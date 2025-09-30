@@ -561,6 +561,7 @@ pub fn safe_exit(code: i32) -> ! {
     }
     std::process::exit(code)
 }
+#[cfg(not(windows))]
 pub fn catch_signal<F: Fn(std::io::Result<libc::c_int>) + Send + Sync + 'static>(
     signals: &[libc::c_int],
     handler: F,
@@ -573,6 +574,19 @@ pub fn catch_signal<F: Fn(std::io::Result<libc::c_int>) + Send + Sync + 'static>
             handler(Ok(sig));
             safe_exit(1);
         }
+    });
+}
+
+#[cfg(windows)]
+pub fn catch_signal<F: Fn(std::io::Result<libc::c_int>) + Send + Sync + 'static>(
+    _signals: &[libc::c_int],
+    handler: F,
+) {
+    std::thread::spawn(move || {
+        handler(Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "signal handling not supported on Windows",
+        )));
     });
 }
 pub fn catch_interrupt() {
