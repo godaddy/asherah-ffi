@@ -1,14 +1,26 @@
 #![allow(unsafe_code)]
 #![deny(clippy::all)]
-use std::collections::HashMap;
 use parking_lot::Mutex;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::sync::OnceLock;
 use std::time::Instant;
 
 use napi::bindgen_prelude::*;
+use napi::bindgen_prelude::{FunctionRef, JsValuesTupleIntoVec, Object};
+use napi::{Env, Status};
+use napi::sys;
 // Log hook temporarily disabled for performance testing; add debug timers
+use napi::threadsafe_function::{
+    ThreadsafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
+};
 use napi_derive::napi;
 use once_cell::sync::Lazy;
+
+use asherah::logging::{ensure_logger as ensure_core_logger, set_sink as set_log_sink, LogSink};
+use asherah::metrics;
+use asherah::metrics::MetricsSink;
 
 type Factory = asherah::session::PublicFactory<
     asherah::aead::AES256GCM,
@@ -369,8 +381,218 @@ pub fn set_max_stack_alloc_item_size(_n: u32) {}
 #[napi]
 pub fn set_safety_padding_overhead(_n: u32) {}
 
-// Stub log hook (no-op). Could be wired to asherah metrics sink later.
+struct JsArgList(Vec<sys::napi_value>);
+
+impl JsValuesTupleIntoVec for JsArgList {
+    fn into_vec(self, _: sys::napi_env) -> Result<Vec<sys::napi_value>> {
+        Ok(self.0)
+    }
+}
+
+struct MetricsEvent {
+    event_type: &'static str,
+    duration_ns: Option<u64>,
+    name: Option<String>,
+}
+
+type MetricsCallback = ThreadsafeFunction<
+    MetricsEvent,
+    Unknown<'static>,
+    JsArgList,
+    Status,
+    true,
+    false,
+    0,
+>;
+
+struct JsMetricsSink {
+    tsfn: Arc<MetricsCallback>,
+}
+
+struct MetricsHook {
+    _tsfn: Arc<MetricsCallback>,
+    _reference: FunctionRef<Unknown<'static>, Unknown<'static>>,
+}
+
+impl JsMetricsSink {
+    fn emit(&self, event_type: &'static str, duration_ns: Option<u64>, name: Option<String>) {
+        let event = MetricsEvent {
+            event_type,
+            duration_ns,
+            name,
+        };
+        let _ = self
+            .tsfn
+            .call(Ok(event), ThreadsafeFunctionCallMode::NonBlocking);
+    }
+}
+
+impl MetricsSink for JsMetricsSink {
+    fn encrypt(&self, duration: std::time::Duration) {
+        self.emit("encrypt", Some(duration.as_nanos() as u64), None);
+    }
+
+    fn decrypt(&self, duration: std::time::Duration) {
+        self.emit("decrypt", Some(duration.as_nanos() as u64), None);
+    }
+
+    fn store(&self, duration: std::time::Duration) {
+        self.emit("store", Some(duration.as_nanos() as u64), None);
+    }
+
+    fn load(&self, duration: std::time::Duration) {
+        self.emit("load", Some(duration.as_nanos() as u64), None);
+    }
+
+    fn cache_hit(&self, name: &str) {
+        self.emit("cache_hit", None, Some(name.to_string()));
+    }
+
+    fn cache_miss(&self, name: &str) {
+        self.emit("cache_miss", None, Some(name.to_string()));
+    }
+}
+
+static METRICS_HOOK: Lazy<Mutex<Option<MetricsHook>>> = Lazy::new(|| Mutex::new(None));
+
 #[napi]
-pub fn set_log_hook(_hook: Function<'_>) -> Result<()> {
+pub fn set_metrics_hook(env: Env, callback: Option<Function<'_>>) -> Result<()> {
+    if let Some(cb) = callback {
+        let func_ref = cb.create_ref()?;
+        let borrowed = func_ref.borrow_back(&env)?;
+        let borrowed_static: Function<'static> = unsafe { std::mem::transmute(borrowed) };
+        let tsfn = borrowed_static
+            .build_threadsafe_function::<MetricsEvent>()
+            .max_queue_size::<0>()
+            .callee_handled::<true>()
+            .build_callback(|ctx: ThreadsafeCallContext<MetricsEvent>| {
+                let env = ctx.env;
+                let MetricsEvent {
+                    event_type,
+                    duration_ns,
+                    name,
+                } = ctx.value;
+                let mut obj = Object::new(&env)?;
+                obj.set("type", env.create_string(event_type)?)?;
+                if let Some(ns) = duration_ns {
+                    obj.set("durationNs", env.create_double(ns as f64)?)?;
+                }
+                if let Some(name) = name {
+                    obj.set("name", env.create_string(&name)?)?;
+                }
+                let raw = obj.value().value;
+                Ok(JsArgList(vec![raw]))
+            })?;
+        let arc = Arc::new(tsfn);
+        let reference: FunctionRef<Unknown<'static>, Unknown<'static>> =
+            unsafe { std::mem::transmute(func_ref) };
+        metrics::set_sink(JsMetricsSink {
+            tsfn: Arc::clone(&arc),
+        });
+        *METRICS_HOOK.lock() = Some(MetricsHook {
+            _tsfn: arc,
+            _reference: reference,
+        });
+    } else {
+        metrics::clear_sink();
+        *METRICS_HOOK.lock() = None;
+    }
+    Ok(())
+}
+
+#[derive(Clone)]
+struct LogEvent {
+    level: log::Level,
+    message: String,
+    target: String,
+}
+
+type LogCallback = ThreadsafeFunction<
+    LogEvent,
+    Unknown<'static>,
+    JsArgList,
+    Status,
+    true,
+    false,
+    0,
+>;
+
+struct JsLogSink {
+    tsfn: Arc<LogCallback>,
+}
+
+struct LogHook {
+    _tsfn: Arc<LogCallback>,
+    _reference: FunctionRef<Unknown<'static>, Unknown<'static>>,
+}
+
+impl LogSink for JsLogSink {
+    fn log(&self, record: &log::Record<'_>) {
+        let event = LogEvent {
+            level: record.level(),
+            message: record.args().to_string(),
+            target: record.target().to_string(),
+        };
+        let _ = self
+            .tsfn
+            .call(Ok(event), ThreadsafeFunctionCallMode::NonBlocking);
+    }
+}
+
+static LOG_HOOK: Lazy<Mutex<Option<LogHook>>> = Lazy::new(|| Mutex::new(None));
+static LOGGER_READY: OnceLock<()> = OnceLock::new();
+
+fn ensure_logger_initialized() -> Result<()> {
+    if LOGGER_READY.get().is_none() {
+        ensure_core_logger().map_err(|e| Error::from_reason(format!("log init error: {e}")))?;
+        let _ = LOGGER_READY.set(());
+    }
+    Ok(())
+}
+
+#[napi]
+pub fn set_log_hook(env: Env, callback: Option<Function<'_>>) -> Result<()> {
+    ensure_logger_initialized()?;
+
+    if let Some(cb) = callback {
+        let func_ref = cb.create_ref()?;
+        let borrowed = func_ref.borrow_back(&env)?;
+        let borrowed_static: Function<'static> = unsafe { std::mem::transmute(borrowed) };
+        let tsfn = borrowed_static
+            .build_threadsafe_function::<LogEvent>()
+            .max_queue_size::<0>()
+            .callee_handled::<true>()
+            .build_callback(|ctx: ThreadsafeCallContext<LogEvent>| {
+                let env = ctx.env;
+                let LogEvent {
+                    level,
+                    message,
+                    target,
+                } = ctx.value;
+                let mut obj = Object::new(&env)?;
+                obj.set("level", env.create_string(level.as_str())?)?;
+                obj.set("message", env.create_string(&message)?)?;
+                obj.set("target", env.create_string(&target)?)?;
+                let raw = obj.value().value;
+                Ok(JsArgList(vec![raw]))
+            })?;
+        let arc = Arc::new(tsfn);
+        let reference: FunctionRef<Unknown<'static>, Unknown<'static>> =
+            unsafe { std::mem::transmute(func_ref) };
+        set_log_sink(
+            "node",
+            Some(Arc::new(JsLogSink {
+                tsfn: Arc::clone(&arc),
+            })),
+        );
+        *LOG_HOOK.lock() = Some(LogHook {
+            _tsfn: arc,
+            _reference: reference,
+        });
+    } else {
+        set_log_sink("node", None);
+        *LOG_HOOK.lock() = None;
+    }
+
     Ok(())
 }

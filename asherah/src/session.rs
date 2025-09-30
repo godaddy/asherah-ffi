@@ -121,11 +121,7 @@ impl<
                 let ik_bytes = sk_loaded.with_key_func(|sk_bytes| {
                     self.f.crypto.decrypt(&ekr.encrypted_key, sk_bytes)
                 })??;
-                return CryptoKey::new(
-                    ekr.created,
-                    ekr.revoked.unwrap_or(false),
-                    ik_bytes,
-                );
+                return CryptoKey::new(ekr.created, ekr.revoked.unwrap_or(false), ik_bytes);
             }
         }
         let ik_bytes =

@@ -55,7 +55,8 @@ thread_local! {
 fn set_error(msg: impl Into<String>) {
     LAST_ERROR.with(|c| {
         let message = msg.into();
-        let cstring = CString::new(message).unwrap_or_else(|_| CString::new("error").expect("static string"));
+        let cstring =
+            CString::new(message).unwrap_or_else(|_| CString::new("error").expect("static string"));
         *c.borrow_mut() = Some(cstring);
     });
 }

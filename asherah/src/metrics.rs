@@ -1,5 +1,6 @@
-use once_cell::sync::OnceCell;
+use once_cell::sync::Lazy;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::RwLock;
 
 #[derive(Debug)]
 pub struct Timers {
@@ -36,13 +37,24 @@ pub trait MetricsSink: Send + Sync + 'static {
 struct NoopSink;
 impl MetricsSink for NoopSink {}
 
-static SINK: OnceCell<Box<dyn MetricsSink>> = OnceCell::new();
+static SINK: Lazy<RwLock<Box<dyn MetricsSink>>> = Lazy::new(|| RwLock::new(Box::new(NoopSink)));
 
 pub fn set_sink<T: MetricsSink>(sink: T) {
-    let _set_result = SINK.set(Box::new(sink));
+    if let Ok(mut guard) = SINK.write() {
+        *guard = Box::new(sink);
+    }
 }
-fn sink() -> &'static dyn MetricsSink {
-    SINK.get().map(|b| &**b).unwrap_or(&NoopSink)
+
+pub fn clear_sink() {
+    if let Ok(mut guard) = SINK.write() {
+        *guard = Box::new(NoopSink);
+    }
+}
+fn with_sink<R>(f: impl FnOnce(&dyn MetricsSink) -> R) -> R {
+    match SINK.read() {
+        Ok(guard) => f(&**guard),
+        Err(_) => f(&NoopSink),
+    }
 }
 
 pub fn record_encrypt(start: std::time::Instant) {
@@ -51,7 +63,7 @@ pub fn record_encrypt(start: std::time::Instant) {
     ENCRYPT_TIMER
         .total_ns
         .fetch_add(d.as_nanos() as u64, Ordering::Relaxed);
-    sink().encrypt(d);
+    with_sink(|sink| sink.encrypt(d));
 }
 pub fn record_decrypt(start: std::time::Instant) {
     DECRYPT_TIMER.count.fetch_add(1, Ordering::Relaxed);
@@ -59,18 +71,20 @@ pub fn record_decrypt(start: std::time::Instant) {
     DECRYPT_TIMER
         .total_ns
         .fetch_add(d.as_nanos() as u64, Ordering::Relaxed);
-    sink().decrypt(d);
+    with_sink(|sink| sink.decrypt(d));
 }
 
 pub fn record_store(start: std::time::Instant) {
-    sink().store(start.elapsed());
+    let d = start.elapsed();
+    with_sink(|sink| sink.store(d));
 }
 pub fn record_load(start: std::time::Instant) {
-    sink().load(start.elapsed());
+    let d = start.elapsed();
+    with_sink(|sink| sink.load(d));
 }
 pub fn record_cache_hit(name: &str) {
-    sink().cache_hit(name);
+    with_sink(|sink| sink.cache_hit(name));
 }
 pub fn record_cache_miss(name: &str) {
-    sink().cache_miss(name);
+    with_sink(|sink| sink.cache_miss(name));
 }

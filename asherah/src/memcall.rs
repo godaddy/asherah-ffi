@@ -324,14 +324,8 @@ mod os {
         use windows_sys::Win32::System::Memory::VirtualProtect;
         let prot = mpf.to_win_prot()?;
         let mut old: u32 = 0;
-        let ok = unsafe {
-            VirtualProtect(
-                ptr.cast::<c_void>(),
-                len,
-                prot,
-                std::ptr::addr_of_mut!(old),
-            )
-        };
+        let ok =
+            unsafe { VirtualProtect(ptr.cast::<c_void>(), len, prot, std::ptr::addr_of_mut!(old)) };
         if ok == 0 {
             return Err(MemError::Sys(format!(
                 "<memcall> could not set {prot} on {ptr:p}"

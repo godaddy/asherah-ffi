@@ -230,18 +230,13 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_encrypt(
         Ok(drr) => match serde_json::to_vec(&drr) {
             Ok(bytes) => bytes,
             Err(e) => {
-                let _err = env.throw_new(
-                    "java/lang/RuntimeException",
-                    format!("encrypt error: {e}"),
-                );
+                let _err =
+                    env.throw_new("java/lang/RuntimeException", format!("encrypt error: {e}"));
                 return ptr::null_mut();
             }
         },
         Err(e) => {
-            let _err = env.throw_new(
-                "java/lang/RuntimeException",
-                format!("encrypt error: {e}"),
-            );
+            let _err = env.throw_new("java/lang/RuntimeException", format!("encrypt error: {e}"));
             return ptr::null_mut();
         }
     };

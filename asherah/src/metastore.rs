@@ -4,8 +4,7 @@ use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Clone)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct InMemoryMetastore {
     inner: Arc<Mutex<HashMap<(String, i64), EnvelopeKeyRecord>>>,
 }
@@ -33,11 +32,7 @@ impl Default for InMemoryMetastore {
 
 impl Metastore for InMemoryMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
-        Ok(self
-            .inner
-            .lock()
-            .get(&(id.to_string(), created))
-            .cloned())
+        Ok(self.inner.lock().get(&(id.to_string(), created)).cloned())
     }
     fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         let m = self.inner.lock();

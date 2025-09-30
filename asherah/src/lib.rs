@@ -11,6 +11,7 @@ pub mod kms_aws;
 pub mod kms_aws_envelope;
 pub mod kms_builders;
 pub mod kms_multi;
+pub mod logging;
 pub mod metastore;
 #[cfg(feature = "dynamodb")]
 pub mod metastore_dynamodb;

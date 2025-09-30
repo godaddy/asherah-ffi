@@ -3,15 +3,20 @@
 #![allow(unused_qualifications)]
 
 use asherah as ael;
+use asherah::logging::{ensure_logger, set_sink as set_log_sink, LogSink};
+use asherah::metrics;
+use asherah::metrics::MetricsSink;
 use asherah_config as config;
 use once_cell::sync::Lazy;
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
+use pyo3::types::PyDict;
 use pyo3::PyRef;
 
-use std::collections::HashMap;
 use parking_lot::Mutex;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 type Factory = ael::session::PublicFactory<
     ael::aead::AES256GCM,
@@ -196,6 +201,8 @@ impl FactoryManager {
 }
 
 static MANAGER: Lazy<Mutex<Option<FactoryManager>>> = Lazy::new(|| Mutex::new(None));
+static PY_METRICS_CALLBACK: Lazy<Mutex<Option<Arc<Py<PyAny>>>>> = Lazy::new(|| Mutex::new(None));
+static PY_LOG_CALLBACK: Lazy<Mutex<Option<Arc<Py<PyAny>>>>> = Lazy::new(|| Mutex::new(None));
 
 fn with_manager<F, R>(f: F) -> PyResult<R>
 where
@@ -307,6 +314,143 @@ impl PySession {
     }
 }
 
+struct PyMetricsSink {
+    callback: Arc<Py<PyAny>>,
+}
+
+impl PyMetricsSink {
+    fn emit(&self, builder: impl FnOnce(Python<'_>) -> PyResult<PyObject>) {
+        let cb = Arc::clone(&self.callback);
+        Python::with_gil(|py| match builder(py) {
+            Ok(obj) => {
+                if let Err(err) = cb.call1(py, (obj,)) {
+                    err.print(py);
+                }
+            }
+            Err(err) => err.print(py),
+        });
+    }
+}
+
+impl MetricsSink for PyMetricsSink {
+    fn encrypt(&self, duration: std::time::Duration) {
+        self.emit(|py| {
+            let dict = PyDict::new(py);
+            dict.set_item("type", "encrypt")?;
+            dict.set_item("duration_ns", duration.as_nanos() as u64)?;
+            Ok(dict.into())
+        });
+    }
+
+    fn decrypt(&self, duration: std::time::Duration) {
+        self.emit(|py| {
+            let dict = PyDict::new(py);
+            dict.set_item("type", "decrypt")?;
+            dict.set_item("duration_ns", duration.as_nanos() as u64)?;
+            Ok(dict.into())
+        });
+    }
+
+    fn store(&self, duration: std::time::Duration) {
+        self.emit(|py| {
+            let dict = PyDict::new(py);
+            dict.set_item("type", "store")?;
+            dict.set_item("duration_ns", duration.as_nanos() as u64)?;
+            Ok(dict.into())
+        });
+    }
+
+    fn load(&self, duration: std::time::Duration) {
+        self.emit(|py| {
+            let dict = PyDict::new(py);
+            dict.set_item("type", "load")?;
+            dict.set_item("duration_ns", duration.as_nanos() as u64)?;
+            Ok(dict.into())
+        });
+    }
+
+    fn cache_hit(&self, name: &str) {
+        let name = name.to_string();
+        self.emit(|py| {
+            let dict = PyDict::new(py);
+            dict.set_item("type", "cache_hit")?;
+            dict.set_item("name", &name)?;
+            Ok(dict.into())
+        });
+    }
+
+    fn cache_miss(&self, name: &str) {
+        let name = name.to_string();
+        self.emit(|py| {
+            let dict = PyDict::new(py);
+            dict.set_item("type", "cache_miss")?;
+            dict.set_item("name", &name)?;
+            Ok(dict.into())
+        });
+    }
+}
+
+struct PyLogSink {
+    callback: Arc<Py<PyAny>>,
+}
+
+impl LogSink for PyLogSink {
+    fn log(&self, record: &log::Record<'_>) {
+        let level = record.level().to_string();
+        let message = record.args().to_string();
+        let target = record.target().to_string();
+        let cb = Arc::clone(&self.callback);
+        Python::with_gil(|py| {
+            let dict = PyDict::new(py);
+            if dict.set_item("level", level).is_err()
+                || dict.set_item("message", message).is_err()
+                || dict.set_item("target", target).is_err()
+            {
+                return;
+            }
+            if let Err(err) = cb.call1(py, (dict,)) {
+                err.print(py);
+            }
+        });
+    }
+}
+
+#[pyfunction]
+fn set_metrics_hook(py: Python<'_>, callback: Option<&PyAny>) -> PyResult<()> {
+    if let Some(cb) = callback {
+        let obj: Py<PyAny> = cb.into_py(py);
+        let arc = Arc::new(obj);
+        metrics::set_sink(PyMetricsSink {
+            callback: Arc::clone(&arc),
+        });
+        *PY_METRICS_CALLBACK.lock() = Some(arc);
+    } else {
+        metrics::clear_sink();
+        *PY_METRICS_CALLBACK.lock() = None;
+    }
+    Ok(())
+}
+
+#[pyfunction]
+fn set_log_hook(py: Python<'_>, callback: Option<&PyAny>) -> PyResult<()> {
+    ensure_logger().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
+    if let Some(cb) = callback {
+        let obj: Py<PyAny> = cb.into_py(py);
+        let arc = Arc::new(obj);
+        set_log_sink(
+            "python",
+            Some(Arc::new(PyLogSink {
+                callback: Arc::clone(&arc),
+            })),
+        );
+        *PY_LOG_CALLBACK.lock() = Some(arc);
+    } else {
+        set_log_sink("python", None);
+        *PY_LOG_CALLBACK.lock() = None;
+    }
+    Ok(())
+}
+
 #[pyfunction]
 fn version() -> &'static str {
     env!("CARGO_PKG_VERSION")
@@ -324,6 +468,8 @@ fn asherah_py(py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(decrypt_string, m)?)?;
     m.add_class::<PySessionFactory>()?;
     m.add_class::<PySession>()?;
+    m.add_function(wrap_pyfunction!(set_metrics_hook, m)?)?;
+    m.add_function(wrap_pyfunction!(set_log_hook, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     py.run(
         r#"

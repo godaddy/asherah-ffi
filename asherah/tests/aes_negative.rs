@@ -20,7 +20,6 @@ fn decrypt_fails_on_tamper() {
 fn decrypt_rejects_short_ciphertext() {
     let c = ael::aead::AES256GCM::new();
     let key = vec![0_u8; 32];
-    let short =
-        vec![0_u8; ael::aead::AES256GCM::NONCE_SIZE + ael::aead::AES256GCM::TAG_SIZE - 1];
+    let short = vec![0_u8; ael::aead::AES256GCM::NONCE_SIZE + ael::aead::AES256GCM::TAG_SIZE - 1];
     assert!(c.decrypt(&short, &key).is_err());
 }

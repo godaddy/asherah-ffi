@@ -39,5 +39,15 @@ export declare function decryptStringAsync(partitionId: string, dataRowRecordJso
 
 export declare function setMaxStackAllocItemSize(n: number): void;
 export declare function setSafetyPaddingOverhead(n: number): void;
-export declare function setLogHook(_hook: (level: number, message: string) => void): void;
+export type LogEvent = {
+  level: 'trace' | 'debug' | 'info' | 'warn' | 'error';
+  message: string;
+  target: string;
+};
 
+export type MetricsEvent =
+  | { type: 'encrypt' | 'decrypt' | 'store' | 'load'; durationNs: number }
+  | { type: 'cache_hit' | 'cache_miss'; name: string };
+
+export declare function setLogHook(hook: ((event: LogEvent) => void) | null): void;
+export declare function setMetricsHook(hook: ((event: MetricsEvent) => void) | null): void;
