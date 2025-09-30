@@ -96,3 +96,7 @@ echo "[tests] dotnet bindings"
 dotnet test asherah-dotnet/AsherahDotNet.sln --nologo
 
 echo "[tests] complete"
+
+echo "[tests] adjusting permissions"
+chmod -R a+rwX "$ROOT_DIR/.cache" 2>/dev/null || true
+chmod -R a+rwX "$ROOT_DIR/target" 2>/dev/null || true

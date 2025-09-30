@@ -17,7 +17,6 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
           key: lint-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             lint-${{ runner.os }}-
@@ -48,7 +47,6 @@ jobs:
             .cache/npm
             .cache/maven
             .cache/dotnet
-            target
           key: tests-${{ runner.os }}-amd64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
           restore-keys: |
             tests-${{ runner.os }}-amd64-
@@ -71,7 +69,6 @@ jobs:
             .cache/npm
             .cache/maven
             .cache/dotnet
-            target
           key: tests-${{ runner.os }}-arm64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
           restore-keys: |
             tests-${{ runner.os }}-arm64-
@@ -99,7 +96,6 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
           key: sanitizers-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             sanitizers-${{ runner.os }}-
@@ -143,7 +139,6 @@ jobs:
             .cache/npm
             .cache/maven
             .cache/dotnet
-            target
           key: build-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
           restore-keys: |
             build-${{ runner.os }}-

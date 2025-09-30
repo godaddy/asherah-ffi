@@ -94,3 +94,7 @@ mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipT
 cp "$ROOT_DIR"/asherah-java/java/target/*.jar "$OUT_DIR/java/"
 
 echo "[build-bindings] Binding artifacts prepared in $OUT_DIR"
+
+chmod -R a+rwX "$ROOT_DIR/.cache" 2>/dev/null || true
+chmod -R a+rwX "$ROOT_DIR/target" 2>/dev/null || true
+chmod -R a+rwX "$ROOT_DIR/artifacts" 2>/dev/null || true
