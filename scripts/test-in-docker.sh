@@ -22,6 +22,11 @@ COMMON_MOUNTS=(
   -v "$CACHE_DIR/dotnet:/root/.nuget/packages"
 )
 
+RUN_SCRIPT="/workspace/scripts/run-tests.sh"
+if [ -n "${BINDING_TESTS_ONLY:-}" ]; then
+  RUN_SCRIPT="/workspace/scripts/run-binding-tests.sh"
+fi
+
 if [ -n "${DOCKER_PLATFORM:-}" ]; then
   docker buildx build \
     --platform "$DOCKER_PLATFORM" \
@@ -34,12 +39,12 @@ if [ -n "${DOCKER_PLATFORM:-}" ]; then
     --platform "$DOCKER_PLATFORM" \
     "${COMMON_MOUNTS[@]}" \
     "$IMAGE_TAG" \
-    /workspace/scripts/run-tests.sh
+    "$RUN_SCRIPT"
 else
   docker build -f "$ROOT_DIR/docker/tests.Dockerfile" -t "$IMAGE_TAG" "$ROOT_DIR"
 
   docker run --rm \
     "${COMMON_MOUNTS[@]}" \
     "$IMAGE_TAG" \
-    /workspace/scripts/run-tests.sh
+    "$RUN_SCRIPT"
 fi
