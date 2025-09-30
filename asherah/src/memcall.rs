@@ -19,6 +19,7 @@ impl MemoryProtectionFlag {
     pub fn read_write() -> Self {
         Self { flag: 6 }
     }
+    #[cfg_attr(windows, allow(dead_code))]
     fn to_unix_prot(self) -> Result<i32, MemError> {
         #[cfg(not(windows))]
         {
