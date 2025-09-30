@@ -1,3 +1,4 @@
+#![allow(unsafe_code)]
 #![deny(clippy::all)]
 use std::collections::HashMap;
 use std::sync::{

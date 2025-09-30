@@ -1,4 +1,5 @@
 #![allow(non_local_definitions)]
+#![allow(unsafe_code)]
 
 use asherah as ael;
 use asherah_config as config;
@@ -7,6 +8,7 @@ use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use pyo3::PyRef;
+
 use std::collections::HashMap;
 use std::sync::Mutex;
 

@@ -1,4 +1,5 @@
 #![allow(non_snake_case)]
+#![allow(unsafe_code)]
 
 use std::ptr;
 

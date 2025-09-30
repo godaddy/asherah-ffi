@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;

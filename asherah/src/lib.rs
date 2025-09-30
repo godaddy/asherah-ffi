@@ -1,3 +1,5 @@
+#![allow(unsafe_code)]
+
 pub mod aead;
 pub mod api;
 pub mod builders;

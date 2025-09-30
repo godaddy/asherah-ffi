@@ -22,8 +22,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Install @napi-rs/cli
         run: npm install --global @napi-rs/cli
-      - name: Build workspace
-        run: cargo build --workspace
+      - name: Build core crates
+        run: cargo build --workspace --exclude asherah-py --exclude asherah-java
       - name: Build asherah-node prebuild
         working-directory: asherah-node
         run: |

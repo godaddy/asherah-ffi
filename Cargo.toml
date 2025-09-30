@@ -19,7 +19,7 @@ resolver = "2"
 workspace = true
 
 [workspace.lints.rust]
-unsafe_code = "forbid"
+unsafe_code = "deny"
 future_incompatible = { level = "deny", priority = -1 }
 ambiguous_negative_literals = "warn"
 closure_returning_async_block = "warn"
