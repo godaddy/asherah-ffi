@@ -24,8 +24,8 @@
     "node": ">= 18"
   },
   "optionalDependencies": {
-    "asherah-node-win32-x64-msvc": "0.1.0",
-    "asherah-node-darwin-x64": "0.1.0",
-    "asherah-node-linux-x64-gnu": "0.1.0"
+    "asherah-win32-x64-msvc": "0.1.0",
+    "asherah-darwin-x64": "0.1.0",
+    "asherah-linux-x64-gnu": "0.1.0"
   }
 }

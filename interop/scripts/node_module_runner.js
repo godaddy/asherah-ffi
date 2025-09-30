@@ -2,22 +2,31 @@
 const path = require('path');
 
 function loadNewAddon() {
-  const binaryName = 'asherah_node.node';
+  const primaryBinary = 'asherah.node';
+  const legacyBinary = 'asherah_node.node';
   const envTarget = process.env.NAPI_RS_CARGO_TARGET_DIR || process.env.CARGO_TARGET_DIR;
   const candidates = [];
 
   if (envTarget) {
     candidates.push(
-      path.resolve(envTarget, 'debug', binaryName),
-      path.resolve(envTarget, 'release', binaryName),
+      path.resolve(envTarget, 'debug', primaryBinary),
+      path.resolve(envTarget, 'release', primaryBinary),
+      path.resolve(envTarget, 'debug', legacyBinary),
+      path.resolve(envTarget, 'release', legacyBinary),
     );
   }
 
   candidates.push(
-    path.resolve(__dirname, '..', '..', 'asherah-node', 'target', 'debug', binaryName),
-    path.resolve(__dirname, '..', '..', 'asherah-node', 'target', 'release', binaryName),
-    path.resolve(__dirname, '..', '..', 'target', 'debug', binaryName),
-    path.resolve(__dirname, '..', '..', 'target', 'release', binaryName),
+    path.resolve(__dirname, '..', '..', 'asherah-node', 'target', 'debug', primaryBinary),
+    path.resolve(__dirname, '..', '..', 'asherah-node', 'target', 'release', primaryBinary),
+    path.resolve(__dirname, '..', '..', 'target', 'debug', primaryBinary),
+    path.resolve(__dirname, '..', '..', 'target', 'release', primaryBinary),
+    path.resolve(__dirname, '..', '..', 'asherah-node', 'dist', primaryBinary),
+    path.resolve(__dirname, '..', '..', 'asherah-node', 'npm', primaryBinary),
+    path.resolve(__dirname, '..', '..', 'asherah-node', 'target', 'debug', legacyBinary),
+    path.resolve(__dirname, '..', '..', 'asherah-node', 'target', 'release', legacyBinary),
+    path.resolve(__dirname, '..', '..', 'target', 'debug', legacyBinary),
+    path.resolve(__dirname, '..', '..', 'target', 'release', legacyBinary),
     path.resolve(__dirname, '..', '..', 'asherah-node', 'index.node'),
   );
 

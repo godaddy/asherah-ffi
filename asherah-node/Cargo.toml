@@ -28,7 +28,8 @@ once_cell = "1"
 napi-build = "2"
 
 [package.metadata.napi]
-name = "asherah_node"
+name = "asherah"
+npm = { default = true }
 napi-version = 4
 
 [lints]
