@@ -26,6 +26,7 @@ __pycache__/
 
 # Language-specific
 **/bin/
+!asherah/src/bin/
 **/obj/
 **/*.py[cod]
 **/*.pyo
