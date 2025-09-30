@@ -31,15 +31,22 @@ if command -v ld.lld >/dev/null 2>&1; then
 fi
 
 echo "[tests] cargo fmt --check"
-rustup component add rustfmt >/dev/null
+if command -v rustup >/dev/null 2>&1; then
+  rustup component add rustfmt >/dev/null
+fi
 cargo fmt --all -- --check
 
 echo "[tests] cargo clippy"
-rustup component add clippy >/dev/null
+if command -v rustup >/dev/null 2>&1; then
+  rustup component add clippy >/dev/null
+fi
 cargo clippy --all-targets --all-features -- -D warnings
 
 echo "[tests] cargo test"
 cargo test --workspace --exclude asherah-node
+
+echo "[tests] build FFI debug artifact"
+cargo build -p asherah-ffi
 
 # Ensure language bindings can locate build artifacts using conventional paths
 mkdir -p "$ROOT_DIR/target"
