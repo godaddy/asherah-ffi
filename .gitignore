@@ -11,6 +11,7 @@ __pycache__/
 /target/
 **/target/
 artifacts/
+.cache/
 /.venv/
 **/.venv/
 /.mypy_cache/

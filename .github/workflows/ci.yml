@@ -11,6 +11,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: lint-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            lint-${{ runner.os }}-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -29,6 +39,19 @@ jobs:
     needs: lint
     steps:
       - uses: actions/checkout@v4
+      - name: Restore workspace caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/cargo
+            .cache/pip
+            .cache/npm
+            .cache/maven
+            .cache/dotnet
+            target
+          key: tests-${{ runner.os }}-amd64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
+          restore-keys: |
+            tests-${{ runner.os }}-amd64-
       - name: Verify Docker availability
         run: docker version
       - name: Run full language test matrix
@@ -39,6 +62,19 @@ jobs:
     needs: lint
     steps:
       - uses: actions/checkout@v4
+      - name: Restore workspace caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/cargo
+            .cache/pip
+            .cache/npm
+            .cache/maven
+            .cache/dotnet
+            target
+          key: tests-${{ runner.os }}-arm64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
+          restore-keys: |
+            tests-${{ runner.os }}-arm64-
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
@@ -57,6 +93,16 @@ jobs:
     needs: tests
     steps:
       - uses: actions/checkout@v4
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: sanitizers-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            sanitizers-${{ runner.os }}-
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -88,6 +134,19 @@ jobs:
       - tests-arm64
     steps:
       - uses: actions/checkout@v4
+      - name: Restore workspace caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/cargo
+            .cache/pip
+            .cache/npm
+            .cache/maven
+            .cache/dotnet
+            target
+          key: build-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
+          restore-keys: |
+            build-${{ runner.os }}-
       - name: Set up QEMU for cross architectures
         uses: docker/setup-qemu-action@v3
         with:
