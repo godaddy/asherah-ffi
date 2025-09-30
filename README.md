@@ -1,5 +1,5 @@
-Memcall + Rust Ports
---------------------
+Asherah
+-------
 
 This repository hosts the Rust Asherah AppEncryption SDK along with multi-language bindings that mirror the established Go APIs.
 
