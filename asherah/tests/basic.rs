@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use std::sync::Arc;
 
 use asherah as ael;
@@ -24,7 +25,7 @@ fn json_shapes_match() {
 #[test]
 fn session_roundtrip_inmemory() {
     let crypto = Arc::new(ael::aead::AES256GCM::new());
-    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![7u8; 32]));
+    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![7_u8; 32]));
     let metastore = Arc::new(ael::metastore::InMemoryMetastore::new());
     let cfg = ael::Config::new("svc", "prod");
     let f = ael::api::new_session_factory(cfg, metastore, kms, crypto);
@@ -37,7 +38,7 @@ fn session_roundtrip_inmemory() {
 #[test]
 fn store_load_with_context_variants() {
     let crypto = Arc::new(ael::aead::AES256GCM::new());
-    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![7u8; 32]));
+    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![7_u8; 32]));
     let metastore = Arc::new(ael::metastore::InMemoryMetastore::new());
     let cfg = ael::Config::new("svc", "prod");
     let f = ael::api::new_session_factory(cfg, metastore, kms, crypto);
@@ -51,7 +52,7 @@ fn store_load_with_context_variants() {
 #[test]
 fn region_suffix_prefers_metastore_over_config() {
     let crypto = Arc::new(ael::aead::AES256GCM::new());
-    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![0u8; 32]));
+    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![0_u8; 32]));
     let base = Arc::new(ael::metastore::InMemoryMetastore::new());
     // Decorate with region suffix
     let meta = Arc::new(ael::metastore_region::RegionSuffixMetastore::new(

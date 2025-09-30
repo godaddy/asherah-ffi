@@ -12,6 +12,7 @@ pub fn aws_kms_from_env<A: crate::traits::AEAD + Send + Sync + 'static>(
 }
 
 // Multi-region builder
+#[allow(missing_debug_implementations)]
 pub struct AwsKmsBuilder<A: crate::traits::AEAD + Send + Sync + 'static> {
     aead: Arc<A>,
     preferred_region: Option<String>,
@@ -39,7 +40,7 @@ impl<A: crate::traits::AEAD + Send + Sync + 'static> AwsKmsBuilder<A> {
             return Err(anyhow::anyhow!("no entries configured"));
         }
         let mut backends: Vec<Arc<dyn KeyManagementService>> = Vec::new();
-        let mut preferred_idx = 0usize;
+        let mut preferred_idx = 0_usize;
         for (i, (region, key)) in self.entries.iter().enumerate() {
             if let Some(pref) = &self.preferred_region {
                 if pref == region {

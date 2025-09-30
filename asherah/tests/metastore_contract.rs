@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::print_stderr)]
 use ael::traits::Metastore;
 use ael::types::{EnvelopeKeyRecord, KeyMeta};
 use asherah as ael;

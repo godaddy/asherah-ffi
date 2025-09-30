@@ -1,6 +1,6 @@
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use crate::session::PublicSession;
@@ -8,6 +8,7 @@ use crate::traits::{KeyManagementService, Metastore, AEAD};
 
 type SessionEntry<A, K, M> = (Arc<PublicSession<A, K, M>>, Instant);
 
+#[allow(missing_debug_implementations)]
 pub struct SessionCache<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> {
     map: Mutex<HashMap<String, SessionEntry<A, K, M>>>,
     max: usize,
@@ -28,7 +29,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> Ses
         id: &str,
         create: impl FnOnce() -> PublicSession<A, K, M>,
     ) -> Arc<PublicSession<A, K, M>> {
-        let mut map = self.map.lock().unwrap();
+        let mut map = self.map.lock();
         if let Some((sess, ts)) = map.get_mut(id) {
             if ts.elapsed() < self.ttl {
                 *ts = Instant::now();
@@ -51,6 +52,6 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> Ses
     }
 
     pub fn close(&self) {
-        self.map.lock().unwrap().clear();
+        self.map.lock().clear();
     }
 }

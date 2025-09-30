@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use asherah as ael;
 use asherah::Metastore;
 use std::fs;
@@ -47,7 +48,7 @@ fn cross_language_fixtures_if_present() {
                     } else {
                         ekr.id = ekr.parent_key_meta.as_ref().unwrap().id.clone();
                     }
-                    let _ = store.store(&ekr.id, ekr.created, &ekr).unwrap();
+                    store.store(&ekr.id, ekr.created, &ekr).unwrap();
                 }
             }
             let cfg = ael::Config::new("svc", "prod");

@@ -70,6 +70,7 @@ impl std::fmt::Display for MemError {
 }
 impl std::error::Error for MemError {}
 
+#[derive(Debug)]
 pub struct MemBuf {
     ptr: NonNull<u8>,
     len: usize,
@@ -111,7 +112,7 @@ impl MemBuf {
         os::os_protect(self.ptr.as_ptr(), self.len, mpf)
     }
     pub fn free(mut self) -> Result<(), MemError> {
-        let _ = self.protect(MemoryProtectionFlag::read_write());
+        let _ignored = self.protect(MemoryProtectionFlag::read_write());
         wipe(self.as_mut_slice());
         let result = os::os_free(self.ptr.as_ptr(), self.len);
         self.len = 0;
@@ -123,12 +124,12 @@ impl Drop for MemBuf {
         if self.len == 0 {
             return;
         }
-        let _ = self.protect(MemoryProtectionFlag::read_write());
+        let _ignored = self.protect(MemoryProtectionFlag::read_write());
         if self.len > 0 {
             let s = unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) };
             wipe(s);
         }
-        let _ = os::os_free(self.ptr.as_ptr(), self.len);
+        let _ignored = os::os_free(self.ptr.as_ptr(), self.len);
         self.len = 0;
     }
 }
@@ -179,7 +180,7 @@ mod os {
         if ptr.is_null() {
             return Err(MemError::Sys("<memcall> could not allocate".into()));
         }
-        unsafe { std::ptr::write_bytes(ptr, 0, len) };
+        unsafe { ptr::write_bytes(ptr, 0, len) };
         Ok(unsafe { NonNull::new_unchecked(ptr) })
     }
     #[cfg(not(windows))]
@@ -232,13 +233,13 @@ mod os {
         if ptr == libc::MAP_FAILED {
             return Err(MemError::Sys("<memcall> could not allocate".into()));
         }
-        unsafe { std::ptr::write_bytes(ptr, 0, len) };
-        Ok(unsafe { NonNull::new_unchecked(ptr as *mut u8) })
+        unsafe { ptr::write_bytes(ptr, 0, len) };
+        Ok(unsafe { NonNull::new_unchecked(ptr.cast::<u8>()) })
     }
     #[cfg(windows)]
     pub fn os_free(ptr: *mut u8, _len: usize) -> Result<(), MemError> {
         use windows_sys::Win32::System::Memory::{VirtualFree, MEM_RELEASE};
-        let ok = unsafe { VirtualFree(ptr as *mut c_void, 0, MEM_RELEASE) };
+        let ok = unsafe { VirtualFree(ptr.cast::<c_void>(), 0, MEM_RELEASE) };
         if ok == 0 {
             return Err(MemError::Sys(format!(
                 "<memcall> could not deallocate {ptr:p}"
@@ -248,7 +249,7 @@ mod os {
     }
     #[cfg(not(windows))]
     pub fn os_free(ptr: *mut u8, len: usize) -> Result<(), MemError> {
-        let rc = unsafe { libc::munmap(ptr as *mut c_void, len) };
+        let rc = unsafe { libc::munmap(ptr.cast::<c_void>(), len) };
         if rc != 0 {
             return Err(MemError::Sys(format!(
                 "<memcall> could not deallocate {ptr:p}"
@@ -259,7 +260,7 @@ mod os {
     #[cfg(windows)]
     pub fn os_lock(ptr: *mut u8, len: usize) -> Result<(), MemError> {
         use windows_sys::Win32::System::Memory::VirtualLock;
-        let ok = unsafe { VirtualLock(ptr as *mut c_void, len) };
+        let ok = unsafe { VirtualLock(ptr.cast::<c_void>(), len) };
         if ok == 0 {
             return Err(MemError::Sys(format!(
                 "<memcall> could not acquire lock on {ptr:p}, limit reached?"
@@ -271,11 +272,11 @@ mod os {
     pub fn os_lock(ptr: *mut u8, len: usize) -> Result<(), MemError> {
         #[cfg(target_os = "linux")]
         unsafe {
-            libc::madvise(ptr as *mut c_void, len, libc::MADV_DONTDUMP)
+            libc::madvise(ptr.cast::<c_void>(), len, libc::MADV_DONTDUMP)
         };
         #[cfg(target_os = "freebsd")]
         unsafe {
-            libc::madvise(ptr as *mut c_void, len, libc::MADV_NOCORE)
+            libc::madvise(ptr.cast::<c_void>(), len, libc::MADV_NOCORE)
         };
         let rc = unsafe { libc::mlock(ptr as *const c_void, len) };
         if rc != 0 {
@@ -294,7 +295,7 @@ mod os {
     #[cfg(windows)]
     pub fn os_unlock(ptr: *mut u8, len: usize) -> Result<(), MemError> {
         use windows_sys::Win32::System::Memory::VirtualUnlock;
-        let ok = unsafe { VirtualUnlock(ptr as *mut c_void, len) };
+        let ok = unsafe { VirtualUnlock(ptr.cast::<c_void>(), len) };
         if ok == 0 {
             return Err(MemError::Sys(format!(
                 "<memcall> could not free lock on {ptr:p}"
@@ -323,7 +324,14 @@ mod os {
         use windows_sys::Win32::System::Memory::VirtualProtect;
         let prot = mpf.to_win_prot()?;
         let mut old: u32 = 0;
-        let ok = unsafe { VirtualProtect(ptr as *mut c_void, len, prot, &mut old as *mut u32) };
+        let ok = unsafe {
+            VirtualProtect(
+                ptr.cast::<c_void>(),
+                len,
+                prot,
+                std::ptr::addr_of_mut!(old),
+            )
+        };
         if ok == 0 {
             return Err(MemError::Sys(format!(
                 "<memcall> could not set {prot} on {ptr:p}"
@@ -334,7 +342,7 @@ mod os {
     #[cfg(not(windows))]
     pub fn os_protect(ptr: *mut u8, len: usize, mpf: MemoryProtectionFlag) -> Result<(), MemError> {
         let prot = mpf.to_unix_prot()?;
-        let rc = unsafe { libc::mprotect(ptr as *mut c_void, len, prot) };
+        let rc = unsafe { libc::mprotect(ptr.cast::<c_void>(), len, prot) };
         if rc != 0 {
             return Err(MemError::Sys(format!(
                 "<memcall> could not set {prot} on {ptr:p}"

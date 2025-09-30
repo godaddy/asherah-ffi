@@ -2,12 +2,25 @@ use crate::traits::AEAD as AeadTrait;
 use rand::RngCore;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AES256GCM;
 
 impl AES256GCM {
+    pub const NONCE_SIZE: usize = GCM_NONCE_SIZE;
+    pub const TAG_SIZE: usize = 16;
+    pub const BLOCK_SIZE: usize = 16;
+    pub const MAX_DATA_SIZE: usize = (((1_u64 << 32) - 2) as usize) * Self::BLOCK_SIZE;
+
     pub fn new() -> Self {
         Self
+    }
+
+    pub fn nonce_size(&self) -> usize {
+        Self::NONCE_SIZE
+    }
+
+    pub fn tag_size(&self) -> usize {
+        Self::TAG_SIZE
     }
 }
 
@@ -30,7 +43,7 @@ impl AeadTrait for AES256GCM {
         let unbound =
             UnboundKey::new(&AES_256_GCM, key).map_err(|_| anyhow::anyhow!("invalid key"))?;
         let key = LessSafeKey::new(unbound);
-        let mut nonce = [0u8; GCM_NONCE_SIZE];
+        let mut nonce = [0_u8; GCM_NONCE_SIZE];
         rand::rngs::OsRng.fill_bytes(&mut nonce);
         let nonce_obj = Nonce::assume_unique_for_key(nonce);
         let nonce_bytes = *nonce_obj.as_ref();
@@ -70,27 +83,13 @@ impl AeadTrait for AES256GCM {
     }
 }
 
-impl AES256GCM {
-    pub const NONCE_SIZE: usize = GCM_NONCE_SIZE;
-    pub const TAG_SIZE: usize = 16;
-    pub const BLOCK_SIZE: usize = 16;
-    pub const MAX_DATA_SIZE: usize = (((1u64 << 32) - 2) as usize) * Self::BLOCK_SIZE;
-
-    pub fn nonce_size(&self) -> usize {
-        Self::NONCE_SIZE
-    }
-    pub fn tag_size(&self) -> usize {
-        Self::TAG_SIZE
-    }
-}
-
 // Helper for deriving a fixed-size pseudo-key from arbitrary bytes (dev placeholder)
 pub fn xsalsa_key_from_bytes(input: &[u8]) -> [u8; 32] {
     use blake2::{Blake2b512, Digest};
     let mut h = Blake2b512::new();
     h.update(input);
     let out = h.finalize();
-    let mut key = [0u8; 32];
+    let mut key = [0_u8; 32];
     key.copy_from_slice(&out[..32]);
     key
 }

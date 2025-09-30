@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
@@ -7,7 +8,7 @@ use asherah as ael;
 #[test]
 fn ik_cache_ttl_expires_and_reloads() {
     let crypto = Arc::new(ael::aead::AES256GCM::new());
-    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![6u8; 32]));
+    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![6_u8; 32]));
     let store = Arc::new(ael::metastore::InMemoryMetastore::new());
     let mut cfg = ael::Config::new("svc", "prod");
     cfg.policy.shared_intermediate_key_cache = false;

@@ -1,3 +1,6 @@
+#![allow(unsafe_code)]
+#![allow(clippy::print_stderr, clippy::ptr_as_ptr)]
+
 use std::sync::Once;
 
 use asherah_java::{
@@ -37,8 +40,8 @@ fn create_vm() -> Result<JavaVM, StartJvmError> {
     JavaVM::new(args)
 }
 
-fn env_from_guard<'a>(guard: &'a AttachGuard<'a>) -> JNIEnv<'a> {
-    unsafe { JNIEnv::from_raw(guard.get_native_interface() as *mut _) }.expect("env from guard")
+fn env_from_guard<'env>(guard: &'env AttachGuard<'env>) -> JNIEnv<'env> {
+    unsafe { JNIEnv::from_raw(guard.get_native_interface().cast()) }.expect("env from guard")
 }
 
 #[allow(non_snake_case)]
@@ -60,7 +63,7 @@ fn jni_encrypt_decrypt_roundtrip() {
     };
 
     let mut env = env_from_guard(&attach);
-    let factory_class: JClass = env
+    let factory_class: JClass<'_> = env
         .find_class("java/lang/Object")
         .expect("find Object class");
     let factory_handle =
@@ -68,7 +71,7 @@ fn jni_encrypt_decrypt_roundtrip() {
     assert_ne!(factory_handle, 0, "factory pointer should be non-zero");
 
     let mut env = env_from_guard(&attach);
-    let session_class = env
+    let session_class: JClass<'_> = env
         .find_class("java/lang/Object")
         .expect("find Object class");
     let partition = env.new_string("test-partition").expect("partition");
@@ -87,7 +90,7 @@ fn jni_encrypt_decrypt_roundtrip() {
         .expect("create plaintext array");
 
     let mut env = env_from_guard(&attach);
-    let encrypt_class = env
+    let encrypt_class: JClass<'_> = env
         .find_class("java/lang/Object")
         .expect("find Object class");
     let ciphertext_ptr = Java_com_godaddy_asherah_jni_AsherahNative_encrypt(
@@ -107,7 +110,7 @@ fn jni_encrypt_decrypt_roundtrip() {
         .byte_array_from_slice(&ciphertext)
         .expect("ciphertext array");
     let mut env = env_from_guard(&attach);
-    let decrypt_class = env
+    let decrypt_class: JClass<'_> = env
         .find_class("java/lang/Object")
         .expect("find Object class");
     let plaintext_ptr = Java_com_godaddy_asherah_jni_AsherahNative_decrypt(
@@ -124,19 +127,19 @@ fn jni_encrypt_decrypt_roundtrip() {
     assert_eq!(decrypted, plaintext);
 
     let mut env = env_from_guard(&attach);
-    let close_class = env
+    let close_class: JClass<'_> = env
         .find_class("java/lang/Object")
         .expect("find Object class");
     Java_com_godaddy_asherah_jni_AsherahNative_closeSession(env, close_class, session_handle);
 
     let mut env = env_from_guard(&attach);
-    let free_session_class = env
+    let free_session_class: JClass<'_> = env
         .find_class("java/lang/Object")
         .expect("find Object class");
     Java_com_godaddy_asherah_jni_AsherahNative_freeSession(env, free_session_class, session_handle);
 
     let mut env = env_from_guard(&attach);
-    let close_factory_class = env
+    let close_factory_class: JClass<'_> = env
         .find_class("java/lang/Object")
         .expect("find Object class");
     Java_com_godaddy_asherah_jni_AsherahNative_closeFactory(
@@ -146,7 +149,7 @@ fn jni_encrypt_decrypt_roundtrip() {
     );
 
     let mut env = env_from_guard(&attach);
-    let free_factory_class = env
+    let free_factory_class: JClass<'_> = env
         .find_class("java/lang/Object")
         .expect("find Object class");
     Java_com_godaddy_asherah_jni_AsherahNative_freeFactory(env, free_factory_class, factory_handle);

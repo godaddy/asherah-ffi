@@ -1,8 +1,9 @@
 use crate::traits::{Loader, Storer};
 use crate::types::DataRowRecord;
+use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::sync::Mutex;
 
+#[derive(Debug)]
 pub struct InMemoryStore {
     map: Mutex<HashMap<serde_json::Value, DataRowRecord>>,
 }
@@ -23,7 +24,7 @@ impl Default for InMemoryStore {
 
 impl Loader for InMemoryStore {
     fn load(&self, key: &serde_json::Value) -> Result<Option<DataRowRecord>, anyhow::Error> {
-        Ok(self.map.lock().unwrap().get(key).cloned())
+        Ok(self.map.lock().get(key).cloned())
     }
 }
 
@@ -32,7 +33,7 @@ impl Storer for InMemoryStore {
         // Use Created + hash of data as key example; real impl likely uses DB key
         let key =
             serde_json::json!({"Created": d.key.as_ref().map(|k| k.created), "Len": d.data.len()});
-        self.map.lock().unwrap().insert(key.clone(), d.clone());
+        self.map.lock().insert(key.clone(), d.clone());
         Ok(key)
     }
 }

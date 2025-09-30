@@ -1,10 +1,8 @@
 #![allow(unsafe_code)]
 #![deny(clippy::all)]
 use std::collections::HashMap;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Mutex,
-};
+use parking_lot::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use napi::bindgen_prelude::*;
 // Log hook temporarily disabled for performance testing; add debug timers
@@ -37,10 +35,11 @@ fn is_debug() -> bool {
 }
 fn debug_log(msg: &str) {
     if is_debug() {
-        eprintln!("[asherah-node] {msg}");
+        log::debug!("[asherah-node] {msg}");
     }
 }
 
+#[derive(Debug)]
 #[napi(object)]
 pub struct AsherahConfig {
     pub service_name: String,
@@ -104,7 +103,7 @@ fn apply_config_env(cfg: &AsherahConfig) -> Result<()> {
         m = "rdbms".into();
     }
     if std::env::var("ASHERAH_INTEROP_DEBUG").is_ok() {
-        eprintln!(
+        log::debug!(
             "asherah-node metastore={} connection_string={:?} sqlite_path={:?}",
             m,
             cfg.connection_string,
@@ -186,7 +185,7 @@ pub fn setup(config: AsherahConfig) -> Result<()> {
         .map_err(|e| Error::from_reason(format!("setup error: {e}")))?;
     let session_caching = config.enable_session_caching.unwrap_or(true);
 
-    let mut guard = STATE.lock().unwrap();
+    let mut guard = STATE.lock();
     if guard.is_some() {
         return Err(Error::from_reason(
             "asherah already configured; call shutdown() first",
@@ -209,10 +208,10 @@ pub async fn setup_async(config: AsherahConfig) -> Result<()> {
 
 #[napi]
 pub fn shutdown() -> Result<()> {
-    let mut guard = STATE.lock().unwrap();
+    let mut guard = STATE.lock();
     if let Some(mut state) = guard.take() {
         for (_, session) in state.sessions.drain() {
-            let _ = session.close();
+            drop(session.close());
         }
         state
             .factory
@@ -229,7 +228,7 @@ pub async fn shutdown_async() -> Result<()> {
 }
 
 fn with_session<R>(partition_id: &str, fcall: impl FnOnce(&Session) -> Result<R>) -> Result<R> {
-    let mut guard = STATE.lock().unwrap();
+    let mut guard = STATE.lock();
     let state = guard
         .as_mut()
         .ok_or_else(|| Error::from_reason("asherah not configured; call setup() first"))?;
@@ -250,8 +249,7 @@ fn with_session<R>(partition_id: &str, fcall: impl FnOnce(&Session) -> Result<R>
         .map_err(|e| Error::from_reason(format!("session close error: {e}")));
     match (result, close_result) {
         (Ok(value), Ok(())) => Ok(value),
-        (Ok(_), Err(e)) => Err(e),
-        (Err(e), Ok(())) => Err(e),
+        (Ok(_), Err(e)) | (Err(e), Ok(())) => Err(e),
         (Err(e), Err(close_err)) => {
             debug_log(&format!("error closing session after failure: {close_err}"));
             Err(e)
@@ -261,7 +259,7 @@ fn with_session<R>(partition_id: &str, fcall: impl FnOnce(&Session) -> Result<R>
 
 #[napi]
 pub fn get_setup_status() -> bool {
-    STATE.lock().unwrap().is_some()
+    STATE.lock().is_some()
 }
 
 #[napi]
@@ -373,6 +371,6 @@ pub fn set_safety_padding_overhead(_n: u32) {}
 
 // Stub log hook (no-op). Could be wired to asherah metrics sink later.
 #[napi]
-pub fn set_log_hook(_hook: Function) -> Result<()> {
+pub fn set_log_hook(_hook: Function<'_>) -> Result<()> {
     Ok(())
 }

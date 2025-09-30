@@ -3,6 +3,7 @@
 
 use blake2::{Blake2b512, Digest};
 use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use subtle::ConstantTimeEq;
@@ -43,7 +44,7 @@ pub fn wipe_bytes(buf: &mut [u8]) {
     }
 }
 pub fn hash(bytes: &[u8]) -> [u8; 32] {
-    let mut h = [0u8; 32];
+    let mut h = [0_u8; 32];
     let mut hasher = Blake2b512::new();
     hasher.update(bytes);
     let out = hasher.finalize();
@@ -77,11 +78,13 @@ impl From<memcall::MemError> for Error {
     }
 }
 
+#[allow(missing_debug_implementations)]
 pub enum WithBytesError<E> {
     Buffer(Error),
     Callback(E),
 }
 
+#[derive(Debug)]
 pub struct Buffer {
     mem: memcall::MemBuf,
     data_off: usize,
@@ -252,7 +255,7 @@ pub fn encrypt(plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>, Error> {
         return Err(Error::InvalidKeyLength);
     }
     let cipher = XSalsa20Poly1305::new(Key::from_slice(key));
-    let mut nonce = [0u8; 24];
+    let mut nonce = [0_u8; 24];
     OsRng.fill_bytes(&mut nonce);
     let mut out = nonce.to_vec();
     let ct = cipher
@@ -281,6 +284,7 @@ pub fn decrypt(ciphertext: &[u8], key: &[u8], output: &mut [u8]) -> Result<usize
     Ok(n)
 }
 
+#[derive(Debug)]
 pub struct Enclave {
     ciphertext: Vec<u8>,
 }
@@ -310,7 +314,8 @@ impl Enclave {
     }
 }
 
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
+#[derive(Debug)]
 struct CofferInner {
     left: Buffer,
     right: Buffer,
@@ -356,6 +361,7 @@ impl CofferInner {
         Ok(())
     }
 }
+#[derive(Debug)]
 pub struct Coffer(Arc<Mutex<CofferInner>>);
 impl Coffer {
     pub fn new() -> Result<Self, Error> {
@@ -373,9 +379,8 @@ impl Coffer {
                 match weak.upgrade() {
                     None => break,
                     Some(strong) => {
-                        if let Ok(mut g) = strong.lock() {
-                            let _ = g.rekey();
-                        }
+                        let mut g = strong.lock();
+                        let _ignored = g.rekey();
                         std::thread::sleep(Duration::from_millis(INTERVAL_MS));
                     }
                 }
@@ -384,20 +389,20 @@ impl Coffer {
         Ok(c)
     }
     pub fn view(&self) -> Result<Buffer, Error> {
-        self.0.lock().unwrap().view()
+        self.0.lock().view()
     }
     pub fn destroy(&self) -> Result<(), Error> {
-        let mut g = self.0.lock().unwrap();
-        let _ = g.left.destroy();
-        let _ = g.right.destroy();
-        let _ = g.rand.destroy();
+        let mut g = self.0.lock();
+        let _left = g.left.destroy();
+        let _right = g.right.destroy();
+        let _rand = g.rand.destroy();
         Ok(())
     }
 }
 
 static KEY: Lazy<Mutex<Option<Arc<Coffer>>>> = Lazy::new(|| Mutex::new(None));
 fn get_or_create_key() -> Arc<Coffer> {
-    let mut k = KEY.lock().unwrap();
+    let mut k = KEY.lock();
     if let Some(c) = &*k {
         return c.clone();
     }
@@ -408,23 +413,24 @@ fn get_or_create_key() -> Arc<Coffer> {
 
 static REGISTRY: Lazy<Mutex<Vec<Weak<Mutex<Buffer>>>>> = Lazy::new(|| Mutex::new(Vec::new()));
 fn registry_add(w: Weak<Mutex<Buffer>>) {
-    REGISTRY.lock().unwrap().push(w);
+    REGISTRY.lock().push(w);
 }
 fn registry_remove(ptr: *const Mutex<Buffer>) {
-    let mut v = REGISTRY.lock().unwrap();
+    let mut v = REGISTRY.lock();
     v.retain(|w| !std::ptr::eq(w.as_ptr(), ptr));
 }
 fn registry_copy() -> Vec<Arc<Mutex<Buffer>>> {
-    let v = REGISTRY.lock().unwrap();
+    let v = REGISTRY.lock();
     v.iter().filter_map(|w| w.upgrade()).collect()
 }
 fn registry_flush() -> Vec<Arc<Mutex<Buffer>>> {
-    let mut v = REGISTRY.lock().unwrap();
+    let mut v = REGISTRY.lock();
     let out: Vec<_> = v.iter().filter_map(|w| w.upgrade()).collect();
     v.clear();
     out
 }
 
+#[derive(Debug)]
 pub struct LockedBuffer(Arc<Mutex<Buffer>>);
 impl LockedBuffer {
     pub fn new(size: usize) -> Result<Self, Error> {
@@ -442,7 +448,7 @@ impl LockedBuffer {
     pub fn from_bytes(mut bytes: Vec<u8>) -> Result<Self, Error> {
         let b = Self::new(bytes.len())?;
         {
-            let mut g = b.0.lock().unwrap();
+            let mut g = b.0.lock();
             ct_move(g.bytes(), &mut bytes);
             g.freeze()?;
         }
@@ -454,57 +460,57 @@ impl LockedBuffer {
         Self(arc)
     }
     pub fn freeze(&self) -> Result<(), Error> {
-        self.0.lock().unwrap().freeze()
+        self.0.lock().freeze()
     }
     pub fn melt(&self) -> Result<(), Error> {
-        self.0.lock().unwrap().melt()
+        self.0.lock().melt()
     }
     pub fn scramble(&self) {
-        self.0.lock().unwrap().scramble()
+        self.0.lock().scramble()
     }
     pub fn wipe(&self) {
-        wipe_bytes(self.0.lock().unwrap().bytes());
+        wipe_bytes(self.0.lock().bytes());
     }
     pub fn size(&self) -> usize {
-        self.0.lock().unwrap().size()
+        self.0.lock().size()
     }
     pub fn is_alive(&self) -> bool {
-        self.0.lock().unwrap().alive()
+        self.0.lock().alive()
     }
     pub fn is_mutable(&self) -> bool {
-        self.0.lock().unwrap().mutable()
+        self.0.lock().mutable()
     }
     pub fn bytes(&self) -> Vec<u8> {
-        self.0.lock().unwrap().as_slice().to_vec()
+        self.0.lock().as_slice().to_vec()
     }
     pub fn copy(&self, src: &[u8]) {
         self.copy_at(0, src);
     }
     pub fn copy_at(&self, offset: usize, src: &[u8]) {
-        let mut g = self.0.lock().unwrap();
+        let mut g = self.0.lock();
         ct_copy(&mut g.bytes()[offset..], src);
     }
     pub fn r#move(&self, src: &mut [u8]) {
         self.move_at(0, src);
     }
     pub fn move_at(&self, offset: usize, src: &mut [u8]) {
-        let mut g = self.0.lock().unwrap();
+        let mut g = self.0.lock();
         ct_move(&mut g.bytes()[offset..], src);
     }
     pub fn seal(&self) -> Result<Enclave, Error> {
-        let mut g = self.0.lock().unwrap();
+        let mut g = self.0.lock();
         Enclave::new_from(&mut g)
     }
     pub fn destroy(&self) -> Result<(), Error> {
         let ptr = Arc::as_ptr(&self.0);
         registry_remove(ptr);
-        self.0.lock().unwrap().destroy()
+        self.0.lock().destroy()
     }
     pub fn inner_raw(&self) -> (*mut u8, usize) {
-        self.0.lock().unwrap().inner_raw()
+        self.0.lock().inner_raw()
     }
     pub fn with_bytes<R>(&self, f: impl FnOnce(&[u8]) -> R) -> Result<R, Error> {
-        let g = self.0.lock().unwrap();
+        let g = self.0.lock();
         if !g.alive() {
             return Err(Error::CanaryFailed);
         }
@@ -514,29 +520,28 @@ impl LockedBuffer {
 
 pub fn purge() -> Result<(), Error> {
     {
-        let mut k = KEY.lock().unwrap();
+        let mut k = KEY.lock();
         *k = Some(Arc::new(Coffer::new()?));
     }
     let snapshot = registry_flush();
     let mut op_err: Option<String> = None;
     for arc in snapshot {
-        if let Ok(mut b) = arc.lock() {
-            if let Err(e) = b.destroy() {
-                let mut wiped = false;
-                if let Ok(()) = b.melt() {
-                    wipe_bytes(b.bytes());
-                    wiped = true;
-                }
-                let msg = if wiped {
-                    format!("{:?} (wiped)", e)
-                } else {
-                    format!("{:?}", e)
-                };
-                op_err = Some(match op_err {
-                    None => msg,
-                    Some(prev) => format!("{}; {}", prev, msg),
-                });
+        let mut b = arc.lock();
+        if let Err(e) = b.destroy() {
+            let mut wiped = false;
+            if let Ok(()) = b.melt() {
+                wipe_bytes(b.bytes());
+                wiped = true;
             }
+            let msg = if wiped {
+                format!("{:?} (wiped)", e)
+            } else {
+                format!("{:?}", e)
+            };
+            op_err = Some(match op_err {
+                None => msg,
+                Some(prev) => format!("{}; {}", prev, msg),
+            });
         }
     }
     if let Some(m) = op_err {
@@ -544,15 +549,15 @@ pub fn purge() -> Result<(), Error> {
     }
     Ok(())
 }
+#[allow(clippy::exit)]
 pub fn safe_exit(code: i32) -> ! {
-    if let Some(c) = KEY.lock().unwrap().as_ref() {
-        let _ = c.destroy();
+    if let Some(c) = KEY.lock().as_ref() {
+        let _destroyed = c.destroy();
     }
     let snapshot = registry_copy();
     for arc in snapshot {
-        if let Ok(mut b) = arc.lock() {
-            let _ = b.destroy();
-        }
+        let mut b = arc.lock();
+        let _destroyed = b.destroy();
     }
     std::process::exit(code)
 }
@@ -574,6 +579,6 @@ pub fn catch_interrupt() {
     catch_signal(&[libc::SIGINT], |_s| {});
 }
 static INIT: Lazy<()> = Lazy::new(|| {
-    let _ = memcall::disable_core_dumps();
+    let _result = memcall::disable_core_dumps();
 });
 pub static mut STREAM_CHUNK_SIZE: usize = 0;

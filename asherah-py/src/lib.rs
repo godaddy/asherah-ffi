@@ -1,5 +1,6 @@
 #![allow(non_local_definitions)]
 #![allow(unsafe_code)]
+#![allow(unused_qualifications)]
 
 use asherah as ael;
 use asherah_config as config;
@@ -10,7 +11,7 @@ use pyo3::types::PyBytes;
 use pyo3::PyRef;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 type Factory = ael::session::PublicFactory<
     ael::aead::AES256GCM,
@@ -40,7 +41,7 @@ fn setup(config_obj: &PyAny) -> PyResult<()> {
         .extract()?;
     let cfg = config::ConfigOptions::from_json(&json_config).map_err(anyhow_to_py)?;
     let (factory, applied) = config::factory_from_config(&cfg).map_err(anyhow_to_py)?;
-    let mut guard = MANAGER.lock().expect("factory mutex poisoned");
+    let mut guard = MANAGER.lock();
     if guard.is_some() {
         return Err(PyRuntimeError::new_err(
             "Asherah already configured; call shutdown() first",
@@ -52,7 +53,7 @@ fn setup(config_obj: &PyAny) -> PyResult<()> {
 
 #[pyfunction]
 fn shutdown() -> PyResult<()> {
-    let mut guard = MANAGER.lock().expect("factory mutex poisoned");
+    let mut guard = MANAGER.lock();
     if let Some(manager) = guard.take() {
         manager.shutdown().map_err(anyhow_to_py)?;
     }
@@ -61,21 +62,22 @@ fn shutdown() -> PyResult<()> {
 
 #[pyfunction]
 fn get_setup_status() -> PyResult<bool> {
-    let guard = MANAGER.lock().expect("factory mutex poisoned");
+    let guard = MANAGER.lock();
     Ok(guard.is_some())
 }
 
 #[pyfunction]
 fn setenv(env_obj: &PyAny) -> PyResult<()> {
     let py = env_obj.py();
-    let value = if let Ok(s) = env_obj.extract::<&str>() {
-        serde_json::from_str::<serde_json::Value>(s)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
-    } else {
-        let json_module = py.import("json")?;
-        let dumped: String = json_module.call_method1("dumps", (env_obj,))?.extract()?;
-        serde_json::from_str::<serde_json::Value>(&dumped)
-            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
+    let value = match env_obj.extract::<&str>() {
+        Ok(s) => serde_json::from_str::<serde_json::Value>(s)
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?,
+        Err(_) => {
+            let json_module = py.import("json")?;
+            let dumped: String = json_module.call_method1("dumps", (env_obj,))?.extract()?;
+            serde_json::from_str::<serde_json::Value>(&dumped)
+                .map_err(|e| PyRuntimeError::new_err(e.to_string()))?
+        }
     };
 
     let obj = value
@@ -87,7 +89,7 @@ fn setenv(env_obj: &PyAny) -> PyResult<()> {
         match val {
             serde_json::Value::Null => {
                 std::env::remove_var(key);
-                let _ = environ.del_item(key);
+                let _removed = environ.del_item(key);
             }
             serde_json::Value::String(s) => {
                 std::env::set_var(key, s);
@@ -199,7 +201,7 @@ fn with_manager<F, R>(f: F) -> PyResult<R>
 where
     F: FnOnce(&mut FactoryManager) -> PyResult<R>,
 {
-    let mut guard = MANAGER.lock().expect("factory mutex poisoned");
+    let mut guard = MANAGER.lock();
     let manager = guard
         .as_mut()
         .ok_or_else(|| PyRuntimeError::new_err("Asherah not configured; call setup()"))?;
@@ -207,6 +209,7 @@ where
 }
 
 #[pyclass(module = "asherah_py", frozen, name = "SessionFactory")]
+#[allow(missing_debug_implementations)]
 pub struct PySessionFactory {
     inner: Factory,
 }
@@ -234,7 +237,7 @@ impl PySessionFactory {
         Ok(())
     }
 
-    fn __enter__(slf: PyRef<Self>) -> PyResult<PyRef<Self>> {
+    fn __enter__(slf: PyRef<'_, Self>) -> PyResult<PyRef<'_, Self>> {
         Ok(slf)
     }
 
@@ -249,6 +252,7 @@ impl PySessionFactory {
 }
 
 #[pyclass(module = "asherah_py", frozen, name = "Session")]
+#[allow(missing_debug_implementations)]
 pub struct PySession {
     inner: SessionHandle,
 }
@@ -283,7 +287,7 @@ impl PySession {
         Ok(())
     }
 
-    fn __enter__(slf: PyRef<Self>) -> PyResult<PyRef<Self>> {
+    fn __enter__(slf: PyRef<'_, Self>) -> PyResult<PyRef<'_, Self>> {
         Ok(slf)
     }
 
@@ -295,9 +299,7 @@ impl PySession {
     ) -> PyResult<()> {
         self.close()
     }
-}
 
-impl PySession {
     fn decrypt_raw(&self, data_row_record: &str) -> PyResult<Vec<u8>> {
         let drr: ael::types::DataRowRecord =
             serde_json::from_str(data_row_record).map_err(json_parse_err)?;

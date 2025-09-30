@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use asherah as ael;
 #[test]
 fn test_policy_options_builder() {

@@ -9,6 +9,6 @@ fn main() -> anyhow::Result<()> {
     let payload = std::env::var("PLAINTEXT").unwrap_or_else(|_| "hello-from-env".into());
     let drr = session.encrypt(payload.as_bytes())?;
     let pt = session.decrypt(drr)?;
-    println!("{}", String::from_utf8_lossy(&pt));
+    log::info!("{}", String::from_utf8_lossy(&pt));
     Ok(())
 }

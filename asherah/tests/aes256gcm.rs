@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use std::sync::Arc;
 
 use asherah as ael;
@@ -14,7 +15,7 @@ fn test_aes_cipher_factory_sizes() {
 #[test]
 fn test_encrypt_decrypt_roundtrip() {
     let c = Arc::new(ael::aead::AES256GCM::new());
-    let mut key = vec![0u8; 32];
+    let mut key = vec![0_u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut key);
     let pt = b"some secret string".to_vec();
     let ct = c.encrypt(&pt, &key).unwrap();
@@ -33,10 +34,10 @@ fn test_encrypt_too_large_payload_is_error() {
 #[test]
 fn test_encrypt_decrypt_output_size() {
     let c = ael::aead::AES256GCM::new();
-    let mut key = vec![0u8; 32];
+    let mut key = vec![0_u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut key);
     for i in 1..256 {
-        let payload = vec![0u8; i];
+        let payload = vec![0_u8; i];
         let ct = c.encrypt(&payload, &key).unwrap();
         assert_eq!(
             ct.len(),

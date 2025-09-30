@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use asherah as ael;
 use std::sync::Arc;
 
@@ -5,7 +6,7 @@ use std::sync::Arc;
 fn test_store_load_with_inmemory_store() {
     let crypto = Arc::new(ael::aead::AES256GCM::new());
     let metastore = Arc::new(ael::metastore::InMemoryMetastore::new());
-    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![3u8; 32]));
+    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![3_u8; 32]));
     let cfg = ael::Config::new("svc", "prod");
     let factory = ael::api::new_session_factory(cfg, metastore, kms, crypto);
     let session = factory.get_session("p");

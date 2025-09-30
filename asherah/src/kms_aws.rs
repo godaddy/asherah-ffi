@@ -7,6 +7,7 @@ use crate::traits::{KeyManagementService, AEAD};
 
 // AWS KMS adapter using AWS SDK for Rust (async under the hood, blocked on a Runtime)
 #[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct AwsKms<A: AEAD + Send + Sync + 'static> {
     client: Client,
     key_id: String,
@@ -44,9 +45,10 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
             }
             b.build()
         };
-        let conf = match &rt {
-            Some(rt) => rt.block_on(conf_fut),
-            None => handle.unwrap().block_on(conf_fut),
+        let conf = match (&rt, handle) {
+            (Some(rt), _) => rt.block_on(conf_fut),
+            (None, Some(h)) => h.block_on(conf_fut),
+            (None, None) => unreachable!("tokio runtime unavailable"),
         };
         let client = Client::from_conf(conf);
         Ok(Self {

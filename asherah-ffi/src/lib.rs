@@ -1,6 +1,8 @@
 #![allow(unsafe_code)]
 
 use std::ffi::{CStr, CString};
+use std::fmt;
+use std::mem::ManuallyDrop;
 use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
 
@@ -19,6 +21,7 @@ type Session = ael::session::PublicSession<
 >;
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct AsherahBuffer {
     pub data: *mut u8,
     pub len: usize,
@@ -33,18 +36,31 @@ pub struct AsherahSession {
     inner: Session,
 }
 
+impl fmt::Debug for AsherahFactory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("AsherahFactory { .. }")
+    }
+}
+
+impl fmt::Debug for AsherahSession {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("AsherahSession { .. }")
+    }
+}
+
 thread_local! {
     static LAST_ERROR: std::cell::RefCell<Option<CString>> = const { std::cell::RefCell::new(None) };
 }
 
 fn set_error(msg: impl Into<String>) {
     LAST_ERROR.with(|c| {
-        *c.borrow_mut() =
-            Some(CString::new(msg.into()).unwrap_or_else(|_| CString::new("error").unwrap()));
+        let message = msg.into();
+        let cstring = CString::new(message).unwrap_or_else(|_| CString::new("error").expect("static string"));
+        *c.borrow_mut() = Some(cstring);
     });
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn asherah_last_error_message() -> *const c_char {
     LAST_ERROR.with(|c| {
         c.borrow()
@@ -54,7 +70,7 @@ pub extern "C" fn asherah_last_error_message() -> *const c_char {
     })
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn asherah_factory_new_from_env() -> *mut AsherahFactory {
     match ael::builders::factory_from_env() {
         Ok(f) => Box::into_raw(Box::new(AsherahFactory { inner: f })),
@@ -75,7 +91,7 @@ fn factory_from_config_json(
 
 /// # Safety
 /// `config_json` must point to a valid, null-terminated UTF-8 string.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_apply_config_json(config_json: *const c_char) -> c_int {
     match factory_from_config_json(config_json) {
         Ok((_factory, _applied)) => 0,
@@ -88,7 +104,7 @@ pub unsafe extern "C" fn asherah_apply_config_json(config_json: *const c_char) -
 
 /// # Safety
 /// `config_json` must point to a valid, null-terminated UTF-8 string.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_factory_new_with_config(
     config_json: *const c_char,
 ) -> *mut AsherahFactory {
@@ -103,7 +119,7 @@ pub unsafe extern "C" fn asherah_factory_new_with_config(
 
 /// # Safety
 /// `ptr` must be a factory pointer previously obtained from this module.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_factory_free(ptr: *mut AsherahFactory) {
     if ptr.is_null() {
         return;
@@ -111,7 +127,7 @@ pub unsafe extern "C" fn asherah_factory_free(ptr: *mut AsherahFactory) {
     drop(Box::from_raw(ptr));
 }
 
-unsafe fn cstr_to_str<'a>(s: *const c_char) -> Result<&'a str, anyhow::Error> {
+unsafe fn cstr_to_str<'str>(s: *const c_char) -> Result<&'str str, anyhow::Error> {
     if s.is_null() {
         return Err(anyhow::anyhow!("null string"));
     }
@@ -120,7 +136,7 @@ unsafe fn cstr_to_str<'a>(s: *const c_char) -> Result<&'a str, anyhow::Error> {
 
 /// # Safety
 /// `factory` must be a valid factory pointer and `partition_id` a valid C string.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_factory_get_session(
     factory: *mut AsherahFactory,
     partition_id: *const c_char,
@@ -143,7 +159,7 @@ pub unsafe extern "C" fn asherah_factory_get_session(
 
 /// # Safety
 /// `ptr` must be a session pointer previously obtained from this module.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_session_free(ptr: *mut AsherahSession) {
     if ptr.is_null() {
         return;
@@ -151,12 +167,12 @@ pub unsafe extern "C" fn asherah_session_free(ptr: *mut AsherahSession) {
     drop(Box::from_raw(ptr));
 }
 
-fn take_vec_into_buffer(mut v: Vec<u8>, out: *mut AsherahBuffer) -> c_int {
+fn take_vec_into_buffer(v: Vec<u8>, out: *mut AsherahBuffer) -> c_int {
+    let mut v = ManuallyDrop::new(v);
     let buf = AsherahBuffer {
         data: v.as_mut_ptr(),
         len: v.len(),
     };
-    std::mem::forget(v);
     unsafe {
         *out = buf;
     }
@@ -165,22 +181,22 @@ fn take_vec_into_buffer(mut v: Vec<u8>, out: *mut AsherahBuffer) -> c_int {
 
 /// # Safety
 /// `buf` must point to a valid `AsherahBuffer` initialized by this library.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_buffer_free(buf: *mut AsherahBuffer) {
     if buf.is_null() {
         return;
     }
     let b = &mut *buf;
     if !b.data.is_null() && b.len > 0 {
-        let _ = Vec::from_raw_parts(b.data, b.len, b.len);
+        drop(Vec::from_raw_parts(b.data, b.len, b.len));
     }
-    b.data = std::ptr::null_mut();
+    b.data = null_mut();
     b.len = 0;
 }
 
 /// # Safety
 /// `session` must be valid, `data` must reference `len` bytes, and `out` must be non-null.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_encrypt_to_json(
     session: *mut AsherahSession,
     data: *const u8,
@@ -214,7 +230,7 @@ pub unsafe extern "C" fn asherah_encrypt_to_json(
 
 /// # Safety
 /// `session` must be valid, `json` must reference `len` bytes, and `out` must be non-null.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_decrypt_from_json(
     session: *mut AsherahSession,
     json: *const u8,

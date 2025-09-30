@@ -1,6 +1,6 @@
 use crate::traits::Partition;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DefaultPartition {
     id: String,
     service: String,

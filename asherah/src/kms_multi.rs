@@ -4,6 +4,7 @@ use crate::traits::KeyManagementService;
 
 // A composite KMS that routes Encrypt to a preferred region KMS and Decrypt tries all KMSs until success.
 #[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct MultiKms {
     preferred: usize,
     backends: Vec<Arc<dyn KeyManagementService>>, // different regions
@@ -76,18 +77,19 @@ mod tests {
     }
 
     #[test]
-    fn multi_kms_pref_encrypts_on_preferred_and_fallbacks_on_decrypt() {
+    fn multi_kms_pref_encrypts_on_preferred_and_fallbacks_on_decrypt() -> anyhow::Result<()> {
         static C1: AtomicUsize = AtomicUsize::new(0);
         static C2: AtomicUsize = AtomicUsize::new(0);
         let kms1: Arc<dyn KeyManagementService> = Arc::new(DummyKms(&C1, 1));
         let kms2: Arc<dyn KeyManagementService> = Arc::new(DummyKms(&C2, 2));
-        let mk = MultiKms::new(0, vec![kms1.clone(), kms2.clone()]).unwrap();
+        let mk = MultiKms::new(0, vec![kms1.clone(), kms2.clone()])?;
         let pt = b"secret";
-        let blob = mk.encrypt_key(&(), pt).unwrap();
+        let blob = mk.encrypt_key(&(), pt)?;
         assert_eq!(C1.load(Ordering::Relaxed), 1);
         // Decrypt with a different backend via a new MultiKms pref index 1
-        let mk2 = MultiKms::new(1, vec![kms1, kms2]).unwrap();
-        let out = mk2.decrypt_key(&(), &blob).unwrap();
+        let mk2 = MultiKms::new(1, vec![kms1, kms2])?;
+        let out = mk2.decrypt_key(&(), &blob)?;
         assert_eq!(out, pt);
+        Ok(())
     }
 }

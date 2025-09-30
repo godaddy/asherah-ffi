@@ -6,8 +6,7 @@ use std::sync::Arc;
 fn main() -> anyhow::Result<()> {
     #[cfg(not(feature = "dynamodb"))]
     {
-        eprintln!("Enable with --features dynamodb");
-        return Ok(());
+        return Err(anyhow::anyhow!("Enable with --features dynamodb"));
     }
     #[cfg(feature = "dynamodb")]
     {
@@ -18,14 +17,14 @@ fn main() -> anyhow::Result<()> {
         )?);
         let crypto = Arc::new(ael::aead::AES256GCM::new());
         // StaticKMS for demo (replace with AwsKms for real usage)
-        let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![3u8; 32]));
+        let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![3_u8; 32]));
         let cfg = ael::Config::new("svc", "prod");
         let factory = ael::api::new_session_factory(cfg, store, kms, crypto);
         let s = factory.get_session("p1");
         let drr = s.encrypt(b"ddb-example")?;
         let pt = s.decrypt(drr)?;
         assert_eq!(pt, b"ddb-example");
-        println!("dynamodb example OK");
+        log::info!("dynamodb example OK");
         Ok(())
     }
 }

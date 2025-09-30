@@ -19,6 +19,7 @@ once_cell = "1.19"
 parking_lot = "0.12"
 rand = "0.8"
 anyhow = "1.0"
+log = "0.4"
 # aes-gcm kept as optional fallback; ring is default backend now
 # aes-gcm = { version = "0.10", features = ["aes"] }
 serde_bytes = "0.11"

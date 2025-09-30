@@ -4,6 +4,7 @@ use crate::traits::Metastore;
 
 type MetastoreEnvResult = (Arc<dyn Metastore>, String, String, Option<String>);
 
+#[derive(Debug)]
 pub enum StoreChoice {
     InMemory,
     #[cfg(feature = "postgres")]
@@ -14,6 +15,7 @@ pub enum StoreChoice {
     DynamoDb,
 }
 
+#[derive(Debug)]
 pub struct FromEnvResult<M: Metastore + Clone + 'static> {
     pub metastore: Arc<M>,
     pub service: String,
@@ -35,7 +37,7 @@ pub fn metastore_from_env() -> anyhow::Result<MetastoreEnvResult> {
         .unwrap_or_else(|_| "memory".to_string())
         .to_lowercase();
     if std::env::var("ASHERAH_INTEROP_DEBUG").is_ok() {
-        eprintln!(
+        log::debug!(
             "metastore_from_env choice={} sqlite_path={:?}",
             mchoice,
             std::env::var("SQLITE_PATH").ok()
@@ -146,6 +148,7 @@ pub fn config_from_env() -> crate::Config {
 
 // === Dynamic wrappers to pass trait-objects through generic factory ===
 #[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct DynKms(pub Arc<dyn crate::traits::KeyManagementService>);
 impl crate::traits::KeyManagementService for DynKms {
     fn encrypt_key(&self, ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
@@ -157,8 +160,9 @@ impl crate::traits::KeyManagementService for DynKms {
 }
 
 #[derive(Clone)]
-pub struct DynMetastore(pub Arc<dyn crate::traits::Metastore>);
-impl crate::traits::Metastore for DynMetastore {
+#[allow(missing_debug_implementations)]
+pub struct DynMetastore(pub Arc<dyn Metastore>);
+impl Metastore for DynMetastore {
     fn load(
         &self,
         id: &str,
@@ -211,7 +215,7 @@ pub fn factory_from_env(
                     serde_json::from_str(&map_json)?;
                 let preferred = std::env::var("PREFERRED_REGION").ok();
                 let mut entries: Vec<(String, String)> = Vec::new();
-                let mut pref_idx = 0usize;
+                let mut pref_idx = 0_usize;
                 for (i, (region, key)) in regions.iter().enumerate() {
                     if preferred.as_ref() == Some(region) {
                         pref_idx = i;
@@ -238,7 +242,7 @@ pub fn factory_from_env(
         }
         _ => {
             let hex = std::env::var("STATIC_MASTER_KEY_HEX").unwrap_or_else(|_| "00".repeat(32));
-            let mut key = vec![0u8; hex.len() / 2];
+            let mut key = vec![0_u8; hex.len() / 2];
             for i in 0..key.len() {
                 key[i] = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).unwrap_or(0);
             }

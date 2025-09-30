@@ -8,6 +8,7 @@ use crate::traits::Metastore;
 use crate::types::{EnvelopeKeyRecord, KeyMeta};
 
 #[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct DynamoDbMetastore {
     client: Client,
     table: String,
@@ -109,7 +110,7 @@ impl Metastore for DynamoDbMetastore {
                             .ok_or_else(|| anyhow::anyhow!("missing Created in ParentKeyMeta"))?;
                         let c_num: i64 = c.parse::<i64>()?;
                         Some(KeyMeta {
-                            id: kid.to_string(),
+                            id: kid.to_owned(),
                             created: c_num,
                         })
                     } else {
@@ -118,7 +119,7 @@ impl Metastore for DynamoDbMetastore {
 
                     return Ok(Some(EnvelopeKeyRecord {
                         revoked: Some(revoked),
-                        id: id.to_string(),
+                        id: id.to_owned(),
                         created: created_num,
                         encrypted_key,
                         parent_key_meta,
@@ -172,7 +173,7 @@ impl Metastore for DynamoDbMetastore {
                             .ok_or_else(|| anyhow::anyhow!("missing Created in ParentKeyMeta"))?;
                         let c_num: i64 = c.parse::<i64>()?;
                         Some(KeyMeta {
-                            id: kid.to_string(),
+                            id: kid.to_owned(),
                             created: c_num,
                         })
                     } else {
@@ -180,7 +181,7 @@ impl Metastore for DynamoDbMetastore {
                     };
                 return Ok(Some(EnvelopeKeyRecord {
                     revoked: Some(revoked),
-                    id: id.to_string(),
+                    id: id.to_owned(),
                     created: created_num,
                     encrypted_key,
                     parent_key_meta,

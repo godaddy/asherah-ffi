@@ -140,6 +140,7 @@ dependencies = [
  "cucumber",
  "futures",
  "libc",
+ "log",
  "mysql",
  "once_cell",
  "parking_lot",
@@ -197,10 +198,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "asherah",
+ "log",
  "napi",
  "napi-build",
  "napi-derive",
  "once_cell",
+ "parking_lot",
  "serde",
  "serde_json",
  "tokio",
@@ -214,6 +217,7 @@ dependencies = [
  "asherah",
  "asherah-config",
  "once_cell",
+ "parking_lot",
  "pyo3",
  "serde_json",
 ]

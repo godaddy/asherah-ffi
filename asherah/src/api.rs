@@ -18,6 +18,7 @@ pub fn new_session_factory<
 }
 
 // No-op options to mirror Go's FactoryOption pattern
+#[derive(Debug)]
 pub enum FactoryOption {
     Metrics(bool),
     SecretFactory, // not applicable in Rust port (memguard-rs is internal)
@@ -32,10 +33,10 @@ pub fn new_session_factory_with_options<
     store: Arc<M>,
     kms: Arc<K>,
     crypto: Arc<A>,
-    _opts: &[FactoryOption],
+    opts: &[FactoryOption],
 ) -> PublicFactory<A, K, M> {
     let mut metrics_enabled = true;
-    for opt in _opts {
+    for opt in opts {
         match opt {
             FactoryOption::Metrics(b) => metrics_enabled = *b,
             FactoryOption::SecretFactory => {}

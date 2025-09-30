@@ -1,5 +1,6 @@
 use crate::memguard::LockedBuffer;
 
+#[derive(Debug)]
 pub struct CryptoKey {
     created: i64,
     revoked: bool,
@@ -30,7 +31,7 @@ impl CryptoKey {
 }
 
 pub fn generate_key(created: i64) -> anyhow::Result<CryptoKey> {
-    let mut raw = vec![0u8; 32];
+    let mut raw = vec![0_u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut raw);
     CryptoKey::new(created, false, raw)
 }

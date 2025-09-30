@@ -1,3 +1,4 @@
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 use std::sync::Arc;
 use std::thread;
 
@@ -6,7 +7,7 @@ use asherah as ael;
 #[test]
 fn concurrent_encrypt_decrypt_roundtrip() {
     let crypto = Arc::new(ael::aead::AES256GCM::new());
-    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![9u8; 32]));
+    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![9_u8; 32]));
     let store = Arc::new(ael::metastore::InMemoryMetastore::new());
     let factory =
         ael::api::new_session_factory(ael::Config::new("svc", "prod"), store, kms, crypto);

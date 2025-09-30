@@ -1,7 +1,8 @@
 use crate::internal::CryptoKey;
 use crate::types::KeyMeta;
+use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 type MetaCacheInner = HashMap<(String, i64), (Arc<CryptoKey>, std::time::Instant)>;
 type LatestCacheInner = HashMap<String, (Arc<CryptoKey>, std::time::Instant)>;
@@ -22,6 +23,7 @@ pub trait KeyCacher: Send + Sync {
     }
 }
 
+#[derive(Debug)]
 pub struct NeverCache;
 
 impl KeyCacher for NeverCache {
@@ -41,6 +43,7 @@ impl KeyCacher for NeverCache {
     }
 }
 
+#[derive(Debug)]
 pub struct SimpleKeyCache {
     by_meta: Mutex<MetaCacheInner>,
     latest: Mutex<LatestCacheInner>,
@@ -72,7 +75,7 @@ impl KeyCacher for SimpleKeyCache {
         id: &str,
         loader: &mut dyn FnMut() -> anyhow::Result<Arc<CryptoKey>>,
     ) -> anyhow::Result<Arc<CryptoKey>> {
-        let mut map = self.latest.lock().unwrap();
+        let mut map = self.latest.lock();
         if let Some((v, t)) = map.get(id) {
             if t.elapsed() < self.ttl {
                 crate::metrics::record_cache_hit("latest");
@@ -90,7 +93,7 @@ impl KeyCacher for SimpleKeyCache {
         loader: &mut dyn FnMut() -> anyhow::Result<Arc<CryptoKey>>,
     ) -> anyhow::Result<Arc<CryptoKey>> {
         let key = (meta.id.clone(), meta.created);
-        let mut map = self.by_meta.lock().unwrap();
+        let mut map = self.by_meta.lock();
         if let Some((v, t)) = map.get(&key) {
             if t.elapsed() < self.ttl {
                 crate::metrics::record_cache_hit("meta");

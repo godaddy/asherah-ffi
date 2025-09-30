@@ -3,6 +3,7 @@ use crate::types::EnvelopeKeyRecord;
 use postgres::{Client, NoTls};
 
 #[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct PostgresMetastore {
     url: String,
 }
@@ -35,12 +36,13 @@ impl Metastore for PostgresMetastore {
             "SELECT key_record::text FROM encryption_key WHERE id=$1 AND created=to_timestamp($2)",
             &[&id, &created],
         )?;
-        if let Some(row) = rows.into_iter().next() {
-            let txt: String = row.get(0);
-            let ekr: EnvelopeKeyRecord = serde_json::from_str(&txt)?;
-            Ok(Some(ekr))
-        } else {
-            Ok(None)
+        match rows.into_iter().next() {
+            Some(row) => {
+                let txt: String = row.get(0);
+                let ekr: EnvelopeKeyRecord = serde_json::from_str(&txt)?;
+                Ok(Some(ekr))
+            }
+            None => Ok(None),
         }
     }
     fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
@@ -49,12 +51,13 @@ impl Metastore for PostgresMetastore {
             "SELECT key_record::text FROM encryption_key WHERE id=$1 ORDER BY created DESC LIMIT 1",
             &[&id],
         )?;
-        if let Some(row) = rows.into_iter().next() {
-            let txt: String = row.get(0);
-            let ekr: EnvelopeKeyRecord = serde_json::from_str(&txt)?;
-            Ok(Some(ekr))
-        } else {
-            Ok(None)
+        match rows.into_iter().next() {
+            Some(row) => {
+                let txt: String = row.get(0);
+                let ekr: EnvelopeKeyRecord = serde_json::from_str(&txt)?;
+                Ok(Some(ekr))
+            }
+            None => Ok(None),
         }
     }
     fn store(

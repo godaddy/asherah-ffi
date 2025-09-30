@@ -1,7 +1,7 @@
 use crate::cache::{KeyCacher, NeverCache, SimpleKeyCache};
 use crate::config::Config;
 use crate::internal::crypto_key::{generate_key, is_key_expired};
-use crate::internal::{self, CryptoKey};
+use crate::internal::CryptoKey;
 use crate::metrics;
 use crate::partition::DefaultPartition;
 use crate::policy::CryptoPolicy;
@@ -11,6 +11,7 @@ use crate::types::{EnvelopeKeyRecord, KeyMeta};
 use std::sync::Arc;
 
 #[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct SessionFactory<
     A: AEAD + Clone,
     K: KeyManagementService + Clone,
@@ -69,6 +70,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     }
 }
 
+#[allow(missing_debug_implementations)]
 pub struct Session<
     A: AEAD + Clone,
     K: KeyManagementService + Clone,
@@ -104,7 +106,7 @@ impl<
 
     fn system_key_from_ekr(&self, ekr: &EnvelopeKeyRecord) -> anyhow::Result<CryptoKey> {
         let bytes = self.f.kms.decrypt_key(&(), &ekr.encrypted_key)?;
-        internal::CryptoKey::new(ekr.created, ekr.revoked.unwrap_or(false), bytes)
+        CryptoKey::new(ekr.created, ekr.revoked.unwrap_or(false), bytes)
     }
 
     fn intermediate_key_from_ekr(
@@ -119,7 +121,7 @@ impl<
                 let ik_bytes = sk_loaded.with_key_func(|sk_bytes| {
                     self.f.crypto.decrypt(&ekr.encrypted_key, sk_bytes)
                 })??;
-                return internal::CryptoKey::new(
+                return CryptoKey::new(
                     ekr.created,
                     ekr.revoked.unwrap_or(false),
                     ik_bytes,
@@ -128,7 +130,7 @@ impl<
         }
         let ik_bytes =
             sk.with_key_func(|sk_bytes| self.f.crypto.decrypt(&ekr.encrypted_key, sk_bytes))??;
-        internal::CryptoKey::new(ekr.created, ekr.revoked.unwrap_or(false), ik_bytes)
+        CryptoKey::new(ekr.created, ekr.revoked.unwrap_or(false), ik_bytes)
     }
 
     fn get_or_load_system_key(&self, meta: KeyMeta) -> anyhow::Result<CryptoKey> {
@@ -196,10 +198,10 @@ impl<
 
 fn now_s() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs() as i64
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs() as i64,
+        Err(_) => 0,
+    }
 }
 
 // Public API compatible with Go shapes
@@ -243,7 +245,7 @@ impl<
                         created: sk.created(),
                     }),
                 };
-                let _ = self.f.metastore.store(&ekr.id, ekr.created, &ekr)?;
+                self.f.metastore.store(&ekr.id, ekr.created, &ekr)?;
                 ik
             }
         };
@@ -334,6 +336,7 @@ impl<
 }
 
 // Public factory and session that mirror Go API surface (non-generic entrypoints)
+#[allow(missing_debug_implementations)]
 pub struct PublicFactory<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> {
     cfg: Config,
     metastore: Arc<M>,
@@ -349,9 +352,10 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
 {
     pub fn new(cfg: Config, metastore: Arc<M>, kms: Arc<K>, crypto: Arc<A>) -> Self {
         let shared = if cfg.policy.shared_intermediate_key_cache {
-            Some(Arc::new(SimpleKeyCache::new_with_ttl(
+            let cache: Arc<dyn KeyCacher> = Arc::new(SimpleKeyCache::new_with_ttl(
                 cfg.policy.revoke_check_interval_s,
-            )) as Arc<dyn KeyCacher>)
+            ));
+            Some(cache)
         } else {
             None
         };
@@ -451,6 +455,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     }
 }
 
+#[allow(missing_debug_implementations)]
 pub struct PublicSession<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> {
     inner: Session<A, K, M, DefaultPartition>,
     metastore: Arc<M>,
@@ -479,6 +484,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     }
 }
 
+#[allow(clippy::same_name_method)]
 impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     PublicSession<A, K, M>
 {
@@ -503,7 +509,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             created: 0,
         };
         let sk = self.get_or_load_system_key(sk_meta)?;
-        let ik = super::internal::crypto_key::generate_key(self.inner.new_key_timestamp())?;
+        let ik = generate_key(self.inner.new_key_timestamp())?;
         let enc_ik =
             ik.with_key_func(|ikb| sk.with_key_func(|skb| self.crypto.encrypt(ikb, skb)))??;
         let ekr = EnvelopeKeyRecord {
@@ -582,8 +588,8 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             .ik_cache
             .get_or_load_latest(&self.inner.f.partition.intermediate_key_id(), &mut loader)?;
         // Fast DRK path: avoid memguard for ephemeral data-row key
-        let created = super::session::now_s();
-        let mut drk = vec![0u8; 32];
+        let created = now_s();
+        let mut drk = vec![0_u8; 32];
         use rand::RngCore;
         rand::rngs::OsRng.fill_bytes(&mut drk);
         let enc_data = self.crypto.encrypt(data, &drk)?;

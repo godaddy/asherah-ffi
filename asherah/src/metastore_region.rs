@@ -4,6 +4,7 @@ use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
 
 #[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct RegionSuffixMetastore<M: Metastore + ?Sized> {
     inner: Arc<M>,
     suffix: String,

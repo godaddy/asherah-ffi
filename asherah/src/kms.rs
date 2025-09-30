@@ -3,6 +3,7 @@ use crate::traits::AEAD;
 use std::sync::Arc;
 
 #[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct StaticKMS<A: AEAD + Send + Sync + 'static> {
     aead: Arc<A>,
     master_key: Vec<u8>,

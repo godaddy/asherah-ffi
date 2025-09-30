@@ -1,6 +1,7 @@
 use once_cell::sync::OnceCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+#[derive(Debug)]
 pub struct Timers {
     pub count: AtomicU64,
     pub total_ns: AtomicU64,
@@ -24,18 +25,10 @@ pub static ENCRYPT_TIMER: Timers = Timers::new();
 pub static DECRYPT_TIMER: Timers = Timers::new();
 
 pub trait MetricsSink: Send + Sync + 'static {
-    fn encrypt(&self, dur: std::time::Duration) {
-        let _ = dur;
-    }
-    fn decrypt(&self, dur: std::time::Duration) {
-        let _ = dur;
-    }
-    fn store(&self, dur: std::time::Duration) {
-        let _ = dur;
-    }
-    fn load(&self, dur: std::time::Duration) {
-        let _ = dur;
-    }
+    fn encrypt(&self, _dur: std::time::Duration) {}
+    fn decrypt(&self, _dur: std::time::Duration) {}
+    fn store(&self, _dur: std::time::Duration) {}
+    fn load(&self, _dur: std::time::Duration) {}
     fn cache_hit(&self, _name: &str) {}
     fn cache_miss(&self, _name: &str) {}
 }
@@ -46,7 +39,7 @@ impl MetricsSink for NoopSink {}
 static SINK: OnceCell<Box<dyn MetricsSink>> = OnceCell::new();
 
 pub fn set_sink<T: MetricsSink>(sink: T) {
-    let _ = SINK.set(Box::new(sink));
+    let _set_result = SINK.set(Box::new(sink));
 }
 fn sink() -> &'static dyn MetricsSink {
     SINK.get().map(|b| &**b).unwrap_or(&NoopSink)

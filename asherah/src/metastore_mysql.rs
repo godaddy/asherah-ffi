@@ -3,6 +3,7 @@ use crate::types::EnvelopeKeyRecord;
 use mysql::{prelude::Queryable, Pool, PooledConn};
 
 #[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct MySqlMetastore {
     pool: Pool,
 }

@@ -7,10 +7,7 @@ use asherah as ael;
 fn main() -> anyhow::Result<()> {
     let key_id = match std::env::var("KMS_KEY_ID") {
         Ok(v) => v,
-        Err(_) => {
-            eprintln!("Set KMS_KEY_ID to run this example");
-            return Ok(());
-        }
+        Err(_) => return Err(anyhow::anyhow!("Set KMS_KEY_ID to run this example")),
     };
 
     let region = std::env::var("AWS_REGION").ok();
@@ -26,6 +23,6 @@ fn main() -> anyhow::Result<()> {
     let drr = session.encrypt(b"hello-kms")?;
     let pt = session.decrypt(drr)?;
     assert_eq!(pt, b"hello-kms");
-    println!("AWS KMS example OK");
+    log::info!("AWS KMS example OK");
     Ok(())
 }

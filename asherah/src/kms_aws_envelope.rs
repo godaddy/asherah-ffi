@@ -13,6 +13,7 @@ struct RegionalClient {
 }
 
 #[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct AwsKmsEnvelope<A: AEAD + Send + Sync + 'static> {
     clients: Vec<RegionalClient>,
     preferred: usize,
@@ -121,9 +122,10 @@ fn new_kms_client(
         }
         b.build()
     };
-    let conf = match &rt {
-        Some(rt) => rt.block_on(conf_fut),
-        None => handle.unwrap().block_on(conf_fut),
+    let conf = match (&rt, handle) {
+        (Some(rt), _) => rt.block_on(conf_fut),
+        (None, Some(h)) => h.block_on(conf_fut),
+        (None, None) => unreachable!("tokio runtime unavailable"),
     };
     let client = Client::from_conf(conf.clone());
     let resolved_region = conf
@@ -287,7 +289,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_envelope_json_field_names_and_roundtrip() {
+    fn test_envelope_json_field_names_and_roundtrip() -> anyhow::Result<()> {
         let env = KekEnvelope {
             encrypted_key: vec![1, 2, 3],
             keks: vec![RegionalKek {
@@ -296,7 +298,7 @@ mod tests {
                 encrypted_kek: vec![9, 8, 7],
             }],
         };
-        let j = serde_json::to_string(&env).unwrap();
+        let j = serde_json::to_string(&env)?;
         // Check JSON field names match Go
         assert!(j.contains("\"encryptedKey\""));
         assert!(j.contains("\"kmsKeks\""));
@@ -304,11 +306,12 @@ mod tests {
         assert!(j.contains("\"arn\""));
         assert!(j.contains("\"encryptedKek\""));
         // Roundtrip
-        let back: KekEnvelope = serde_json::from_str(&j).unwrap();
+        let back: KekEnvelope = serde_json::from_str(&j)?;
         assert_eq!(back.encrypted_key, vec![1, 2, 3]);
         assert_eq!(back.keks.len(), 1);
         assert_eq!(back.keks[0].region, "us-east-1");
         assert_eq!(back.keks[0].arn, "arn:aws:kms:...");
         assert_eq!(back.keks[0].encrypted_kek, vec![9, 8, 7]);
+        Ok(())
     }
 }
