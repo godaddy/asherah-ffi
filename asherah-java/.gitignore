@@ -1,0 +1,16 @@
+# Rust build output
+/target/
+**/*.rs.bk
+
+# Maven artifacts
+/java/target/
+**/*.class
+**/*.jar
+**/*.war
+**/*.ear
+
+# IDE metadata
+.idea/
+.classpath
+.project
+.settings/

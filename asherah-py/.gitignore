@@ -1,0 +1,19 @@
+# Python artifacts
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+build/
+dist/
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Rust target for extension builds
+/target/

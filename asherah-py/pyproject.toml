@@ -1,0 +1,29 @@
+[build-system]
+requires = ["maturin>=1.4,<2"]
+build-backend = "maturin"
+
+[project]
+name = "asherah-py"
+version = "0.1.0"
+description = "Python bindings for Go-compatible Asherah envelope encryption"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "Apache-2.0" }
+authors = [
+  { name = "Asherah Maintainers" }
+]
+classifiers = [
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Rust",
+  "Topic :: Security :: Cryptography",
+  "License :: OSI Approved :: Apache Software License"
+]
+
+[project.urls]
+Homepage = "https://github.com/godaddy/asherah"
+Repository = "https://github.com/godaddy/asherah"
+
+[tool.maturin]
+bindings = "pyo3"
+features = []

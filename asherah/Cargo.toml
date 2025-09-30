@@ -1,0 +1,81 @@
+[package]
+name = "asherah"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Asherah (Rust): AppEncryption with embedded memguard/memcall"
+homepage = "https://github.com/awnumar/memcall"
+repository = "https://github.com/awnumar/memcall"
+documentation = "https://docs.rs/asherah"
+readme = "README.md"
+keywords = ["asherah", "encryption", "kms", "security", "secrets"]
+categories = ["cryptography", "memory-management", "config"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+once_cell = "1.19"
+parking_lot = "0.12"
+rand = "0.8"
+anyhow = "1.0"
+# aes-gcm kept as optional fallback; ring is default backend now
+# aes-gcm = { version = "0.10", features = ["aes"] }
+serde_bytes = "0.11"
+blake2 = "0.10"
+base64 = "0.21"
+subtle = "2.5"
+xsalsa20poly1305 = "0.9"
+signal-hook = "0.3"
+libc = "0.2"
+windows-sys = { version = "0.48", features = ["Win32_System_Memory"] }
+ring = "0.17"
+
+[[bin]]
+name = "asherah-interop"
+path = "src/bin/interop.rs"
+
+[features]
+sqlite = ["dep:rusqlite"]
+mysql = ["dep:mysql"]
+postgres = ["dep:postgres"]
+dynamodb = ["dep:aws-sdk-dynamodb"]
+cucumber_xlang = []
+
+[dependencies.rusqlite]
+version = "0.31"
+optional = true
+features = ["bundled"]
+
+[dependencies.aws-config]
+version = "1"
+
+[dependencies.aws-sdk-kms]
+version = "1"
+
+[dependencies.aws-sdk-dynamodb]
+version = "1"
+optional = true
+
+[dependencies.tokio]
+version = "1"
+features = ["rt-multi-thread", "macros"]
+
+[dependencies.mysql]
+version = "25"
+optional = true
+
+[dependencies.postgres]
+version = "0.19"
+optional = true
+
+[dev-dependencies]
+cucumber = "0.20"
+futures = "0.3"
+serde_json = "1.0"
+which = "6"
+
+[[test]]
+name = "cucumber"
+harness = false
+required-features = ["cucumber_xlang"]

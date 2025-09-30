@@ -1,0 +1,14 @@
+# Ruby artifacts
+.bundle/
+pkg/
+coverage/
+doc/
+tmp/
+*.gem
+.yardoc/
+yardoc/
+
+# Native extensions
+*.so
+*.bundle
+*.dylib

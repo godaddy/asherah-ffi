@@ -1,0 +1,31 @@
+{
+  "name": "asherah-node",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Node.js addon for Asherah (napi-rs)",
+  "main": "npm/index.js",
+  "types": "index.d.ts",
+  "files": [
+    "npm/**/*",
+    "index.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "napi build",
+    "build:release": "napi build --release",
+    "prepublishOnly": "napi prepublish -t npm",
+    "test": "node test/roundtrip.js"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0"
+  },
+  "engines": {
+    "node": ">= 18"
+  },
+  "optionalDependencies": {
+    "asherah-node-win32-x64-msvc": "0.1.0",
+    "asherah-node-darwin-x64": "0.1.0",
+    "asherah-node-linux-x64-gnu": "0.1.0"
+  }
+}

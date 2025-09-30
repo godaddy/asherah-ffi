@@ -1,0 +1,83 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.godaddy.asherah</groupId>
+  <artifactId>asherah-java</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <name>asherah-java</name>
+  <packaging>jar</packaging>
+
+  <properties>
+    <maven.compiler.release>11</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <junit.jupiter.version>5.10.2</junit.jupiter.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.jupiter.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.1.0</version>
+        <executions>
+          <execution>
+            <id>build-native</id>
+            <phase>generate-resources</phase>
+            <goals>
+              <goal>exec</goal>
+            </goals>
+            <configuration>
+              <skip>${native.build.skip}</skip>
+              <workingDirectory>${project.basedir}/../..</workingDirectory>
+              <executable>cargo</executable>
+              <arguments>
+                <argument>build</argument>
+                <argument>-p</argument>
+                <argument>asherah-java</argument>
+              </arguments>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.1.2</version>
+        <configuration>
+          <useSystemClassLoader>true</useSystemClassLoader>
+          <systemPropertyVariables>
+            <asherah.java.nativeLibraryPath>${env.CARGO_TARGET_DIR}/debug</asherah.java.nativeLibraryPath>
+          </systemPropertyVariables>
+          <environmentVariables>
+            <SERVICE_NAME>svc</SERVICE_NAME>
+            <PRODUCT_ID>prod</PRODUCT_ID>
+            <KMS>static</KMS>
+            <STATIC_MASTER_KEY_HEX>2222222222222222222222222222222222222222222222222222222222222222</STATIC_MASTER_KEY_HEX>
+          </environmentVariables>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.11.0</version>
+        <configuration>
+          <release>${maven.compiler.release}</release>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+</project>

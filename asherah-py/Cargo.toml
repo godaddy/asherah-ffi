@@ -1,0 +1,27 @@
+[package]
+name = "asherah-py"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Python bindings for the Asherah Rust library"
+homepage = "https://github.com/awnumar/memcall"
+repository = "https://github.com/awnumar/memcall"
+documentation = "https://docs.rs/asherah-py"
+readme = "README.md"
+keywords = ["asherah", "python", "ffi", "encryption"]
+categories = ["cryptography", "api-bindings", "ffi"]
+
+[lib]
+name = "asherah_py"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.20", features = ["extension-module", "abi3-py38", "serde"] }
+asherah = { path = "../asherah", features = ["sqlite"] }
+asherah-config = { path = "../asherah-config" }
+serde_json = "1.0"
+anyhow = "1.0"
+once_cell = "1.19"
+
+[package.metadata.maturin]
+name = "asherah_py"

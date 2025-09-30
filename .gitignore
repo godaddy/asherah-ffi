@@ -1,0 +1,62 @@
+# General tooling
+.DS_Store
+*.log
+*.tmp
+*.swp
+.vscode/
+.pytest_cache/
+__pycache__/
+
+# Build outputs
+/target/
+**/target/
+/.venv/
+**/.venv/
+/.mypy_cache/
+**/.mypy_cache/
+/.ruff_cache/
+**/.ruff_cache/
+
+# Dependencies & package managers
+**/node_modules/
+**/vendor/
+**/dist/
+**/build/
+**/pkg/
+
+# Language-specific
+**/bin/
+**/obj/
+**/*.py[cod]
+**/*.pyo
+**/*.pyd
+**/*.so
+**/*.class
+**/*.jar
+**/*.war
+**/*.ear
+**/*.gem
+**/*.dll
+**/*.dylib
+**/*.exe
+**/*.out
+
+# Test & coverage artifacts
+coverage/
+**/coverage/
+**/.coverage
+**/.coverage.*
+**/htmlcov/
+
+# Logs & temp files
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/pip-wheel-metadata/
+docker_tests.log
+docker_run.log
+
+# IDE specific
+.idea/
+.vs/
+**/.vs/

@@ -1,0 +1,14 @@
+# Node / N-API artifacts
+node_modules/
+dist/
+build/
+*.node
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.yarn/
+.pnp.*
+.eslintcache
+
+# Rust target used during napi builds
+/target/

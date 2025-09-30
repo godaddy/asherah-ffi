@@ -1,0 +1,11 @@
+# Normalize line endings across contributors
+* text=auto eol=lf
+
+# Keep generated binaries untouched
+*.dll binary
+*.dylib binary
+*.so binary
+*.exe binary
+
+# Preserve tab-indented makefiles
+Makefile linguist-language=Makefile

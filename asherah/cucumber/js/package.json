@@ -1,0 +1,8 @@
+{
+  "name": "asherah-cross",
+  "version": "0.0.1",
+  "private": true,
+  "dependencies": {
+    "asherah": "^3.0.12"
+  }
+}

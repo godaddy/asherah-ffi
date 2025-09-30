@@ -1,0 +1,30 @@
+name: npm-publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download prebuilt artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: asherah-node/npm
+      - name: List downloaded artifacts
+        run: ls -la asherah-node/npm || true
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+      - name: Publish to npm
+        working-directory: asherah-node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish --access public
+

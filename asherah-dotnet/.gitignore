@@ -1,0 +1,11 @@
+# .NET build artifacts
+bin/
+obj/
+TestResults/
+.vs/
+
+# User-specific files
+*.user
+*.rsuser
+*.suo
+*.userprefs

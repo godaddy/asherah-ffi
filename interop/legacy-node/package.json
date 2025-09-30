@@ -1,0 +1,9 @@
+{
+  "name": "legacy-asherah-node",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Compatibility fixture for the published asherah npm package",
+  "dependencies": {
+    "asherah": "3.0.12"
+  }
+}

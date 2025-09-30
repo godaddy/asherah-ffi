@@ -1,0 +1,15 @@
+{
+  "name": "asherah-interop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Interoperability + benchmarks between published asherah (npm) and local asherah-node (napi-rs)",
+  "scripts": {
+    "interop": "node interop.js",
+    "bench": "node bench.js",
+    "setup-local": "(cd ../asherah-node && npm install && npm run build && npm run prepublishOnly) && npm install ../asherah-node"
+  },
+  "dependencies": {
+    "asherah": "^3.0.12",
+    "asherah-node": "file:../asherah-node"
+  }
+}

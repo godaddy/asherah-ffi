@@ -1,0 +1,26 @@
+[package]
+name = "asherah-java"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "JNI bindings for the Asherah Rust library"
+homepage = "https://github.com/awnumar/memcall"
+repository = "https://github.com/awnumar/memcall"
+documentation = "https://docs.rs/asherah-java"
+readme = "README.md"
+keywords = ["asherah", "java", "jni", "encryption"]
+categories = ["cryptography", "api-bindings", "ffi"]
+
+[lib]
+name = "asherah_java"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+jni = { version = "0.21", default-features = false, features = ["invocation"] }
+asherah = { path = "../asherah", features = ["sqlite"] }
+asherah-config = { path = "../asherah-config" }
+anyhow = "1.0"
+serde_json = "1.0"
+
+[dev-dependencies]
+serial_test = "3.1"

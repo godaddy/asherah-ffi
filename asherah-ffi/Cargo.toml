@@ -1,0 +1,21 @@
+[package]
+name = "asherah-ffi"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "C ABI for Asherah Rust library"
+homepage = "https://github.com/awnumar/memcall"
+repository = "https://github.com/awnumar/memcall"
+documentation = "https://docs.rs/asherah-ffi"
+readme = "README.md"
+keywords = ["asherah", "ffi", "encryption", "kms"]
+categories = ["cryptography", "memory-management", "ffi"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+asherah = { path = "../asherah", features = ["sqlite"] }
+asherah-config = { path = "../asherah-config" }
+serde_json = "1.0"
+anyhow = "1.0"
