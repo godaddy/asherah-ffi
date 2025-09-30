@@ -3,12 +3,12 @@
 use std::collections::HashMap;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Instant;
 
 use napi::bindgen_prelude::*;
 // Log hook temporarily disabled for performance testing; add debug timers
 use napi_derive::napi;
 use once_cell::sync::Lazy;
-use std::time::Instant;
 
 type Factory = asherah::session::PublicFactory<
     asherah::aead::AES256GCM,
