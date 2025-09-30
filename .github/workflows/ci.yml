@@ -47,6 +47,8 @@ jobs:
         uses: dtolnay/rust-toolchain@nightly
         with:
           components: miri
+      - name: Prepare nightly toolchain target
+        run: rustup +nightly target add x86_64-unknown-linux-gnu
       - name: Run miri on FFI crate
         run: |
           cargo +nightly miri setup
@@ -56,7 +58,7 @@ jobs:
           RUSTFLAGS: -Zsanitizer=address
           RUSTDOCFLAGS: -Zsanitizer=address
           ASAN_OPTIONS: detect_leaks=1
-        run: cargo +nightly test -Zsanitizer=address -p asherah-ffi
+        run: cargo +nightly -Zbuild-std test -p asherah-ffi --target x86_64-unknown-linux-gnu -- --test-threads=1
       - name: Run valgrind on FFI tests
         run: |
           valgrind --error-exitcode=1 cargo test -p asherah-ffi --lib
