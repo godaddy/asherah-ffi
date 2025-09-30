@@ -33,7 +33,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
 # Python tooling
 RUN pip3 install --no-cache-dir maturin==1.9.4 pytest==8.4.1
 
-RUN rustup component add rustfmt
+RUN rustup component add rustfmt clippy
 
 ENV DOTNET_CLI_TELEMETRY_OPTOUT=1
 

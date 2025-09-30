@@ -33,6 +33,9 @@ fi
 echo "[tests] cargo fmt --check"
 cargo fmt --all -- --check
 
+echo "[tests] cargo clippy"
+cargo clippy --all-targets --all-features -- -D warnings
+
 echo "[tests] cargo test"
 cargo test --workspace --exclude asherah-node
 
