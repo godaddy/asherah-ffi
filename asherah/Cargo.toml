@@ -79,3 +79,6 @@ which = "6"
 name = "cucumber"
 harness = false
 required-features = ["cucumber_xlang"]
+
+[lints]
+workspace = true

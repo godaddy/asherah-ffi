@@ -30,3 +30,6 @@ napi-build = "2"
 [package.metadata.napi]
 name = "asherah_node"
 napi-version = 4
+
+[lints]
+workspace = true

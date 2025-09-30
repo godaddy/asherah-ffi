@@ -19,3 +19,6 @@ asherah = { path = "../asherah", features = ["sqlite"] }
 asherah-config = { path = "../asherah-config" }
 serde_json = "1.0"
 anyhow = "1.0"
+
+[lints]
+workspace = true

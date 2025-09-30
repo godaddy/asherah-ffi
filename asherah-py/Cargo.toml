@@ -13,6 +13,9 @@ categories = ["cryptography", "api-bindings", "ffi"]
 
 [lib]
 name = "asherah_py"
+
+[lints]
+workspace = true
 crate-type = ["cdylib"]
 
 [dependencies]

@@ -1,14 +1,3 @@
-[workspace]
-members = [
-  "asherah",
-  "asherah-ffi",
-  "asherah-node",
-  "asherah-py",
-  "asherah-java",
-  "asherah-config",
-]
-resolver = "2"
-
 [lints]
 workspace = true
 
