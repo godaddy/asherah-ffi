@@ -9,8 +9,8 @@ use std::time::Instant;
 
 use napi::bindgen_prelude::*;
 use napi::bindgen_prelude::{FunctionRef, JsValuesTupleIntoVec, Object};
-use napi::{Env, Status};
 use napi::sys;
+use napi::{Env, Status};
 // Log hook temporarily disabled for performance testing; add debug timers
 use napi::threadsafe_function::{
     ThreadsafeCallContext, ThreadsafeFunction, ThreadsafeFunctionCallMode,
@@ -395,15 +395,8 @@ struct MetricsEvent {
     name: Option<String>,
 }
 
-type MetricsCallback = ThreadsafeFunction<
-    MetricsEvent,
-    Unknown<'static>,
-    JsArgList,
-    Status,
-    true,
-    false,
-    0,
->;
+type MetricsCallback =
+    ThreadsafeFunction<MetricsEvent, Unknown<'static>, JsArgList, Status, true, false, 0>;
 
 struct JsMetricsSink {
     tsfn: Arc<MetricsCallback>,
@@ -507,15 +500,8 @@ struct LogEvent {
     target: String,
 }
 
-type LogCallback = ThreadsafeFunction<
-    LogEvent,
-    Unknown<'static>,
-    JsArgList,
-    Status,
-    true,
-    false,
-    0,
->;
+type LogCallback =
+    ThreadsafeFunction<LogEvent, Unknown<'static>, JsArgList, Status, true, false, 0>;
 
 struct JsLogSink {
     tsfn: Arc<LogCallback>,

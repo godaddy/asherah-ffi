@@ -12,8 +12,14 @@ struct TestMetricsSink {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum MetricsEventRecord {
-    Timed { kind: &'static str, duration: Duration },
-    Named { kind: &'static str, name: String },
+    Timed {
+        kind: &'static str,
+        duration: Duration,
+    },
+    Named {
+        kind: &'static str,
+        name: String,
+    },
 }
 
 impl TestMetricsSink {
@@ -86,16 +92,22 @@ fn metrics_sink_receives_events() {
         .lock()
         .expect("metrics sink lock should succeed")
         .clone();
-    assert!(events.iter().any(|event| matches!(
-        event,
-        MetricsEventRecord::Timed { kind, duration }
-            if *kind == "encrypt" && duration.as_nanos() > 0
-    )), "expected encrypt timing event, got {events:?}");
-    assert!(events.iter().any(|event| matches!(
-        event,
-        MetricsEventRecord::Named { kind, name }
-            if *kind == "cache_hit" && name == "factory"
-    )), "expected cache_hit event, got {events:?}");
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            MetricsEventRecord::Timed { kind, duration }
+                if *kind == "encrypt" && duration.as_nanos() > 0
+        )),
+        "expected encrypt timing event, got {events:?}"
+    );
+    assert!(
+        events.iter().any(|event| matches!(
+            event,
+            MetricsEventRecord::Named { kind, name }
+                if *kind == "cache_hit" && name == "factory"
+        )),
+        "expected cache_hit event, got {events:?}"
+    );
 }
 
 #[derive(Default)]
@@ -130,9 +142,12 @@ fn log_sink_receives_events() {
         .lock()
         .expect("log sink lock should succeed")
         .clone();
-    assert!(events.iter().any(|(level, message, target)| {
-        *level == log::Level::Info
-            && message == "hook triggered"
-            && target == "observability::test"
-    }), "expected info log event, got {events:?}");
+    assert!(
+        events.iter().any(|(level, message, target)| {
+            *level == log::Level::Info
+                && message == "hook triggered"
+                && target == "observability::test"
+        }),
+        "expected info log event, got {events:?}"
+    );
 }
