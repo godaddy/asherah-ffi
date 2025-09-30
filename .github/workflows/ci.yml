@@ -15,6 +15,10 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - name: Ensure pinned toolchain components
+        run: |
+          TOOLCHAIN=$(rustup show active-toolchain | cut -d' ' -f1)
+          rustup component add --toolchain "$TOOLCHAIN" rustfmt clippy
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Clippy
