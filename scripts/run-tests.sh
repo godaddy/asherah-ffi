@@ -31,9 +31,11 @@ if command -v ld.lld >/dev/null 2>&1; then
 fi
 
 echo "[tests] cargo fmt --check"
+rustup component add rustfmt >/dev/null
 cargo fmt --all -- --check
 
 echo "[tests] cargo clippy"
+rustup component add clippy >/dev/null
 cargo clippy --all-targets --all-features -- -D warnings
 
 echo "[tests] cargo test"
