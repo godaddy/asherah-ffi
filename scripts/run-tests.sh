@@ -80,6 +80,13 @@ python3 -m pytest asherah-py/tests -vv
 echo "[tests] node addon"
 (cd asherah-node && rm -rf target && npm install && npm run build && npm test)
 
+if command -v bun >/dev/null 2>&1; then
+  echo "[tests] node addon (bun)"
+  (cd asherah-node && bun run build && bun run test)
+else
+  echo "[tests] bun not found, skipping bun test"
+fi
+
 echo "[tests] ruby bindings"
 ruby -Iasherah-ruby/lib -Iasherah-ruby/test asherah-ruby/test/round_trip_test.rb
 

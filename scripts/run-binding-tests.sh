@@ -53,6 +53,11 @@ fi
 pushd "$ROOT_DIR/asherah-node" >/dev/null
 npm ci
 npm test
+if command -v bun >/dev/null 2>&1; then
+  bun run test
+else
+  echo "[binding-tests] bun not found, skipping bun test"
+fi
 popd >/dev/null
 
 echo "[binding-tests] Python"

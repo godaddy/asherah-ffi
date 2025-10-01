@@ -30,6 +30,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
 
+ENV BUN_INSTALL=/root/.bun
+RUN curl -fsSL https://bun.sh/install | bash \
+    && ln -s /root/.bun/bin/bun /usr/local/bin/bun
+
 # Python tooling
 RUN pip3 install --no-cache-dir maturin==1.9.4 pytest==8.4.1
 

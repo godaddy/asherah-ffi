@@ -10,7 +10,8 @@ mkdir -p \
   "$CACHE_DIR/pip" \
   "$CACHE_DIR/npm" \
   "$CACHE_DIR/maven" \
-  "$CACHE_DIR/dotnet"
+  "$CACHE_DIR/dotnet" \
+  "$CACHE_DIR/bun"
 
 COMMON_MOUNTS=(
   -v "$ROOT_DIR:/workspace"
@@ -20,6 +21,7 @@ COMMON_MOUNTS=(
   -v "$CACHE_DIR/npm:/root/.npm"
   -v "$CACHE_DIR/maven:/root/.m2"
   -v "$CACHE_DIR/dotnet:/root/.nuget/packages"
+  -v "$CACHE_DIR/bun:/root/.bun"
 )
 
 RUN_SCRIPT="/workspace/scripts/run-tests.sh"
