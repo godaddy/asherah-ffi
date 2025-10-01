@@ -57,9 +57,13 @@ jobs:
       - name: Run full language test matrix
         run: ./scripts/test-in-docker.sh
 
-  package-x86_64-ffi:
+  package-x86_64:
     runs-on: ubuntu-latest
     needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [ffi, node, python, dotnet, java]
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -79,644 +83,33 @@ jobs:
             .cache/maven
             .cache/dotnet
             .cache/bun
-          key: build-${{ runner.os }}-x86_64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
+          key: build-${{ runner.os }}-x86_64-${{ matrix.component }}-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
           restore-keys: |
-            build-${{ runner.os }}-x86_64-
-      - name: Package FFI artifacts
-        run: ./scripts/build-bindings.sh
-        env:
-          TARGET_ARCH: x86_64
-          BINDING_COMPONENTS: ffi
-      - name: Upload partial artifact (ffi)
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-linux-x86_64-part-ffi
-          path: artifacts/x86_64/**
-
-  package-x86_64-node:
-    runs-on: ubuntu-latest
-    needs: lint
-    env:
-      CARGO_HOME: ${{ github.workspace }}/.cache/cargo
-      RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
-      NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
-      BUN_INSTALL: ${{ github.workspace }}/.cache/bun
-      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
-    steps:
-      - uses: actions/checkout@v4
-      - name: Restore workspace caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            .cache/cargo
-            .cache/rustup
-            .cache/pip
-            .cache/npm
-            .cache/maven
-            .cache/dotnet
-            .cache/bun
-          key: build-${{ runner.os }}-x86_64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
-          restore-keys: |
+            build-${{ runner.os }}-x86_64-${{ matrix.component }}-
             build-${{ runner.os }}-x86_64-
       - uses: actions/setup-node@v4
+        if: matrix.component == 'node'
         with:
           node-version: 20
-      - name: Package Node addon
-        run: ./scripts/build-bindings.sh
-        env:
-          TARGET_ARCH: x86_64
-          BINDING_COMPONENTS: node
-      - name: Upload partial artifact (node)
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-linux-x86_64-part-node
-          path: artifacts/x86_64/**
-
-  package-x86_64-python:
-    runs-on: ubuntu-latest
-    needs: lint
-    env:
-      CARGO_HOME: ${{ github.workspace }}/.cache/cargo
-      RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
-      NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
-      BUN_INSTALL: ${{ github.workspace }}/.cache/bun
-      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
-    steps:
-      - uses: actions/checkout@v4
-      - name: Restore workspace caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            .cache/cargo
-            .cache/rustup
-            .cache/pip
-            .cache/npm
-            .cache/maven
-            .cache/dotnet
-            .cache/bun
-          key: build-${{ runner.os }}-x86_64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
-          restore-keys: |
-            build-${{ runner.os }}-x86_64-
-      - name: Package Python wheel
-        run: ./scripts/build-bindings.sh
-        env:
-          TARGET_ARCH: x86_64
-          BINDING_COMPONENTS: python
-      - name: Upload partial artifact (python)
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-linux-x86_64-part-python
-          path: artifacts/x86_64/**
-
-  package-x86_64-dotnet:
-    runs-on: ubuntu-latest
-    needs: lint
-    env:
-      CARGO_HOME: ${{ github.workspace }}/.cache/cargo
-      RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
-      NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
-      BUN_INSTALL: ${{ github.workspace }}/.cache/bun
-      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
-    steps:
-      - uses: actions/checkout@v4
-      - name: Restore workspace caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            .cache/cargo
-            .cache/rustup
-            .cache/pip
-            .cache/npm
-            .cache/maven
-            .cache/dotnet
-            .cache/bun
-          key: build-${{ runner.os }}-x86_64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
-          restore-keys: |
-            build-${{ runner.os }}-x86_64-
       - uses: actions/setup-dotnet@v4
+        if: matrix.component == 'dotnet'
         with:
           dotnet-version: '8.0.x'
-      - name: Package .NET artifacts
-        run: ./scripts/build-bindings.sh
+      - name: Package ${{ matrix.component }} (x86_64)
         env:
           TARGET_ARCH: x86_64
-          BINDING_COMPONENTS: dotnet
-      - name: Upload partial artifact (dotnet)
+          BINDING_COMPONENTS: ${{ matrix.component }}
+        run: ./scripts/build-bindings.sh
+      - name: Upload partial artifact (${{ matrix.component }})
         uses: actions/upload-artifact@v4
         with:
-          name: bindings-linux-x86_64-part-dotnet
+          name: bindings-linux-x86_64-part-${{ matrix.component }}
           path: artifacts/x86_64/**
-
-  package-x86_64-java:
-    runs-on: ubuntu-latest
-    needs: lint
-    env:
-      CARGO_HOME: ${{ github.workspace }}/.cache/cargo
-      RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
-      NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
-      BUN_INSTALL: ${{ github.workspace }}/.cache/bun
-      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
-    steps:
-      - uses: actions/checkout@v4
-      - name: Restore workspace caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            .cache/cargo
-            .cache/rustup
-            .cache/pip
-            .cache/npm
-            .cache/maven
-            .cache/dotnet
-            .cache/bun
-          key: build-${{ runner.os }}-x86_64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
-          restore-keys: |
-            build-${{ runner.os }}-x86_64-
-      - name: Package Java artifacts
-        run: ./scripts/build-bindings.sh
-        env:
-          TARGET_ARCH: x86_64
-          BINDING_COMPONENTS: java
-      - name: Upload partial artifact (java)
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-linux-x86_64-part-java
-          path: artifacts/x86_64/**
-
-  verify-x86_64-go:
-    runs-on: ubuntu-latest
-    needs: lint
-    env:
-      CARGO_HOME: ${{ github.workspace }}/.cache/cargo
-      RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
-      NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
-      BUN_INSTALL: ${{ github.workspace }}/.cache/bun
-      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
-    steps:
-      - uses: actions/checkout@v4
-      - name: Restore workspace caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            .cache/cargo
-            .cache/rustup
-            .cache/pip
-            .cache/npm
-            .cache/maven
-            .cache/dotnet
-            .cache/bun
-          key: build-${{ runner.os }}-x86_64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
-          restore-keys: |
-            build-${{ runner.os }}-x86_64-
-      - name: Verify Go module build
-        run: ./scripts/build-bindings.sh
-        env:
-          TARGET_ARCH: x86_64
-          BINDING_COMPONENTS: go
-
-  assemble-x86_64:
-    runs-on: ubuntu-latest
-    needs:
-      - package-x86_64-ffi
-      - package-x86_64-node
-      - package-x86_64-python
-      - package-x86_64-dotnet
-      - package-x86_64-java
-      - verify-x86_64-go
-    steps:
-      - name: Prepare artifact directory
-        run: |
-          rm -rf artifacts/x86_64
-          mkdir -p artifacts/x86_64 partial/x86_64
-      - uses: actions/download-artifact@v4
-        with:
-          name: bindings-linux-x86_64-part-ffi
-          path: partial/x86_64/ffi
-      - uses: actions/download-artifact@v4
-        with:
-          name: bindings-linux-x86_64-part-node
-          path: partial/x86_64/node
-      - uses: actions/download-artifact@v4
-        with:
-          name: bindings-linux-x86_64-part-python
-          path: partial/x86_64/python
-      - uses: actions/download-artifact@v4
-        with:
-          name: bindings-linux-x86_64-part-dotnet
-          path: partial/x86_64/dotnet
-      - uses: actions/download-artifact@v4
-        with:
-          name: bindings-linux-x86_64-part-java
-          path: partial/x86_64/java
-      - name: Merge partial artifacts
-        run: |
-          shopt -s nullglob
-          for part in partial/x86_64/*/artifacts/x86_64/*; do
-            cp -R "$part" artifacts/x86_64/
-          done
-          shopt -u nullglob
-      - name: Upload consolidated x86_64 artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-linux-x86_64
-          path: artifacts/x86_64/**
-
-  prepare-arm64-env:
-    runs-on: ubuntu-latest
-    needs: lint
-    env:
-      CARGO_HOME: ${{ github.workspace }}/.cache/cargo
-      RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
-      NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
-      BUN_INSTALL: ${{ github.workspace }}/.cache/bun
-      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
-      TARGET_ARCH: aarch64
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_AR: aarch64-linux-gnu-ar
-      CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-      CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-      AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
-      PKG_CONFIG_ALLOW_CROSS: 1
-    steps:
-      - uses: actions/checkout@v4
-      - name: Restore workspace caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            .cache/cargo
-            .cache/rustup
-            .cache/pip
-            .cache/npm
-            .cache/maven
-            .cache/dotnet
-            .cache/bun
-          key: build-${{ runner.os }}-arm64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
-          restore-keys: |
-            build-${{ runner.os }}-arm64-
-      - name: Install cross toolchains
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config
-      - name: Prepare Rust target
-        run: rustup target add aarch64-unknown-linux-gnu
-      - name: Upload toolchain marker
-        run: |
-          mkdir -p artifacts/setup
-          touch artifacts/setup/arm64-toolchain-ready
-      - name: Persist setup marker
-        uses: actions/upload-artifact@v4
-        with:
-          name: arm64-toolchain-ready
-          path: artifacts/setup/arm64-toolchain-ready
-
-  package-arm64-ffi:
-    runs-on: ubuntu-latest
-    needs:
-      - lint
-      - prepare-arm64-env
-    env:
-      CARGO_HOME: ${{ github.workspace }}/.cache/cargo
-      RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
-      NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
-      BUN_INSTALL: ${{ github.workspace }}/.cache/bun
-      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
-      TARGET_ARCH: aarch64
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_AR: aarch64-linux-gnu-ar
-      CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-      CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-      AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
-      PKG_CONFIG_ALLOW_CROSS: 1
-    steps:
-      - uses: actions/checkout@v4
-      - name: Restore workspace caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            .cache/cargo
-            .cache/rustup
-            .cache/pip
-            .cache/npm
-            .cache/maven
-            .cache/dotnet
-            .cache/bun
-          key: build-${{ runner.os }}-arm64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
-          restore-keys: |
-            build-${{ runner.os }}-arm64-
-      - uses: actions/download-artifact@v4
-        with:
-          name: arm64-toolchain-ready
-          path: artifacts/setup
-      - name: Package FFI artifacts (arm64)
-        run: ./scripts/build-bindings.sh
-        env:
-          TARGET_ARCH: aarch64
-          BINDING_COMPONENTS: ffi
-      - name: Upload partial artifact (ffi arm64)
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-linux-aarch64-part-ffi
-          path: artifacts/aarch64/**
-
-  package-arm64-node:
-    runs-on: ubuntu-latest
-    needs:
-      - lint
-      - prepare-arm64-env
-    env:
-      CARGO_HOME: ${{ github.workspace }}/.cache/cargo
-      RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
-      NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
-      BUN_INSTALL: ${{ github.workspace }}/.cache/bun
-      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
-      TARGET_ARCH: aarch64
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_AR: aarch64-linux-gnu-ar
-      CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-      CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-      AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
-      PKG_CONFIG_ALLOW_CROSS: 1
-    steps:
-      - uses: actions/checkout@v4
-      - name: Restore workspace caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            .cache/cargo
-            .cache/rustup
-            .cache/pip
-            .cache/npm
-            .cache/maven
-            .cache/dotnet
-            .cache/bun
-          key: build-${{ runner.os }}-arm64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
-          restore-keys: |
-            build-${{ runner.os }}-arm64-
-      - uses: actions/download-artifact@v4
-        with:
-          name: arm64-toolchain-ready
-          path: artifacts/setup
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - name: Package Node addon (arm64)
-        run: ./scripts/build-bindings.sh
-        env:
-          TARGET_ARCH: aarch64
-          BINDING_COMPONENTS: node
-      - name: Upload partial artifact (node arm64)
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-linux-aarch64-part-node
-          path: artifacts/aarch64/**
-
-  package-arm64-python:
-    runs-on: ubuntu-latest
-    needs:
-      - lint
-      - prepare-arm64-env
-    env:
-      CARGO_HOME: ${{ github.workspace }}/.cache/cargo
-      RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
-      NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
-      BUN_INSTALL: ${{ github.workspace }}/.cache/bun
-      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
-      TARGET_ARCH: aarch64
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_AR: aarch64-linux-gnu-ar
-      CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-      CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-      AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
-      PKG_CONFIG_ALLOW_CROSS: 1
-    steps:
-      - uses: actions/checkout@v4
-      - name: Restore workspace caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            .cache/cargo
-            .cache/rustup
-            .cache/pip
-            .cache/npm
-            .cache/maven
-            .cache/dotnet
-            .cache/bun
-          key: build-${{ runner.os }}-arm64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
-          restore-keys: |
-            build-${{ runner.os }}-arm64-
-      - uses: actions/download-artifact@v4
-        with:
-          name: arm64-toolchain-ready
-          path: artifacts/setup
-      - name: Package Python wheel (arm64)
-        run: ./scripts/build-bindings.sh
-        env:
-          TARGET_ARCH: aarch64
-          BINDING_COMPONENTS: python
-      - name: Upload partial artifact (python arm64)
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-linux-aarch64-part-python
-          path: artifacts/aarch64/**
-
-  package-arm64-dotnet:
-    runs-on: ubuntu-latest
-    needs:
-      - lint
-      - prepare-arm64-env
-    env:
-      CARGO_HOME: ${{ github.workspace }}/.cache/cargo
-      RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
-      NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
-      BUN_INSTALL: ${{ github.workspace }}/.cache/bun
-      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
-      TARGET_ARCH: aarch64
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_AR: aarch64-linux-gnu-ar
-      CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-      CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-      AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
-      PKG_CONFIG_ALLOW_CROSS: 1
-    steps:
-      - uses: actions/checkout@v4
-      - name: Restore workspace caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            .cache/cargo
-            .cache/rustup
-            .cache/pip
-            .cache/npm
-            .cache/maven
-            .cache/dotnet
-            .cache/bun
-          key: build-${{ runner.os }}-arm64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
-          restore-keys: |
-            build-${{ runner.os }}-arm64-
-      - uses: actions/download-artifact@v4
-        with:
-          name: arm64-toolchain-ready
-          path: artifacts/setup
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-      - name: Package .NET artifacts (arm64)
-        run: ./scripts/build-bindings.sh
-        env:
-          TARGET_ARCH: aarch64
-          BINDING_COMPONENTS: dotnet
-      - name: Upload partial artifact (dotnet arm64)
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-linux-aarch64-part-dotnet
-          path: artifacts/aarch64/**
-
-  package-arm64-java:
-    runs-on: ubuntu-latest
-    needs:
-      - lint
-      - prepare-arm64-env
-    env:
-      CARGO_HOME: ${{ github.workspace }}/.cache/cargo
-      RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
-      NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
-      BUN_INSTALL: ${{ github.workspace }}/.cache/bun
-      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
-      TARGET_ARCH: aarch64
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_AR: aarch64-linux-gnu-ar
-      CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-      CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-      AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
-      PKG_CONFIG_ALLOW_CROSS: 1
-    steps:
-      - uses: actions/checkout@v4
-      - name: Restore workspace caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            .cache/cargo
-            .cache/rustup
-            .cache/pip
-            .cache/npm
-            .cache/maven
-            .cache/dotnet
-            .cache/bun
-          key: build-${{ runner.os }}-arm64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
-          restore-keys: |
-            build-${{ runner.os }}-arm64-
-      - uses: actions/download-artifact@v4
-        with:
-          name: arm64-toolchain-ready
-          path: artifacts/setup
-      - name: Package Java artifacts (arm64)
-        run: ./scripts/build-bindings.sh
-        env:
-          TARGET_ARCH: aarch64
-          BINDING_COMPONENTS: java
-      - name: Upload partial artifact (java arm64)
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-linux-aarch64-part-java
-          path: artifacts/aarch64/**
-
-  verify-arm64-go:
-    runs-on: ubuntu-latest
-    needs:
-      - lint
-      - prepare-arm64-env
-    env:
-      CARGO_HOME: ${{ github.workspace }}/.cache/cargo
-      RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
-      NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
-      BUN_INSTALL: ${{ github.workspace }}/.cache/bun
-      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
-      TARGET_ARCH: aarch64
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_AR: aarch64-linux-gnu-ar
-      CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-      CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-      AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
-      PKG_CONFIG_ALLOW_CROSS: 1
-    steps:
-      - uses: actions/checkout@v4
-      - name: Restore workspace caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            .cache/cargo
-            .cache/rustup
-            .cache/pip
-            .cache/npm
-            .cache/maven
-            .cache/dotnet
-            .cache/bun
-          key: build-${{ runner.os }}-arm64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
-          restore-keys: |
-            build-${{ runner.os }}-arm64-
-      - uses: actions/download-artifact@v4
-        with:
-          name: arm64-toolchain-ready
-          path: artifacts/setup
-      - name: Verify Go module build (arm64)
-        run: ./scripts/build-bindings.sh
-        env:
-          TARGET_ARCH: aarch64
-          BINDING_COMPONENTS: go
-
-  assemble-arm64:
-    runs-on: ubuntu-latest
-    needs:
-      - package-arm64-ffi
-      - package-arm64-node
-      - package-arm64-python
-      - package-arm64-dotnet
-      - package-arm64-java
-      - verify-arm64-go
-    steps:
-      - name: Prepare artifact directory
-        run: |
-          rm -rf artifacts/aarch64
-          mkdir -p artifacts/aarch64 partial/aarch64
-      - uses: actions/download-artifact@v4
-        with:
-          name: bindings-linux-aarch64-part-ffi
-          path: partial/aarch64/ffi
-      - uses: actions/download-artifact@v4
-        with:
-          name: bindings-linux-aarch64-part-node
-          path: partial/aarch64/node
-      - uses: actions/download-artifact@v4
-        with:
-          name: bindings-linux-aarch64-part-python
-          path: partial/aarch64/python
-      - uses: actions/download-artifact@v4
-        with:
-          name: bindings-linux-aarch64-part-dotnet
-          path: partial/aarch64/dotnet
-      - uses: actions/download-artifact@v4
-        with:
-          name: bindings-linux-aarch64-part-java
-          path: partial/aarch64/java
-      - name: Merge partial artifacts
-        run: |
-          shopt -s nullglob
-          for part in partial/aarch64/*/artifacts/aarch64/*; do
-            cp -R "$part" artifacts/aarch64/
-          done
-          shopt -u nullglob
-      - name: Upload consolidated arm64 artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-linux-aarch64
-          path: artifacts/aarch64/**
 
   tests-arm64:
     runs-on: ubuntu-latest
     needs:
-      - package-arm64-ffi
-      - package-arm64-node
-      - package-arm64-python
+      - assemble-arm64
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
@@ -729,33 +122,14 @@ jobs:
             .cache/npm
             .cache/maven
             .cache/dotnet
-            .cache/bun
           key: tests-${{ runner.os }}-arm64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
           restore-keys: |
             tests-${{ runner.os }}-arm64-
-      - name: Prepare partial artifacts
-        run: |
-          rm -rf artifacts/aarch64 partial/aarch64
-          mkdir -p artifacts/aarch64 partial/aarch64
-      - uses: actions/download-artifact@v4
+      - name: Download arm64 binding artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: bindings-linux-aarch64-part-ffi
-          path: partial/aarch64/ffi
-      - uses: actions/download-artifact@v4
-        with:
-          name: bindings-linux-aarch64-part-node
-          path: partial/aarch64/node
-      - uses: actions/download-artifact@v4
-        with:
-          name: bindings-linux-aarch64-part-python
-          path: partial/aarch64/python
-      - name: Merge partial artifacts
-        run: |
-          shopt -s nullglob
-          for part in partial/aarch64/*/artifacts/aarch64/*; do
-            cp -R "$part" artifacts/aarch64/
-          done
-          shopt -u nullglob
+          name: bindings-linux-aarch64
+          path: artifacts/aarch64
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
         with:
@@ -810,12 +184,101 @@ jobs:
         run: |
           valgrind --error-exitcode=1 cargo test -p asherah-ffi --lib
 
-  build-arm64:
+  assemble-x86_64:
+    runs-on: ubuntu-latest
+    needs: package-x86_64
+    steps:
+      - name: Prepare artifact staging
+        run: |
+          rm -rf partial/x86_64 artifacts/x86_64
+          mkdir -p partial/x86_64 artifacts/x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: bindings-linux-x86_64-part-ffi
+          path: partial/x86_64/ffi
+      - uses: actions/download-artifact@v4
+        with:
+          name: bindings-linux-x86_64-part-node
+          path: partial/x86_64/node
+      - uses: actions/download-artifact@v4
+        with:
+          name: bindings-linux-x86_64-part-python
+          path: partial/x86_64/python
+      - uses: actions/download-artifact@v4
+        with:
+          name: bindings-linux-x86_64-part-dotnet
+          path: partial/x86_64/dotnet
+      - uses: actions/download-artifact@v4
+        with:
+          name: bindings-linux-x86_64-part-java
+          path: partial/x86_64/java
+      - name: Merge partial artifacts
+        run: |
+          shopt -s nullglob
+          for part in partial/x86_64/*/artifacts/x86_64/*; do
+            cp -R "$part" artifacts/x86_64/
+          done
+          shopt -u nullglob
+      - name: Upload consolidated x86_64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-linux-x86_64
+          path: artifacts/x86_64/**
+
+  assemble-arm64:
+    runs-on: ubuntu-latest
+    needs: package-arm64
+    steps:
+      - name: Prepare artifact staging
+        run: |
+          rm -rf partial/aarch64 artifacts/aarch64
+          mkdir -p partial/aarch64 artifacts/aarch64
+      - uses: actions/download-artifact@v4
+        with:
+          name: bindings-linux-aarch64-part-ffi
+          path: partial/aarch64/ffi
+      - uses: actions/download-artifact@v4
+        with:
+          name: bindings-linux-aarch64-part-node
+          path: partial/aarch64/node
+      - uses: actions/download-artifact@v4
+        with:
+          name: bindings-linux-aarch64-part-python
+          path: partial/aarch64/python
+      - uses: actions/download-artifact@v4
+        with:
+          name: bindings-linux-aarch64-part-dotnet
+          path: partial/aarch64/dotnet
+      - uses: actions/download-artifact@v4
+        with:
+          name: bindings-linux-aarch64-part-java
+          path: partial/aarch64/java
+      - name: Merge partial artifacts
+        run: |
+          shopt -s nullglob
+          for part in partial/aarch64/*/artifacts/aarch64/*; do
+            cp -R "$part" artifacts/aarch64/
+          done
+          shopt -u nullglob
+      - name: Upload consolidated arm64 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-linux-aarch64
+          path: artifacts/aarch64/**
+
+  package-arm64:
     runs-on: ubuntu-latest
     needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        component: [ffi, node, python, dotnet, java]
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
+      NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
+      BUN_INSTALL: ${{ github.workspace }}/.cache/bun
+      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
@@ -828,25 +291,29 @@ jobs:
             .cache/npm
             .cache/maven
             .cache/dotnet
-          key: build-${{ runner.os }}-arm64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
+            .cache/bun
+          key: build-${{ runner.os }}-arm64-${{ matrix.component }}-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
           restore-keys: |
+            build-${{ runner.os }}-arm64-${{ matrix.component }}-
             build-${{ runner.os }}-arm64-
       - name: Install cross toolchains
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config
-      - name: Prepare Rust targets
-        run: |
-          rustup target add aarch64-unknown-linux-gnu
+      - name: Prepare Rust target
+        run: rustup target add aarch64-unknown-linux-gnu
       - uses: actions/setup-node@v4
+        if: matrix.component == 'node'
         with:
           node-version: 20
       - uses: actions/setup-dotnet@v4
+        if: matrix.component == 'dotnet'
         with:
           dotnet-version: '8.0.x'
-      - name: Build bindings (arm64)
+      - name: Package ${{ matrix.component }} (arm64)
         env:
           TARGET_ARCH: aarch64
+          BINDING_COMPONENTS: ${{ matrix.component }}
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_AR: aarch64-linux-gnu-ar
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -854,8 +321,8 @@ jobs:
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
           PKG_CONFIG_ALLOW_CROSS: 1
         run: ./scripts/build-bindings.sh
-      - name: Upload arm64 binding artifacts
+      - name: Upload partial artifact (${{ matrix.component }} arm64)
         uses: actions/upload-artifact@v4
         with:
-          name: bindings-linux-aarch64
+          name: bindings-linux-aarch64-part-${{ matrix.component }}
           path: artifacts/aarch64/**
