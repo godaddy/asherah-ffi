@@ -69,9 +69,33 @@ TARGET_DIR="$ROOT_DIR/target/$CARGO_TRIPLE"
 
 echo "[build-bindings] Preparing directories for $ARCH (components: ${COMPONENTS_SPEC})"
 mkdir -p "$TARGET_DIR"
-if [ -n "$OUT_DIR" ]; then
+if [ "$COMPONENTS_SPEC" = "all" ] || [ "$COMPONENTS_SPEC" = "*" ]; then
   rm -rf "$OUT_DIR"
   mkdir -p "$OUT_DIR"
+else
+  mkdir -p "$OUT_DIR"
+  for comp in "${COMPONENT_LIST[@]}"; do
+    case "$comp" in
+      ffi)
+        rm -rf "$OUT_DIR/ffi" "$OUT_DIR/ruby"
+        ;;
+      node)
+        rm -rf "$OUT_DIR/node"
+        ;;
+      python)
+        rm -rf "$OUT_DIR/python"
+        ;;
+      dotnet)
+        rm -rf "$OUT_DIR/dotnet"
+        ;;
+      java)
+        rm -rf "$OUT_DIR/java"
+        ;;
+      go)
+        rm -rf "$OUT_DIR/go"
+        ;;
+    esac
+  done
 fi
 
 export CARGO_TARGET_DIR="$TARGET_DIR"
