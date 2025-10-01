@@ -104,7 +104,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-x86_64-part-${{ matrix.component }}
-          path: artifacts/x86_64/**
+          path: artifacts/x86_64
 
   tests-arm64:
     runs-on: ubuntu-latest
@@ -325,4 +325,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-aarch64-part-${{ matrix.component }}
-          path: artifacts/aarch64/**
+          path: artifacts/aarch64
