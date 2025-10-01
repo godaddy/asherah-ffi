@@ -47,6 +47,12 @@ fi
 
 echo "[build-bindings] Building core FFI library (release)"
 cargo build --release -p asherah-ffi --target "$CARGO_TRIPLE"
+mkdir -p "$ROOT_DIR/target/release"
+shopt -s nullglob
+for lib in "$CARGO_TARGET_DIR"/release/libasherah_ffi.*; do
+  cp "$lib" "$ROOT_DIR/target/release/"
+done
+shopt -u nullglob
 
 echo "[build-bindings] Building Node.js addon"
 pushd "$ROOT_DIR/asherah-node" >/dev/null
@@ -83,6 +89,7 @@ shopt -u nullglob
 
 echo "[build-bindings] Validating Go module"
 pushd "$ROOT_DIR/asherah-go" >/dev/null
+export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
 GOOS=linux GOARCH="$(go env GOARCH)" go test ./...
 popd >/dev/null
 
