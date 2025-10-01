@@ -45,12 +45,14 @@ if command -v git >/dev/null 2>&1; then
   git config --global --add safe.directory "$ROOT_DIR" 2>/dev/null || true
 fi
 
+RELEASE_DIR="$ROOT_DIR/target/release"
+mkdir -p "$RELEASE_DIR"
+
 echo "[build-bindings] Building core FFI library (release)"
 cargo build --release -p asherah-ffi --target "$CARGO_TRIPLE"
-mkdir -p "$ROOT_DIR/target/release"
 shopt -s nullglob
 for lib in "$CARGO_TARGET_DIR"/release/libasherah_ffi.*; do
-  cp "$lib" "$ROOT_DIR/target/release/"
+  cp "$lib" "$RELEASE_DIR/"
 done
 shopt -u nullglob
 
