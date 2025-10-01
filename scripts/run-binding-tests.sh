@@ -43,6 +43,12 @@ echo "[binding-tests] Node.js"
 if [ -d "$ARTIFACTS_DIR/node/npm" ]; then
   rm -rf "$ROOT_DIR/asherah-node/npm"
   cp -R "$ARTIFACTS_DIR/node/npm" "$ROOT_DIR/asherah-node/npm"
+  if ! [ -f "$ROOT_DIR/asherah-node/npm/asherah.node" ]; then
+    candidate=$(find "$ROOT_DIR/asherah-node/npm" -maxdepth 2 -name '*.node' -print | head -n1 || true)
+    if [ -n "$candidate" ]; then
+      cp "$candidate" "$ROOT_DIR/asherah-node/npm/asherah.node"
+    fi
+  fi
 fi
 pushd "$ROOT_DIR/asherah-node" >/dev/null
 npm ci
