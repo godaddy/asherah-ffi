@@ -67,6 +67,11 @@ fi
 
 TARGET_DIR="$ROOT_DIR/target/$CARGO_TRIPLE"
 
+CARGO_RELEASE_DIR="$TARGET_DIR/release"
+if [ ! -d "$CARGO_RELEASE_DIR" ]; then
+  CARGO_RELEASE_DIR="$TARGET_DIR/$CARGO_TRIPLE/release"
+fi
+
 echo "[build-bindings] Preparing directories for $ARCH (components: ${COMPONENTS_SPEC})"
 mkdir -p "$TARGET_DIR"
 if [ "$COMPONENTS_SPEC" = "all" ] || [ "$COMPONENTS_SPEC" = "*" ]; then
@@ -103,9 +108,9 @@ export SERVICE_NAME="svc"
 export PRODUCT_ID="prod"
 export KMS="static"
 export STATIC_MASTER_KEY_HEX="2222222222222222222222222222222222222222222222222222222222222222"
-export ASHERAH_DOTNET_NATIVE="$CARGO_TARGET_DIR/release"
-export ASHERAH_RUBY_NATIVE="$CARGO_TARGET_DIR/release"
-export ASHERAH_GO_NATIVE="$CARGO_TARGET_DIR/release"
+export ASHERAH_DOTNET_NATIVE="$CARGO_RELEASE_DIR"
+export ASHERAH_RUBY_NATIVE="$CARGO_RELEASE_DIR"
+export ASHERAH_GO_NATIVE="$CARGO_RELEASE_DIR"
 export NAPI_RS_CARGO_TARGET_DIR="$CARGO_TARGET_DIR"
 export NAPI_TYPE_DEF_TMP_FOLDER="$CARGO_TARGET_DIR/napi-types"
 
@@ -121,13 +126,13 @@ mkdir -p "$RELEASE_DIR"
 if requires_core_build; then
   echo "[build-bindings] Building core FFI library (release)"
   cargo build --release -p asherah-ffi --target "$CARGO_TRIPLE"
-  echo "[build-bindings] Built artifacts in $CARGO_TARGET_DIR/release:"
-  find "$CARGO_TARGET_DIR/release" -maxdepth 2 -mindepth 1 -print || true
-  echo "[build-bindings] Searching for asherah_ffi artifacts under $CARGO_TARGET_DIR:"
-  find "$CARGO_TARGET_DIR" -maxdepth 4 -name '*asherah_ffi*' -print || true
-  mapfile -d '' ffi_release_files < <(find "$CARGO_TARGET_DIR/release" \( -type f -o -type l \) -name 'libasherah_ffi.*' -print0)
+  echo "[build-bindings] Built artifacts in $CARGO_RELEASE_DIR:"
+  find "$CARGO_RELEASE_DIR" -maxdepth 2 -mindepth 1 -print || true
+  echo "[build-bindings] Searching for asherah_ffi artifacts under $TARGET_DIR:"
+  find "$TARGET_DIR" -maxdepth 4 -name '*asherah_ffi*' -print || true
+  mapfile -d '' ffi_release_files < <(find "$CARGO_RELEASE_DIR" \( -type f -o -type l \) -name 'libasherah_ffi.*' -print0)
   if [ ${#ffi_release_files[@]} -eq 0 ]; then
-    echo "[build-bindings] Warning: no libasherah_ffi artifacts found in $CARGO_TARGET_DIR/release"
+    echo "[build-bindings] Warning: no libasherah_ffi artifacts found in $CARGO_RELEASE_DIR"
   else
     for lib in "${ffi_release_files[@]}"; do
       echo "[build-bindings] Copying core artifact $(basename "$lib") to $RELEASE_DIR"
@@ -167,7 +172,7 @@ if should_build ffi || should_build ruby || should_build all; then
   echo "[build-bindings] Capturing native FFI artifacts"
   mkdir -p "$OUT_DIR/ffi"
   mkdir -p "$OUT_DIR/ruby"
-  mapfile -d '' ffi_files < <(find "$CARGO_TARGET_DIR/release" \( -type f -o -type l \) -name 'libasherah_ffi.*' -print0)
+  mapfile -d '' ffi_files < <(find "$CARGO_RELEASE_DIR" \( -type f -o -type l \) -name 'libasherah_ffi.*' -print0)
   if [ ${#ffi_files[@]} -eq 0 ]; then
     echo "[build-bindings] Warning: no libasherah_ffi artifacts found for packaging"
   else
