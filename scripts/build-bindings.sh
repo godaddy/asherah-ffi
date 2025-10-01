@@ -158,14 +158,21 @@ if should_build python || should_build all; then
   echo "[build-bindings] Building Python wheel"
   python3 -m pip install --upgrade pip >/dev/null
   python3 -m pip install --upgrade maturin==1.9.4 >/dev/null
-  rm -rf "$ROOT_DIR/target/wheels"
+  rm -rf "$ROOT_DIR/target/wheels" "$ROOT_DIR/target/$CARGO_TRIPLE/wheels"
   maturin build --release --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml" --target "$CARGO_TRIPLE"
   mkdir -p "$OUT_DIR/python"
-  shopt -s nullglob
-  for wheel in "$ROOT_DIR"/target/wheels/*.whl; do
-    cp "$wheel" "$OUT_DIR/python/"
-  done
-  shopt -u nullglob
+  PY_WHEEL_DIR="$ROOT_DIR/target/wheels"
+  if ! compgen -G "$PY_WHEEL_DIR/*.whl" >/dev/null 2>&1; then
+    PY_WHEEL_DIR="$ROOT_DIR/target/$CARGO_TRIPLE/wheels"
+  fi
+  if compgen -G "$PY_WHEEL_DIR/*.whl" >/dev/null 2>&1; then
+    for wheel in "$PY_WHEEL_DIR"/*.whl; do
+      echo "[build-bindings] Packaging $(basename "$wheel")"
+      cp "$wheel" "$OUT_DIR/python/"
+    done
+  else
+    echo "[build-bindings] Warning: no wheels found in $PY_WHEEL_DIR"
+  fi
 fi
 
 if should_build ffi || should_build ruby || should_build all; then
