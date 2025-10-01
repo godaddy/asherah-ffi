@@ -1,0 +1,14 @@
+{
+  "name": "asherah-node-bench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Compare asherah-node performance under Node.js and Bun",
+  "license": "Apache-2.0",
+  "scripts": {
+    "bench:node": "node bench.js",
+    "bench:bun": "bun run bench.js"
+  },
+  "dependencies": {
+    "asherah-node": "file:../../asherah-node"
+  }
+}
