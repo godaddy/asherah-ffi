@@ -27,6 +27,19 @@ if [ -n "${BINDING_TESTS_ONLY:-}" ]; then
   RUN_SCRIPT="/workspace/scripts/run-binding-tests.sh"
 fi
 
+RUN_ENVS=()
+if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then
+  BINDING_PATH="$BINDING_ARTIFACTS_DIR"
+  if [[ "$BINDING_PATH" == "$ROOT_DIR"* ]]; then
+    BINDING_PATH="/workspace${BINDING_PATH#"$ROOT_DIR"}"
+  fi
+  RUN_ENVS+=(-e "BINDING_ARTIFACTS_DIR=$BINDING_PATH")
+fi
+
+if [ -n "${BINDING_TESTS_ONLY:-}" ]; then
+  RUN_ENVS+=(-e "BINDING_TESTS_ONLY=$BINDING_TESTS_ONLY")
+fi
+
 if [ -n "${DOCKER_PLATFORM:-}" ]; then
   docker buildx build \
     --platform "$DOCKER_PLATFORM" \
@@ -38,6 +51,7 @@ if [ -n "${DOCKER_PLATFORM:-}" ]; then
   docker run --rm \
     --platform "$DOCKER_PLATFORM" \
     "${COMMON_MOUNTS[@]}" \
+    "${RUN_ENVS[@]}" \
     "$IMAGE_TAG" \
     "$RUN_SCRIPT"
 else
@@ -45,6 +59,7 @@ else
 
   docker run --rm \
     "${COMMON_MOUNTS[@]}" \
+    "${RUN_ENVS[@]}" \
     "$IMAGE_TAG" \
     "$RUN_SCRIPT"
 fi
