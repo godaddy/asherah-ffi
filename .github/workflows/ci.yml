@@ -163,6 +163,12 @@ jobs:
       - name: Build bindings (arm64)
         env:
           TARGET_ARCH: aarch64
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_AR: aarch64-linux-gnu-ar
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          PKG_CONFIG_ALLOW_CROSS: 1
         run: ./scripts/build-bindings.sh
       - name: Upload amd64 binding artifacts
         uses: actions/upload-artifact@v4
