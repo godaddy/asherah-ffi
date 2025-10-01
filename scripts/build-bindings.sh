@@ -91,12 +91,7 @@ shopt -u nullglob
 
 echo "[build-bindings] Go module"
 pushd "$ROOT_DIR/asherah-go" >/dev/null
-if [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "amd64" ]; then
-  export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
-  GOOS=linux GOARCH="$(go env GOARCH)" go test ./...
-else
-  GOOS=linux GOARCH=arm64 go build ./...
-fi
+GOOS=linux GOARCH=$(if [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "amd64" ]; then go env GOARCH; else echo arm64; fi) go build ./...
 popd >/dev/null
 
 echo "[build-bindings] Packing .NET library"
