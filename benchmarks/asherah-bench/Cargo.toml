@@ -16,3 +16,7 @@ rand = "0.8"
 
 [build-dependencies]
 anyhow = "1.0"
+
+[[bench]]
+name = "ffi"
+harness = false

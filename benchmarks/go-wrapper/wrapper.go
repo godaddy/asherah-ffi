@@ -98,15 +98,19 @@ func getErrorCString() *C.char {
 func ensureStaticKey(key string) (string, error) {
 	trimmed := strings.TrimSpace(key)
 	if trimmed == "" {
-		return "", errors.New("STATIC_MASTER_KEY_HEX must be set")
+		trimmed = strings.Repeat("22", 32)
 	}
 	if len(trimmed)%2 != 0 {
 		return "", errors.New("STATIC_MASTER_KEY_HEX must be even length hex")
 	}
-	if _, err := hex.DecodeString(trimmed); err != nil {
+	decoded, err := hex.DecodeString(trimmed)
+	if err != nil {
 		return "", fmt.Errorf("invalid STATIC_MASTER_KEY_HEX: %w", err)
 	}
-	return trimmed, nil
+	if len(decoded) != 32 {
+		return "", fmt.Errorf("decoded key must be 32 bytes, got %d", len(decoded))
+	}
+	return string(decoded), nil
 }
 
 func buildFactory() (*appencryption.SessionFactory, error) {
