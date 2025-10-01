@@ -18,13 +18,21 @@ candidates.push(
   path.resolve(__dirname, '../target/release', binaryName),
   path.resolve(__dirname, '../../target/debug', binaryName),
   path.resolve(__dirname, '../../target/release', binaryName),
-  path.resolve(__dirname, '../index.node'),
   path.resolve(__dirname, '../npm/index.js'),
+  path.resolve(__dirname, '../index.node'),
 );
 for (const candidate of candidates) {
-  if (fs.existsSync(candidate)) {
+  if (!fs.existsSync(candidate)) {
+    continue;
+  }
+  try {
     addon = require(candidate);
     break;
+  } catch (err) {
+    if (err.code === 'MODULE_NOT_FOUND' || err.code === 'ERR_MODULE_NOT_FOUND' || err.code === 'ERR_DLOPEN_FAILED') {
+      continue;
+    }
+    throw err;
   }
 }
 if (!addon) {

@@ -5,6 +5,24 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
 ARTIFACTS_DIR="${BINDING_ARTIFACTS_DIR:?BINDING_ARTIFACTS_DIR must be set}"
 ARCH="$(uname -m)"
 
+ensure_bun() {
+  if command -v bun >/dev/null 2>&1; then
+    return
+  fi
+
+  if [ -x /root/.bun/bin/bun ]; then
+    ln -sf /root/.bun/bin/bun /usr/local/bin/bun
+  fi
+
+  if command -v bun >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "[binding-tests] Installing bun runtime"
+  curl -fsSL https://bun.sh/install | bash >/dev/null
+  ln -sf /root/.bun/bin/bun /usr/local/bin/bun
+}
+
 case "$ARCH" in
   aarch64)
     TARGET_TRIPLE="aarch64-unknown-linux-gnu"
@@ -51,8 +69,13 @@ if [ -d "$ARTIFACTS_DIR/node/npm" ]; then
   fi
 fi
 pushd "$ROOT_DIR/asherah-node" >/dev/null
+rm -f index.node
 npm ci
+if [ ! -f npm/asherah.node ]; then
+  npm run build
+fi
 npm test
+ensure_bun
 if command -v bun >/dev/null 2>&1; then
   bun run test
 else

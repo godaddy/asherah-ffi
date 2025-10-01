@@ -11,7 +11,11 @@ for (const candidate of attempts) {
     module.exports.__binary = candidate;
     return;
   } catch (err) {
-    if (err.code !== 'MODULE_NOT_FOUND' && err.code !== 'ERR_MODULE_NOT_FOUND') {
+    if (
+      err.code !== 'MODULE_NOT_FOUND' &&
+      err.code !== 'ERR_MODULE_NOT_FOUND' &&
+      err.code !== 'ERR_DLOPEN_FAILED'
+    ) {
       throw err;
     }
   }

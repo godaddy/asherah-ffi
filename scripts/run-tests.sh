@@ -8,6 +8,24 @@ OS_NAME="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH_NAME="$(uname -m)"
 DEFAULT_TARGET_DIR="$ROOT_DIR/target/${OS_NAME}-${ARCH_NAME}"
 
+ensure_bun() {
+  if command -v bun >/dev/null 2>&1; then
+    return
+  fi
+
+  if [ -x /root/.bun/bin/bun ]; then
+    ln -sf /root/.bun/bin/bun /usr/local/bin/bun
+  fi
+
+  if command -v bun >/dev/null 2>&1; then
+    return
+  fi
+
+  echo "[tests] Installing bun runtime"
+  curl -fsSL https://bun.sh/install | bash >/dev/null
+  ln -sf /root/.bun/bin/bun /usr/local/bin/bun
+}
+
 export PATH="/usr/local/cargo/bin:$PATH"
 
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$DEFAULT_TARGET_DIR}"
@@ -80,6 +98,7 @@ python3 -m pytest asherah-py/tests -vv
 echo "[tests] node addon"
 (cd asherah-node && rm -rf target && npm install && npm run build && npm test)
 
+ensure_bun
 if command -v bun >/dev/null 2>&1; then
   echo "[tests] node addon (bun)"
   (cd asherah-node && bun run build && bun run test)
