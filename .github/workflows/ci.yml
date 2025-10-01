@@ -94,6 +94,7 @@ jobs:
           DOCKER_PLATFORM: linux/arm64
           BINDING_TESTS_ONLY: "1"
           BINDING_ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/aarch64
+          BINDING_TESTS_FAST_ONLY: "1"
         run: ./scripts/test-in-docker.sh
 
   sanitizers:

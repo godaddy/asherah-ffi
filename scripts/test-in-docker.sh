@@ -40,6 +40,10 @@ if [ -n "${BINDING_TESTS_ONLY:-}" ]; then
   RUN_ENVS+=(-e "BINDING_TESTS_ONLY=$BINDING_TESTS_ONLY")
 fi
 
+if [ -n "${BINDING_TESTS_FAST_ONLY:-}" ]; then
+  RUN_ENVS+=(-e "BINDING_TESTS_FAST_ONLY=$BINDING_TESTS_FAST_ONLY")
+fi
+
 if [ -n "${DOCKER_PLATFORM:-}" ]; then
   docker buildx build \
     --platform "$DOCKER_PLATFORM" \

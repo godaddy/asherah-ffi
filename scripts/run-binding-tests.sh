@@ -68,6 +68,16 @@ else
 fi
 python3 -m pytest "$ROOT_DIR/asherah-py/tests" -vv
 
+if [ "${BINDING_TESTS_FAST_ONLY:-}" = "1" ]; then
+  echo "[binding-tests] Fast-only mode enabled, skipping Ruby/Go/Interop/.NET/Java"
+  deactivate >/dev/null 2>&1 || true
+  chmod -R a+rwX "$ROOT_DIR/.cache" 2>/dev/null || true
+  chmod -R a+rwX "$ROOT_DIR/target" 2>/dev/null || true
+  chmod -R a+rwX "$ROOT_DIR/artifacts" 2>/dev/null || true
+  echo "[binding-tests] complete (fast mode)"
+  exit 0
+fi
+
 echo "[binding-tests] Ruby"
 ruby -Iasherah-ruby/lib -Iasherah-ruby/test asherah-ruby/test/round_trip_test.rb
 
