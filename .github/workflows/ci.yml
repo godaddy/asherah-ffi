@@ -216,9 +216,12 @@ jobs:
         run: |
           shopt -s nullglob
           for part in partial/x86_64/*/artifacts/x86_64/*; do
+            echo "Copying ${part}"
             cp -R "$part" artifacts/x86_64/
           done
           shopt -u nullglob
+          echo "Assembled x86_64 contents:"
+          find artifacts/x86_64 -maxdepth 3 -mindepth 1 -print || true
       - name: Upload consolidated x86_64 artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -257,9 +260,12 @@ jobs:
         run: |
           shopt -s nullglob
           for part in partial/aarch64/*/artifacts/aarch64/*; do
+            echo "Copying ${part}"
             cp -R "$part" artifacts/aarch64/
           done
           shopt -u nullglob
+          echo "Assembled arm64 contents:"
+          find artifacts/aarch64 -maxdepth 3 -mindepth 1 -print || true
       - name: Upload consolidated arm64 artifacts
         uses: actions/upload-artifact@v4
         with:
