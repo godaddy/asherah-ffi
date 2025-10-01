@@ -2,14 +2,18 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
-ARCH="$(uname -m)"
+ARCH="${TARGET_ARCH:-$(uname -m)}"
 
 case "$ARCH" in
-  x86_64)
+  x86_64|amd64)
     DOTNET_RID="linux-x64"
+    CARGO_TRIPLE="x86_64-unknown-linux-gnu"
+    NAPI_PLATFORM="linux-x64"
     ;;
-  aarch64)
+  aarch64|arm64)
     DOTNET_RID="linux-arm64"
+    CARGO_TRIPLE="aarch64-unknown-linux-gnu"
+    NAPI_PLATFORM="linux-arm64"
     ;;
   *)
     echo "[build-bindings] Unsupported architecture: $ARCH" >&2
@@ -17,7 +21,7 @@ case "$ARCH" in
     ;;
 esac
 
-TARGET_DIR="$ROOT_DIR/target/$ARCH"
+TARGET_DIR="$ROOT_DIR/target/$CARGO_TRIPLE"
 OUT_DIR="$ROOT_DIR/artifacts/$ARCH"
 
 echo "[build-bindings] Preparing directories for $ARCH"
@@ -42,12 +46,12 @@ if command -v git >/dev/null 2>&1; then
 fi
 
 echo "[build-bindings] Building core FFI library (release)"
-cargo build --release -p asherah-ffi
+cargo build --release -p asherah-ffi --target "$CARGO_TRIPLE"
 
 echo "[build-bindings] Building Node.js addon"
 pushd "$ROOT_DIR/asherah-node" >/dev/null
 npm ci
-npm run build:release
+npx @napi-rs/cli build --release --platform "$NAPI_PLATFORM"
 npm run prepublishOnly
 mkdir -p "$OUT_DIR/node"
 rm -rf "$OUT_DIR/node/npm"
@@ -59,7 +63,7 @@ echo "[build-bindings] Building Python wheel"
 python3 -m pip install --upgrade pip >/dev/null
 python3 -m pip install --upgrade maturin==1.9.4 >/dev/null
 rm -rf "$ROOT_DIR/target/wheels"
-maturin build --release --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml"
+maturin build --release --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml" --target "$CARGO_TRIPLE"
 mkdir -p "$OUT_DIR/python"
 shopt -s nullglob
 for wheel in "$ROOT_DIR"/target/wheels/*.whl; do
@@ -92,7 +96,7 @@ dotnet pack "$ROOT_DIR/asherah-dotnet/AsherahDotNet/AsherahDotNet.csproj" \
 
 echo "[build-bindings] Capturing Java artifacts"
 mkdir -p "$OUT_DIR/java"
-cargo build --release -p asherah-java
+cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
 mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package
 cp "$ROOT_DIR"/asherah-java/java/target/*.jar "$OUT_DIR/java/"
 

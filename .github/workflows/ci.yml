@@ -149,20 +149,21 @@ jobs:
           key: build-${{ runner.os }}-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
           restore-keys: |
             build-${{ runner.os }}-
-      - name: Set up QEMU for cross architectures
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: linux/arm64
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Install cross toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config
+      - name: Prepare Rust targets
+        run: |
+          rustup target add aarch64-unknown-linux-gnu
       - name: Build bindings (amd64)
         env:
-          DOCKER_PLATFORM: linux/amd64
-        run: ./scripts/build-bindings-docker.sh
+          TARGET_ARCH: x86_64
+        run: ./scripts/build-bindings.sh
       - name: Build bindings (arm64)
         env:
-          DOCKER_PLATFORM: linux/arm64
-        run: ./scripts/build-bindings-docker.sh
+          TARGET_ARCH: aarch64
+        run: ./scripts/build-bindings.sh
       - name: Upload amd64 binding artifacts
         uses: actions/upload-artifact@v4
         with:
