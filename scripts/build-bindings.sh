@@ -135,8 +135,20 @@ if requires_core_build; then
     echo "[build-bindings] Warning: no libasherah_ffi artifacts found in $CARGO_RELEASE_DIR"
   else
     for lib in "${ffi_release_files[@]}"; do
-      echo "[build-bindings] Copying core artifact $(basename "$lib") to $RELEASE_DIR"
-      cp "$lib" "$RELEASE_DIR/"
+      base="$(basename "$lib")"
+      ext="${base##*.}"
+      if [ "$ext" = "d" ]; then
+        continue
+      fi
+      normalized="$base"
+      case "$base" in
+        libasherah_ffi-*.so) normalized="libasherah_ffi.so" ;;
+        libasherah_ffi-*.a) normalized="libasherah_ffi.a" ;;
+        libasherah_ffi-*.dylib) normalized="libasherah_ffi.dylib" ;;
+        asherah_ffi-*.dll) normalized="asherah_ffi.dll" ;;
+      esac
+      echo "[build-bindings] Copying core artifact $base to $RELEASE_DIR/$normalized"
+      cp "$lib" "$RELEASE_DIR/$normalized"
     done
   fi
 fi
@@ -184,9 +196,21 @@ if should_build ffi || should_build ruby || should_build all; then
     echo "[build-bindings] Warning: no libasherah_ffi artifacts found for packaging"
   else
     for lib in "${ffi_files[@]}"; do
-      echo "[build-bindings] Packaging $(basename "$lib")"
-      cp "$lib" "$OUT_DIR/ffi/"
-      cp "$lib" "$OUT_DIR/ruby/"
+      base="$(basename "$lib")"
+      ext="${base##*.}"
+      if [ "$ext" = "d" ]; then
+        continue
+      fi
+      normalized="$base"
+      case "$base" in
+        libasherah_ffi-*.so) normalized="libasherah_ffi.so" ;;
+        libasherah_ffi-*.a) normalized="libasherah_ffi.a" ;;
+        libasherah_ffi-*.dylib) normalized="libasherah_ffi.dylib" ;;
+        asherah_ffi-*.dll) normalized="asherah_ffi.dll" ;;
+      esac
+      echo "[build-bindings] Packaging $base as $normalized"
+      cp "$lib" "$OUT_DIR/ffi/$normalized"
+      cp "$lib" "$OUT_DIR/ruby/$normalized"
     done
   fi
 fi
