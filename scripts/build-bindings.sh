@@ -122,7 +122,7 @@ if requires_core_build; then
   echo "[build-bindings] Building core FFI library (release)"
   cargo build --release -p asherah-ffi --target "$CARGO_TRIPLE"
   echo "[build-bindings] Built artifacts in $CARGO_TARGET_DIR/release:"
-  find "$CARGO_TARGET_DIR/release" -maxdepth 1 -mindepth 1 -print || true
+  find "$CARGO_TARGET_DIR/release" -maxdepth 2 -mindepth 1 -print || true
   shopt -s nullglob
   for lib in "$CARGO_TARGET_DIR"/release/libasherah_ffi.*; do
     cp "$lib" "$RELEASE_DIR/"
