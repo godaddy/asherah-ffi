@@ -30,6 +30,10 @@ if command -v ld.lld >/dev/null 2>&1; then
   export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=lld"
 fi
 
+if command -v git >/dev/null 2>&1; then
+  git config --global --add safe.directory "$ROOT_DIR" 2>/dev/null || true
+fi
+
 echo "[tests] cargo fmt --check"
 if command -v rustup >/dev/null 2>&1; then
   rustup component add rustfmt >/dev/null

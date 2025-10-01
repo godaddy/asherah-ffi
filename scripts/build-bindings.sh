@@ -37,6 +37,10 @@ export NAPI_TYPE_DEF_TMP_FOLDER="$CARGO_TARGET_DIR/napi-types"
 
 mkdir -p "$NAPI_TYPE_DEF_TMP_FOLDER"
 
+if command -v git >/dev/null 2>&1; then
+  git config --global --add safe.directory "$ROOT_DIR" 2>/dev/null || true
+fi
+
 echo "[build-bindings] Building core FFI library (release)"
 cargo build --release -p asherah-ffi
 

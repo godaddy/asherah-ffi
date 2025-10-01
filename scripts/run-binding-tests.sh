@@ -35,6 +35,10 @@ export PRODUCT_ID="prod"
 export KMS="static"
 export STATIC_MASTER_KEY_HEX="2222222222222222222222222222222222222222222222222222222222222222"
 
+if command -v git >/dev/null 2>&1; then
+  git config --global --add safe.directory "$ROOT_DIR" 2>/dev/null || true
+fi
+
 echo "[binding-tests] Node.js"
 if [ -d "$ARTIFACTS_DIR/node/npm" ]; then
   rm -rf "$ROOT_DIR/asherah-node/npm"
