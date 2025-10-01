@@ -86,10 +86,9 @@ echo "[build-bindings] Packing .NET library"
 dotnet restore "$ROOT_DIR/asherah-dotnet/AsherahDotNet.sln"
 dotnet pack "$ROOT_DIR/asherah-dotnet/AsherahDotNet/AsherahDotNet.csproj" \
   -c Release \
-  -r "$DOTNET_RID" \
   -p:ContinuousIntegrationBuild=true \
-  -o "$OUT_DIR/dotnet" \
-  --no-build=false
+  -p:RuntimeIdentifier="$DOTNET_RID" \
+  -o "$OUT_DIR/dotnet"
 
 echo "[build-bindings] Capturing Java artifacts"
 mkdir -p "$OUT_DIR/java"
