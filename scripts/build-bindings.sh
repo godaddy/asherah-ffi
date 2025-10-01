@@ -4,6 +4,41 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
 ARCH="${TARGET_ARCH:-$(uname -m)}"
 
+COMPONENTS_SPEC="${BINDING_COMPONENTS:-all}"
+COMPONENTS_SPEC="$(printf '%s' "$COMPONENTS_SPEC" | tr '[:upper:]' '[:lower:]')"
+IFS=' ,'
+read -r -a COMPONENT_LIST <<< "$COMPONENTS_SPEC"
+unset IFS
+
+should_build() {
+  local target="$1"
+  if [ "$COMPONENTS_SPEC" = "all" ] || [ "$COMPONENTS_SPEC" = "*" ]; then
+    return 0
+  fi
+  for entry in "${COMPONENT_LIST[@]}"; do
+    if [ "$entry" = "$target" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+requires_core_build() {
+  if should_build all; then
+    return 0
+  fi
+  local comp
+  for comp in ffi python ruby dotnet java go; do
+    if should_build "$comp"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+ROOT_OUT_DIR_DEFAULT="$ROOT_DIR/artifacts/$ARCH"
+OUT_DIR="${BINDING_OUTPUT_DIR:-$ROOT_OUT_DIR_DEFAULT}"
+
 case "$ARCH" in
   x86_64|amd64)
     DOTNET_RID="linux-x64"
@@ -31,11 +66,13 @@ if [ "$CARGO_TRIPLE" = "aarch64-unknown-linux-gnu" ]; then
 fi
 
 TARGET_DIR="$ROOT_DIR/target/$CARGO_TRIPLE"
-OUT_DIR="$ROOT_DIR/artifacts/$ARCH"
 
-echo "[build-bindings] Preparing directories for $ARCH"
-rm -rf "$OUT_DIR"
-mkdir -p "$OUT_DIR"
+echo "[build-bindings] Preparing directories for $ARCH (components: ${COMPONENTS_SPEC})"
+mkdir -p "$TARGET_DIR"
+if [ -n "$OUT_DIR" ]; then
+  rm -rf "$OUT_DIR"
+  mkdir -p "$OUT_DIR"
+fi
 
 export CARGO_TARGET_DIR="$TARGET_DIR"
 export SERVICE_NAME="svc"
@@ -57,65 +94,79 @@ fi
 RELEASE_DIR="$ROOT_DIR/target/release"
 mkdir -p "$RELEASE_DIR"
 
-echo "[build-bindings] Building core FFI library (release)"
-cargo build --release -p asherah-ffi --target "$CARGO_TRIPLE"
-shopt -s nullglob
-for lib in "$CARGO_TARGET_DIR"/release/libasherah_ffi.*; do
-  cp "$lib" "$RELEASE_DIR/"
-done
-shopt -u nullglob
+if requires_core_build; then
+  echo "[build-bindings] Building core FFI library (release)"
+  cargo build --release -p asherah-ffi --target "$CARGO_TRIPLE"
+  shopt -s nullglob
+  for lib in "$CARGO_TARGET_DIR"/release/libasherah_ffi.*; do
+    cp "$lib" "$RELEASE_DIR/"
+  done
+  shopt -u nullglob
+fi
 
-echo "[build-bindings] Building Node.js addon"
-pushd "$ROOT_DIR/asherah-node" >/dev/null
-npm ci
-npx @napi-rs/cli build --release --platform "$NAPI_PLATFORM"
-npm run prepublishOnly
-mkdir -p "$OUT_DIR/node"
-rm -rf "$OUT_DIR/node/npm"
-cp -R npm "$OUT_DIR/node/npm"
-rm -rf node_modules
-popd >/dev/null
+if should_build node || should_build all; then
+  echo "[build-bindings] Building Node.js addon"
+  pushd "$ROOT_DIR/asherah-node" >/dev/null
+  npm ci
+  npx @napi-rs/cli build --release --platform "$NAPI_PLATFORM"
+  npm run prepublishOnly
+  mkdir -p "$OUT_DIR/node"
+  rm -rf "$OUT_DIR/node/npm"
+  cp -R npm "$OUT_DIR/node/npm"
+  rm -rf node_modules
+  popd >/dev/null
+fi
 
-echo "[build-bindings] Building Python wheel"
-python3 -m pip install --upgrade pip >/dev/null
-python3 -m pip install --upgrade maturin==1.9.4 >/dev/null
-rm -rf "$ROOT_DIR/target/wheels"
-maturin build --release --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml" --target "$CARGO_TRIPLE"
-mkdir -p "$OUT_DIR/python"
-shopt -s nullglob
-for wheel in "$ROOT_DIR"/target/wheels/*.whl; do
-  cp "$wheel" "$OUT_DIR/python/"
-done
-shopt -u nullglob
+if should_build python || should_build all; then
+  echo "[build-bindings] Building Python wheel"
+  python3 -m pip install --upgrade pip >/dev/null
+  python3 -m pip install --upgrade maturin==1.9.4 >/dev/null
+  rm -rf "$ROOT_DIR/target/wheels"
+  maturin build --release --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml" --target "$CARGO_TRIPLE"
+  mkdir -p "$OUT_DIR/python"
+  shopt -s nullglob
+  for wheel in "$ROOT_DIR"/target/wheels/*.whl; do
+    cp "$wheel" "$OUT_DIR/python/"
+  done
+  shopt -u nullglob
+fi
 
-echo "[build-bindings] Capturing native FFI artifacts"
-mkdir -p "$OUT_DIR/ffi"
-mkdir -p "$OUT_DIR/ruby"
-shopt -s nullglob
-for lib in "$CARGO_TARGET_DIR"/release/libasherah_ffi.*; do
-  cp "$lib" "$OUT_DIR/ffi/"
-  cp "$lib" "$OUT_DIR/ruby/"
-done
-shopt -u nullglob
+if should_build ffi || should_build ruby || should_build all; then
+  echo "[build-bindings] Capturing native FFI artifacts"
+  mkdir -p "$OUT_DIR/ffi"
+  mkdir -p "$OUT_DIR/ruby"
+  shopt -s nullglob
+  for lib in "$CARGO_TARGET_DIR"/release/libasherah_ffi.*; do
+    cp "$lib" "$OUT_DIR/ffi/"
+    cp "$lib" "$OUT_DIR/ruby/"
+  done
+  shopt -u nullglob
+fi
 
-echo "[build-bindings] Go module"
-pushd "$ROOT_DIR/asherah-go" >/dev/null
-GOOS=linux GOARCH=$(if [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "amd64" ]; then go env GOARCH; else echo arm64; fi) go build ./...
-popd >/dev/null
+if should_build go || should_build all; then
+  echo "[build-bindings] Go module"
+  pushd "$ROOT_DIR/asherah-go" >/dev/null
+  GOOS=linux GOARCH=$(if [ "$ARCH" = "x86_64" ] || [ "$ARCH" = "amd64" ]; then go env GOARCH; else echo arm64; fi) go build ./...
+  popd >/dev/null
+fi
 
-echo "[build-bindings] Packing .NET library"
-dotnet restore "$ROOT_DIR/asherah-dotnet/AsherahDotNet.sln"
-dotnet pack "$ROOT_DIR/asherah-dotnet/AsherahDotNet/AsherahDotNet.csproj" \
-  -c Release \
-  -p:ContinuousIntegrationBuild=true \
-  -p:RuntimeIdentifier="$DOTNET_RID" \
-  -o "$OUT_DIR/dotnet"
+if should_build dotnet || should_build all; then
+  echo "[build-bindings] Packing .NET library"
+  dotnet restore "$ROOT_DIR/asherah-dotnet/AsherahDotNet.sln"
+  dotnet pack "$ROOT_DIR/asherah-dotnet/AsherahDotNet/AsherahDotNet.csproj" \
+    -c Release \
+    -p:ContinuousIntegrationBuild=true \
+    -p:RuntimeIdentifier="$DOTNET_RID" \
+    -o "$OUT_DIR/dotnet"
+fi
 
-echo "[build-bindings] Capturing Java artifacts"
-mkdir -p "$OUT_DIR/java"
-cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
-mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package
-cp "$ROOT_DIR"/asherah-java/java/target/*.jar "$OUT_DIR/java/"
+if should_build java || should_build all; then
+  echo "[build-bindings] Capturing Java artifacts"
+  mkdir -p "$OUT_DIR/java"
+  cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
+  mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package
+  cp "$ROOT_DIR"/asherah-java/java/target/*.jar "$OUT_DIR/java/"
+fi
 
 echo "[build-bindings] Binding artifacts prepared in $OUT_DIR"
 
