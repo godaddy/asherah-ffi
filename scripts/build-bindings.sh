@@ -212,27 +212,40 @@ if should_build ffi || should_build ruby || should_build all; then
   mkdir -p "$OUT_DIR/ffi"
   mkdir -p "$OUT_DIR/ruby"
   mapfile -d '' ffi_files < <(find "$CARGO_RELEASE_DIR" \( -type f -o -type l \) -name 'libasherah_ffi.*' -print0)
+
   if [ ${#ffi_files[@]} -eq 0 ]; then
-    echo "[build-bindings] Warning: no libasherah_ffi artifacts found for packaging"
-  else
-    for lib in "${ffi_files[@]}"; do
-      base="$(basename "$lib")"
-      ext="${base##*.}"
-      if [ "$ext" = "d" ]; then
-        continue
-      fi
-      normalized="$base"
-      case "$base" in
-        libasherah_ffi-*.so) normalized="libasherah_ffi.so" ;;
-        libasherah_ffi-*.a) normalized="libasherah_ffi.a" ;;
-        libasherah_ffi-*.dylib) normalized="libasherah_ffi.dylib" ;;
-        asherah_ffi-*.dll) normalized="asherah_ffi.dll" ;;
-      esac
-      echo "[build-bindings] Packaging $base as $normalized"
-      cp "$lib" "$OUT_DIR/ffi/$normalized"
-      cp "$lib" "$OUT_DIR/ruby/$normalized"
-    done
+    ALT_RELEASE_DIR="$TARGET_DIR/$CARGO_TRIPLE/release"
+    if [ -d "$ALT_RELEASE_DIR" ]; then
+      mapfile -d '' ffi_files < <(find "$ALT_RELEASE_DIR" \( -type f -o -type l \) -name 'libasherah_ffi.*' -print0)
+    fi
   fi
+
+  if [ ${#ffi_files[@]} -eq 0 ]; then
+    mapfile -d '' ffi_files < <(find "$TARGET_DIR" -maxdepth 4 -type f \( -name 'libasherah_ffi.*' -o -name 'asherah_ffi.dll' \) ! -path '*/deps/*' -print0)
+  fi
+
+  if [ ${#ffi_files[@]} -eq 0 ]; then
+    echo "[build-bindings] Error: no libasherah_ffi artifacts found for packaging"
+    exit 1
+  fi
+
+  for lib in "${ffi_files[@]}"; do
+    base="$(basename "$lib")"
+    ext="${base##*.}"
+    if [ "$ext" = "d" ]; then
+      continue
+    fi
+    normalized="$base"
+    case "$base" in
+      libasherah_ffi-*.so) normalized="libasherah_ffi.so" ;;
+      libasherah_ffi-*.a) normalized="libasherah_ffi.a" ;;
+      libasherah_ffi-*.dylib) normalized="libasherah_ffi.dylib" ;;
+      asherah_ffi-*.dll) normalized="asherah_ffi.dll" ;;
+    esac
+    echo "[build-bindings] Packaging $base as $normalized"
+    cp "$lib" "$OUT_DIR/ffi/$normalized"
+    cp "$lib" "$OUT_DIR/ruby/$normalized"
+  done
 fi
 
 if should_build go || should_build all; then
