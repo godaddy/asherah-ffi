@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
-IMAGE_TAG="asherah-tests:latest"
+IMAGE_TAG="${TESTS_IMAGE_TAG:-asherah-tests:latest}"
+USE_PREBUILT_IMAGE="${USE_PREBUILT_TEST_IMAGE:-0}"
 CACHE_DIR="$ROOT_DIR/.cache"
 
 mkdir -p \
@@ -47,25 +48,42 @@ if [ -n "${BINDING_TESTS_FAST_ONLY:-}" ]; then
 fi
 
 if [ -n "${DOCKER_PLATFORM:-}" ]; then
-  docker buildx build \
-    --platform "$DOCKER_PLATFORM" \
-    --file "$ROOT_DIR/docker/tests.Dockerfile" \
-    --tag "$IMAGE_TAG" \
-    --load \
-    "$ROOT_DIR"
+  if [ "$USE_PREBUILT_IMAGE" = "1" ]; then
+    docker run --rm \
+      --platform "$DOCKER_PLATFORM" \
+      "${COMMON_MOUNTS[@]}" \
+      "${RUN_ENVS[@]}" \
+      "$IMAGE_TAG" \
+      "$RUN_SCRIPT"
+  else
+    docker buildx build \
+      --platform "$DOCKER_PLATFORM" \
+      --file "$ROOT_DIR/docker/tests.Dockerfile" \
+      --tag "$IMAGE_TAG" \
+      --load \
+      "$ROOT_DIR"
 
-  docker run --rm \
-    --platform "$DOCKER_PLATFORM" \
-    "${COMMON_MOUNTS[@]}" \
-    "${RUN_ENVS[@]}" \
-    "$IMAGE_TAG" \
-    "$RUN_SCRIPT"
+    docker run --rm \
+      --platform "$DOCKER_PLATFORM" \
+      "${COMMON_MOUNTS[@]}" \
+      "${RUN_ENVS[@]}" \
+      "$IMAGE_TAG" \
+      "$RUN_SCRIPT"
+  fi
 else
-  docker build -f "$ROOT_DIR/docker/tests.Dockerfile" -t "$IMAGE_TAG" "$ROOT_DIR"
+  if [ "$USE_PREBUILT_IMAGE" = "1" ]; then
+    docker run --rm \
+      "${COMMON_MOUNTS[@]}" \
+      "${RUN_ENVS[@]}" \
+      "$IMAGE_TAG" \
+      "$RUN_SCRIPT"
+  else
+    docker build -f "$ROOT_DIR/docker/tests.Dockerfile" -t "$IMAGE_TAG" "$ROOT_DIR"
 
-  docker run --rm \
-    "${COMMON_MOUNTS[@]}" \
-    "${RUN_ENVS[@]}" \
-    "$IMAGE_TAG" \
-    "$RUN_SCRIPT"
+    docker run --rm \
+      "${COMMON_MOUNTS[@]}" \
+      "${RUN_ENVS[@]}" \
+      "$IMAGE_TAG" \
+      "$RUN_SCRIPT"
+  fi
 fi
