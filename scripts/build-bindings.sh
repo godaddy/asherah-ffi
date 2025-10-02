@@ -123,13 +123,20 @@ fi
 RELEASE_DIR="$ROOT_DIR/target/release"
 mkdir -p "$RELEASE_DIR"
 
+SKIP_CORE_BUILD="${SKIP_CORE_BUILD:-0}"
+
 if requires_core_build; then
-  echo "[build-bindings] Building core FFI library (release)"
-  cargo build --release -p asherah-ffi --target "$CARGO_TRIPLE"
-  echo "[build-bindings] Built artifacts in $CARGO_RELEASE_DIR:"
-  find "$CARGO_RELEASE_DIR" -maxdepth 2 -mindepth 1 -print || true
-  echo "[build-bindings] Searching for asherah_ffi artifacts under $TARGET_DIR:"
-  find "$TARGET_DIR" -maxdepth 4 -name '*asherah_ffi*' -print || true
+  if [ "$SKIP_CORE_BUILD" = "1" ]; then
+    echo "[build-bindings] Skipping core build; reusing cached artifacts"
+  else
+    echo "[build-bindings] Building core FFI library (release)"
+    cargo build --release -p asherah-ffi --target "$CARGO_TRIPLE"
+    echo "[build-bindings] Built artifacts in $CARGO_RELEASE_DIR:"
+    find "$CARGO_RELEASE_DIR" -maxdepth 2 -mindepth 1 -print || true
+    echo "[build-bindings] Searching for asherah_ffi artifacts under $TARGET_DIR:"
+    find "$TARGET_DIR" -maxdepth 4 -name '*asherah_ffi*' -print || true
+  fi
+
   mapfile -d '' ffi_release_files < <(find "$CARGO_RELEASE_DIR" \( -type f -o -type l \) -name 'libasherah_ffi.*' -print0)
   if [ ${#ffi_release_files[@]} -eq 0 ]; then
     echo "[build-bindings] Warning: no libasherah_ffi artifacts found in $CARGO_RELEASE_DIR"
