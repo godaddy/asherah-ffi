@@ -177,7 +177,9 @@ if should_build node || should_build all; then
   echo "[build-bindings] Building Node.js addon"
   pushd "$ROOT_DIR/asherah-node" >/dev/null
   npm ci
-  npx @napi-rs/cli build --release --platform "$NAPI_PLATFORM"
+  # Build the Node addon for the explicit Rust target to ensure
+  # cross-compilation produces the correct architecture binary.
+  npx @napi-rs/cli build --release --platform "$NAPI_PLATFORM" --target "$CARGO_TRIPLE"
   npm run prepublishOnly
   mkdir -p "$OUT_DIR/node"
   rm -rf "$OUT_DIR/node/npm"
