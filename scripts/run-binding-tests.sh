@@ -4,6 +4,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
 ARTIFACTS_DIR="${BINDING_ARTIFACTS_DIR:?BINDING_ARTIFACTS_DIR must be set}"
 ARCH="$(uname -m)"
+BINDING_SELECTOR="${BINDING_TESTS_BINDING:-all}"
+BINDING_SELECTOR="${BINDING_SELECTOR,,}"
+
+should_run() {
+  local target="$1"
+  if [ "$BINDING_SELECTOR" = "all" ]; then
+    return 0
+  fi
+  [ "$BINDING_SELECTOR" = "$target" ]
+}
 
 ensure_bun() {
   if command -v bun >/dev/null 2>&1; then
@@ -57,52 +67,63 @@ if command -v git >/dev/null 2>&1; then
   git config --global --add safe.directory "$ROOT_DIR" 2>/dev/null || true
 fi
 
-echo "[binding-tests] Node.js"
-if [ -d "$ARTIFACTS_DIR/node/npm" ]; then
-  rm -rf "$ROOT_DIR/asherah-node/npm"
-  cp -R "$ARTIFACTS_DIR/node/npm" "$ROOT_DIR/asherah-node/npm"
-  if ! [ -f "$ROOT_DIR/asherah-node/npm/asherah.node" ]; then
-    candidate=$(find "$ROOT_DIR/asherah-node/npm" -maxdepth 2 -name '*.node' -print | head -n1 || true)
-    if [ -n "$candidate" ]; then
-      cp "$candidate" "$ROOT_DIR/asherah-node/npm/asherah.node"
+if should_run node; then
+  echo "[binding-tests] Node.js"
+  if [ -d "$ARTIFACTS_DIR/node/npm" ]; then
+    rm -rf "$ROOT_DIR/asherah-node/npm"
+    cp -R "$ARTIFACTS_DIR/node/npm" "$ROOT_DIR/asherah-node/npm"
+    if ! [ -f "$ROOT_DIR/asherah-node/npm/asherah.node" ]; then
+      candidate=$(find "$ROOT_DIR/asherah-node/npm" -maxdepth 2 -name '*.node' -print | head -n1 || true)
+      if [ -n "$candidate" ]; then
+        cp "$candidate" "$ROOT_DIR/asherah-node/npm/asherah.node"
+      fi
     fi
   fi
+  pushd "$ROOT_DIR/asherah-node" >/dev/null
+  rm -f index.node
+  npm ci
+  if [ ! -f npm/asherah.node ]; then
+    npm run build
+  fi
+  npm test
+  ensure_bun
+  if command -v bun >/dev/null 2>&1; then
+    bun run test
+  else
+    echo "[binding-tests] bun not found, skipping bun test"
+  fi
+  popd >/dev/null
 fi
-pushd "$ROOT_DIR/asherah-node" >/dev/null
-rm -f index.node
-npm ci
-if [ ! -f npm/asherah.node ]; then
-  npm run build
-fi
-npm test
-ensure_bun
-if command -v bun >/dev/null 2>&1; then
-  bun run test
-else
-  echo "[binding-tests] bun not found, skipping bun test"
-fi
-popd >/dev/null
 
-echo "[binding-tests] Python"
-python3 -m venv "$ROOT_DIR/.venv"
-# shellcheck source=/dev/null
-source "$ROOT_DIR/.venv/bin/activate"
-python3 -m pip install --upgrade pip >/dev/null
-python3 -m pip install pytest >/dev/null
-python3 -m pip uninstall -y asherah-py >/dev/null 2>&1 || true
-if compgen -G "$ARTIFACTS_DIR/python/*.whl" >/dev/null; then
-  if ! python3 -m pip install "$ARTIFACTS_DIR"/python/*.whl; then
-    echo "[binding-tests] Wheel install failed, falling back to editable install"
+PYTHON_VENV_ACTIVE=0
+if should_run python; then
+  echo "[binding-tests] Python"
+  python3 -m venv "$ROOT_DIR/.venv"
+  # shellcheck source=/dev/null
+  source "$ROOT_DIR/.venv/bin/activate"
+  PYTHON_VENV_ACTIVE=1
+  python3 -m pip install --upgrade pip >/dev/null
+  python3 -m pip install pytest >/dev/null
+  python3 -m pip uninstall -y asherah-py >/dev/null 2>&1 || true
+  if compgen -G "$ARTIFACTS_DIR/python/*.whl" >/dev/null; then
+    if ! python3 -m pip install "$ARTIFACTS_DIR"/python/*.whl; then
+      echo "[binding-tests] Wheel install failed, falling back to editable install"
+      python3 -m pip install -e "$ROOT_DIR/asherah-py"
+    fi
+  else
     python3 -m pip install -e "$ROOT_DIR/asherah-py"
   fi
-else
-  python3 -m pip install -e "$ROOT_DIR/asherah-py"
-fi
-python3 -m pytest "$ROOT_DIR/asherah-py/tests" -vv
+  python3 -m pytest "$ROOT_DIR/asherah-py/tests" -vv
 
-if [ "${BINDING_TESTS_FAST_ONLY:-}" = "1" ]; then
+  echo "[binding-tests] Interop"
+  python3 -m pytest "$ROOT_DIR/interop/tests"
+fi
+
+if [ "${BINDING_TESTS_FAST_ONLY:-}" = "1" ] && [ "$BINDING_SELECTOR" = "all" ]; then
   echo "[binding-tests] Fast-only mode enabled, skipping Ruby/Go/Interop/.NET/Java"
-  deactivate >/dev/null 2>&1 || true
+  if [ $PYTHON_VENV_ACTIVE -eq 1 ]; then
+    deactivate >/dev/null 2>&1 || true
+  fi
   chmod -R a+rwX "$ROOT_DIR/.cache" 2>/dev/null || true
   chmod -R a+rwX "$ROOT_DIR/target" 2>/dev/null || true
   chmod -R a+rwX "$ROOT_DIR/artifacts" 2>/dev/null || true
@@ -110,22 +131,29 @@ if [ "${BINDING_TESTS_FAST_ONLY:-}" = "1" ]; then
   exit 0
 fi
 
-echo "[binding-tests] Ruby"
-ruby -Iasherah-ruby/lib -Iasherah-ruby/test asherah-ruby/test/round_trip_test.rb
+if should_run ffi; then
+  echo "[binding-tests] Ruby"
+  ruby -Iasherah-ruby/lib -Iasherah-ruby/test asherah-ruby/test/round_trip_test.rb
 
-echo "[binding-tests] Go"
-pushd "$ROOT_DIR/asherah-go" >/dev/null
-go test ./...
-popd >/dev/null
+  echo "[binding-tests] Go"
+  pushd "$ROOT_DIR/asherah-go" >/dev/null
+  go test ./...
+  popd >/dev/null
+fi
 
-echo "[binding-tests] Interop"
-python3 -m pytest "$ROOT_DIR/interop/tests"
+if should_run dotnet; then
+  echo "[binding-tests] .NET"
+  dotnet test "$ROOT_DIR/asherah-dotnet/AsherahDotNet.sln" --nologo
+fi
 
-echo "[binding-tests] .NET"
-dotnet test "$ROOT_DIR/asherah-dotnet/AsherahDotNet.sln" --nologo
+if should_run java; then
+  echo "[binding-tests] Java"
+  mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true test
+fi
 
-echo "[binding-tests] Java"
-mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true test
+if [ $PYTHON_VENV_ACTIVE -eq 1 ]; then
+  deactivate >/dev/null 2>&1 || true
+fi
 
 chmod -R a+rwX "$ROOT_DIR/.cache" 2>/dev/null || true
 chmod -R a+rwX "$ROOT_DIR/target" 2>/dev/null || true
