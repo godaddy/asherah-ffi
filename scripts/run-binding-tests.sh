@@ -81,10 +81,7 @@ if should_run node; then
   fi
   pushd "$ROOT_DIR/asherah-node" >/dev/null
   rm -f index.node
-  npm ci
-  if [ ! -f npm/asherah.node ]; then
-    npm run build
-  fi
+  npm install --ignore-scripts >/dev/null
   npm test
   ensure_bun
   if command -v bun >/dev/null 2>&1; then
