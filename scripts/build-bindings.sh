@@ -137,16 +137,30 @@ if requires_core_build; then
     find "$TARGET_DIR" -maxdepth 4 -name '*asherah_ffi*' -print || true
   fi
 
-  mapfile -d '' ffi_release_files < <(find "$CARGO_RELEASE_DIR" \( -type f -o -type l \) -name 'libasherah_ffi.*' -print0)
-  if [ ${#ffi_release_files[@]} -eq 0 ]; then
-    echo "[build-bindings] Warning: no libasherah_ffi artifacts found in $CARGO_RELEASE_DIR"
-  else
-    for lib in "${ffi_release_files[@]}"; do
-      base="$(basename "$lib")"
-      ext="${base##*.}"
-      if [ "$ext" = "d" ]; then
-        continue
-      fi
+mapfile -d '' ffi_release_files < <(find "$CARGO_RELEASE_DIR" \( -type f -o -type l \) -name 'libasherah_ffi.*' -print0)
+
+if [ ${#ffi_release_files[@]} -eq 0 ]; then
+  ALT_RELEASE_DIR="$TARGET_DIR/$CARGO_TRIPLE/release"
+  if [ -d "$ALT_RELEASE_DIR" ]; then
+    mapfile -d '' ffi_release_files < <(find "$ALT_RELEASE_DIR" \( -type f -o -type l \) -name 'libasherah_ffi.*' -print0)
+  fi
+fi
+
+if [ ${#ffi_release_files[@]} -eq 0 ]; then
+  mapfile -d '' ffi_release_files < <(find "$TARGET_DIR" -maxdepth 4 -type f \( -name 'libasherah_ffi.*' -o -name 'asherah_ffi.dll' \) ! -path '*/deps/*' -print0)
+fi
+
+if [ ${#ffi_release_files[@]} -eq 0 ]; then
+  echo "[build-bindings] Error: no libasherah_ffi artifacts available under $TARGET_DIR"
+  exit 1
+fi
+
+for lib in "${ffi_release_files[@]}"; do
+    base="$(basename "$lib")"
+    ext="${base##*.}"
+    if [ "$ext" = "d" ]; then
+      continue
+    fi
       normalized="$base"
       case "$base" in
         libasherah_ffi-*.so) normalized="libasherah_ffi.so" ;;
@@ -154,10 +168,9 @@ if requires_core_build; then
         libasherah_ffi-*.dylib) normalized="libasherah_ffi.dylib" ;;
         asherah_ffi-*.dll) normalized="asherah_ffi.dll" ;;
       esac
-      echo "[build-bindings] Copying core artifact $base to $RELEASE_DIR/$normalized"
-      cp "$lib" "$RELEASE_DIR/$normalized"
-    done
-  fi
+    echo "[build-bindings] Copying core artifact $base to $RELEASE_DIR/$normalized"
+    cp "$lib" "$RELEASE_DIR/$normalized"
+  done
 fi
 
 if should_build node || should_build all; then
