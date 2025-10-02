@@ -43,12 +43,12 @@ case "$ARCH" in
   x86_64|amd64)
     DOTNET_RID="linux-x64"
     CARGO_TRIPLE="x86_64-unknown-linux-gnu"
-    NAPI_PLATFORM="linux-x64"
+    NAPI_PLATFORM="linux-x64-gnu"
     ;;
   aarch64|arm64)
     DOTNET_RID="linux-arm64"
     CARGO_TRIPLE="aarch64-unknown-linux-gnu"
-    NAPI_PLATFORM="linux-arm64"
+    NAPI_PLATFORM="linux-arm64-gnu"
     ;;
   *)
     echo "[build-bindings] Unsupported architecture: $ARCH" >&2
