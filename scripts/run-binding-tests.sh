@@ -90,7 +90,10 @@ source "$ROOT_DIR/.venv/bin/activate"
 python3 -m pip install --upgrade pip >/dev/null
 python3 -m pip uninstall -y asherah-py >/dev/null 2>&1 || true
 if compgen -G "$ARTIFACTS_DIR/python/*.whl" >/dev/null; then
-  python3 -m pip install "$ARTIFACTS_DIR"/python/*.whl
+  if ! python3 -m pip install "$ARTIFACTS_DIR"/python/*.whl; then
+    echo "[binding-tests] Wheel install failed, falling back to editable install"
+    python3 -m pip install -e "$ROOT_DIR/asherah-py"
+  fi
 else
   python3 -m pip install -e "$ROOT_DIR/asherah-py"
 fi
