@@ -214,12 +214,27 @@ jobs:
           path: partial/x86_64/java
       - name: Merge partial artifacts
         run: |
-          shopt -s nullglob
-          for part in partial/x86_64/*/artifacts/x86_64/*; do
-            echo "Copying ${part}"
-            cp -R "$part" artifacts/x86_64/
+          shopt -s dotglob nullglob
+          for part_root in partial/x86_64/*; do
+            [ -d "$part_root" ] || continue
+            if compgen -G "$part_root/artifacts/x86_64/*" > /dev/null; then
+              for entry in "$part_root"/artifacts/x86_64/*; do
+                echo "Copying ${entry}"
+                cp -R "$entry" artifacts/x86_64/
+              done
+            fi
+            if compgen -G "$part_root"/* > /dev/null; then
+              for entry in "$part_root"/*; do
+                base="$(basename "$entry")"
+                if [ "$base" = "artifacts" ]; then
+                  continue
+                fi
+                echo "Copying ${entry}"
+                cp -R "$entry" artifacts/x86_64/
+              done
+            fi
           done
-          shopt -u nullglob
+          shopt -u dotglob nullglob
           echo "Assembled x86_64 contents:"
           find artifacts/x86_64 -maxdepth 3 -mindepth 1 -print || true
       - name: Upload consolidated x86_64 artifacts
@@ -258,12 +273,27 @@ jobs:
           path: partial/aarch64/java
       - name: Merge partial artifacts
         run: |
-          shopt -s nullglob
-          for part in partial/aarch64/*/artifacts/aarch64/*; do
-            echo "Copying ${part}"
-            cp -R "$part" artifacts/aarch64/
+          shopt -s dotglob nullglob
+          for part_root in partial/aarch64/*; do
+            [ -d "$part_root" ] || continue
+            if compgen -G "$part_root/artifacts/aarch64/*" > /dev/null; then
+              for entry in "$part_root"/artifacts/aarch64/*; do
+                echo "Copying ${entry}"
+                cp -R "$entry" artifacts/aarch64/
+              done
+            fi
+            if compgen -G "$part_root"/* > /dev/null; then
+              for entry in "$part_root"/*; do
+                base="$(basename "$entry")"
+                if [ "$base" = "artifacts" ]; then
+                  continue
+                fi
+                echo "Copying ${entry}"
+                cp -R "$entry" artifacts/aarch64/
+              done
+            fi
           done
-          shopt -u nullglob
+          shopt -u dotglob nullglob
           echo "Assembled arm64 contents:"
           find artifacts/aarch64 -maxdepth 3 -mindepth 1 -print || true
       - name: Upload consolidated arm64 artifacts
