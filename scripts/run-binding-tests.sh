@@ -88,6 +88,7 @@ python3 -m venv "$ROOT_DIR/.venv"
 # shellcheck source=/dev/null
 source "$ROOT_DIR/.venv/bin/activate"
 python3 -m pip install --upgrade pip >/dev/null
+python3 -m pip install pytest >/dev/null
 python3 -m pip uninstall -y asherah-py >/dev/null 2>&1 || true
 if compgen -G "$ARTIFACTS_DIR/python/*.whl" >/dev/null; then
   if ! python3 -m pip install "$ARTIFACTS_DIR"/python/*.whl; then
