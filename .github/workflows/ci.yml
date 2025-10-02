@@ -1,5 +1,9 @@
 name: CI
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [ main ]
@@ -186,7 +190,7 @@ jobs:
       - package-arm64
       - arm64-test-image
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         binding: [ffi, python, node, dotnet, java]
     steps:

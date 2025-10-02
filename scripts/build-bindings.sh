@@ -200,7 +200,8 @@ if should_build python || should_build all; then
   python3 -m pip install --upgrade pip >/dev/null
   python3 -m pip install --upgrade maturin==1.9.4 >/dev/null
   rm -rf "$ROOT_DIR/target/wheels" "$ROOT_DIR/target/$CARGO_TRIPLE/wheels"
-  maturin build --release --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml" --target "$CARGO_TRIPLE"
+  # Build manylinux-compatible wheel so tests image (glibc 2.31) can install it
+  maturin build --release --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml" --target "$CARGO_TRIPLE" --compatibility manylinux_2_31
   mkdir -p "$OUT_DIR/python"
   PY_WHEEL_DIR="$ROOT_DIR/target/wheels"
   if ! compgen -G "$PY_WHEEL_DIR/*.whl" >/dev/null 2>&1; then
