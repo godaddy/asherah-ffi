@@ -3,6 +3,10 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
 ARTIFACTS_DIR="${BINDING_ARTIFACTS_DIR:?BINDING_ARTIFACTS_DIR must be set}"
+# Some artifact uploads include a nested artifacts/aarch64 prefix; normalize if present.
+if [ -d "$ARTIFACTS_DIR/artifacts/aarch64" ]; then
+  ARTIFACTS_DIR="$ARTIFACTS_DIR/artifacts/aarch64"
+fi
 ARCH="$(uname -m)"
 BINDING_SELECTOR="${BINDING_TESTS_BINDING:-all}"
 BINDING_SELECTOR="${BINDING_SELECTOR,,}"
@@ -101,15 +105,15 @@ if should_run python; then
   source "$ROOT_DIR/.venv/bin/activate"
   PYTHON_VENV_ACTIVE=1
   python3 -m pip install --upgrade pip >/dev/null
-  python3 -m pip install pytest >/dev/null
+  python3 -m pip install -U pytest maturin >/dev/null
   python3 -m pip uninstall -y asherah-py >/dev/null 2>&1 || true
   if compgen -G "$ARTIFACTS_DIR/python/*.whl" >/dev/null; then
     if ! python3 -m pip install "$ARTIFACTS_DIR"/python/*.whl; then
-      echo "[binding-tests] Wheel install failed, falling back to editable install"
-      python3 -m pip install -e "$ROOT_DIR/asherah-py"
+      echo "[binding-tests] Wheel install failed, falling back to maturin develop"
+      python3 -m maturin develop --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml"
     fi
   else
-    python3 -m pip install -e "$ROOT_DIR/asherah-py"
+    python3 -m maturin develop --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml"
   fi
   python3 -m pytest "$ROOT_DIR/asherah-py/tests" -vv
 

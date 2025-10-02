@@ -181,6 +181,13 @@ if should_build node || should_build all; then
   # cross-compilation produces the correct architecture binary.
   npx @napi-rs/cli build --release --platform "$NAPI_PLATFORM" --target "$CARGO_TRIPLE"
   npm run prepublishOnly
+  # Ensure top-level asherah.node exists for test loader convenience
+  if [ ! -f npm/asherah.node ]; then
+    candidate=$(find npm -maxdepth 6 -name '*.node' -print | head -n1 || true)
+    if [ -n "$candidate" ]; then
+      cp "$candidate" npm/asherah.node
+    fi
+  fi
   mkdir -p "$OUT_DIR/node"
   rm -rf "$OUT_DIR/node/npm"
   cp -R npm "$OUT_DIR/node/npm"
