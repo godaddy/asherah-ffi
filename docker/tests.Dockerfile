@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ruby-full \
     patchelf
 
-RUN curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
+RUN curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
     && chmod +x /tmp/dotnet-install.sh \
     && /tmp/dotnet-install.sh --install-dir /usr/share/dotnet --channel 8.0 --no-path \
     && ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet \
