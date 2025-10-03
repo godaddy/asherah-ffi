@@ -203,10 +203,11 @@ if should_run java; then
   echo "[binding-tests] Java"
   # Ensure JNI/FFI libraries are built and discoverable
   export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
+  export ASHERAH_JAVA_NATIVE="$RELEASE_DIR"
   cargo build -p asherah-java --release || true
   mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" \
     -Dnative.build.skip=true \
-    -DargLine="-Djava.library.path=$RELEASE_DIR" \
+    -DargLine="-Djava.library.path=$RELEASE_DIR -Dasherah.java.nativeLibraryPath=$RELEASE_DIR" \
     test
 fi
 
