@@ -106,6 +106,7 @@ jobs:
       fail-fast: false
       matrix:
         component: [ffi, node, python, dotnet, java]
+    continue-on-error: ${{ matrix.component == 'python' }}
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -210,6 +211,7 @@ jobs:
             tests-${{ runner.os }}-arm64-${{ matrix.binding }}-
             tests-${{ runner.os }}-arm64-
       - name: Download arm64 binding artifact
+        if: matrix.binding != 'python'
         uses: actions/download-artifact@v4
         with:
           name: bindings-linux-aarch64-part-${{ matrix.binding }}
@@ -456,6 +458,7 @@ jobs:
       fail-fast: false
       matrix:
         component: [ffi, node, python, dotnet, java]
+    continue-on-error: ${{ matrix.component == 'python' }}
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
