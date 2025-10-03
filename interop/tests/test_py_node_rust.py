@@ -22,6 +22,10 @@ NODE_SCRIPT = NODE_DIR / "scripts" / "interop.js"
 NODE_COMPAT_SCRIPT = ROOT / "interop" / "scripts" / "node_module_runner.js"
 RUST_BIN_DEBUG = ROOT / "target" / "debug" / "asherah-interop"
 RUST_BIN_RELEASE = ROOT / "target" / "release" / "asherah-interop"
+# Also consider explicit CARGO_TARGET_DIR paths (e.g., target/<triple>/...)
+_CARGO_TARGET_DIR = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
+RUST_TRIPLE_DEBUG = _CARGO_TARGET_DIR / "debug" / "asherah-interop"
+RUST_TRIPLE_RELEASE = _CARGO_TARGET_DIR / "release" / "asherah-interop"
 RUBY_DIR = ROOT / "asherah-ruby"
 RUBY_SCRIPT = RUBY_DIR / "scripts" / "interop.rb"
 LEGACY_NODE_DIR = ROOT / "interop" / "legacy-node"
@@ -183,7 +187,15 @@ def node_cli(action: str, partition: str, payload: bytes) -> bytes:
 def rust_cli(action: str, partition: str, payload: bytes) -> bytes:
     payload_b64 = base64.b64encode(payload).decode()
     env = ensure_env({})
-    bin_path = RUST_BIN_DEBUG if RUST_BIN_DEBUG.exists() else RUST_BIN_RELEASE
+    # Prefer plain target/debug, then target/<triple>/debug, then releases.
+    if RUST_BIN_DEBUG.exists():
+        bin_path = RUST_BIN_DEBUG
+    elif RUST_TRIPLE_DEBUG.exists():
+        bin_path = RUST_TRIPLE_DEBUG
+    elif RUST_BIN_RELEASE.exists():
+        bin_path = RUST_BIN_RELEASE
+    else:
+        bin_path = RUST_TRIPLE_RELEASE
     LOGGER.info("rust cli %s partition=%s payload=%d bytes", action, partition, len(payload))
     result = subprocess.run(
         [str(bin_path), action, partition, payload_b64],

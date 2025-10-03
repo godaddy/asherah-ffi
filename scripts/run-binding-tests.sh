@@ -204,7 +204,10 @@ if should_run java; then
   # Ensure JNI/FFI libraries are built and discoverable
   export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
   cargo build -p asherah-java --release || true
-  mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true test
+  mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" \
+    -Dnative.build.skip=true \
+    -DargLine="-Djava.library.path=$RELEASE_DIR" \
+    test
 fi
 
 if [ $PYTHON_VENV_ACTIVE -eq 1 ]; then
