@@ -303,6 +303,7 @@ jobs:
         with:
           name: bindings-linux-x86_64-part-python
           path: partial/x86_64/python
+        continue-on-error: true
       - uses: actions/download-artifact@v4
         with:
           name: bindings-linux-x86_64-part-dotnet
@@ -362,6 +363,7 @@ jobs:
         with:
           name: bindings-linux-aarch64-part-python
           path: partial/aarch64/python
+        continue-on-error: true
       - uses: actions/download-artifact@v4
         with:
           name: bindings-linux-aarch64-part-dotnet

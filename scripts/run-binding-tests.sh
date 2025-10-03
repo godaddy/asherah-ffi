@@ -59,6 +59,7 @@ if compgen -G "$ARTIFACTS_DIR/ffi/libasherah_ffi.*" >/dev/null; then
 fi
 
 export CARGO_TARGET_DIR="$TARGET_DIR"
+export NAPI_RS_CARGO_TARGET_DIR="$CARGO_TARGET_DIR"
 export ASHERAH_DOTNET_NATIVE="$RELEASE_DIR"
 export ASHERAH_RUBY_NATIVE="$RELEASE_DIR"
 export ASHERAH_GO_NATIVE="$RELEASE_DIR"
@@ -98,6 +99,16 @@ if should_run node; then
   pushd "$ROOT_DIR/asherah-node" >/dev/null
   rm -f index.node
   npm install --ignore-scripts >/dev/null
+  # Ensure native addon is compatible with the container's glibc by building locally
+  if ! [ -f "$ROOT_DIR/asherah-node/npm/asherah.node" ]; then
+    echo "[binding-tests] Building Node addon locally for test container"
+    npx @napi-rs/cli build --release || npm run build || true
+    candidate=$(find "$ROOT_DIR/asherah-node/npm" -maxdepth 6 -name '*.node' -print | head -n1 || true)
+    if [ -n "$candidate" ]; then
+      cp "$candidate" "$ROOT_DIR/asherah-node/npm/asherah.node" || true
+    fi
+  fi
+  export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
   npm test
   ensure_bun
   if command -v bun >/dev/null 2>&1; then
@@ -146,6 +157,7 @@ fi
 
 if should_run ffi; then
   echo "[binding-tests] Ruby"
+  export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
   ruby -Iasherah-ruby/lib -Iasherah-ruby/test asherah-ruby/test/round_trip_test.rb
 
   echo "[binding-tests] Go"
