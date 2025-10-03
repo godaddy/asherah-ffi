@@ -93,6 +93,22 @@ if should_run ffi || should_run dotnet || should_run java; then
   ensure_local_ffi
 fi
 
+ensure_interop_bin() {
+  echo "[binding-tests] Building Rust interop CLI (debug + release)"
+  cargo build --manifest-path "$ROOT_DIR/asherah/Cargo.toml" --bin asherah-interop --features sqlite || true
+  cargo build --manifest-path "$ROOT_DIR/asherah/Cargo.toml" --bin asherah-interop --features sqlite --release || true
+  mkdir -p "$ROOT_DIR/target/debug" "$ROOT_DIR/target/release"
+  local dbg_bin rel_bin
+  dbg_bin=$(find "$CARGO_TARGET_DIR/debug" -maxdepth 1 -type f -name asherah-interop -print -quit || true)
+  if [ -n "$dbg_bin" ]; then
+    cp "$dbg_bin" "$ROOT_DIR/target/debug/asherah-interop" || true
+  fi
+  rel_bin=$(find "$CARGO_TARGET_DIR/release" -maxdepth 1 -type f -name asherah-interop -print -quit || true)
+  if [ -n "$rel_bin" ]; then
+    cp "$rel_bin" "$ROOT_DIR/target/release/asherah-interop" || true
+  fi
+}
+
 if should_run node; then
   echo "[binding-tests] Node.js"
   if [ -d "$ARTIFACTS_DIR/node/npm" ]; then
@@ -150,7 +166,9 @@ if should_run python; then
   python3 -m pytest "$ROOT_DIR/asherah-py/tests" -vv
 
   echo "[binding-tests] Interop"
-  python3 -m pytest "$ROOT_DIR/interop/tests"
+  ensure_interop_bin
+  export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
+  python3 -m pytest "$ROOT_DIR/interop/tests" -vv
 fi
 
 if [ "${BINDING_TESTS_FAST_ONLY:-}" = "1" ] && [ "$BINDING_SELECTOR" = "all" ]; then
