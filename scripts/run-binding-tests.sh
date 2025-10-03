@@ -72,6 +72,16 @@ if command -v git >/dev/null 2>&1; then
   git config --global --add safe.directory "$ROOT_DIR" 2>/dev/null || true
 fi
 
+# Provide legacy convenience symlinks so tests that expect /workspace/target/{debug,release}
+# can find artifacts when CARGO_TARGET_DIR includes the target triple.
+mkdir -p "$ROOT_DIR/target"
+if [ -d "$CARGO_TARGET_DIR/debug" ]; then
+  ln -snf "$CARGO_TARGET_DIR/debug" "$ROOT_DIR/target/debug"
+fi
+if [ -d "$CARGO_TARGET_DIR/release" ]; then
+  ln -snf "$CARGO_TARGET_DIR/release" "$ROOT_DIR/target/release"
+fi
+
 # On arm64 tests container, rebuild the FFI library locally to ensure
 # glibc compatibility with the container runtime (e.g., glibc 2.31).
 ensure_local_ffi() {
@@ -173,6 +183,9 @@ fi
 
 if should_run java; then
   echo "[binding-tests] Java"
+  # Ensure JNI/FFI libraries are built and discoverable
+  export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
+  cargo build -p asherah-java --release || true
   mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true test
 fi
 
