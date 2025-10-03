@@ -71,6 +71,17 @@ if command -v git >/dev/null 2>&1; then
   git config --global --add safe.directory "$ROOT_DIR" 2>/dev/null || true
 fi
 
+# On arm64 tests container, rebuild the FFI library locally to ensure
+# glibc compatibility with the container runtime (e.g., glibc 2.31).
+ensure_local_ffi() {
+  echo "[binding-tests] Building local FFI (release) for container"
+  cargo build -p asherah-ffi --release
+}
+
+if should_run ffi || should_run dotnet || should_run java; then
+  ensure_local_ffi
+fi
+
 if should_run node; then
   echo "[binding-tests] Node.js"
   if [ -d "$ARTIFACTS_DIR/node/npm" ]; then
