@@ -205,6 +205,14 @@ if should_run java; then
   export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
   export ASHERAH_JAVA_NATIVE="$RELEASE_DIR"
   cargo build -p asherah-java --release || true
+  # Ensure libasherah_java is present where loader might look (both release and debug dirs)
+  mapfile -t JAVA_LIBS < <(find "$CARGO_TARGET_DIR/release" -maxdepth 1 -type f -name "libasherah_java.*" 2>/dev/null || true)
+  mkdir -p "$TARGET_DIR/debug"
+  for lib in "${JAVA_LIBS[@]:-}"; do
+    [ -n "$lib" ] || continue
+    cp "$lib" "$RELEASE_DIR/" 2>/dev/null || true
+    cp "$lib" "$TARGET_DIR/debug/" 2>/dev/null || true
+  done
   set +e
   mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" \
     -Dnative.build.skip=true \
