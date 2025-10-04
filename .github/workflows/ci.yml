@@ -102,11 +102,11 @@ jobs:
   package-x86_64:
     runs-on: ubuntu-latest
     needs: core-x86_64
+    container: ${{ matrix.component == 'python' && 'quay.io/pypa/manylinux_2_28_x86_64:latest' || null }}
     strategy:
       fail-fast: false
       matrix:
         component: [ffi, node, python, dotnet, java]
-    continue-on-error: ${{ matrix.component == 'python' }}
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -115,6 +115,11 @@ jobs:
       PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
     steps:
       - uses: actions/checkout@v4
+      - name: Install Rust for Python in manylinux container
+        if: matrix.component == 'python'
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       - name: Restore workspace caches
         uses: actions/cache@v4
         with:
@@ -303,7 +308,6 @@ jobs:
         with:
           name: bindings-linux-x86_64-part-python
           path: partial/x86_64/python
-        continue-on-error: true
       - uses: actions/download-artifact@v4
         with:
           name: bindings-linux-x86_64-part-dotnet
@@ -363,7 +367,6 @@ jobs:
         with:
           name: bindings-linux-aarch64-part-python
           path: partial/aarch64/python
-        continue-on-error: true
       - uses: actions/download-artifact@v4
         with:
           name: bindings-linux-aarch64-part-dotnet
@@ -456,11 +459,11 @@ jobs:
   package-arm64:
     runs-on: ubuntu-latest
     needs: core-arm64
+    container: ${{ matrix.component == 'python' && 'quay.io/pypa/manylinux_2_28_aarch64:latest' || null }}
     strategy:
       fail-fast: false
       matrix:
         component: [ffi, node, python, dotnet, java]
-    continue-on-error: ${{ matrix.component == 'python' }}
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -469,6 +472,11 @@ jobs:
       PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
     steps:
       - uses: actions/checkout@v4
+      - name: Install Rust for Python in manylinux container
+        if: matrix.component == 'python'
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       - name: Restore workspace caches
         uses: actions/cache@v4
         with:
