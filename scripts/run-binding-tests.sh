@@ -82,11 +82,19 @@ if [ -d "$CARGO_TARGET_DIR/release" ]; then
   ln -snf "$CARGO_TARGET_DIR/release" "$ROOT_DIR/target/release"
 fi
 
+# Prefer an explicit Ruby native library path to avoid loader ambiguity
+RUBY_LIB_CAND=$(find "$RELEASE_DIR" -maxdepth 1 -type f -name "libasherah_ffi.*" | head -n1 || true)
+if [ -n "$RUBY_LIB_CAND" ]; then
+  export ASHERAH_RUBY_NATIVE="$RUBY_LIB_CAND"
+fi
+
 # On arm64 tests container, rebuild the FFI library locally to ensure
 # glibc compatibility with the container runtime (e.g., glibc 2.31).
 ensure_local_ffi() {
   echo "[binding-tests] Building local FFI (release) for container"
   cargo build -p asherah-ffi --release
+  # Also build debug to satisfy tools that prefer debug paths
+  cargo build -p asherah-ffi || true
 }
 
 if should_run ffi || should_run dotnet || should_run java; then
