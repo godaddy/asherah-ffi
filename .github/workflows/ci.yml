@@ -102,7 +102,6 @@ jobs:
   package-x86_64:
     runs-on: ubuntu-latest
     needs: core-x86_64
-    container: ${{ matrix.component == 'python' && 'quay.io/pypa/manylinux_2_28_x86_64:latest' || null }}
     strategy:
       fail-fast: false
       matrix:
@@ -115,11 +114,6 @@ jobs:
       PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust for Python in manylinux container
-        if: matrix.component == 'python'
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       - name: Restore workspace caches
         uses: actions/cache@v4
         with:
@@ -151,7 +145,16 @@ jobs:
         if: matrix.component == 'dotnet'
         with:
           dotnet-version: '8.0.x'
+      - name: Package ${{ matrix.component }} (x86_64) - manylinux
+        if: matrix.component == 'python'
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --manifest-path asherah-py/Cargo.toml --target x86_64-unknown-linux-gnu --compatibility manylinux_2_28 --out artifacts/x86_64/python
+          manylinux: 2_28
+          rust-toolchain: stable
       - name: Package ${{ matrix.component }} (x86_64)
+        if: matrix.component != 'python'
         env:
           TARGET_ARCH: x86_64
           BINDING_COMPONENTS: ${{ matrix.component }}
@@ -459,7 +462,6 @@ jobs:
   package-arm64:
     runs-on: ubuntu-latest
     needs: core-arm64
-    container: ${{ matrix.component == 'python' && 'quay.io/pypa/manylinux_2_28_aarch64:latest' || null }}
     strategy:
       fail-fast: false
       matrix:
@@ -472,11 +474,6 @@ jobs:
       PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
     steps:
       - uses: actions/checkout@v4
-      - name: Install Rust for Python in manylinux container
-        if: matrix.component == 'python'
-        run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       - name: Restore workspace caches
         uses: actions/cache@v4
         with:
@@ -501,10 +498,12 @@ jobs:
           key: core-target-${{ runner.os }}-arm64-${{ github.run_id }}
           fail-on-cache-miss: true
       - name: Install cross toolchains
+        if: matrix.component != 'python'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config
       - name: Prepare Rust target
+        if: matrix.component != 'python'
         run: rustup target add aarch64-unknown-linux-gnu
       - uses: actions/setup-node@v4
         if: matrix.component == 'node'
@@ -514,7 +513,17 @@ jobs:
         if: matrix.component == 'dotnet'
         with:
           dotnet-version: '8.0.x'
+      - name: Package ${{ matrix.component }} (arm64) - manylinux
+        if: matrix.component == 'python'
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --manifest-path asherah-py/Cargo.toml --target aarch64-unknown-linux-gnu --compatibility manylinux_2_28 --out artifacts/aarch64/python
+          manylinux: 2_28
+          target: aarch64
+          rust-toolchain: stable
       - name: Package ${{ matrix.component }} (arm64)
+        if: matrix.component != 'python'
         env:
           TARGET_ARCH: aarch64
           BINDING_COMPONENTS: ${{ matrix.component }}
