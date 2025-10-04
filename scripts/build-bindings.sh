@@ -177,8 +177,17 @@ if should_build node || should_build all; then
   echo "[build-bindings] Building Node.js addon"
   pushd "$ROOT_DIR/asherah-node" >/dev/null
   npm ci
-  npx @napi-rs/cli build --release --platform "$NAPI_PLATFORM"
+  # Build the Node addon for the explicit Rust target to ensure
+  # cross-compilation produces the correct architecture binary.
+  npx @napi-rs/cli build --release --platform "$NAPI_PLATFORM" --target "$CARGO_TRIPLE"
   npm run prepublishOnly
+  # Ensure top-level asherah.node exists for test loader convenience
+  if [ ! -f npm/asherah.node ]; then
+    candidate=$(find npm -maxdepth 6 -name '*.node' -print | head -n1 || true)
+    if [ -n "$candidate" ]; then
+      cp "$candidate" npm/asherah.node
+    fi
+  fi
   mkdir -p "$OUT_DIR/node"
   rm -rf "$OUT_DIR/node/npm"
   cp -R npm "$OUT_DIR/node/npm"
@@ -191,7 +200,8 @@ if should_build python || should_build all; then
   python3 -m pip install --upgrade pip >/dev/null
   python3 -m pip install --upgrade maturin==1.9.4 >/dev/null
   rm -rf "$ROOT_DIR/target/wheels" "$ROOT_DIR/target/$CARGO_TRIPLE/wheels"
-  maturin build --release --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml" --target "$CARGO_TRIPLE"
+  # Build manylinux-compatible wheel (glibc 2.28)
+  maturin build --release --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml" --target "$CARGO_TRIPLE" --compatibility manylinux_2_28
   mkdir -p "$OUT_DIR/python"
   PY_WHEEL_DIR="$ROOT_DIR/target/wheels"
   if ! compgen -G "$PY_WHEEL_DIR/*.whl" >/dev/null 2>&1; then

@@ -1,5 +1,9 @@
 name: CI
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches: [ main ]
@@ -126,11 +130,19 @@ jobs:
             build-${{ runner.os }}-x86_64-${{ matrix.component }}-
             build-${{ runner.os }}-x86_64-
       - name: Restore x86_64 core artifacts
+        if: matrix.component != 'python'
         uses: actions/cache/restore@v4
         with:
           path: |
             target/x86_64-unknown-linux-gnu
             target/release
+          key: core-target-${{ runner.os }}-x86_64-${{ github.run_id }}
+          fail-on-cache-miss: true
+      - name: Restore x86_64 core artifacts (Python only target-specific)
+        if: matrix.component == 'python'
+        uses: actions/cache/restore@v4
+        with:
+          path: target/x86_64-unknown-linux-gnu
           key: core-target-${{ runner.os }}-x86_64-${{ github.run_id }}
           fail-on-cache-miss: true
       - uses: actions/setup-node@v4
@@ -141,7 +153,16 @@ jobs:
         if: matrix.component == 'dotnet'
         with:
           dotnet-version: '8.0.x'
+      - name: Package ${{ matrix.component }} (x86_64) - manylinux
+        if: matrix.component == 'python'
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/x86_64/python
+          manylinux: 2_28
+          rust-toolchain: stable
       - name: Package ${{ matrix.component }} (x86_64)
+        if: matrix.component != 'python'
         env:
           TARGET_ARCH: x86_64
           BINDING_COMPONENTS: ${{ matrix.component }}
@@ -186,7 +207,7 @@ jobs:
       - package-arm64
       - arm64-test-image
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         binding: [ffi, python, node, dotnet, java]
     steps:
@@ -206,9 +227,15 @@ jobs:
             tests-${{ runner.os }}-arm64-${{ matrix.binding }}-
             tests-${{ runner.os }}-arm64-
       - name: Download arm64 binding artifact
+        if: matrix.binding != 'python'
         uses: actions/download-artifact@v4
         with:
           name: bindings-linux-aarch64-part-${{ matrix.binding }}
+          path: artifacts/aarch64
+      - name: Download arm64 core FFI artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bindings-linux-aarch64-part-ffi
           path: artifacts/aarch64
       - name: Download arm64 test image
         uses: actions/download-artifact@v4
@@ -471,6 +498,7 @@ jobs:
             build-${{ runner.os }}-arm64-${{ matrix.component }}-
             build-${{ runner.os }}-arm64-
       - name: Restore arm64 core artifacts
+        if: matrix.component != 'python'
         uses: actions/cache/restore@v4
         with:
           path: |
@@ -478,11 +506,20 @@ jobs:
             target/release
           key: core-target-${{ runner.os }}-arm64-${{ github.run_id }}
           fail-on-cache-miss: true
+      - name: Restore arm64 core artifacts (Python only target-specific)
+        if: matrix.component == 'python'
+        uses: actions/cache/restore@v4
+        with:
+          path: target/aarch64-unknown-linux-gnu
+          key: core-target-${{ runner.os }}-arm64-${{ github.run_id }}
+          fail-on-cache-miss: true
       - name: Install cross toolchains
+        if: matrix.component != 'python'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config
       - name: Prepare Rust target
+        if: matrix.component != 'python'
         run: rustup target add aarch64-unknown-linux-gnu
       - uses: actions/setup-node@v4
         if: matrix.component == 'node'
@@ -492,7 +529,17 @@ jobs:
         if: matrix.component == 'dotnet'
         with:
           dotnet-version: '8.0.x'
+      - name: Package ${{ matrix.component }} (arm64) - manylinux
+        if: matrix.component == 'python'
+        uses: PyO3/maturin-action@v1
+        with:
+          command: build
+          args: --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/aarch64/python
+          manylinux: 2_28
+          target: aarch64
+          rust-toolchain: stable
       - name: Package ${{ matrix.component }} (arm64)
+        if: matrix.component != 'python'
         env:
           TARGET_ARCH: aarch64
           BINDING_COMPONENTS: ${{ matrix.component }}
