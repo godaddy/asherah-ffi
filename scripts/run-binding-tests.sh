@@ -205,10 +205,18 @@ if should_run java; then
   export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
   export ASHERAH_JAVA_NATIVE="$RELEASE_DIR"
   cargo build -p asherah-java --release || true
+  set +e
   mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" \
     -Dnative.build.skip=true \
     -DargLine="-Djava.library.path=$RELEASE_DIR -Dasherah.java.nativeLibraryPath=$RELEASE_DIR" \
     test
+  MVN_RC=$?
+  if [ $MVN_RC -ne 0 ]; then
+    echo "[binding-tests] Java test failed; dumping surefire reports"
+    find "$ROOT_DIR/asherah-java/java/target/surefire-reports" -type f -maxdepth 1 -print -exec sh -c 'echo "----- {} -----"; sed -n "1,240p" "{}"' \; 2>/dev/null || true
+    exit $MVN_RC
+  fi
+  set -e
 fi
 
 if [ $PYTHON_VENV_ACTIVE -eq 1 ]; then
