@@ -156,6 +156,12 @@ jobs:
       - name: Package ${{ matrix.component }} (x86_64) - manylinux
         if: matrix.component == 'python'
         uses: PyO3/maturin-action@v1
+        env:
+          CARGO_HOME:
+          RUSTUP_HOME:
+          NPM_CONFIG_CACHE:
+          BUN_INSTALL:
+          PIP_CACHE_DIR:
         with:
           command: build
           args: --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/x86_64/python
@@ -532,6 +538,12 @@ jobs:
       - name: Package ${{ matrix.component }} (arm64) - manylinux
         if: matrix.component == 'python'
         uses: PyO3/maturin-action@v1
+        env:
+          CARGO_HOME:
+          RUSTUP_HOME:
+          NPM_CONFIG_CACHE:
+          BUN_INSTALL:
+          PIP_CACHE_DIR:
         with:
           command: build
           args: --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/aarch64/python
