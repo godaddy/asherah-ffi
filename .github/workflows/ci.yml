@@ -147,12 +147,18 @@ jobs:
         if: matrix.component == 'dotnet'
         with:
           dotnet-version: '8.0.x'
-      - name: Clean workspace for Python build
+      - name: Restore x86_64 core artifacts for Python
+        if: matrix.component == 'python'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            target/x86_64-unknown-linux-gnu
+            target/release
+          key: core-target-${{ runner.os }}-x86_64-${{ github.run_id }}
+          fail-on-cache-miss: true
+      - name: Prepare Python build directory
         if: matrix.component == 'python'
         run: |
-          rm -rf target || true
-          rm -rf .cache/cargo || true
-          rm -rf .cache/rustup || true
           rm -rf artifacts/x86_64/python || true
           mkdir -p artifacts/x86_64/python
       - name: Package ${{ matrix.component }} (x86_64) - manylinux
@@ -531,12 +537,18 @@ jobs:
         if: matrix.component == 'dotnet'
         with:
           dotnet-version: '8.0.x'
-      - name: Clean workspace for Python build
+      - name: Restore arm64 core artifacts for Python
+        if: matrix.component == 'python'
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            target/aarch64-unknown-linux-gnu
+            target/release
+          key: core-target-${{ runner.os }}-arm64-${{ github.run_id }}
+          fail-on-cache-miss: true
+      - name: Prepare Python build directory
         if: matrix.component == 'python'
         run: |
-          rm -rf target || true
-          rm -rf .cache/cargo || true
-          rm -rf .cache/rustup || true
           rm -rf artifacts/aarch64/python || true
           mkdir -p artifacts/aarch64/python
       - name: Set up QEMU for ARM64
@@ -554,8 +566,9 @@ jobs:
             bash -c "
               curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
               source \$HOME/.cargo/env
+              rustup target add aarch64-unknown-linux-gnu
               /opt/python/cp38-cp38/bin/pip install maturin
-              /opt/python/cp38-cp38/bin/maturin build --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/aarch64/python
+              /opt/python/cp38-cp38/bin/maturin build --release --target aarch64-unknown-linux-gnu --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/aarch64/python
             "
 
       - name: Package ${{ matrix.component }} (arm64)
