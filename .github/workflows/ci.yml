@@ -144,7 +144,7 @@ jobs:
         with:
           path: target/x86_64-unknown-linux-gnu
           key: core-target-${{ runner.os }}-x86_64-${{ github.run_id }}
-          fail-on-cache-miss: true
+          fail-on-cache-miss: false
       - uses: actions/setup-node@v4
         if: matrix.component == 'node'
         with:
@@ -512,7 +512,7 @@ jobs:
         with:
           path: target/aarch64-unknown-linux-gnu
           key: core-target-${{ runner.os }}-arm64-${{ github.run_id }}
-          fail-on-cache-miss: true
+          fail-on-cache-miss: false
       - name: Install cross toolchains
         if: matrix.component != 'python'
         run: |
