@@ -557,7 +557,7 @@ jobs:
           docker run --rm \
             -v "$PWD":/io \
             -w /io \
-            messense/manylinux_2_28-cross:aarch64 \
+            messense/manylinux_2_28-cross:x86_64 \
             bash -c "
               curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
               source \$HOME/.cargo/env
