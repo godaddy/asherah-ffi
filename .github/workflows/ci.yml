@@ -147,6 +147,9 @@ jobs:
         if: matrix.component == 'dotnet'
         with:
           dotnet-version: '8.0.x'
+      - name: Clean workspace for Python build
+        if: matrix.component == 'python'
+        run: rm -rf target || true
       - name: Package ${{ matrix.component }} (x86_64) - manylinux
         if: matrix.component == 'python'
         uses: PyO3/maturin-action@v1
@@ -517,6 +520,9 @@ jobs:
         if: matrix.component == 'dotnet'
         with:
           dotnet-version: '8.0.x'
+      - name: Clean workspace for Python build
+        if: matrix.component == 'python'
+        run: rm -rf target || true
       - name: Package ${{ matrix.component }} (arm64) - manylinux
         if: matrix.component == 'python'
         uses: PyO3/maturin-action@v1
