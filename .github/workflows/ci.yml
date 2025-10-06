@@ -153,6 +153,8 @@ jobs:
           rm -rf target || true
           rm -rf .cache/cargo || true
           rm -rf .cache/rustup || true
+          rm -rf artifacts/x86_64/python || true
+          mkdir -p artifacts/x86_64/python
       - name: Package ${{ matrix.component }} (x86_64) - manylinux
         if: matrix.component == 'python'
         uses: PyO3/maturin-action@v1
@@ -535,6 +537,8 @@ jobs:
           rm -rf target || true
           rm -rf .cache/cargo || true
           rm -rf .cache/rustup || true
+          rm -rf artifacts/aarch64/python || true
+          mkdir -p artifacts/aarch64/python
       - name: Package ${{ matrix.component }} (arm64) - manylinux
         if: matrix.component == 'python'
         uses: PyO3/maturin-action@v1
