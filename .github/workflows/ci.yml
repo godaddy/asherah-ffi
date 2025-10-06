@@ -551,25 +551,23 @@ jobs:
         run: |
           rm -rf artifacts/aarch64/python || true
           mkdir -p artifacts/aarch64/python
-      - name: Package ${{ matrix.component }} (arm64) - manylinux
+      - name: Install cross-compile toolchain for arm64
         if: matrix.component == 'python'
         run: |
-          docker run --rm \
-            -v "$PWD":/io \
-            -w /io \
-            quay.io/pypa/manylinux_2_28_x86_64:latest \
-            bash -c "
-              yum install -y gcc-aarch64-linux-gnu gcc-c++-aarch64-linux-gnu binutils-aarch64-linux-gnu glibc-devel.aarch64
-              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
-              source \$HOME/.cargo/env
-              rustup target add aarch64-unknown-linux-gnu
-              /opt/python/cp311-cp311/bin/pip install maturin
-              export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
-              export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
-              export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
-              export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-              /opt/python/cp311-cp311/bin/maturin build --release --target aarch64-unknown-linux-gnu --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/aarch64/python
-            "
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: Build Python wheel for arm64 (using cached core artifacts)
+        if: matrix.component == 'python'
+        env:
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          pip install maturin
+          rustup target add aarch64-unknown-linux-gnu
+          # Build with cached arm64 core artifacts - only compiles the Python binding wrapper
+          maturin build --release --target aarch64-unknown-linux-gnu --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/aarch64/python
 
       - name: Package ${{ matrix.component }} (arm64)
         if: matrix.component != 'python'
