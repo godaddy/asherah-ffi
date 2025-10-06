@@ -115,6 +115,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
+        if: matrix.component != 'python'
         uses: actions/cache@v4
         with:
           path: |
@@ -154,8 +155,6 @@ jobs:
           args: --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/x86_64/python
           manylinux: 2_28
           rust-toolchain: stable
-          before-script-linux: |
-            rm -rf target || true
       - name: Package ${{ matrix.component }} (x86_64)
         if: matrix.component != 'python'
         env:
@@ -478,6 +477,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
+        if: matrix.component != 'python'
         uses: actions/cache@v4
         with:
           path: |
@@ -526,8 +526,6 @@ jobs:
           manylinux: 2_28
           target: aarch64
           rust-toolchain: stable
-          before-script-linux: |
-            rm -rf target || true
       - name: Package ${{ matrix.component }} (arm64)
         if: matrix.component != 'python'
         env:
