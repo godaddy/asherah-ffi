@@ -138,13 +138,6 @@ jobs:
             target/release
           key: core-target-${{ runner.os }}-x86_64-${{ github.run_id }}
           fail-on-cache-miss: true
-      - name: Restore x86_64 core artifacts (Python only target-specific)
-        if: matrix.component == 'python'
-        uses: actions/cache/restore@v4
-        with:
-          path: target/x86_64-unknown-linux-gnu
-          key: core-target-${{ runner.os }}-x86_64-${{ github.run_id }}
-          fail-on-cache-miss: false
       - uses: actions/setup-node@v4
         if: matrix.component == 'node'
         with:
@@ -506,13 +499,6 @@ jobs:
             target/release
           key: core-target-${{ runner.os }}-arm64-${{ github.run_id }}
           fail-on-cache-miss: true
-      - name: Restore arm64 core artifacts (Python only target-specific)
-        if: matrix.component == 'python'
-        uses: actions/cache/restore@v4
-        with:
-          path: target/aarch64-unknown-linux-gnu
-          key: core-target-${{ runner.os }}-arm64-${{ github.run_id }}
-          fail-on-cache-miss: false
       - name: Install cross toolchains
         if: matrix.component != 'python'
         run: |
