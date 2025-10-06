@@ -149,15 +149,13 @@ jobs:
       - name: Package ${{ matrix.component }} (x86_64) - manylinux
         if: matrix.component == 'python'
         uses: PyO3/maturin-action@v1
-        env:
-          CARGO_HOME: ""
-          RUSTUP_HOME: ""
-          CARGO_TARGET_DIR: ""
         with:
           command: build
           args: --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/x86_64/python
           manylinux: 2_28
           rust-toolchain: stable
+          before-script-linux: |
+            rm -rf target || true
       - name: Package ${{ matrix.component }} (x86_64)
         if: matrix.component != 'python'
         env:
@@ -522,16 +520,14 @@ jobs:
       - name: Package ${{ matrix.component }} (arm64) - manylinux
         if: matrix.component == 'python'
         uses: PyO3/maturin-action@v1
-        env:
-          CARGO_HOME: ""
-          RUSTUP_HOME: ""
-          CARGO_TARGET_DIR: ""
         with:
           command: build
           args: --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/aarch64/python
           manylinux: 2_28
           target: aarch64
           rust-toolchain: stable
+          before-script-linux: |
+            rm -rf target || true
       - name: Package ${{ matrix.component }} (arm64)
         if: matrix.component != 'python'
         env:
