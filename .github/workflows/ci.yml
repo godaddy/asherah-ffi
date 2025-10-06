@@ -557,17 +557,18 @@ jobs:
           docker run --rm \
             -v "$PWD":/io \
             -w /io \
-            messense/manylinux_2_28-cross:x86_64 \
+            quay.io/pypa/manylinux_2_28_x86_64:latest \
             bash -c "
+              yum install -y gcc-aarch64-linux-gnu gcc-c++-aarch64-linux-gnu binutils-aarch64-linux-gnu
               curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
               source \$HOME/.cargo/env
               rustup target add aarch64-unknown-linux-gnu
-              pip3.11 install maturin
+              /opt/python/cp311-cp311/bin/pip install maturin
               export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
               export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
               export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
               export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-              maturin build --release --target aarch64-unknown-linux-gnu --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/aarch64/python
+              /opt/python/cp311-cp311/bin/maturin build --release --target aarch64-unknown-linux-gnu --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/aarch64/python
             "
 
       - name: Package ${{ matrix.component }} (arm64)
