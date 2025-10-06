@@ -149,13 +149,13 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Clean workspace for Python build
         if: matrix.component == 'python'
-        run: rm -rf target || true
+        run: |
+          rm -rf target || true
+          rm -rf .cache/cargo || true
+          rm -rf .cache/rustup || true
       - name: Package ${{ matrix.component }} (x86_64) - manylinux
         if: matrix.component == 'python'
         uses: PyO3/maturin-action@v1
-        env:
-          CARGO_HOME: ""
-          RUSTUP_HOME: ""
         with:
           command: build
           args: --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/x86_64/python
@@ -525,13 +525,13 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Clean workspace for Python build
         if: matrix.component == 'python'
-        run: rm -rf target || true
+        run: |
+          rm -rf target || true
+          rm -rf .cache/cargo || true
+          rm -rf .cache/rustup || true
       - name: Package ${{ matrix.component }} (arm64) - manylinux
         if: matrix.component == 'python'
         uses: PyO3/maturin-action@v1
-        env:
-          CARGO_HOME: ""
-          RUSTUP_HOME: ""
         with:
           command: build
           args: --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/aarch64/python
