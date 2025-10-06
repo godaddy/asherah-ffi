@@ -157,18 +157,18 @@ jobs:
           mkdir -p artifacts/x86_64/python
       - name: Package ${{ matrix.component }} (x86_64) - manylinux
         if: matrix.component == 'python'
-        uses: PyO3/maturin-action@v1
-        env:
-          CARGO_HOME:
-          RUSTUP_HOME:
-          NPM_CONFIG_CACHE:
-          BUN_INSTALL:
-          PIP_CACHE_DIR:
-        with:
-          command: build
-          args: --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/x86_64/python
-          manylinux: 2_28
-          rust-toolchain: stable
+        run: |
+          docker run --rm \
+            -v "$PWD":/io \
+            -w /io \
+            quay.io/pypa/manylinux_2_28_x86_64:latest \
+            bash -c "
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+              source \$HOME/.cargo/env
+              pip3 install maturin
+              maturin build --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/x86_64/python
+            "
+
       - name: Package ${{ matrix.component }} (x86_64)
         if: matrix.component != 'python'
         env:
@@ -539,21 +539,25 @@ jobs:
           rm -rf .cache/rustup || true
           rm -rf artifacts/aarch64/python || true
           mkdir -p artifacts/aarch64/python
+      - name: Set up QEMU for ARM64
+        if: matrix.component == 'python'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
       - name: Package ${{ matrix.component }} (arm64) - manylinux
         if: matrix.component == 'python'
-        uses: PyO3/maturin-action@v1
-        env:
-          CARGO_HOME:
-          RUSTUP_HOME:
-          NPM_CONFIG_CACHE:
-          BUN_INSTALL:
-          PIP_CACHE_DIR:
-        with:
-          command: build
-          args: --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/aarch64/python
-          manylinux: 2_28
-          target: aarch64
-          rust-toolchain: stable
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD":/io \
+            -w /io \
+            quay.io/pypa/manylinux_2_28_aarch64:latest \
+            bash -c "
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+              source \$HOME/.cargo/env
+              pip3 install maturin
+              maturin build --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/aarch64/python
+            "
+
       - name: Package ${{ matrix.component }} (arm64)
         if: matrix.component != 'python'
         env:
