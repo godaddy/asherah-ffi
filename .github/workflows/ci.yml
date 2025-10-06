@@ -564,10 +564,15 @@ jobs:
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: |
-          pip install maturin
+          pip install maturin auditwheel patchelf
           rustup target add aarch64-unknown-linux-gnu
           # Build with cached arm64 core artifacts - only compiles the Python binding wrapper
-          maturin build --release --target aarch64-unknown-linux-gnu --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/aarch64/python
+          # Skip auditwheel because GitHub runner has too-new GLIBC
+          maturin build --release --target aarch64-unknown-linux-gnu --manifest-path asherah-py/Cargo.toml --skip-auditwheel --out artifacts/aarch64/python
+          # Manually repair with correct manylinux tag
+          for wheel in artifacts/aarch64/python/*.whl; do
+            auditwheel repair --plat manylinux_2_28_aarch64 -w artifacts/aarch64/python "$wheel" && rm "$wheel"
+          done
 
       - name: Package ${{ matrix.component }} (arm64)
         if: matrix.component != 'python'
