@@ -165,8 +165,8 @@ jobs:
             bash -c "
               curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
               source \$HOME/.cargo/env
-              pip3 install maturin
-              maturin build --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/x86_64/python
+              /opt/python/cp38-cp38/bin/pip install maturin
+              /opt/python/cp38-cp38/bin/maturin build --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/x86_64/python
             "
 
       - name: Package ${{ matrix.component }} (x86_64)
@@ -554,8 +554,8 @@ jobs:
             bash -c "
               curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
               source \$HOME/.cargo/env
-              pip3 install maturin
-              maturin build --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/aarch64/python
+              /opt/python/cp38-cp38/bin/pip install maturin
+              /opt/python/cp38-cp38/bin/maturin build --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 --out artifacts/aarch64/python
             "
 
       - name: Package ${{ matrix.component }} (arm64)
