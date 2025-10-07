@@ -456,23 +456,23 @@ jobs:
           key: build-${{ runner.os }}-arm64-core-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
           restore-keys: |
             build-${{ runner.os }}-arm64-core-
-      - name: Install cross toolchains
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: linux/arm64
+      - name: Build FFI core (arm64) in manylinux container
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config
-      - name: Prepare Rust target
-        run: rustup target add aarch64-unknown-linux-gnu
-      - name: Build FFI core (arm64)
-        env:
-          TARGET_ARCH: aarch64
-          BINDING_COMPONENTS: ffi
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_AR: aarch64-linux-gnu-ar
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
-          PKG_CONFIG_ALLOW_CROSS: 1
-        run: ./scripts/build-bindings.sh
+          docker run --rm \
+            -v "$PWD":/io \
+            -w /io \
+            --platform linux/arm64 \
+            quay.io/pypa/manylinux_2_28_aarch64:latest \
+            bash -c "
+              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+              source \$HOME/.cargo/env
+              rustup target add aarch64-unknown-linux-gnu
+              TARGET_ARCH=aarch64 BINDING_COMPONENTS=ffi ./scripts/build-bindings.sh
+            "
       - name: Cache arm64 core artifacts
         uses: actions/cache/save@v4
         with:
