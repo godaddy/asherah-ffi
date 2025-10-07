@@ -26,3 +26,17 @@ Emulated builds are unacceptably slow (60-90 minutes vs 5-10 minutes) and are fo
 - Install cross-compile toolchains (gcc-aarch64-linux-gnu, etc.)
 - Set proper environment variables for cross-compilation
 - Trust pre-built artifacts from earlier pipeline stages
+
+### Current Hardcoded Assumptions
+
+The CI workflow currently assumes x86_64 as the native architecture and cross-compiles to aarch64:
+- Job names: `core-x86_64`, `package-x86_64`, `core-arm64`, `package-arm64`
+- Artifact paths: `artifacts/x86_64`, `artifacts/aarch64`
+- Cache keys: `-x86_64-`, `-arm64-`
+- Manylinux containers: `manylinux_2_28_x86_64` for native, cross-compilers for aarch64
+
+**Future Work**: The workflow could be made bidirectional by:
+1. Detecting host architecture (`uname -m`)
+2. Setting native=x86_64 cross=aarch64 (or vice versa)
+3. Using variables throughout instead of hardcoded values
+4. This would allow the same workflow to run on ARM64 laptops/runners
