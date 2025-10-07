@@ -477,8 +477,8 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: |
-            target/aarch64-unknown-linux-gnu
-            target/release
+            ${{ github.workspace }}/target/aarch64-unknown-linux-gnu
+            ${{ github.workspace }}/target/release
           key: core-target-${{ runner.os }}-arm64-${{ github.run_id }}
 
   package-arm64:
@@ -517,8 +517,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            target/aarch64-unknown-linux-gnu
-            target/release
+            ${{ github.workspace }}/target/aarch64-unknown-linux-gnu
+            ${{ github.workspace }}/target/release
           key: core-target-${{ runner.os }}-arm64-${{ github.run_id }}
           fail-on-cache-miss: true
       - name: Install cross toolchains
@@ -542,8 +542,8 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: |
-            target/aarch64-unknown-linux-gnu
-            target/release
+            ${{ github.workspace }}/target/aarch64-unknown-linux-gnu
+            ${{ github.workspace }}/target/release
           key: core-target-${{ runner.os }}-arm64-${{ github.run_id }}
           fail-on-cache-miss: true
       - name: Prepare Python build directory
