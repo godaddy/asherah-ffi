@@ -456,17 +456,20 @@ jobs:
           key: build-${{ runner.os }}-arm64-core-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
           restore-keys: |
             build-${{ runner.os }}-arm64-core-
-      - name: Build FFI core (arm64) with manylinux_2_28 sysroot
+      - name: Build FFI core (arm64) by cross-compilation
         run: |
           docker run --rm \
             -v "$PWD":/io \
             -w /io \
             quay.io/pypa/manylinux_2_28_x86_64:latest \
             bash -c "
+              set -ex
               curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
               source \$HOME/.cargo/env
               rustup target add aarch64-unknown-linux-gnu
-              yum install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu glibc-devel.aarch64
+              yum install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+              which aarch64-linux-gnu-gcc || echo 'gcc not found in PATH'
+              aarch64-linux-gnu-gcc --version || echo 'gcc not executable'
               export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
               export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
               export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
