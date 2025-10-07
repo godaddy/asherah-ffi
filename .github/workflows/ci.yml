@@ -432,7 +432,7 @@ jobs:
           path: artifacts/aarch64/**
 
   core-arm64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04  # glibc 2.31, same as Debian Bullseye test container
     needs: lint
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
@@ -456,29 +456,22 @@ jobs:
           key: build-${{ runner.os }}-arm64-core-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
           restore-keys: |
             build-${{ runner.os }}-arm64-core-
-      - name: Build FFI core (arm64) by cross-compilation
+      - name: Install cross-compile toolchain for arm64
         run: |
-          docker run --rm \
-            -v "$PWD":/io \
-            -w /io \
-            quay.io/pypa/manylinux_2_28_x86_64:latest \
-            bash -c "
-              set -ex
-              curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
-              source \$HOME/.cargo/env
-              rustup target add aarch64-unknown-linux-gnu
-              yum install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
-              # Try to find and install sysroot package
-              yum list available | grep -i aarch64 | grep -i sysroot || echo 'No sysroot package found'
-              yum install -y filesystem-aarch64-linux-gnu || echo 'filesystem package not available'
-              ls -la /usr/aarch64-linux-gnu/ || echo 'No sysroot directory'
-              export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
-              export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
-              export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
-              export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-              export PKG_CONFIG_ALLOW_CROSS=1
-              TARGET_ARCH=aarch64 BINDING_COMPONENTS=ffi ./scripts/build-bindings.sh
-            "
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: Build FFI core (arm64) via cross-compilation
+        env:
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          PKG_CONFIG_ALLOW_CROSS: 1
+          TARGET_ARCH: aarch64
+          BINDING_COMPONENTS: ffi
+        run: |
+          rustup target add aarch64-unknown-linux-gnu
+          ./scripts/build-bindings.sh
       - name: Cache arm64 core artifacts
         uses: actions/cache/save@v4
         with:
