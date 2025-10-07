@@ -432,7 +432,7 @@ jobs:
           path: artifacts/aarch64/**
 
   core-arm64:
-    runs-on: ubuntu-20.04  # glibc 2.31, same as Debian Bullseye test container
+    runs-on: ubuntu-latest  # Cross-compile with proper sysroot
     needs: lint
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
