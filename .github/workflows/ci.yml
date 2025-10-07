@@ -477,9 +477,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: arm64-core-artifacts
-          path: |
-            target/aarch64-unknown-linux-gnu
-            target/release
+          path: target/
 
   package-arm64:
     runs-on: ubuntu-latest
@@ -517,7 +515,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: arm64-core-artifacts
-          path: .
+          path: target/
       - name: Install cross toolchains
         if: matrix.component != 'python'
         run: |
@@ -539,7 +537,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: arm64-core-artifacts
-          path: .
+          path: target/
       - name: Prepare Python build directory
         if: matrix.component == 'python'
         run: |
