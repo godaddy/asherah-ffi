@@ -128,6 +128,12 @@ SKIP_CORE_BUILD="${SKIP_CORE_BUILD:-0}"
 if requires_core_build; then
   if [ "$SKIP_CORE_BUILD" = "1" ]; then
     echo "[build-bindings] Skipping core build; reusing cached artifacts"
+    echo "[build-bindings] TARGET_DIR=$TARGET_DIR"
+    echo "[build-bindings] CARGO_RELEASE_DIR=$CARGO_RELEASE_DIR"
+    echo "[build-bindings] Contents of TARGET_DIR:"
+    find "$TARGET_DIR" -maxdepth 3 -print || true
+    echo "[build-bindings] Contents of $ROOT_DIR/target:"
+    ls -la "$ROOT_DIR/target/" || true
   else
     echo "[build-bindings] Building core FFI library (release)"
     cargo build --release -p asherah-ffi --target "$CARGO_TRIPLE"
