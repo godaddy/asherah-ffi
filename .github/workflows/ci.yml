@@ -468,8 +468,10 @@ jobs:
               source \$HOME/.cargo/env
               rustup target add aarch64-unknown-linux-gnu
               yum install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
-              which aarch64-linux-gnu-gcc || echo 'gcc not found in PATH'
-              aarch64-linux-gnu-gcc --version || echo 'gcc not executable'
+              # Try to find and install sysroot package
+              yum list available | grep -i aarch64 | grep -i sysroot || echo 'No sysroot package found'
+              yum install -y filesystem-aarch64-linux-gnu || echo 'filesystem package not available'
+              ls -la /usr/aarch64-linux-gnu/ || echo 'No sysroot directory'
               export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
               export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
               export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
