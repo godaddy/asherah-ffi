@@ -432,8 +432,9 @@ jobs:
           path: artifacts/aarch64/**
 
   core-arm64:
-    runs-on: ubuntu-20.04  # glibc 2.31 matches test container
+    runs-on: ubuntu-latest
     needs: lint
+    container: debian:bullseye  # glibc 2.31, same as test container
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -458,8 +459,13 @@ jobs:
             build-${{ runner.os }}-arm64-core-
       - name: Install cross-compile toolchain for arm64
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          apt-get update
+          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu curl
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          . "$HOME/.cargo/env"
+          rustup target add aarch64-unknown-linux-gnu
       - name: Build FFI core (arm64) via cross-compilation
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -470,7 +476,7 @@ jobs:
           TARGET_ARCH: aarch64
           BINDING_COMPONENTS: ffi
         run: |
-          rustup target add aarch64-unknown-linux-gnu
+          . "$HOME/.cargo/env"
           ./scripts/build-bindings.sh
       - name: Cache arm64 core artifacts
         uses: actions/cache/save@v4
