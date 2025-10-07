@@ -88,13 +88,10 @@ if [ -n "$RUBY_LIB_CAND" ]; then
   export ASHERAH_RUBY_NATIVE="$RUBY_LIB_CAND"
 fi
 
-# On arm64 tests container, rebuild the FFI library locally to ensure
-# glibc compatibility with the container runtime (e.g., glibc 2.31).
+# Pre-built artifacts from manylinux_2_28 (glibc 2.28) are compatible with
+# Debian Bullseye (glibc 2.31). No rebuild needed.
 ensure_local_ffi() {
-  echo "[binding-tests] Building local FFI (release) for container"
-  cargo build -p asherah-ffi --release
-  # Also build debug to satisfy tools that prefer debug paths
-  cargo build -p asherah-ffi || true
+  echo "[binding-tests] Using pre-built FFI artifacts (manylinux_2_28 compatible)"
 }
 
 if should_run ffi || should_run dotnet || should_run java; then
@@ -102,19 +99,9 @@ if should_run ffi || should_run dotnet || should_run java; then
 fi
 
 ensure_interop_bin() {
-  echo "[binding-tests] Building Rust interop CLI (debug + release)"
-  cargo build --manifest-path "$ROOT_DIR/asherah/Cargo.toml" --bin asherah-interop --features sqlite || true
-  cargo build --manifest-path "$ROOT_DIR/asherah/Cargo.toml" --bin asherah-interop --features sqlite --release || true
-  mkdir -p "$ROOT_DIR/target/debug" "$ROOT_DIR/target/release"
-  local dbg_bin rel_bin
-  dbg_bin=$(find "$CARGO_TARGET_DIR/debug" -maxdepth 1 -type f -name asherah-interop -print -quit || true)
-  if [ -n "$dbg_bin" ]; then
-    cp "$dbg_bin" "$ROOT_DIR/target/debug/asherah-interop" || true
-  fi
-  rel_bin=$(find "$CARGO_TARGET_DIR/release" -maxdepth 1 -type f -name asherah-interop -print -quit || true)
-  if [ -n "$rel_bin" ]; then
-    cp "$rel_bin" "$ROOT_DIR/target/release/asherah-interop" || true
-  fi
+  # Skip rebuild - interop tests are disabled in fast mode (BINDING_TESTS_FAST_ONLY=1)
+  # and pre-built artifacts are compatible
+  echo "[binding-tests] Skipping interop build (fast mode enabled)"
 }
 
 if should_run node; then
@@ -133,14 +120,10 @@ if should_run node; then
   pushd "$ROOT_DIR/asherah-node" >/dev/null
   rm -f index.node
   npm install --ignore-scripts >/dev/null
-  # Ensure native addon is compatible with the container's glibc by building locally
+  # Pre-built .node addon from artifacts is glibc 2.28 compatible
   if ! [ -f "$ROOT_DIR/asherah-node/npm/asherah.node" ]; then
-    echo "[binding-tests] Building Node addon locally for test container"
-    npx @napi-rs/cli build --release || npm run build || true
-    candidate=$(find "$ROOT_DIR/asherah-node/npm" -maxdepth 6 -name '*.node' -print | head -n1 || true)
-    if [ -n "$candidate" ]; then
-      cp "$candidate" "$ROOT_DIR/asherah-node/npm/asherah.node" || true
-    fi
+    echo "[binding-tests] ERROR: Node addon not found in artifacts"
+    exit 1
   fi
   export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
   npm test
@@ -161,15 +144,16 @@ if should_run python; then
   source "$ROOT_DIR/.venv/bin/activate"
   PYTHON_VENV_ACTIVE=1
   python3 -m pip install --upgrade pip >/dev/null
-  python3 -m pip install -U pytest maturin >/dev/null
+  python3 -m pip install -U pytest >/dev/null
   python3 -m pip uninstall -y asherah-py >/dev/null 2>&1 || true
   if compgen -G "$ARTIFACTS_DIR/python/*.whl" >/dev/null; then
-    if ! python3 -m pip install "$ARTIFACTS_DIR"/python/*.whl; then
-      echo "[binding-tests] Wheel install failed, falling back to maturin develop"
-      python3 -m maturin develop --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml"
-    fi
+    python3 -m pip install "$ARTIFACTS_DIR"/python/*.whl || {
+      echo "[binding-tests] ERROR: Python wheel install failed"
+      exit 1
+    }
   else
-    python3 -m maturin develop --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml"
+    echo "[binding-tests] ERROR: Python wheel not found in artifacts"
+    exit 1
   fi
   python3 -m pytest "$ROOT_DIR/asherah-py/tests" -vv
 
