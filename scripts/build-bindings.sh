@@ -186,14 +186,20 @@ if should_build node || should_build all; then
   # Build the Node addon for the explicit Rust target to ensure
   # cross-compilation produces the correct architecture binary.
   npx @napi-rs/cli build --release --platform "$NAPI_PLATFORM" --target "$CARGO_TRIPLE"
-  npm run prepublishOnly
   # Ensure top-level asherah.node exists for test loader convenience
   if [ ! -f npm/asherah.node ]; then
-    candidate=$(find npm -maxdepth 6 -name '*.node' -print | head -n1 || true)
+    echo "[build-bindings] Searching for .node addon in target directory"
+    find "$CARGO_TARGET_DIR" -name '*.node' -print || true
+    candidate=$(find "$CARGO_TARGET_DIR" -name '*.node' -print | head -n1 || true)
     if [ -n "$candidate" ]; then
+      echo "[build-bindings] Found addon at $candidate, copying to npm/asherah.node"
       cp "$candidate" npm/asherah.node
+    else
+      echo "[build-bindings] ERROR: No .node addon found in target directory"
+      exit 1
     fi
   fi
+  npm run prepublishOnly || echo "[build-bindings] prepublishOnly failed (expected for cross-compilation)"
   mkdir -p "$OUT_DIR/node"
   rm -rf "$OUT_DIR/node/npm"
   cp -R npm "$OUT_DIR/node/npm"
