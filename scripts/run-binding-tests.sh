@@ -137,6 +137,11 @@ if should_run node; then
     exit 1
   fi
   export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
+  echo "[binding-tests] DEBUG: LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+  echo "[binding-tests] DEBUG: Contents of RELEASE_DIR:"
+  ls -la "$RELEASE_DIR/" | grep libasherah || echo "No libasherah found in RELEASE_DIR"
+  echo "[binding-tests] DEBUG: Checking if asherah.node can find dependencies:"
+  ldd "$ROOT_DIR/asherah-node/npm/asherah.node" 2>/dev/null || echo "ldd failed"
   npm test
   ensure_bun
   if command -v bun >/dev/null 2>&1; then
