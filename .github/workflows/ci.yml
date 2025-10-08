@@ -247,6 +247,7 @@ jobs:
           name: bindings-linux-aarch64-part-${{ matrix.binding }}
           path: artifacts/aarch64
       - name: Download arm64 core FFI artifact
+        if: matrix.binding != 'ffi'
         uses: actions/download-artifact@v4
         with:
           name: bindings-linux-aarch64-part-ffi
