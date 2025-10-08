@@ -186,19 +186,32 @@ if should_build node || should_build all; then
   # Build the Node addon for the explicit Rust target to ensure
   # cross-compilation produces the correct architecture binary.
   npx @napi-rs/cli build --release --platform "$NAPI_PLATFORM" --target "$CARGO_TRIPLE"
+
+  echo "[build-bindings] Contents of asherah-node after napi build:"
+  find . -maxdepth 3 -name '*.node' -o -name 'npm' -type d | head -20 || true
+
   # Ensure top-level asherah.node exists for test loader convenience
   if [ ! -f npm/asherah.node ]; then
-    echo "[build-bindings] Searching for .node addon in target directory"
-    find "$CARGO_TARGET_DIR" -name '*.node' -print || true
-    candidate=$(find "$CARGO_TARGET_DIR" -name '*.node' -print | head -n1 || true)
+    echo "[build-bindings] npm/asherah.node not found, searching for .node addon"
+    # napi-rs may put the file in npm/platform-specific subdirectory
+    candidate=$(find npm -maxdepth 6 -name '*.node' -print 2>/dev/null | head -n1 || true)
+    if [ -z "$candidate" ]; then
+      # Fall back to searching the entire target directory
+      candidate=$(find "$CARGO_TARGET_DIR" -name '*.node' -print 2>/dev/null | head -n1 || true)
+    fi
     if [ -n "$candidate" ]; then
       echo "[build-bindings] Found addon at $candidate, copying to npm/asherah.node"
+      mkdir -p npm
       cp "$candidate" npm/asherah.node
     else
-      echo "[build-bindings] ERROR: No .node addon found in target directory"
+      echo "[build-bindings] ERROR: No .node addon found"
+      echo "[build-bindings] Directory structure:"
+      ls -la . || true
+      ls -la npm || true
       exit 1
     fi
   fi
+
   npm run prepublishOnly || echo "[build-bindings] prepublishOnly failed (expected for cross-compilation)"
   mkdir -p "$OUT_DIR/node"
   rm -rf "$OUT_DIR/node/npm"
