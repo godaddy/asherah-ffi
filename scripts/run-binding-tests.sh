@@ -106,6 +106,9 @@ ensure_interop_bin() {
 
 if should_run node; then
   echo "[binding-tests] Node.js"
+  echo "[binding-tests] DEBUG: ARTIFACTS_DIR=$ARTIFACTS_DIR"
+  echo "[binding-tests] DEBUG: Contents of ARTIFACTS_DIR:"
+  find "$ARTIFACTS_DIR" -maxdepth 3 -ls 2>/dev/null || ls -laR "$ARTIFACTS_DIR" || true
   if [ -d "$ARTIFACTS_DIR/node/npm" ]; then
     rm -rf "$ROOT_DIR/asherah-node/npm"
     cp -R "$ARTIFACTS_DIR/node/npm" "$ROOT_DIR/asherah-node/npm"
