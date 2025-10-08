@@ -193,21 +193,17 @@ if should_build node || should_build all; then
   # Ensure top-level asherah.node exists for test loader convenience
   if [ ! -f npm/asherah.node ]; then
     echo "[build-bindings] npm/asherah.node not found, searching for .node addon"
-    # napi-rs may put the file in npm/platform-specific subdirectory
-    candidate=$(find npm -maxdepth 6 -name '*.node' -print 2>/dev/null | head -n1 || true)
-    if [ -z "$candidate" ]; then
-      # Fall back to searching the entire target directory
-      candidate=$(find "$CARGO_TARGET_DIR" -name '*.node' -print 2>/dev/null | head -n1 || true)
-    fi
+    # napi-rs puts the file in platform-specific subdirectory (e.g., linux-x64-gnu/)
+    candidate=$(find . -maxdepth 2 -name '*.node' -print 2>/dev/null | head -n1 || true)
     if [ -n "$candidate" ]; then
       echo "[build-bindings] Found addon at $candidate, copying to npm/asherah.node"
       mkdir -p npm
       cp "$candidate" npm/asherah.node
     else
-      echo "[build-bindings] ERROR: No .node addon found"
+      echo "[build-bindings] ERROR: No .node addon found in current directory"
       echo "[build-bindings] Directory structure:"
       ls -la . || true
-      ls -la npm || true
+      find . -maxdepth 2 -type f -name '*.node' || echo "No .node files found"
       exit 1
     fi
   fi
