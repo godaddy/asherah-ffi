@@ -276,7 +276,6 @@ jobs:
             tests-${{ runner.os }}-arm64-${{ matrix.binding }}-
             tests-${{ runner.os }}-arm64-
       - name: Download arm64 binding artifact
-        if: matrix.binding != 'python'
         uses: actions/download-artifact@v4
         with:
           name: bindings-linux-aarch64-part-${{ matrix.binding }}
