@@ -1,7 +1,7 @@
 {
   "name": "asherah-node",
-  "version": "0.1.0",
-  "private": true,
+  "version": "4.0.0",
+  "private": false,
   "description": "Node.js addon for Asherah (napi-rs)",
   "main": "npm/index.js",
   "types": "index.d.ts",
@@ -24,8 +24,9 @@
     "node": ">= 18"
   },
   "optionalDependencies": {
-    "asherah-win32-x64-msvc": "0.1.0",
-    "asherah-darwin-x64": "0.1.0",
-    "asherah-linux-x64-gnu": "0.1.0"
+    "asherah-win32-x64-msvc": "4.0.0",
+    "asherah-darwin-x64": "4.0.0",
+    "asherah-linux-x64-gnu": "4.0.0",
+    "asherah-linux-arm64-gnu": "4.0.0"
   }
 }
