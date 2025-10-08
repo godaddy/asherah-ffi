@@ -493,10 +493,12 @@ jobs:
           key: build-${{ runner.os }}-arm64-core-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
           restore-keys: |
             build-${{ runner.os }}-arm64-core-
-      - name: Install cross-compile toolchain for arm64
+      - name: Install cross-compile toolchain and Node.js for arm64
         run: |
           apt-get update
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+          apt-get install -y nodejs
       - name: Build FFI core (arm64) via cross-compilation
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -509,11 +511,27 @@ jobs:
         run: |
           rustup target add aarch64-unknown-linux-gnu
           ./scripts/build-bindings.sh
-      - name: Upload arm64 core artifacts
+      - name: Build Node.js binding (arm64) in Bullseye container
+        env:
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          PKG_CONFIG_ALLOW_CROSS: 1
+          TARGET_ARCH: aarch64
+          BINDING_COMPONENTS: node
+          SKIP_CORE_BUILD: "1"
+        run: ./scripts/build-bindings.sh
+      - name: Upload arm64 core target artifacts
         uses: actions/upload-artifact@v4
         with:
           name: arm64-core-artifacts
           path: target/
+      - name: Upload arm64 node binding artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-linux-aarch64-part-node
+          path: artifacts/aarch64
 
   package-arm64:
     runs-on: ubuntu-latest
@@ -521,7 +539,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        component: [ffi, node, python, dotnet, java]
+        component: [ffi, python, dotnet, java]
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
