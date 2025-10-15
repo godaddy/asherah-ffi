@@ -521,6 +521,20 @@ jobs:
           BINDING_COMPONENTS: node
           SKIP_CORE_BUILD: "1"
         run: ./scripts/build-bindings.sh
+      - name: Install Python and maturin for Python binding
+        run: |
+          apt-get install -y python3 python3-pip python3-venv
+          pip3 install maturin==1.9.4
+      - name: Build Python binding (arm64) in Bullseye container
+        env:
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
+          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: |
+          rm -rf artifacts/aarch64/python || true
+          mkdir -p artifacts/aarch64/python
+          maturin build --release --target aarch64-unknown-linux-gnu --manifest-path asherah-py/Cargo.toml --skip-auditwheel --out artifacts/aarch64/python
       - name: Upload arm64 core target artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -530,7 +544,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-aarch64-part-node
-          path: artifacts/aarch64
+          path: artifacts/aarch64/node
+      - name: Upload arm64 python binding artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-linux-aarch64-part-python
+          path: artifacts/aarch64/python
 
   package-arm64:
     runs-on: ubuntu-latest
@@ -538,7 +557,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        component: [ffi, python, dotnet, java]
+        component: [ffi, dotnet, java]
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -548,7 +567,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
-        if: matrix.component != 'python'
         uses: actions/cache@v4
         with:
           path: |
@@ -564,59 +582,21 @@ jobs:
             build-${{ runner.os }}-arm64-${{ matrix.component }}-
             build-${{ runner.os }}-arm64-
       - name: Download arm64 core artifacts
-        if: matrix.component != 'python'
         uses: actions/download-artifact@v4
         with:
           name: arm64-core-artifacts
           path: target/
       - name: Install cross toolchains
-        if: matrix.component != 'python'
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross pkg-config
       - name: Prepare Rust target
-        if: matrix.component != 'python'
         run: rustup target add aarch64-unknown-linux-gnu
-      - uses: actions/setup-node@v4
-        if: matrix.component == 'node'
-        with:
-          node-version: 20
       - uses: actions/setup-dotnet@v4
         if: matrix.component == 'dotnet'
         with:
           dotnet-version: '8.0.x'
-      - name: Download arm64 core artifacts for Python
-        if: matrix.component == 'python'
-        uses: actions/download-artifact@v4
-        with:
-          name: arm64-core-artifacts
-          path: target/
-      - name: Prepare Python build directory
-        if: matrix.component == 'python'
-        run: |
-          rm -rf artifacts/aarch64/python || true
-          mkdir -p artifacts/aarch64/python
-      - name: Install cross-compile toolchain for arm64
-        if: matrix.component == 'python'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-      - name: Build Python wheel for arm64 (using cached core artifacts)
-        if: matrix.component == 'python'
-        env:
-          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
-          CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
-          AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-        run: |
-          pip install maturin
-          rustup target add aarch64-unknown-linux-gnu
-          # Build with cached arm64 core artifacts - only compiles the Python binding wrapper
-          # Skip auditwheel because GitHub runner has too-new GLIBC but maturin still tags correctly
-          maturin build --release --target aarch64-unknown-linux-gnu --manifest-path asherah-py/Cargo.toml --skip-auditwheel --out artifacts/aarch64/python
-
       - name: Package ${{ matrix.component }} (arm64)
-        if: matrix.component != 'python'
         env:
           TARGET_ARCH: aarch64
           BINDING_COMPONENTS: ${{ matrix.component }}
