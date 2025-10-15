@@ -173,11 +173,15 @@ if should_run python; then
   fi
   python3 -m pytest "$ROOT_DIR/asherah-py/tests" -vv
 
-  echo "[binding-tests] Interop"
-  ensure_local_ffi
-  ensure_interop_bin
-  export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
-  python3 -m pytest "$ROOT_DIR/interop/tests" -vv
+  if [ "${BINDING_TESTS_FAST_ONLY:-}" != "1" ]; then
+    echo "[binding-tests] Interop"
+    ensure_local_ffi
+    ensure_interop_bin
+    export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
+    python3 -m pytest "$ROOT_DIR/interop/tests" -vv
+  else
+    echo "[binding-tests] Skipping interop tests (fast mode enabled)"
+  fi
 fi
 
 if [ "${BINDING_TESTS_FAST_ONLY:-}" = "1" ] && [ "$BINDING_SELECTOR" = "all" ]; then
