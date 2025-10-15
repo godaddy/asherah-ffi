@@ -299,7 +299,26 @@ fi
 if should_build java || should_build all; then
   echo "[build-bindings] Capturing Java artifacts"
   mkdir -p "$OUT_DIR/java"
-  cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
+
+  # Build native library only if not using pre-built artifacts
+  if [ "$SKIP_CORE_BUILD" != "1" ]; then
+    cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
+  else
+    echo "[build-bindings] Skipping Java native build; using pre-built artifacts"
+  fi
+
+  # Copy pre-built Java native library if available
+  mapfile -d '' java_libs < <(find "$CARGO_RELEASE_DIR" \( -type f -o -type l \) -name 'libasherah_java.*' -print0 2>/dev/null || true)
+  if [ ${#java_libs[@]} -gt 0 ]; then
+    for lib in "${java_libs[@]}"; do
+      base="$(basename "$lib")"
+      echo "[build-bindings] Found Java native library: $base"
+      cp "$lib" "$OUT_DIR/java/"
+    done
+  else
+    echo "[build-bindings] Warning: no libasherah_java artifacts found in $CARGO_RELEASE_DIR"
+  fi
+
   mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package
   cp "$ROOT_DIR"/asherah-java/java/target/*.jar "$OUT_DIR/java/"
 fi
