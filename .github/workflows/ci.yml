@@ -544,12 +544,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-aarch64-part-node
-          path: artifacts/aarch64/node
+          path: artifacts/aarch64
       - name: Upload arm64 python binding artifact
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-aarch64-part-python
-          path: artifacts/aarch64/python
+          path: artifacts/aarch64
 
   package-arm64:
     runs-on: ubuntu-latest
