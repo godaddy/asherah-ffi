@@ -54,14 +54,8 @@ TARGET_DIR="$ROOT_DIR/target/$TARGET_TRIPLE"
 RELEASE_DIR="$TARGET_DIR/release"
 mkdir -p "$RELEASE_DIR"
 
-echo "[binding-tests] DEBUG: Checking for FFI library in $ARTIFACTS_DIR/ffi/"
-ls -la "$ARTIFACTS_DIR/ffi/" 2>/dev/null || echo "[binding-tests] DEBUG: No ffi directory found"
 if compgen -G "$ARTIFACTS_DIR/ffi/libasherah_ffi.*" >/dev/null; then
-  echo "[binding-tests] DEBUG: Copying FFI library to $RELEASE_DIR/"
   cp "$ARTIFACTS_DIR"/ffi/libasherah_ffi.* "$RELEASE_DIR/"
-  ls -la "$RELEASE_DIR/" | grep libasherah || true
-else
-  echo "[binding-tests] DEBUG: No FFI library found in artifacts"
 fi
 
 export CARGO_TARGET_DIR="$TARGET_DIR"
@@ -112,14 +106,9 @@ ensure_interop_bin() {
 
 if should_run node; then
   echo "[binding-tests] Node.js"
-  echo "[binding-tests] DEBUG: ARTIFACTS_DIR=$ARTIFACTS_DIR"
-  echo "[binding-tests] DEBUG: Contents of ARTIFACTS_DIR:"
-  find "$ARTIFACTS_DIR" -maxdepth 3 -ls 2>/dev/null || ls -laR "$ARTIFACTS_DIR" || true
   if [ -d "$ARTIFACTS_DIR/node/npm" ]; then
     rm -rf "$ROOT_DIR/asherah-node/npm"
     cp -R "$ARTIFACTS_DIR/node/npm" "$ROOT_DIR/asherah-node/npm"
-    echo "[binding-tests] DEBUG: After copy, contents of $ROOT_DIR/asherah-node/npm:"
-    ls -la "$ROOT_DIR/asherah-node/npm" || true
     if ! [ -f "$ROOT_DIR/asherah-node/npm/asherah.node" ]; then
       # Search deeper to handle platform-specific subfolders produced by napi prepublish
       candidate=$(find "$ROOT_DIR/asherah-node/npm" -maxdepth 6 -name '*.node' -print | head -n1 || true)
@@ -137,11 +126,6 @@ if should_run node; then
     exit 1
   fi
   export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
-  echo "[binding-tests] DEBUG: LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
-  echo "[binding-tests] DEBUG: Contents of RELEASE_DIR:"
-  ls -la "$RELEASE_DIR/" | grep libasherah || echo "No libasherah found in RELEASE_DIR"
-  echo "[binding-tests] DEBUG: Checking if asherah.node can find dependencies:"
-  ldd "$ROOT_DIR/asherah-node/npm/asherah.node" 2>/dev/null || echo "ldd failed"
   npm test
   ensure_bun
   if command -v bun >/dev/null 2>&1; then
