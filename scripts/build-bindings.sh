@@ -301,6 +301,8 @@ if should_build java || should_build all; then
   mkdir -p "$OUT_DIR/java"
   # Build Java JNI wrapper - links against pre-built rlib from core build
   cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
+  # Copy Java native library to output
+  find "$CARGO_RELEASE_DIR" -maxdepth 1 -name 'libasherah_java.*' -exec cp {} "$OUT_DIR/java/" \;
   # Package Java JAR with Maven
   mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package
   cp "$ROOT_DIR"/asherah-java/java/target/*.jar "$OUT_DIR/java/"
