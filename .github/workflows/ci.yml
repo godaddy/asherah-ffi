@@ -535,16 +535,13 @@ jobs:
           rm -rf artifacts/aarch64/python || true
           mkdir -p artifacts/aarch64/python
           maturin build --release --target aarch64-unknown-linux-gnu --manifest-path asherah-py/Cargo.toml --skip-auditwheel --out artifacts/aarch64/python
-      - name: Build Java JNI wrapper (arm64) - fast because it links pre-built rlib
+      - name: Build Java JNI wrapper (links pre-built rlib, fast)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
           CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          PKG_CONFIG_ALLOW_CROSS: 1
         run: |
-          # Build asherah-java native library - this is fast because the rlib is already built
-          # and we're doing native ARM64 compilation (not cross-compiling from x86_64)
           cargo build --release -p asherah-java --target aarch64-unknown-linux-gnu
           mkdir -p artifacts/aarch64/java
           find target/aarch64-unknown-linux-gnu/release -name 'libasherah_java.*' -exec cp {} artifacts/aarch64/java/ \;
