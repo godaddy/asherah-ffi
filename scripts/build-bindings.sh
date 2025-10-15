@@ -299,23 +299,8 @@ fi
 if should_build java || should_build all; then
   echo "[build-bindings] Capturing Java artifacts"
   mkdir -p "$OUT_DIR/java"
-
-  # Check if we have pre-built Java native library from core build
-  mapfile -d '' java_libs < <(find "$CARGO_RELEASE_DIR" \( -type f -o -type l \) -name 'libasherah_java.*' -print0 2>/dev/null || true)
-
-  if [ ${#java_libs[@]} -eq 0 ] && [ "$SKIP_CORE_BUILD" = "1" ]; then
-    echo "[build-bindings] No pre-built Java library found, building (links pre-built rlib so should be fast)"
-    cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
-  elif [ ${#java_libs[@]} -eq 0 ]; then
-    echo "[build-bindings] Building Java JNI wrapper (links pre-built rlib)"
-    cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
-  else
-    echo "[build-bindings] Using pre-built Java native library"
-    for lib in "${java_libs[@]}"; do
-      cp "$lib" "$OUT_DIR/java/"
-    done
-  fi
-
+  # Build Java JNI wrapper - links against pre-built rlib from core build
+  cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
   # Package Java JAR with Maven
   mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package
   cp "$ROOT_DIR"/asherah-java/java/target/*.jar "$OUT_DIR/java/"
