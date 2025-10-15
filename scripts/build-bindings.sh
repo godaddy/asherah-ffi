@@ -300,25 +300,23 @@ if should_build java || should_build all; then
   echo "[build-bindings] Capturing Java artifacts"
   mkdir -p "$OUT_DIR/java"
 
-  # Build native library only if not using pre-built artifacts
-  if [ "$SKIP_CORE_BUILD" != "1" ]; then
+  # Check if we have pre-built Java native library from core build
+  mapfile -d '' java_libs < <(find "$CARGO_RELEASE_DIR" \( -type f -o -type l \) -name 'libasherah_java.*' -print0 2>/dev/null || true)
+
+  if [ ${#java_libs[@]} -eq 0 ] && [ "$SKIP_CORE_BUILD" = "1" ]; then
+    echo "[build-bindings] No pre-built Java library found, building (links pre-built rlib so should be fast)"
+    cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
+  elif [ ${#java_libs[@]} -eq 0 ]; then
+    echo "[build-bindings] Building Java JNI wrapper (links pre-built rlib)"
     cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
   else
-    echo "[build-bindings] Skipping Java native build; using pre-built artifacts"
-  fi
-
-  # Copy pre-built Java native library if available
-  mapfile -d '' java_libs < <(find "$CARGO_RELEASE_DIR" \( -type f -o -type l \) -name 'libasherah_java.*' -print0 2>/dev/null || true)
-  if [ ${#java_libs[@]} -gt 0 ]; then
+    echo "[build-bindings] Using pre-built Java native library"
     for lib in "${java_libs[@]}"; do
-      base="$(basename "$lib")"
-      echo "[build-bindings] Found Java native library: $base"
       cp "$lib" "$OUT_DIR/java/"
     done
-  else
-    echo "[build-bindings] Warning: no libasherah_java artifacts found in $CARGO_RELEASE_DIR"
   fi
 
+  # Package Java JAR with Maven
   mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package
   cp "$ROOT_DIR"/asherah-java/java/target/*.jar "$OUT_DIR/java/"
 fi
