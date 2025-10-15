@@ -201,7 +201,17 @@ if should_run java; then
   # Ensure JNI/FFI libraries are built and discoverable
   export LD_LIBRARY_PATH="$RELEASE_DIR:${LD_LIBRARY_PATH:-}"
   export ASHERAH_JAVA_NATIVE="$RELEASE_DIR"
-  cargo build -p asherah-java --release || true
+
+  # Check if we already have pre-built libasherah_java from artifacts
+  if ! compgen -G "$ARTIFACTS_DIR/java/libasherah_java.*" >/dev/null && [ "${BINDING_TESTS_FAST_ONLY:-}" != "1" ]; then
+    cargo build -p asherah-java --release || true
+  fi
+
+  # Copy pre-built artifacts if available
+  if compgen -G "$ARTIFACTS_DIR/java/libasherah_java.*" >/dev/null; then
+    cp "$ARTIFACTS_DIR"/java/libasherah_java.* "$RELEASE_DIR/" 2>/dev/null || true
+  fi
+
   # Ensure libasherah_java is present where loader might look (both release and debug dirs)
   mapfile -t JAVA_LIBS < <(find "$CARGO_TARGET_DIR/release" -maxdepth 1 -type f -name "libasherah_java.*" 2>/dev/null || true)
   mkdir -p "$TARGET_DIR/debug"
