@@ -213,13 +213,19 @@ if should_run java; then
   fi
 
   # Ensure libasherah_java is present where loader might look (both release and debug dirs)
-  mapfile -t JAVA_LIBS < <(find "$CARGO_TARGET_DIR/release" -maxdepth 1 -type f -name "libasherah_java.*" 2>/dev/null || true)
   mkdir -p "$TARGET_DIR/debug"
-  for lib in "${JAVA_LIBS[@]:-}"; do
-    [ -n "$lib" ] || continue
-    cp "$lib" "$RELEASE_DIR/" 2>/dev/null || true
-    cp "$lib" "$TARGET_DIR/debug/" 2>/dev/null || true
-  done
+  if compgen -G "$RELEASE_DIR/libasherah_java.*" >/dev/null; then
+    # Pre-built artifacts are already in RELEASE_DIR, just copy to debug
+    cp "$RELEASE_DIR"/libasherah_java.* "$TARGET_DIR/debug/" 2>/dev/null || true
+  else
+    # Otherwise, find in CARGO_TARGET_DIR/release (from cargo build)
+    mapfile -t JAVA_LIBS < <(find "$CARGO_TARGET_DIR/release" -maxdepth 1 -type f -name "libasherah_java.*" 2>/dev/null || true)
+    for lib in "${JAVA_LIBS[@]:-}"; do
+      [ -n "$lib" ] || continue
+      cp "$lib" "$RELEASE_DIR/" 2>/dev/null || true
+      cp "$lib" "$TARGET_DIR/debug/" 2>/dev/null || true
+    done
+  fi
   set +e
   mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" \
     -Dnative.build.skip=true \
