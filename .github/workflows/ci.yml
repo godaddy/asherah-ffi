@@ -547,7 +547,9 @@ jobs:
           TARGET_ARCH: aarch64
           BINDING_COMPONENTS: node
           SKIP_CORE_BUILD: "1"
-        run: ./scripts/build-bindings.sh
+        run: |
+          rustup target add aarch64-unknown-linux-gnu
+          ./scripts/build-bindings.sh
       - name: Upload arm64 node binding artifact
         uses: actions/upload-artifact@v4
         with:
