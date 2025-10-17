@@ -299,21 +299,28 @@ fi
 if should_build java || should_build all; then
   echo "[build-bindings] Capturing Java artifacts"
   mkdir -p "$OUT_DIR/java"
-  # Build Java JNI wrapper - links against pre-built rlib from core build
-  cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
-  # Copy Java native library to output
-  echo "[build-bindings] Looking for libasherah_java.* in $CARGO_RELEASE_DIR"
-  mapfile -d '' java_libs < <(find "$CARGO_RELEASE_DIR" -maxdepth 1 -type f -name 'libasherah_java.*' -print0)
-  if [ ${#java_libs[@]} -gt 0 ]; then
-    for lib in "${java_libs[@]}"; do
-      echo "[build-bindings] Copying $(basename "$lib") to $OUT_DIR/java/"
-      cp "$lib" "$OUT_DIR/java/"
-    done
-  else
-    echo "[build-bindings] WARNING: No libasherah_java.* found in $CARGO_RELEASE_DIR"
-    echo "[build-bindings] Listing $CARGO_RELEASE_DIR contents:"
-    ls -la "$CARGO_RELEASE_DIR" | grep -E "(asherah|java)" || echo "No asherah/java files found"
+
+  # Check if pre-built Java native library exists (from separate build-java-arm64 job or prior build)
+  JAVA_PREBUILT_FOUND=0
+  if compgen -G "$OUT_DIR/java/libasherah_java.*" >/dev/null 2>&1; then
+    echo "[build-bindings] Using pre-built Java native library from artifacts"
+    JAVA_PREBUILT_FOUND=1
   fi
+
+  # If not pre-built, build it (only happens for non-ARM64 or local builds)
+  if [ $JAVA_PREBUILT_FOUND -eq 0 ]; then
+    echo "[build-bindings] Building Java JNI wrapper"
+    cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
+    # Copy to output
+    mapfile -d '' java_libs < <(find "$CARGO_RELEASE_DIR" -maxdepth 1 -type f -name 'libasherah_java.*' -print0 2>/dev/null || true)
+    if [ ${#java_libs[@]} -gt 0 ]; then
+      for lib in "${java_libs[@]}"; do
+        echo "[build-bindings] Copying $(basename "$lib") to $OUT_DIR/java/"
+        cp "$lib" "$OUT_DIR/java/"
+      done
+    fi
+  fi
+
   # Package Java JAR with Maven
   mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package
   cp "$ROOT_DIR"/asherah-java/java/target/*.jar "$OUT_DIR/java/"
