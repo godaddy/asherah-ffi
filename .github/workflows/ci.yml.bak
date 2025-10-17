@@ -435,14 +435,15 @@ jobs:
         run: |
           valgrind --error-exitcode=1 cargo test -p asherah-ffi --lib
 
-  build-rlib-arm64:
+  build-all-arm64:
     runs-on: ubuntu-latest
     needs: lint
     container: rust:1.86-bullseye
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
-      CARGO_INCREMENTAL: 1
+      PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
+      NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
@@ -451,14 +452,20 @@ jobs:
           path: |
             .cache/cargo
             .cache/rustup
-          key: build-${{ runner.os }}-arm64-rlib-${{ hashFiles('**/Cargo.lock') }}
+            .cache/pip
+            .cache/npm
+            .cache/maven
+          key: build-${{ runner.os }}-arm64-all-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml') }}
           restore-keys: |
-            build-${{ runner.os }}-arm64-rlib-
-      - name: Install cross-compile toolchain
+            build-${{ runner.os }}-arm64-all-
+      - name: Install build dependencies
         run: |
           apt-get update
-          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-      - name: Build FFI rlib (arm64)
+          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu python3 python3-pip python3-venv maven
+          curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+          apt-get install -y nodejs
+          pip3 install maturin==1.9.4
+      - name: Build all ARM64 bindings (sequential for dep reuse)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
           CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
@@ -466,19 +473,16 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           PKG_CONFIG_ALLOW_CROSS: 1
           TARGET_ARCH: aarch64
-          BINDING_COMPONENTS: ffi
+          BINDING_COMPONENTS: all
         run: |
           rustup target add aarch64-unknown-linux-gnu
-          # Build core rlibs first for dependency reuse
-          cargo build --release -p asherah --features sqlite --target aarch64-unknown-linux-gnu
-          cargo build --release -p asherah-config --target aarch64-unknown-linux-gnu
-          # Build FFI cdylib for other bindings
+          # Build all bindings sequentially so Cargo reuses compiled dependencies
           ./scripts/build-bindings.sh
-      - name: Upload arm64 rlib artifacts
+      - name: Upload arm64 artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: arm64-rlib-artifacts
-          path: target/
+          name: bindings-linux-aarch64
+          path: artifacts/aarch64
 
   build-node-arm64:
     runs-on: ubuntu-latest
@@ -488,7 +492,6 @@ jobs:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
-      CARGO_INCREMENTAL: 1
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
@@ -540,7 +543,6 @@ jobs:
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
       PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      CARGO_INCREMENTAL: 1
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
@@ -569,8 +571,6 @@ jobs:
           CXX_aarch64_unknown_linux_gnu: aarch64-linux-gnu-g++
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-          PKG_CONFIG_ALLOW_CROSS: 1
-          TARGET_ARCH: aarch64
         run: |
           rustup target add aarch64-unknown-linux-gnu
           rm -rf artifacts/aarch64/python || true
@@ -589,7 +589,6 @@ jobs:
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
-      CARGO_INCREMENTAL: 1
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
@@ -636,7 +635,6 @@ jobs:
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
-      CARGO_INCREMENTAL: 1
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
