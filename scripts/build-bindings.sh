@@ -311,13 +311,15 @@ if should_build java || should_build all; then
   if [ $JAVA_PREBUILT_FOUND -eq 0 ]; then
     echo "[build-bindings] Building Java JNI wrapper"
     cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
-    # Copy to output
-    mapfile -d '' java_libs < <(find "$CARGO_RELEASE_DIR" -maxdepth 1 -type f -name 'libasherah_java.*' -print0 2>/dev/null || true)
+    # Copy to output - search in both possible locations
+    mapfile -d '' java_libs < <(find "$CARGO_RELEASE_DIR" "$TARGET_DIR/$CARGO_TRIPLE/release" -maxdepth 1 -type f -name 'libasherah_java.*' -print0 2>/dev/null || true)
     if [ ${#java_libs[@]} -gt 0 ]; then
       for lib in "${java_libs[@]}"; do
         echo "[build-bindings] Copying $(basename "$lib") to $OUT_DIR/java/"
         cp "$lib" "$OUT_DIR/java/"
       done
+    else
+      echo "[build-bindings] Warning: no libasherah_java libs found in $CARGO_RELEASE_DIR or $TARGET_DIR/$CARGO_TRIPLE/release"
     fi
   fi
 
