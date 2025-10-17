@@ -146,8 +146,8 @@ jobs:
       - name: Build Python binding (x86_64) - manylinux
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-          export PATH="/github/workspace/.cache/cargo/bin:$PATH"
-          python3.11 -m pip install maturin==1.9.4
+          export PATH="/github/workspace/.cache/cargo/bin:/root/.local/bin:$PATH"
+          python3.11 -m pip install --user maturin==1.9.4
           rm -rf artifacts/x86_64/python || true
           mkdir -p artifacts/x86_64/python
           maturin build --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 -i python3.11 --out artifacts/x86_64/python
