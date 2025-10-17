@@ -83,13 +83,11 @@ jobs:
           TARGET_ARCH: x86_64
           BINDING_COMPONENTS: ffi
         run: ./scripts/build-bindings.sh
-      - name: Cache x86_64 rlib artifacts
-        uses: actions/cache/save@v4
+      - name: Upload x86_64 rlib artifacts
+        uses: actions/upload-artifact@v4
         with:
-          path: |
-            target/x86_64-unknown-linux-gnu
-            target/release
-          key: rlib-target-${{ runner.os }}-x86_64-${{ github.run_id }}
+          name: x86_64-rlib-artifacts
+          path: target/
 
   build-node-x86_64:
     runs-on: ubuntu-latest
@@ -110,14 +108,11 @@ jobs:
           key: build-${{ runner.os }}-x86_64-node-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json') }}
           restore-keys: |
             build-${{ runner.os }}-x86_64-node-
-      - name: Restore x86_64 rlib artifacts
-        uses: actions/cache/restore@v4
+      - name: Download x86_64 rlib artifacts
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            target/x86_64-unknown-linux-gnu
-            target/release
-          key: rlib-target-${{ runner.os }}-x86_64-${{ github.run_id }}
-          fail-on-cache-miss: true
+          name: x86_64-rlib-artifacts
+          path: target/
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -143,14 +138,11 @@ jobs:
       PIP_CACHE_DIR: /github/workspace/.cache/pip
     steps:
       - uses: actions/checkout@v4
-      - name: Restore x86_64 rlib artifacts
-        uses: actions/cache/restore@v4
+      - name: Download x86_64 rlib artifacts
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            target/x86_64-unknown-linux-gnu
-            target/release
-          key: rlib-target-${{ runner.os }}-x86_64-${{ github.run_id }}
-          fail-on-cache-miss: true
+          name: x86_64-rlib-artifacts
+          path: target/
       - name: Build Python binding (x86_64) - manylinux
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
@@ -183,14 +175,11 @@ jobs:
           key: build-${{ runner.os }}-x86_64-java-${{ hashFiles('**/Cargo.lock', 'asherah-java/java/pom.xml') }}
           restore-keys: |
             build-${{ runner.os }}-x86_64-java-
-      - name: Restore x86_64 rlib artifacts
-        uses: actions/cache/restore@v4
+      - name: Download x86_64 rlib artifacts
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            target/x86_64-unknown-linux-gnu
-            target/release
-          key: rlib-target-${{ runner.os }}-x86_64-${{ github.run_id }}
-          fail-on-cache-miss: true
+          name: x86_64-rlib-artifacts
+          path: target/
       - name: Build Java binding (x86_64)
         env:
           TARGET_ARCH: x86_64
@@ -221,14 +210,11 @@ jobs:
           key: build-${{ runner.os }}-x86_64-dotnet-${{ hashFiles('**/Cargo.lock', 'asherah-dotnet/**/*.csproj') }}
           restore-keys: |
             build-${{ runner.os }}-x86_64-dotnet-
-      - name: Restore x86_64 rlib artifacts
-        uses: actions/cache/restore@v4
+      - name: Download x86_64 rlib artifacts
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            target/x86_64-unknown-linux-gnu
-            target/release
-          key: rlib-target-${{ runner.os }}-x86_64-${{ github.run_id }}
-          fail-on-cache-miss: true
+          name: x86_64-rlib-artifacts
+          path: target/
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
@@ -249,14 +235,11 @@ jobs:
     needs: build-rlib-x86_64
     steps:
       - uses: actions/checkout@v4
-      - name: Restore x86_64 rlib artifacts
-        uses: actions/cache/restore@v4
+      - name: Download x86_64 rlib artifacts
+        uses: actions/download-artifact@v4
         with:
-          path: |
-            target/x86_64-unknown-linux-gnu
-            target/release
-          key: rlib-target-${{ runner.os }}-x86_64-${{ github.run_id }}
-          fail-on-cache-miss: true
+          name: x86_64-rlib-artifacts
+          path: target/
       - name: Package FFI artifacts (x86_64)
         run: |
           mkdir -p artifacts/x86_64/ffi artifacts/x86_64/ruby
@@ -727,10 +710,10 @@ jobs:
         with:
           name: arm64-rlib-artifacts
           path: target/
-      - name: Install cross-compile toolchain
+      - name: Install cross-compile toolchain and Maven
         run: |
           apt-get update
-          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu maven
       - name: Build Java binding (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
