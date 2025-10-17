@@ -302,7 +302,18 @@ if should_build java || should_build all; then
   # Build Java JNI wrapper - links against pre-built rlib from core build
   cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
   # Copy Java native library to output
-  find "$CARGO_RELEASE_DIR" -maxdepth 1 -name 'libasherah_java.*' -exec cp {} "$OUT_DIR/java/" \;
+  echo "[build-bindings] Looking for libasherah_java.* in $CARGO_RELEASE_DIR"
+  mapfile -d '' java_libs < <(find "$CARGO_RELEASE_DIR" -maxdepth 1 -type f -name 'libasherah_java.*' -print0)
+  if [ ${#java_libs[@]} -gt 0 ]; then
+    for lib in "${java_libs[@]}"; do
+      echo "[build-bindings] Copying $(basename "$lib") to $OUT_DIR/java/"
+      cp "$lib" "$OUT_DIR/java/"
+    done
+  else
+    echo "[build-bindings] WARNING: No libasherah_java.* found in $CARGO_RELEASE_DIR"
+    echo "[build-bindings] Listing $CARGO_RELEASE_DIR contents:"
+    ls -la "$CARGO_RELEASE_DIR" | grep -E "(asherah|java)" || echo "No asherah/java files found"
+  fi
   # Package Java JAR with Maven
   mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package
   cp "$ROOT_DIR"/asherah-java/java/target/*.jar "$OUT_DIR/java/"
