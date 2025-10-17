@@ -382,6 +382,10 @@ jobs:
         run: docker version
       - name: Load arm64 test image
         run: docker load --input artifacts/asherah-tests-arm64.tar
+      - name: Debug - List artifacts structure
+        run: |
+          echo "=== Artifacts directory structure ==="
+          find artifacts/aarch64 -type f | head -50 || true
       - name: Run ${{ matrix.binding }} binding tests (Arm64)
         env:
           DOCKER_PLATFORM: linux/arm64
