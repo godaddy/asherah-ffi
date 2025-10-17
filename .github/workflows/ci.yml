@@ -464,10 +464,15 @@ jobs:
           AR_aarch64_unknown_linux_gnu: aarch64-linux-gnu-ar
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           PKG_CONFIG_ALLOW_CROSS: 1
+          TARGET_ARCH: aarch64
+          BINDING_COMPONENTS: ffi
         run: |
           rustup target add aarch64-unknown-linux-gnu
+          # Build core rlibs first for dependency reuse
           cargo build --release -p asherah --features sqlite --target aarch64-unknown-linux-gnu
           cargo build --release -p asherah-config --target aarch64-unknown-linux-gnu
+          # Build FFI cdylib for other bindings
+          ./scripts/build-bindings.sh
       - name: Upload arm64 rlib artifacts
         uses: actions/upload-artifact@v4
         with:
