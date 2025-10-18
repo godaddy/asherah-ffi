@@ -444,6 +444,9 @@ jobs:
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       CARGO_INCREMENTAL: 1
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
+      SCCACHE_CACHE_SIZE: 2G
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
@@ -452,13 +455,17 @@ jobs:
           path: |
             .cache/cargo
             .cache/rustup
+            .cache/sccache
           key: build-${{ runner.os }}-arm64-rlib-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             build-${{ runner.os }}-arm64-rlib-
-      - name: Install cross-compile toolchain
+      - name: Install cross-compile toolchain and sccache
         run: |
           apt-get update
-          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu curl
+          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          mv sccache-*/sccache /usr/local/bin/
+          chmod +x /usr/local/bin/sccache
       - name: Build FFI rlib (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -491,6 +498,9 @@ jobs:
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       CARGO_INCREMENTAL: 1
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
+      SCCACHE_CACHE_SIZE: 2G
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
@@ -500,6 +510,7 @@ jobs:
             .cache/cargo
             .cache/rustup
             .cache/npm
+            .cache/sccache
           key: build-${{ runner.os }}-arm64-node-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json') }}
           restore-keys: |
             build-${{ runner.os }}-arm64-node-
@@ -508,12 +519,15 @@ jobs:
         with:
           name: arm64-rlib-artifacts
           path: target/
-      - name: Install cross-compile toolchain and Node.js
+      - name: Install cross-compile toolchain, Node.js, and sccache
         run: |
           apt-get update
-          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu curl
           curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
           apt-get install -y nodejs
+          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          mv sccache-*/sccache /usr/local/bin/
+          chmod +x /usr/local/bin/sccache
       - name: Build Node.js binding (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -543,6 +557,9 @@ jobs:
       PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       CARGO_INCREMENTAL: 1
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
+      SCCACHE_CACHE_SIZE: 2G
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
@@ -552,6 +569,7 @@ jobs:
             .cache/cargo
             .cache/rustup
             .cache/pip
+            .cache/sccache
           key: build-${{ runner.os }}-arm64-python-${{ hashFiles('**/Cargo.lock', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml') }}
           restore-keys: |
             build-${{ runner.os }}-arm64-python-
@@ -560,11 +578,14 @@ jobs:
         with:
           name: arm64-rlib-artifacts
           path: target/
-      - name: Install cross-compile toolchain and Python
+      - name: Install cross-compile toolchain, Python, and sccache
         run: |
           apt-get update
-          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu python3 python3-pip python3-venv
+          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu python3 python3-pip python3-venv curl
           pip3 install maturin==1.9.4
+          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          mv sccache-*/sccache /usr/local/bin/
+          chmod +x /usr/local/bin/sccache
       - name: Build Python binding (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -596,6 +617,9 @@ jobs:
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       CARGO_INCREMENTAL: 1
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
+      SCCACHE_CACHE_SIZE: 2G
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
@@ -605,6 +629,7 @@ jobs:
             .cache/cargo
             .cache/rustup
             .cache/maven
+            .cache/sccache
           key: build-${{ runner.os }}-arm64-java-${{ hashFiles('**/Cargo.lock', 'asherah-java/java/pom.xml') }}
           restore-keys: |
             build-${{ runner.os }}-arm64-java-
@@ -613,10 +638,13 @@ jobs:
         with:
           name: arm64-rlib-artifacts
           path: target/
-      - name: Install cross-compile toolchain and Maven
+      - name: Install cross-compile toolchain, Maven, and sccache
         run: |
           apt-get update
-          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu maven
+          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu maven curl
+          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          mv sccache-*/sccache /usr/local/bin/
+          chmod +x /usr/local/bin/sccache
       - name: Build Java binding (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -644,6 +672,9 @@ jobs:
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
       CARGO_INCREMENTAL: 1
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
+      SCCACHE_CACHE_SIZE: 2G
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
@@ -653,6 +684,7 @@ jobs:
             .cache/cargo
             .cache/rustup
             .cache/dotnet
+            .cache/sccache
           key: build-${{ runner.os }}-arm64-dotnet-${{ hashFiles('**/Cargo.lock', 'asherah-dotnet/**/*.csproj') }}
           restore-keys: |
             build-${{ runner.os }}-arm64-dotnet-
@@ -661,14 +693,17 @@ jobs:
         with:
           name: arm64-rlib-artifacts
           path: target/
-      - name: Install cross-compile toolchain and .NET
+      - name: Install cross-compile toolchain, .NET, and sccache
         run: |
           apt-get update
-          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu wget
+          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu wget curl
           wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
           chmod +x dotnet-install.sh
           ./dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet
           ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet
+          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          mv sccache-*/sccache /usr/local/bin/
+          chmod +x /usr/local/bin/sccache
       - name: Build .NET binding (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
