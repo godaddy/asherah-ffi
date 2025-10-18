@@ -19,24 +19,48 @@ jobs:
   build-bindings:
     strategy:
       matrix:
-        include:
-          - os: ubuntu-latest
+        settings:
+          - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            platform: linux-x64-gnu
-          - os: ubuntu-latest
+            build: |
+              set -e
+              npm ci
+              npm run build -- --target x86_64-unknown-linux-gnu
+              strip -x *.node
+          - host: ubuntu-latest
             target: aarch64-unknown-linux-gnu
-            platform: linux-arm64-gnu
-          - os: macos-latest
+            build: |
+              set -e
+              sudo apt-get update
+              sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+              npm ci
+              npm run build -- --target aarch64-unknown-linux-gnu --use-napi-cross
+          - host: macos-latest
             target: x86_64-apple-darwin
-            platform: darwin-x64
-          - os: macos-latest
+            build: |
+              set -e
+              npm ci
+              npm run build -- --target x86_64-apple-darwin
+              strip -x *.node
+          - host: macos-latest
             target: aarch64-apple-darwin
-            platform: darwin-arm64
-          - os: windows-latest
+            build: |
+              set -e
+              sudo rm -Rf /Library/Developer/CommandLineTools/SDKs/*
+              export CC=$(xcrun -f clang)
+              export CXX=$(xcrun -f clang++)
+              SYSROOT=$(xcrun --sdk macosx --show-sdk-path)
+              export CFLAGS="-isysroot $SYSROOT -isystem $SYSROOT"
+              npm ci
+              npm run build -- --target aarch64-apple-darwin
+              strip -x *.node
+          - host: windows-latest
             target: x86_64-pc-windows-msvc
-            platform: win32-x64-msvc
+            build: |
+              npm ci
+              npm run build -- --target x86_64-pc-windows-msvc
 
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.settings.host }}
 
     steps:
       - uses: actions/checkout@v4
@@ -50,25 +74,30 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.settings.target }}
 
-      - name: Install cross-compilation tools (Linux ARM64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            .cargo-cache
+            target/
+          key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
 
       - name: Build
         working-directory: asherah-node
-        run: |
-          npm ci
-          npx @napi-rs/cli build --release --target ${{ matrix.target }}
+        shell: bash
+        run: ${{ matrix.settings.build }}
 
-      - name: Upload artifacts
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bindings-${{ matrix.platform }}
-          path: asherah-node/npm
+          name: bindings-${{ matrix.settings.target }}
+          path: asherah-node/*.node
+          if-no-files-found: error
           retention-days: 1
 
   publish:
@@ -89,27 +118,32 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: bindings-*
+          merge-multiple: true
 
-      - name: Move bindings to package
+      - name: List downloaded artifacts
         run: |
-          cd asherah-node
+          ls -R artifacts/
+
+      - name: Move bindings and publish
+        working-directory: asherah-node
+        run: |
           npm ci --ignore-scripts
 
-          # Copy all platform bindings
-          for dir in ../artifacts/bindings-*; do
-            if [ -d "$dir" ]; then
-              echo "Copying bindings from $dir"
-              cp -r "$dir"/* ./npm/ || true
-            fi
-          done
+          # Copy all .node files from artifacts
+          echo "Copying bindings..."
+          find ../artifacts -name "*.node" -exec cp -v {} . \;
 
-          ls -la npm/
+          # List what we have
+          ls -lh *.node || echo "No .node files found!"
 
       - name: Publish to npm (dry run)
         if: ${{ github.event.inputs.dry_run == 'true' }}
         working-directory: asherah-node
         run: |
+          npm run prepublishOnly
           npm pack
+          tar -tzf *.tgz | grep "\.node"
           echo "Dry run complete. Package created but not published."
 
       - name: Publish to npm

@@ -31,7 +31,6 @@ napi-build = "2"
 
 [package.metadata.napi]
 name = "asherah"
-npm = { default = true }
 napi-version = 4
 
 [lints]
