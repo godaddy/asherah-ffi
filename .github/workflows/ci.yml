@@ -83,11 +83,23 @@ jobs:
           key: build-${{ runner.os }}-x86_64-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             build-${{ runner.os }}-x86_64-
-      - name: Install sccache
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Install sccache and build tools
         run: |
           curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           sudo mv sccache-*/sccache /usr/local/bin/
           sudo chmod +x /usr/local/bin/sccache
+          sudo apt-get update
+          sudo apt-get install -y maven
+          python -m pip install maturin==1.9.4
       - name: Build all x86_64 bindings
         run: |
           TARGET_ARCH=x86_64 ./scripts/build-bindings.sh
