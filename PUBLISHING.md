@@ -8,33 +8,37 @@
 
 ### Publishing Process
 
-#### Automatic (on release)
-1. Create a git tag: `git tag v4.0.0`
-2. Push tag: `git push origin v4.0.0`
-3. Create GitHub release from tag
-4. Workflow automatically builds for all platforms and publishes to npm
+**Note:** The GitHub Actions publish workflow is currently blocked due to org billing issues. Use the local build method instead.
 
-#### Manual
+#### Local Build (Current Method)
+```bash
+# Build for your current platform
+./scripts/build-npm-package.sh
+
+# Test the package
+cd asherah-node
+node test/roundtrip.js
+
+# Publish (requires npm login first)
+npm publish --access public
+```
+
+**Supported platforms for local builds:**
+- macOS ARM64 (Apple Silicon)
+- macOS x64 (Intel)
+- Linux x64 (glibc)
+- Linux ARM64 (via cross-compilation with aarch64-linux-gnu tools)
+
+**Note:** The current napi-rs configuration builds a single universal package (`npm = { default = true }`), not platform-specific packages. The output `index.node` contains the native binary for the current platform.
+
+#### GitHub Actions (When Billing Resolved)
 1. Go to Actions → "Publish to npm"
 2. Click "Run workflow"
 3. Optional: Enter specific tag (e.g., v4.0.0)
 4. Optional: Enable "Dry run" to test without publishing
 5. Click "Run workflow"
 
-### Supported Platforms
-- Linux x64 (glibc)
-- Linux ARM64 (glibc)
-- macOS x64 (Intel)
-- macOS ARM64 (Apple Silicon)
-- Windows x64 (MSVC)
-
-### Dry Run Testing
-To verify builds without publishing:
-```bash
-gh workflow run publish-npm.yml -f dry_run=true
-```
-
-This creates platform bindings and packages them but skips `npm publish`.
+The workflow builds for all platforms and creates platform-specific npm packages.
 
 ## Python Package (asherah-python)
 
