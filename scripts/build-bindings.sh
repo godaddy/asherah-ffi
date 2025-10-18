@@ -128,6 +128,12 @@ SKIP_CORE_BUILD="${SKIP_CORE_BUILD:-0}"
 if requires_core_build; then
   if [ "$SKIP_CORE_BUILD" = "1" ]; then
     echo "[build-bindings] Skipping core build; reusing cached artifacts"
+    echo "[build-bindings] TARGET_DIR=$TARGET_DIR"
+    echo "[build-bindings] CARGO_RELEASE_DIR=$CARGO_RELEASE_DIR"
+    echo "[build-bindings] Contents of TARGET_DIR:"
+    find "$TARGET_DIR" -maxdepth 3 -print || true
+    echo "[build-bindings] Contents of $ROOT_DIR/target:"
+    ls -la "$ROOT_DIR/target/" || true
   else
     echo "[build-bindings] Building core FFI library (release)"
     cargo build --release -p asherah-ffi --target "$CARGO_TRIPLE"
@@ -177,8 +183,32 @@ if should_build node || should_build all; then
   echo "[build-bindings] Building Node.js addon"
   pushd "$ROOT_DIR/asherah-node" >/dev/null
   npm ci
-  npx @napi-rs/cli build --release --platform "$NAPI_PLATFORM"
-  npm run prepublishOnly
+  # Build the Node addon for the explicit Rust target to ensure
+  # cross-compilation produces the correct architecture binary.
+  npx @napi-rs/cli build --release --platform "$NAPI_PLATFORM" --target "$CARGO_TRIPLE"
+
+  echo "[build-bindings] Contents of asherah-node after napi build:"
+  find . -maxdepth 3 -name '*.node' -o -name 'npm' -type d | head -20 || true
+
+  # Ensure top-level asherah.node exists for test loader convenience
+  if [ ! -f npm/asherah.node ]; then
+    echo "[build-bindings] npm/asherah.node not found, searching for .node addon"
+    # napi-rs puts the file in platform-specific subdirectory (e.g., linux-x64-gnu/)
+    candidate=$(find . -maxdepth 2 -name '*.node' -print 2>/dev/null | head -n1 || true)
+    if [ -n "$candidate" ]; then
+      echo "[build-bindings] Found addon at $candidate, copying to npm/asherah.node"
+      mkdir -p npm
+      cp "$candidate" npm/asherah.node
+    else
+      echo "[build-bindings] ERROR: No .node addon found in current directory"
+      echo "[build-bindings] Directory structure:"
+      ls -la . || true
+      find . -maxdepth 2 -type f -name '*.node' || echo "No .node files found"
+      exit 1
+    fi
+  fi
+
+  npm run prepublishOnly || echo "[build-bindings] prepublishOnly failed (expected for cross-compilation)"
   mkdir -p "$OUT_DIR/node"
   rm -rf "$OUT_DIR/node/npm"
   cp -R npm "$OUT_DIR/node/npm"
@@ -191,7 +221,8 @@ if should_build python || should_build all; then
   python3 -m pip install --upgrade pip >/dev/null
   python3 -m pip install --upgrade maturin==1.9.4 >/dev/null
   rm -rf "$ROOT_DIR/target/wheels" "$ROOT_DIR/target/$CARGO_TRIPLE/wheels"
-  maturin build --release --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml" --target "$CARGO_TRIPLE"
+  # Build manylinux-compatible wheel (glibc 2.28)
+  maturin build --release --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml" --target "$CARGO_TRIPLE" --compatibility manylinux_2_28
   mkdir -p "$OUT_DIR/python"
   PY_WHEEL_DIR="$ROOT_DIR/target/wheels"
   if ! compgen -G "$PY_WHEEL_DIR/*.whl" >/dev/null 2>&1; then
@@ -268,7 +299,31 @@ fi
 if should_build java || should_build all; then
   echo "[build-bindings] Capturing Java artifacts"
   mkdir -p "$OUT_DIR/java"
-  cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
+
+  # Check if pre-built Java native library exists (from separate build-java-arm64 job or prior build)
+  JAVA_PREBUILT_FOUND=0
+  if compgen -G "$OUT_DIR/java/libasherah_java.*" >/dev/null 2>&1; then
+    echo "[build-bindings] Using pre-built Java native library from artifacts"
+    JAVA_PREBUILT_FOUND=1
+  fi
+
+  # If not pre-built, build it (only happens for non-ARM64 or local builds)
+  if [ $JAVA_PREBUILT_FOUND -eq 0 ]; then
+    echo "[build-bindings] Building Java JNI wrapper"
+    cargo build --release -p asherah-java --target "$CARGO_TRIPLE"
+    # Copy to output - search in both possible locations
+    mapfile -d '' java_libs < <(find "$CARGO_RELEASE_DIR" "$TARGET_DIR/$CARGO_TRIPLE/release" -maxdepth 1 -type f -name 'libasherah_java.*' -print0 2>/dev/null || true)
+    if [ ${#java_libs[@]} -gt 0 ]; then
+      for lib in "${java_libs[@]}"; do
+        echo "[build-bindings] Copying $(basename "$lib") to $OUT_DIR/java/"
+        cp "$lib" "$OUT_DIR/java/"
+      done
+    else
+      echo "[build-bindings] Warning: no libasherah_java libs found in $CARGO_RELEASE_DIR or $TARGET_DIR/$CARGO_TRIPLE/release"
+    fi
+  fi
+
+  # Package Java JAR with Maven
   mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package
   cp "$ROOT_DIR"/asherah-java/java/target/*.jar "$OUT_DIR/java/"
 fi

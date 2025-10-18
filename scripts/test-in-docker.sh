@@ -47,6 +47,12 @@ if [ -n "${BINDING_TESTS_FAST_ONLY:-}" ]; then
   RUN_ENVS+=(-e "BINDING_TESTS_FAST_ONLY=$BINDING_TESTS_FAST_ONLY")
 fi
 
+# Ensure binding selector propagates into the container so that
+# run-binding-tests.sh executes only the requested binding suite.
+if [ -n "${BINDING_TESTS_BINDING:-}" ]; then
+  RUN_ENVS+=(-e "BINDING_TESTS_BINDING=$BINDING_TESTS_BINDING")
+fi
+
 if [ -n "${DOCKER_PLATFORM:-}" ]; then
   if [ "$USE_PREBUILT_IMAGE" = "1" ]; then
     docker run --rm \
