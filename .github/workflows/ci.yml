@@ -458,7 +458,8 @@ jobs:
       - name: Install cross-compile toolchain
         run: |
           apt-get update
-          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu python3 python3-pip python3-venv
+          pip3 install maturin==1.9.4
       - name: Build FFI rlib (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -470,10 +471,9 @@ jobs:
           BINDING_COMPONENTS: ffi
         run: |
           rustup target add aarch64-unknown-linux-gnu
-          # Build core rlibs first for dependency reuse
-          cargo build --release -p asherah --features sqlite --target aarch64-unknown-linux-gnu
-          cargo build --release -p asherah-config --target aarch64-unknown-linux-gnu
-          # Build FFI cdylib for other bindings
+          # Build asherah using same method as Python (via maturin) to ensure identical Cargo invocation and fingerprints
+          maturin build --release --target aarch64-unknown-linux-gnu --manifest-path asherah-py/Cargo.toml --skip-auditwheel --out /tmp/throwaway-wheel
+          # Now build FFI cdylib for other bindings (asherah deps already compiled above)
           ./scripts/build-bindings.sh
       - name: Upload arm64 rlib artifacts
         uses: actions/upload-artifact@v4
