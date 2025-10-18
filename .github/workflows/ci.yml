@@ -181,7 +181,7 @@ jobs:
       - name: Build Python binding (x86_64) - manylinux
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-          export PATH="${{ github.workspace }}/.cache/cargo/bin:$PATH"
+          export PATH="$CARGO_HOME/bin:$PATH"
           curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           mv sccache-*/sccache /usr/local/bin/
           chmod +x /usr/local/bin/sccache
