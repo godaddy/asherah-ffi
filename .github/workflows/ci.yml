@@ -67,6 +67,10 @@ jobs:
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
+      CARGO_INCREMENTAL: 0
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
+      SCCACHE_CACHE_SIZE: 2G
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
@@ -75,9 +79,15 @@ jobs:
           path: |
             .cache/cargo
             .cache/rustup
+            .cache/sccache
           key: build-${{ runner.os }}-x86_64-rlib-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             build-${{ runner.os }}-x86_64-rlib-
+      - name: Install sccache
+        run: |
+          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          sudo mv sccache-*/sccache /usr/local/bin/
+          sudo chmod +x /usr/local/bin/sccache
       - name: Build FFI rlib (x86_64)
         env:
           TARGET_ARCH: x86_64
@@ -96,6 +106,10 @@ jobs:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
+      CARGO_INCREMENTAL: 0
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
+      SCCACHE_CACHE_SIZE: 2G
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
@@ -105,6 +119,7 @@ jobs:
             .cache/cargo
             .cache/rustup
             .cache/npm
+            .cache/sccache
           key: build-${{ runner.os }}-x86_64-node-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json') }}
           restore-keys: |
             build-${{ runner.os }}-x86_64-node-
@@ -113,6 +128,11 @@ jobs:
         with:
           name: x86_64-rlib-artifacts
           path: target/
+      - name: Install sccache
+        run: |
+          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          sudo mv sccache-*/sccache /usr/local/bin/
+          sudo chmod +x /usr/local/bin/sccache
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -136,6 +156,10 @@ jobs:
       CARGO_HOME: /github/workspace/.cache/cargo
       RUSTUP_HOME: /github/workspace/.cache/rustup
       PIP_CACHE_DIR: /github/workspace/.cache/pip
+      CARGO_INCREMENTAL: 0
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /github/workspace/.cache/sccache
+      SCCACHE_CACHE_SIZE: 2G
     steps:
       - uses: actions/checkout@v4
       - name: Download x86_64 rlib artifacts
@@ -147,6 +171,9 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
           export PATH="/github/workspace/.cache/cargo/bin:$PATH"
+          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          mv sccache-*/sccache /usr/local/bin/
+          chmod +x /usr/local/bin/sccache
           python3.11 -m pip install maturin==1.9.4
           rm -rf artifacts/x86_64/python || true
           mkdir -p artifacts/x86_64/python
@@ -163,6 +190,10 @@ jobs:
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
+      CARGO_INCREMENTAL: 0
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
+      SCCACHE_CACHE_SIZE: 2G
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
@@ -172,6 +203,7 @@ jobs:
             .cache/cargo
             .cache/rustup
             .cache/maven
+            .cache/sccache
           key: build-${{ runner.os }}-x86_64-java-${{ hashFiles('**/Cargo.lock', 'asherah-java/java/pom.xml') }}
           restore-keys: |
             build-${{ runner.os }}-x86_64-java-
@@ -180,6 +212,11 @@ jobs:
         with:
           name: x86_64-rlib-artifacts
           path: target/
+      - name: Install sccache
+        run: |
+          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          sudo mv sccache-*/sccache /usr/local/bin/
+          sudo chmod +x /usr/local/bin/sccache
       - name: Build Java binding (x86_64)
         env:
           TARGET_ARCH: x86_64
@@ -198,6 +235,10 @@ jobs:
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
+      CARGO_INCREMENTAL: 0
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
+      SCCACHE_CACHE_SIZE: 2G
     steps:
       - uses: actions/checkout@v4
       - name: Restore workspace caches
@@ -207,6 +248,7 @@ jobs:
             .cache/cargo
             .cache/rustup
             .cache/dotnet
+            .cache/sccache
           key: build-${{ runner.os }}-x86_64-dotnet-${{ hashFiles('**/Cargo.lock', 'asherah-dotnet/**/*.csproj') }}
           restore-keys: |
             build-${{ runner.os }}-x86_64-dotnet-
@@ -215,6 +257,11 @@ jobs:
         with:
           name: x86_64-rlib-artifacts
           path: target/
+      - name: Install sccache
+        run: |
+          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          sudo mv sccache-*/sccache /usr/local/bin/
+          sudo chmod +x /usr/local/bin/sccache
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
