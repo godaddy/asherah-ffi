@@ -12,3 +12,5 @@ yarn-error.log*
 
 # Rust target used during napi builds
 /target/
+.github/workflows/*.artifact-version
+asherah-node/*.tgz

@@ -43,6 +43,57 @@ if [ "$PLATFORM" = "darwin" ]; then
   echo
   echo "macOS builds complete!"
 
+  # Also build Linux if Docker is available
+  if command -v docker >/dev/null 2>&1; then
+  echo
+  echo "==> Building Linux binaries using Docker"
+  echo
+
+  # Build Linux x64
+  echo "Building for x86_64-unknown-linux-gnu in Docker..."
+  docker run --rm \
+    -v "$PROJECT_ROOT:/work" \
+    -w /work/asherah-node \
+    --platform linux/amd64 \
+    rust:latest \
+    bash -c "
+      set -ex
+      apt-get update -qq && apt-get install -y -qq nodejs npm > /dev/null 2>&1
+      rustup target add x86_64-unknown-linux-gnu
+      npm ci --ignore-scripts
+      cargo build --release --target x86_64-unknown-linux-gnu
+      ls -la ../target/x86_64-unknown-linux-gnu/release/ | grep asherah
+      strip ../target/x86_64-unknown-linux-gnu/release/libasherah_node.so
+      cp ../target/x86_64-unknown-linux-gnu/release/libasherah_node.so index.linux-x64-gnu.node
+    "
+  echo "✓ Built index.linux-x64-gnu.node"
+
+  # Build Linux ARM64
+  echo "Building for aarch64-unknown-linux-gnu in Docker..."
+  docker run --rm \
+    -v "$PROJECT_ROOT:/work" \
+    -w /work/asherah-node \
+    --platform linux/amd64 \
+    rust:latest \
+    bash -c "
+      set -ex
+      apt-get update -qq && apt-get install -y -qq nodejs npm gcc-aarch64-linux-gnu g++-aarch64-linux-gnu > /dev/null 2>&1
+      npm ci --ignore-scripts
+      rustup target add aarch64-unknown-linux-gnu
+      export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+      export CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++
+      export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+      cargo build --release --target aarch64-unknown-linux-gnu
+      ls -la ../target/aarch64-unknown-linux-gnu/release/ | grep asherah
+      aarch64-linux-gnu-strip ../target/aarch64-unknown-linux-gnu/release/libasherah_node.so
+      cp ../target/aarch64-unknown-linux-gnu/release/libasherah_node.so index.linux-arm64-gnu.node
+    "
+  echo "✓ Built index.linux-arm64-gnu.node"
+
+  echo
+  echo "Linux builds complete (via Docker)!"
+  fi
+
 elif [ "$PLATFORM" = "linux" ]; then
   echo
   echo "==> Building for Linux (both architectures)"
