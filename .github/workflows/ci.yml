@@ -162,6 +162,17 @@ jobs:
       SCCACHE_CACHE_SIZE: 2G
     steps:
       - uses: actions/checkout@v4
+      - name: Restore workspace caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/cargo
+            .cache/rustup
+            .cache/pip
+            .cache/sccache
+          key: build-${{ runner.os }}-x86_64-python-${{ hashFiles('Cargo.lock', 'asherah-py/Cargo.toml') }}
+          restore-keys: |
+            build-${{ runner.os }}-x86_64-python-
       - name: Download x86_64 rlib artifacts
         uses: actions/download-artifact@v4
         with:
