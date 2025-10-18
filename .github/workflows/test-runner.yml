@@ -1,0 +1,18 @@
+name: Test Runner Access
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-github-hosted:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "GitHub-hosted runner test"
+      
+  test-self-hosted:
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
+    steps:
+      - run: echo "Self-hosted runner test"
