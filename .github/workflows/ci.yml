@@ -12,7 +12,10 @@ on:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     steps:
       - uses: actions/checkout@v4
       - name: Cache cargo registry
@@ -38,7 +41,10 @@ jobs:
         run: cargo clippy --all-targets --all-features -- -D warnings
 
   tests:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: lint
     steps:
       - uses: actions/checkout@v4
@@ -62,7 +68,10 @@ jobs:
         run: ./scripts/test-in-docker.sh
 
   build-rlib-x86_64:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: lint
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
@@ -101,7 +110,10 @@ jobs:
           path: target/
 
   build-node-x86_64:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: build-rlib-x86_64
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
@@ -151,7 +163,10 @@ jobs:
           path: artifacts/x86_64
 
   build-python-x86_64:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: build-rlib-x86_64
     container: quay.io/pypa/manylinux_2_28_x86_64
     env:
@@ -199,7 +214,10 @@ jobs:
           path: artifacts/x86_64
 
   build-java-x86_64:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: build-rlib-x86_64
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
@@ -245,7 +263,10 @@ jobs:
           path: artifacts/x86_64
 
   build-dotnet-x86_64:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: build-rlib-x86_64
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
@@ -294,7 +315,10 @@ jobs:
           path: artifacts/x86_64
 
   build-ffi-x86_64:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: build-rlib-x86_64
     steps:
       - uses: actions/checkout@v4
@@ -316,7 +340,10 @@ jobs:
           path: artifacts/x86_64
 
   package-x86_64:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: [build-ffi-x86_64, build-node-x86_64, build-python-x86_64, build-dotnet-x86_64, build-java-x86_64]
     steps:
       - name: Download all x86_64 artifacts
@@ -337,7 +364,10 @@ jobs:
           path: artifacts/x86_64
 
   arm64-test-image:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: lint
     env:
       CACHE_MAX_AGE_DAYS: 7
@@ -400,7 +430,10 @@ jobs:
           path: /tmp/asherah-tests-arm64.tar
 
   tests-arm64:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs:
       - package-arm64
       - arm64-test-image
@@ -464,7 +497,10 @@ jobs:
         run: ./scripts/test-in-docker.sh
 
   sanitizers:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: build-rlib-x86_64
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'schedule' || contains(github.event.head_commit.message, '[sanitize]')
     steps:
@@ -503,7 +539,10 @@ jobs:
           valgrind --error-exitcode=1 cargo test -p asherah-ffi --lib
 
   build-rlib-arm64:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: lint
     container: rust:1.86-bullseye
     env:
@@ -557,7 +596,10 @@ jobs:
           path: target/
 
   build-node-arm64:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: build-rlib-arm64
     container: rust:1.86-bullseye
     env:
@@ -618,7 +660,10 @@ jobs:
           path: artifacts/aarch64
 
   build-python-arm64:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: build-rlib-arm64
     container: rust:1.86-bullseye
     env:
@@ -681,7 +726,10 @@ jobs:
           path: artifacts/aarch64
 
   build-java-arm64:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: build-rlib-arm64
     container: rust:1.86-bullseye
     env:
@@ -738,7 +786,10 @@ jobs:
           path: artifacts/aarch64
 
   build-dotnet-arm64:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: build-rlib-arm64
     container: rust:1.86-bullseye
     env:
@@ -799,7 +850,10 @@ jobs:
           path: artifacts/aarch64
 
   build-ffi-arm64:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: build-rlib-arm64
     steps:
       - uses: actions/checkout@v4
@@ -821,7 +875,10 @@ jobs:
           path: artifacts/aarch64
 
   package-arm64:
-    runs-on: ubuntu-latest
+    runs-on:
+      - self-hosted
+      - X64
+      - Linux
     needs: [build-ffi-arm64, build-node-arm64, build-python-arm64, build-dotnet-arm64, build-java-arm64]
     steps:
       - name: Download all arm64 artifacts
