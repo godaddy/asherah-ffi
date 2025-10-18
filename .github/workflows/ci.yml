@@ -97,6 +97,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: x86_64-rlib-artifacts
+          retention-days: 1
           path: target/
 
   build-node-x86_64:
@@ -146,6 +147,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-x86_64-part-node
+          retention-days: 1
           path: artifacts/x86_64
 
   build-python-x86_64:
@@ -193,6 +195,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-x86_64-part-python
+          retention-days: 1
           path: artifacts/x86_64
 
   build-java-x86_64:
@@ -238,6 +241,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-x86_64-part-java
+          retention-days: 1
           path: artifacts/x86_64
 
   build-dotnet-x86_64:
@@ -286,6 +290,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-x86_64-part-dotnet
+          retention-days: 1
           path: artifacts/x86_64
 
   build-ffi-x86_64:
@@ -307,6 +312,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-x86_64-part-ffi
+          retention-days: 1
           path: artifacts/x86_64
 
   package-x86_64:
@@ -327,6 +333,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-x86_64
+          retention-days: 1
           path: artifacts/x86_64
 
   arm64-test-image:
@@ -389,6 +396,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: arm64-tests-image
+          retention-days: 1
           path: /tmp/asherah-tests-arm64.tar
 
   tests-arm64:
@@ -545,6 +553,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: arm64-rlib-artifacts
+          retention-days: 1
           path: target/
 
   build-node-arm64:
@@ -605,6 +614,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-aarch64-part-node
+          retention-days: 1
           path: artifacts/aarch64
 
   build-python-arm64:
@@ -667,6 +677,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-aarch64-part-python
+          retention-days: 1
           path: artifacts/aarch64
 
   build-java-arm64:
@@ -723,6 +734,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-aarch64-part-java
+          retention-days: 1
           path: artifacts/aarch64
 
   build-dotnet-arm64:
@@ -783,6 +795,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-aarch64-part-dotnet
+          retention-days: 1
           path: artifacts/aarch64
 
   build-ffi-arm64:
@@ -804,6 +817,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-aarch64-part-ffi
+          retention-days: 1
           path: artifacts/aarch64
 
   package-arm64:
@@ -824,4 +838,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-linux-aarch64
+          retention-days: 1
           path: artifacts/aarch64
