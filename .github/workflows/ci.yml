@@ -443,7 +443,7 @@ jobs:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      CARGO_INCREMENTAL: 1
+      CARGO_INCREMENTAL: 0
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
@@ -497,7 +497,7 @@ jobs:
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
       NPM_CONFIG_CACHE: ${{ github.workspace }}/.cache/npm
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      CARGO_INCREMENTAL: 1
+      CARGO_INCREMENTAL: 0
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
@@ -556,7 +556,7 @@ jobs:
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
       PIP_CACHE_DIR: ${{ github.workspace }}/.cache/pip
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      CARGO_INCREMENTAL: 1
+      CARGO_INCREMENTAL: 0
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
@@ -616,7 +616,7 @@ jobs:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      CARGO_INCREMENTAL: 1
+      CARGO_INCREMENTAL: 0
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
@@ -671,7 +671,7 @@ jobs:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
       CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      CARGO_INCREMENTAL: 1
+      CARGO_INCREMENTAL: 0
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
