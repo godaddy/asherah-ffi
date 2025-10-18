@@ -571,7 +571,7 @@ jobs:
             .cache/rustup
             .cache/pip
             .cache/sccache
-          key: build-${{ runner.os }}-arm64-python-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('asherah-py/**') }}
+          key: build-${{ runner.os }}-arm64-python-${{ hashFiles('Cargo.lock', 'asherah-py/Cargo.toml') }}
           restore-keys: |
             build-${{ runner.os }}-arm64-python-
       - name: Download arm64 rlib artifacts
