@@ -1,8 +1,8 @@
 {
-  "name": "asherah-node",
+  "name": "asherah",
   "version": "4.0.0",
   "private": false,
-  "description": "Node.js addon for Asherah (napi-rs)",
+  "description": "Asherah envelope encryption and key rotation library",
   "main": "npm/index.js",
   "types": "index.d.ts",
   "files": [
