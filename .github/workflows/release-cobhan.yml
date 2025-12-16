@@ -28,23 +28,27 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             artifact_name: libasherah_cobhan.so
-            asset_name: libasherah_cobhan-linux-x86_64.so
+            asset_name: libasherah-x64.so
+            arch: x64
           # Linux arm64
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             artifact_name: libasherah_cobhan.so
-            asset_name: libasherah_cobhan-linux-aarch64.so
+            asset_name: libasherah-arm64.so
+            arch: arm64
             cross: true
           # macOS x86_64
           - os: macos-13
             target: x86_64-apple-darwin
             artifact_name: libasherah_cobhan.dylib
-            asset_name: libasherah_cobhan-darwin-x86_64.dylib
+            asset_name: libasherah-x64.dylib
+            arch: x64
           # macOS arm64
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact_name: libasherah_cobhan.dylib
-            asset_name: libasherah_cobhan-darwin-aarch64.dylib
+            asset_name: libasherah-arm64.dylib
+            arch: arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -99,11 +103,83 @@ jobs:
           mkdir -p artifacts
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} artifacts/${{ matrix.asset_name }}
 
+      - name: Generate header file
+        run: |
+          cat > artifacts/libasherah-${{ matrix.arch }}.h << 'EOF'
+          /* libasherah - C ABI for Asherah encryption library
+           *
+           * This header is compatible with both Go and Rust implementations.
+           * Drop-in replacement for github.com/godaddy/asherah-cobhan
+           */
+          #ifndef LIBASHERAH_H
+          #define LIBASHERAH_H
+
+          #include <stdint.h>
+
+          #ifdef __cplusplus
+          extern "C" {
+          #endif
+
+          /* Error codes */
+          #define ERR_NONE                  0
+          #define ERR_NULL_PTR             -1
+          #define ERR_BUFFER_TOO_LARGE     -2
+          #define ERR_BUFFER_TOO_SMALL     -3
+          #define ERR_COPY_FAILED          -4
+          #define ERR_JSON_DECODE_FAILED   -5
+          #define ERR_JSON_ENCODE_FAILED   -6
+          #define ERR_ALREADY_INITIALIZED  -100
+          #define ERR_BAD_CONFIG           -101
+          #define ERR_NOT_INITIALIZED      -102
+          #define ERR_ENCRYPT_FAILED       -103
+          #define ERR_DECRYPT_FAILED       -104
+
+          /* Cobhan buffer format:
+           * - Bytes 0-3: int32_t length (little-endian)
+           * - Bytes 4-7: int32_t capacity (little-endian, for output buffers)
+           * - Bytes 8+:  data payload
+           */
+
+          void Shutdown(void);
+          int32_t SetEnv(void* envJson);
+          int32_t SetupJson(void* configJson);
+          int32_t EstimateBuffer(int32_t dataLen, int32_t partitionLen);
+
+          int32_t Encrypt(
+              void* partitionId,
+              void* data,
+              void* encryptedData,
+              void* encryptedKey,
+              void* created,
+              void* parentKeyId,
+              void* parentKeyCreated
+          );
+
+          int32_t Decrypt(
+              void* partitionId,
+              void* encryptedData,
+              void* encryptedKey,
+              int64_t created,
+              void* parentKeyId,
+              int64_t parentKeyCreated,
+              void* data
+          );
+
+          int32_t EncryptToJson(void* partitionId, void* data, void* jsonOutput);
+          int32_t DecryptFromJson(void* partitionId, void* jsonInput, void* dataOutput);
+
+          #ifdef __cplusplus
+          }
+          #endif
+
+          #endif /* LIBASHERAH_H */
+          EOF
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.asset_name }}
-          path: artifacts/${{ matrix.asset_name }}
+          name: libasherah-${{ matrix.arch }}-${{ matrix.os }}
+          path: artifacts/
           if-no-files-found: error
           retention-days: 7
 
@@ -116,7 +192,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: libasherah_cobhan-*
+          pattern: libasherah-*
           merge-multiple: true
 
       - name: List artifacts
@@ -127,13 +203,13 @@ jobs:
       - name: Create tarball
         run: |
           cd artifacts
-          tar -czvf ../asherah-cobhan-all-platforms.tar.gz .
+          tar -czvf ../libasherah-all-platforms.tar.gz .
 
       - name: Upload combined artifact
         uses: actions/upload-artifact@v4
         with:
-          name: asherah-cobhan-all-platforms
-          path: asherah-cobhan-all-platforms.tar.gz
+          name: libasherah-all-platforms
+          path: libasherah-all-platforms.tar.gz
           retention-days: 7
 
   # Upload to GitHub Release (only on release event or when explicitly requested)
@@ -149,7 +225,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          pattern: libasherah_cobhan-*
+          pattern: libasherah-*
           merge-multiple: true
 
       - name: List artifacts for upload
@@ -157,21 +233,30 @@ jobs:
           echo "=== Artifacts to upload ==="
           ls -la artifacts/
 
+      - name: Generate SHA256SUMS
+        run: |
+          cd artifacts
+          sha256sum libasherah-*.so libasherah-*.dylib 2>/dev/null > SHA256SUMS || true
+          cat SHA256SUMS
+
       - name: Create combined tarball
         run: |
           cd artifacts
-          tar -czvf ../asherah-cobhan-all-platforms.tar.gz .
+          tar -czvf ../libasherah-all-platforms.tar.gz .
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event.inputs.tag || github.ref_name }}
           files: |
-            artifacts/libasherah_cobhan-linux-x86_64.so
-            artifacts/libasherah_cobhan-linux-aarch64.so
-            artifacts/libasherah_cobhan-darwin-x86_64.dylib
-            artifacts/libasherah_cobhan-darwin-aarch64.dylib
-            asherah-cobhan-all-platforms.tar.gz
+            artifacts/libasherah-x64.so
+            artifacts/libasherah-arm64.so
+            artifacts/libasherah-x64.dylib
+            artifacts/libasherah-arm64.dylib
+            artifacts/libasherah-x64.h
+            artifacts/libasherah-arm64.h
+            artifacts/SHA256SUMS
+            libasherah-all-platforms.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -187,22 +272,27 @@ jobs:
           REPO="${{ github.repository }}"
           echo ""
           echo "=============================================="
-          echo "Asherah-Cobhan Download URLs"
+          echo "libasherah Download URLs (Drop-in compatible)"
           echo "=============================================="
           echo ""
           echo "Linux x86_64:"
-          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah_cobhan-linux-x86_64.so"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-x64.so"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-x64.h"
           echo ""
           echo "Linux arm64:"
-          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah_cobhan-linux-aarch64.so"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-arm64.so"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-arm64.h"
           echo ""
           echo "macOS x86_64:"
-          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah_cobhan-darwin-x86_64.dylib"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-x64.dylib"
           echo ""
           echo "macOS arm64 (Apple Silicon):"
-          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah_cobhan-darwin-aarch64.dylib"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-arm64.dylib"
+          echo ""
+          echo "Checksums:"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/SHA256SUMS"
           echo ""
           echo "All platforms (tarball):"
-          echo "  https://github.com/${REPO}/releases/download/${TAG}/asherah-cobhan-all-platforms.tar.gz"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-all-platforms.tar.gz"
           echo ""
           echo "=============================================="
