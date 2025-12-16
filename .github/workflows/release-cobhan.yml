@@ -37,8 +37,8 @@ jobs:
             asset_name: libasherah-arm64.so
             arch: arm64
             cross: true
-          # macOS x86_64
-          - os: macos-13
+          # macOS x86_64 (cross-compile from arm64)
+          - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: libasherah_cobhan.dylib
             asset_name: libasherah-x64.dylib
@@ -79,6 +79,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
 
       - name: Build asherah-cobhan
         env:
