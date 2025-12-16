@@ -1,0 +1,208 @@
+name: Release Asherah-Cobhan
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g., v1.0.0). Leave empty to build from current commit.'
+        required: false
+        type: string
+      upload_to_release:
+        description: 'Upload artifacts to GitHub Release (requires existing release)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux x86_64
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: libasherah_cobhan.so
+            asset_name: libasherah_cobhan-linux-x86_64.so
+          # Linux arm64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_name: libasherah_cobhan.so
+            asset_name: libasherah_cobhan-linux-aarch64.so
+            cross: true
+          # macOS x86_64
+          - os: macos-13
+            target: x86_64-apple-darwin
+            artifact_name: libasherah_cobhan.dylib
+            asset_name: libasherah_cobhan-darwin-x86_64.dylib
+          # macOS arm64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: libasherah_cobhan.dylib
+            asset_name: libasherah_cobhan-darwin-aarch64.dylib
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ matrix.target }}-cargo-cobhan-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.target }}-cargo-cobhan-
+
+      - name: Install cross-compile tools (Linux arm64)
+        if: matrix.cross == true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+
+      - name: Build asherah-cobhan
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.cross && 'aarch64-linux-gnu-gcc' || '' }}
+          CC_aarch64_unknown_linux_gnu: ${{ matrix.cross && 'aarch64-linux-gnu-gcc' || '' }}
+          CXX_aarch64_unknown_linux_gnu: ${{ matrix.cross && 'aarch64-linux-gnu-g++' || '' }}
+          AR_aarch64_unknown_linux_gnu: ${{ matrix.cross && 'aarch64-linux-gnu-ar' || '' }}
+        run: |
+          cargo build --release -p asherah-cobhan --target ${{ matrix.target }}
+
+      - name: Strip binary (Linux/macOS)
+        if: matrix.os != 'windows-latest'
+        run: |
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            aarch64-linux-gnu-strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }} || true
+          else
+            strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }} || true
+          fi
+
+      - name: Prepare artifact
+        run: |
+          mkdir -p artifacts
+          cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} artifacts/${{ matrix.asset_name }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset_name }}
+          path: artifacts/${{ matrix.asset_name }}
+          if-no-files-found: error
+          retention-days: 7
+
+  # Create a combined artifact with all platforms
+  package:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: libasherah_cobhan-*
+          merge-multiple: true
+
+      - name: List artifacts
+        run: |
+          echo "=== Downloaded artifacts ==="
+          ls -la artifacts/
+
+      - name: Create tarball
+        run: |
+          cd artifacts
+          tar -czvf ../asherah-cobhan-all-platforms.tar.gz .
+
+      - name: Upload combined artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: asherah-cobhan-all-platforms
+          path: asherah-cobhan-all-platforms.tar.gz
+          retention-days: 7
+
+  # Upload to GitHub Release (only on release event or when explicitly requested)
+  upload-release:
+    needs: build
+    if: github.event_name == 'release' || github.event.inputs.upload_to_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: libasherah_cobhan-*
+          merge-multiple: true
+
+      - name: List artifacts for upload
+        run: |
+          echo "=== Artifacts to upload ==="
+          ls -la artifacts/
+
+      - name: Create combined tarball
+        run: |
+          cd artifacts
+          tar -czvf ../asherah-cobhan-all-platforms.tar.gz .
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          files: |
+            artifacts/libasherah_cobhan-linux-x86_64.so
+            artifacts/libasherah_cobhan-linux-aarch64.so
+            artifacts/libasherah_cobhan-darwin-x86_64.dylib
+            artifacts/libasherah_cobhan-darwin-aarch64.dylib
+            asherah-cobhan-all-platforms.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Output download URLs (for documentation)
+  show-urls:
+    needs: upload-release
+    if: github.event_name == 'release' || github.event.inputs.upload_to_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Show download URLs
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          REPO="${{ github.repository }}"
+          echo ""
+          echo "=============================================="
+          echo "Asherah-Cobhan Download URLs"
+          echo "=============================================="
+          echo ""
+          echo "Linux x86_64:"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah_cobhan-linux-x86_64.so"
+          echo ""
+          echo "Linux arm64:"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah_cobhan-linux-aarch64.so"
+          echo ""
+          echo "macOS x86_64:"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah_cobhan-darwin-x86_64.dylib"
+          echo ""
+          echo "macOS arm64 (Apple Silicon):"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah_cobhan-darwin-aarch64.dylib"
+          echo ""
+          echo "All platforms (tarball):"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/asherah-cobhan-all-platforms.tar.gz"
+          echo ""
+          echo "=============================================="
