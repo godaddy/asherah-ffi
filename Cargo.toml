@@ -8,6 +8,7 @@ publish = false
 members = [
   "asherah",
   "asherah-ffi",
+  "asherah-cobhan",
   "asherah-node",
   "asherah-py",
   "asherah-java",

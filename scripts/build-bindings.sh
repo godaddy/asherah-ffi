@@ -28,7 +28,7 @@ requires_core_build() {
     return 0
   fi
   local comp
-  for comp in ffi python ruby dotnet java go; do
+  for comp in ffi python ruby dotnet java go cobhan; do
     if should_build "$comp"; then
       return 0
     fi
@@ -98,6 +98,9 @@ else
         ;;
       go)
         rm -rf "$OUT_DIR/go"
+        ;;
+      cobhan)
+        rm -rf "$OUT_DIR/cobhan"
         ;;
     esac
   done
@@ -326,6 +329,31 @@ if should_build java || should_build all; then
   # Package Java JAR with Maven
   mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package
   cp "$ROOT_DIR"/asherah-java/java/target/*.jar "$OUT_DIR/java/"
+fi
+
+if should_build cobhan || should_build all; then
+  echo "[build-bindings] Building asherah-cobhan (C ABI library)"
+  mkdir -p "$OUT_DIR/cobhan"
+
+  cargo build --release -p asherah-cobhan --target "$CARGO_TRIPLE"
+
+  # Find and copy cobhan artifacts
+  mapfile -d '' cobhan_libs < <(find "$CARGO_RELEASE_DIR" "$TARGET_DIR/$CARGO_TRIPLE/release" -maxdepth 1 -type f \( -name 'libasherah_cobhan.so' -o -name 'libasherah_cobhan.dylib' -o -name 'asherah_cobhan.dll' \) -print0 2>/dev/null || true)
+
+  if [ ${#cobhan_libs[@]} -eq 0 ]; then
+    # Try broader search
+    mapfile -d '' cobhan_libs < <(find "$TARGET_DIR" -maxdepth 4 -type f \( -name 'libasherah_cobhan.so' -o -name 'libasherah_cobhan.dylib' -o -name 'asherah_cobhan.dll' \) ! -path '*/deps/*' -print0 2>/dev/null || true)
+  fi
+
+  if [ ${#cobhan_libs[@]} -gt 0 ]; then
+    for lib in "${cobhan_libs[@]}"; do
+      base="$(basename "$lib")"
+      echo "[build-bindings] Packaging cobhan library: $base"
+      cp "$lib" "$OUT_DIR/cobhan/$base"
+    done
+  else
+    echo "[build-bindings] Warning: no libasherah_cobhan libs found"
+  fi
 fi
 
 echo "[build-bindings] Binding artifacts prepared in $OUT_DIR"

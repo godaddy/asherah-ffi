@@ -1,0 +1,49 @@
+[package]
+name = "asherah-cobhan"
+version = "0.5.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "C ABI for Asherah using Cobhan buffer format - drop-in replacement for Go asherah-cobhan"
+homepage = "https://github.com/godaddy/asherah"
+repository = "https://github.com/godaddy/asherah"
+keywords = ["asherah", "ffi", "encryption", "kms", "cobhan"]
+categories = ["cryptography", "memory-management", "ffi"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+test-helpers = []
+
+[dependencies]
+asherah = { path = "../asherah", features = ["sqlite"] }
+asherah-config = { path = "../asherah-config" }
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+base64 = "0.22"
+
+[dev-dependencies]
+asherah-cobhan = { path = ".", features = ["test-helpers"] }
+serde = { version = "1.0", features = ["derive"] }
+base64 = "0.22"
+
+# Allow unsafe code (required for FFI)
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+default_union_representation = "deny"
+exit = "deny"
+lossy_float_literal = "deny"
+mem_forget = "deny"
+multiple_inherent_impl = "deny"
+mut_mut = "deny"
+ptr_as_ptr = "deny"
+unwrap_in_result = "deny"
+unwrap_used = "deny"
+wildcard_dependencies = "deny"
+
+[[test]]
+name = "integration_tests"
+path = "tests/integration_tests.rs"
