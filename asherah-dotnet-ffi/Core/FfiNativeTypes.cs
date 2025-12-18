@@ -57,8 +57,17 @@ internal sealed class Utf8String : IDisposable
     public Utf8String(string value)
     {
         byte[] bytes = System.Text.Encoding.UTF8.GetBytes(value + "\0");
-        _pointer = Marshal.AllocHGlobal(bytes.Length);
-        Marshal.Copy(bytes, 0, _pointer, bytes.Length);
+        IntPtr allocated = Marshal.AllocHGlobal(bytes.Length);
+        try
+        {
+            Marshal.Copy(bytes, 0, allocated, bytes.Length);
+            _pointer = allocated;
+        }
+        catch
+        {
+            Marshal.FreeHGlobal(allocated);
+            throw;
+        }
     }
 
     public IntPtr Pointer => _pointer;

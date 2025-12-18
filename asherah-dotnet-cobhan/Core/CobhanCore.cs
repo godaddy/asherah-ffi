@@ -151,12 +151,20 @@ internal sealed class CobhanBuffer : IDisposable
     {
         int capacity = data.Length;
         IntPtr ptr = Marshal.AllocHGlobal(HeaderSize + capacity);
-        WriteHeader(ptr, data.Length, capacity);
-        if (data.Length > 0)
+        try
         {
-            Marshal.Copy(data, 0, IntPtr.Add(ptr, HeaderSize), data.Length);
+            WriteHeader(ptr, data.Length, capacity);
+            if (data.Length > 0)
+            {
+                Marshal.Copy(data, 0, IntPtr.Add(ptr, HeaderSize), data.Length);
+            }
+            return new CobhanBuffer(ptr, capacity);
         }
-        return new CobhanBuffer(ptr, capacity);
+        catch
+        {
+            Marshal.FreeHGlobal(ptr);
+            throw;
+        }
     }
 
     public static CobhanBuffer FromString(string value)
