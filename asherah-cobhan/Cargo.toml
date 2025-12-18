@@ -1,6 +1,6 @@
 [package]
 name = "asherah-cobhan"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "Apache-2.0"
 description = "C ABI for Asherah using Cobhan buffer format - drop-in replacement for Go asherah-cobhan"
