@@ -1,4 +1,3 @@
-#if ASHERAH_COBHAN
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -205,4 +204,3 @@ internal sealed class CobhanBuffer : IDisposable
         Marshal.WriteInt32(ptr, 4, capacity);
     }
 }
-#endif

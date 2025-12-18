@@ -6,7 +6,7 @@ using GoDaddy.Asherah.Crypto.Exceptions;
 
 namespace GoDaddy.Asherah.Internal;
 
-internal static class NativeLibraryLoader
+internal static partial class NativeLibraryLoader
 {
     private static bool _registered;
 
@@ -154,11 +154,7 @@ internal static class NativeLibraryLoader
         return null;
     }
 
-#if ASHERAH_FFI
-    private const string LibraryName = "asherah_ffi";
-#elif ASHERAH_COBHAN
-    private const string LibraryName = "asherah_cobhan";
-#else
-    private const string LibraryName = "asherah";
-#endif
+    private static readonly string LibraryName = GetLibraryName();
+
+    private static partial string GetLibraryName();
 }
