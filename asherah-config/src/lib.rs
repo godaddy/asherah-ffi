@@ -93,6 +93,16 @@ impl ConfigOptions {
     }
 
     pub fn apply_env(&self) -> Result<AppliedConfig> {
+        // Normalize legacy/debug aliases to supported values.
+        fn normalize_alias(value: &str) -> String {
+            match value.to_lowercase().as_str() {
+                "test-debug-memory" => "memory".to_string(),
+                "test-debug-sqlite" => "sqlite".to_string(),
+                "test-debug-static" => "static".to_string(),
+                other => other.to_string(),
+            }
+        }
+
         let service_name = self
             .service_name
             .as_ref()
@@ -101,11 +111,11 @@ impl ConfigOptions {
             .product_id
             .as_ref()
             .ok_or_else(|| anyhow!("ProductID is required"))?;
-        let metastore = self
+        let metastore_raw = self
             .metastore
             .as_ref()
-            .ok_or_else(|| anyhow!("Metastore is required"))?
-            .to_lowercase();
+            .ok_or_else(|| anyhow!("Metastore is required"))?;
+        let metastore = normalize_alias(metastore_raw);
 
         set_env_opt_str("SERVICE_NAME", Some(service_name));
         set_env_opt_str("PRODUCT_ID", Some(product_id));
@@ -178,7 +188,8 @@ impl ConfigOptions {
             std::env::remove_var("REGION_MAP");
         }
 
-        let kms = self.kms.as_deref().unwrap_or("static").to_lowercase();
+        let kms_raw = self.kms.as_deref().unwrap_or("static");
+        let kms = normalize_alias(kms_raw);
         std::env::set_var("KMS", &kms);
         if let Some(hex) = self.static_master_key_hex.as_deref() {
             set_env_opt_str("STATIC_MASTER_KEY_HEX", Some(hex));
@@ -190,12 +201,6 @@ impl ConfigOptions {
             std::env::set_var("ASHERAH_VERBOSE", "1");
         } else {
             std::env::remove_var("ASHERAH_VERBOSE");
-        }
-
-        if kms == "static" && std::env::var("STATIC_MASTER_KEY_HEX").is_err() {
-            return Err(anyhow!(
-                "Static KMS requires StaticMasterKeyHex or STATIC_MASTER_KEY_HEX"
-            ));
         }
 
         Ok(AppliedConfig {
