@@ -20,6 +20,7 @@ public sealed class AsherahConfig
     public int? SessionCacheMaxSize { get; }
     public long? SessionCacheDuration { get; }
     public string Kms { get; }
+    public string? StaticMasterKeyHex { get; }
     public IReadOnlyDictionary<string, string>? RegionMap { get; }
     public string? PreferredRegion { get; }
     public bool? EnableRegionSuffix { get; }
@@ -41,6 +42,7 @@ public sealed class AsherahConfig
         SessionCacheMaxSize = builder.SessionCacheMaxSize;
         SessionCacheDuration = builder.SessionCacheDuration;
         Kms = builder.Kms;
+        StaticMasterKeyHex = builder.StaticMasterKeyHex;
         RegionMap = builder.RegionMap == null
             ? null
             : new Dictionary<string, string>(builder.RegionMap);
@@ -69,6 +71,7 @@ public sealed class AsherahConfig
             ["SessionCacheMaxSize"] = SessionCacheMaxSize,
             ["SessionCacheDuration"] = SessionCacheDuration,
             ["KMS"] = Kms,
+            ["StaticMasterKeyHex"] = StaticMasterKeyHex,
             ["RegionMap"] = RegionMap,
             ["PreferredRegion"] = PreferredRegion,
             ["EnableRegionSuffix"] = EnableRegionSuffix,
@@ -100,6 +103,7 @@ public sealed class AsherahConfig
         public int? SessionCacheMaxSize { get; private set; }
         public long? SessionCacheDuration { get; private set; }
         public string Kms { get; private set; } = "static";
+        public string? StaticMasterKeyHex { get; private set; }
         public IDictionary<string, string>? RegionMap { get; private set; }
         public string? PreferredRegion { get; private set; }
         public bool? EnableRegionSuffix { get; private set; }
@@ -186,6 +190,22 @@ public sealed class AsherahConfig
             return this;
         }
 
+        public Builder WithStaticMasterKey(string value)
+        {
+            if (value is null)
+            {
+                throw new ArgumentNullException(nameof(value));
+            }
+            var bytes = System.Text.Encoding.UTF8.GetBytes(value);
+            if (bytes.Length != 32)
+            {
+                throw new InvalidOperationException("Static master key must be 32 bytes when UTF-8 encoded");
+            }
+            StaticMasterKeyHex = BytesToHex(bytes);
+            Kms = "static";
+            return this;
+        }
+
         public Builder WithRegionMap(IDictionary<string, string>? value)
         {
             RegionMap = value == null ? null : new Dictionary<string, string>(value);
@@ -230,7 +250,27 @@ public sealed class AsherahConfig
             {
                 throw new InvalidOperationException("Metastore is required");
             }
+            if (string.Equals(Kms, "static", StringComparison.OrdinalIgnoreCase)
+                && string.IsNullOrWhiteSpace(StaticMasterKeyHex)
+                && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("STATIC_MASTER_KEY_HEX")))
+            {
+                throw new InvalidOperationException("Static KMS requires WithStaticMasterKey or STATIC_MASTER_KEY_HEX");
+            }
             return new AsherahConfig(this);
+        }
+
+        private static string BytesToHex(byte[] bytes)
+        {
+            var chars = new char[bytes.Length * 2];
+            for (var i = 0; i < bytes.Length; i++)
+            {
+                var b = bytes[i];
+                var hi = b >> 4;
+                var lo = b & 0xF;
+                chars[i * 2] = (char)(hi < 10 ? '0' + hi : 'a' + (hi - 10));
+                chars[i * 2 + 1] = (char)(lo < 10 ? '0' + lo : 'a' + (lo - 10));
+            }
+            return new string(chars);
         }
     }
 }

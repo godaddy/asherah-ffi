@@ -15,7 +15,7 @@ categories = ["cryptography", "memory-management", "ffi"]
 crate-type = ["cdylib"]
 
 [dependencies]
-asherah = { path = "../asherah", features = ["sqlite"] }
+asherah = { path = "../asherah", features = ["sqlite", "mssql"] }
 asherah-config = { path = "../asherah-config" }
 serde_json = "1.0"
 anyhow = "1.0"

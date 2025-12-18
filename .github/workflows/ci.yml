@@ -42,6 +42,8 @@ jobs:
     needs: lint
     steps:
       - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
       - name: Restore workspace caches
         uses: actions/cache@v4
         with:
@@ -53,7 +55,7 @@ jobs:
             .cache/maven
             .cache/dotnet
             .cache/bun
-          key: tests-${{ runner.os }}-amd64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
+          key: tests-${{ runner.os }}-amd64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj', 'asherah-dotnet-ffi/**/*.csproj', 'asherah-dotnet-cobhan/**/*.csproj') }}
           restore-keys: |
             tests-${{ runner.os }}-amd64-
       - name: Verify Docker availability
@@ -264,7 +266,7 @@ jobs:
             .cache/rustup
             .cache/dotnet
             .cache/sccache
-          key: build-${{ runner.os }}-x86_64-dotnet-${{ hashFiles('**/Cargo.lock', 'asherah-dotnet/**/*.csproj') }}
+          key: build-${{ runner.os }}-x86_64-dotnet-${{ hashFiles('**/Cargo.lock', 'asherah-dotnet/**/*.csproj', 'asherah-dotnet-ffi/**/*.csproj', 'asherah-dotnet-cobhan/**/*.csproj') }}
           restore-keys: |
             build-${{ runner.os }}-x86_64-dotnet-
       - name: Download x86_64 rlib artifacts
@@ -465,7 +467,7 @@ jobs:
             .cache/npm
             .cache/maven
             .cache/dotnet
-          key: tests-${{ runner.os }}-arm64-${{ matrix.binding }}-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
+          key: tests-${{ runner.os }}-arm64-${{ matrix.binding }}-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj', 'asherah-dotnet-ffi/**/*.csproj', 'asherah-dotnet-cobhan/**/*.csproj') }}
           restore-keys: |
             tests-${{ runner.os }}-arm64-${{ matrix.binding }}-
             tests-${{ runner.os }}-arm64-
@@ -804,7 +806,7 @@ jobs:
             .cache/rustup
             .cache/dotnet
             .cache/sccache
-          key: build-${{ runner.os }}-arm64-dotnet-${{ hashFiles('**/Cargo.lock', 'asherah-dotnet/**/*.csproj') }}
+          key: build-${{ runner.os }}-arm64-dotnet-${{ hashFiles('**/Cargo.lock', 'asherah-dotnet/**/*.csproj', 'asherah-dotnet-ffi/**/*.csproj', 'asherah-dotnet-cobhan/**/*.csproj') }}
           restore-keys: |
             build-${{ runner.os }}-arm64-dotnet-
       - name: Download arm64 rlib artifacts

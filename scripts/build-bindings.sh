@@ -36,6 +36,57 @@ requires_core_build() {
   return 1
 }
 
+find_native_libs() {
+  local name="$1"
+  local search_dirs=()
+
+  if [ -d "$CARGO_RELEASE_DIR" ]; then
+    search_dirs+=("$CARGO_RELEASE_DIR")
+  fi
+  if [ -d "$TARGET_DIR/$CARGO_TRIPLE/release" ]; then
+    search_dirs+=("$TARGET_DIR/$CARGO_TRIPLE/release")
+  fi
+
+  if [ ${#search_dirs[@]} -gt 0 ]; then
+    find "${search_dirs[@]}" -maxdepth 1 -type f \( \
+      -name "lib${name}.so" -o -name "lib${name}.dylib" -o -name "${name}.dll" -o \
+      -name "lib${name}-*.so" -o -name "lib${name}-*.dylib" -o -name "${name}-*.dll" \
+      \) -print 2>/dev/null || true
+  fi
+
+  find "$TARGET_DIR" -maxdepth 4 -type f \( \
+    -name "lib${name}.so" -o -name "lib${name}.dylib" -o -name "${name}.dll" -o \
+    -name "lib${name}-*.so" -o -name "lib${name}-*.dylib" -o -name "${name}-*.dll" \
+    \) ! -path '*/deps/*' -print 2>/dev/null || true
+}
+
+copy_dotnet_native_lib() {
+  local name="$1"
+  local project_dir="$2"
+  local rid="$3"
+  local dest_dir="$ROOT_DIR/$project_dir/runtimes/$rid/native"
+
+  mkdir -p "$dest_dir"
+
+  mapfile -t native_libs < <(find_native_libs "$name")
+  if [ ${#native_libs[@]} -eq 0 ]; then
+    return 1
+  fi
+
+  for lib in "${native_libs[@]}"; do
+    local base
+    base="$(basename "$lib")"
+    local normalized="$base"
+    case "$base" in
+      lib${name}-*.so) normalized="lib${name}.so" ;;
+      lib${name}-*.dylib) normalized="lib${name}.dylib" ;;
+      ${name}-*.dll) normalized="${name}.dll" ;;
+    esac
+    echo "[build-bindings] Copying $base to $project_dir/runtimes/$rid/native/$normalized"
+    cp "$lib" "$dest_dir/$normalized"
+  done
+}
+
 ROOT_OUT_DIR_DEFAULT="$ROOT_DIR/artifacts/$ARCH"
 OUT_DIR="${BINDING_OUTPUT_DIR:-$ROOT_OUT_DIR_DEFAULT}"
 
@@ -290,13 +341,42 @@ if should_build go || should_build all; then
 fi
 
 if should_build dotnet || should_build all; then
-  echo "[build-bindings] Packing .NET library"
-  dotnet restore "$ROOT_DIR/asherah-dotnet/AsherahDotNet.sln"
-  dotnet pack "$ROOT_DIR/asherah-dotnet/AsherahDotNet/AsherahDotNet.csproj" \
+  echo "[build-bindings] Preparing .NET native runtime assets"
+
+  if ! copy_dotnet_native_lib "asherah_ffi" "asherah-dotnet-ffi" "$DOTNET_RID"; then
+    if [ "$SKIP_CORE_BUILD" = "1" ]; then
+      echo "[build-bindings] asherah_ffi missing with SKIP_CORE_BUILD=1; rebuilding for .NET packaging"
+    fi
+    cargo build --release -p asherah-ffi --target "$CARGO_TRIPLE"
+    if ! copy_dotnet_native_lib "asherah_ffi" "asherah-dotnet-ffi" "$DOTNET_RID"; then
+      echo "[build-bindings] Error: unable to locate asherah_ffi for .NET packaging"
+      exit 1
+    fi
+  fi
+
+  if ! copy_dotnet_native_lib "asherah_cobhan" "asherah-dotnet-cobhan" "$DOTNET_RID"; then
+    echo "[build-bindings] Building asherah-cobhan for .NET packaging"
+    cargo build --release -p asherah-cobhan --target "$CARGO_TRIPLE"
+    if ! copy_dotnet_native_lib "asherah_cobhan" "asherah-dotnet-cobhan" "$DOTNET_RID"; then
+      echo "[build-bindings] Error: unable to locate asherah_cobhan for .NET packaging"
+      exit 1
+    fi
+  fi
+
+  echo "[build-bindings] Packing .NET libraries"
+  dotnet restore "$ROOT_DIR/asherah-dotnet-ffi/AsherahDotNetFfi.csproj"
+  dotnet restore "$ROOT_DIR/asherah-dotnet-cobhan/AsherahDotNetCobhan.csproj"
+  mkdir -p "$OUT_DIR/dotnet/ffi" "$OUT_DIR/dotnet/cobhan"
+  dotnet pack "$ROOT_DIR/asherah-dotnet-ffi/AsherahDotNetFfi.csproj" \
     -c Release \
     -p:ContinuousIntegrationBuild=true \
     -p:RuntimeIdentifier="$DOTNET_RID" \
-    -o "$OUT_DIR/dotnet"
+    -o "$OUT_DIR/dotnet/ffi"
+  dotnet pack "$ROOT_DIR/asherah-dotnet-cobhan/AsherahDotNetCobhan.csproj" \
+    -c Release \
+    -p:ContinuousIntegrationBuild=true \
+    -p:RuntimeIdentifier="$DOTNET_RID" \
+    -o "$OUT_DIR/dotnet/cobhan"
 fi
 
 if should_build java || should_build all; then

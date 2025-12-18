@@ -7,14 +7,14 @@
 use std::os::raw::c_char;
 
 // Import from the library
+use asherah_cobhan::test_helpers::{
+    create_input_buffer, create_output_buffer, create_string_buffer, get_buffer_data,
+    get_buffer_i64, get_buffer_length, get_buffer_string, ERR_ALREADY_INITIALIZED, ERR_BAD_CONFIG,
+    ERR_BUFFER_TOO_SMALL, ERR_DECRYPT_FAILED, ERR_JSON_DECODE_FAILED, ERR_NONE,
+    ERR_NOT_INITIALIZED,
+};
 use asherah_cobhan::{
     Decrypt, DecryptFromJson, Encrypt, EncryptToJson, EstimateBuffer, SetEnv, SetupJson, Shutdown,
-};
-use asherah_cobhan::test_helpers::{
-    create_input_buffer, create_output_buffer, create_string_buffer,
-    get_buffer_data, get_buffer_i64, get_buffer_length, get_buffer_string,
-    ERR_NONE, ERR_BUFFER_TOO_SMALL, ERR_JSON_DECODE_FAILED,
-    ERR_ALREADY_INITIALIZED, ERR_BAD_CONFIG, ERR_NOT_INITIALIZED, ERR_DECRYPT_FAILED,
 };
 
 // ============================================================================
@@ -99,8 +99,14 @@ fn test_encrypt_to_json_and_decrypt_from_json() {
     // Verify JSON output is valid
     let json_str = get_buffer_string(&json_output);
     assert!(!json_str.is_empty(), "JSON output should not be empty");
-    assert!(json_str.contains("\"Data\""), "JSON should contain Data field");
-    assert!(json_str.contains("\"Key\""), "JSON should contain Key field");
+    assert!(
+        json_str.contains("\"Data\""),
+        "JSON should contain Data field"
+    );
+    assert!(
+        json_str.contains("\"Key\""),
+        "JSON should contain Key field"
+    );
 
     // Decrypt
     let mut decrypted_output = create_output_buffer(plaintext.len() as i32 + 100);
@@ -116,7 +122,10 @@ fn test_encrypt_to_json_and_decrypt_from_json() {
 
     // Verify decrypted data matches original
     let decrypted_data = get_buffer_data(&decrypted_output);
-    assert_eq!(decrypted_data, plaintext, "Decrypted data should match original");
+    assert_eq!(
+        decrypted_data, plaintext,
+        "Decrypted data should match original"
+    );
 }
 
 // ============================================================================
@@ -153,10 +162,16 @@ fn test_encrypt_and_decrypt_components() {
 
     // Verify outputs
     let encrypted_data = get_buffer_string(&encrypted_data_buf);
-    assert!(!encrypted_data.is_empty(), "Encrypted data should not be empty");
+    assert!(
+        !encrypted_data.is_empty(),
+        "Encrypted data should not be empty"
+    );
 
     let encrypted_key = get_buffer_string(&encrypted_key_buf);
-    assert!(!encrypted_key.is_empty(), "Encrypted key should not be empty");
+    assert!(
+        !encrypted_key.is_empty(),
+        "Encrypted key should not be empty"
+    );
 
     let created = get_buffer_i64(&created_buf);
     assert!(created > 0, "Created timestamp should be positive");
@@ -180,7 +195,10 @@ fn test_encrypt_and_decrypt_components() {
 
     // Verify decrypted data
     let decrypted_data = get_buffer_data(&decrypted_output);
-    assert_eq!(decrypted_data, plaintext, "Decrypted data should match original");
+    assert_eq!(
+        decrypted_data, plaintext,
+        "Decrypted data should match original"
+    );
 }
 
 // ============================================================================
@@ -188,7 +206,13 @@ fn test_encrypt_and_decrypt_components() {
 // ============================================================================
 
 fn test_multiple_partitions() {
-    let partitions = ["partition-1", "partition-2", "partition-3", "user-123", "tenant-abc"];
+    let partitions = [
+        "partition-1",
+        "partition-2",
+        "partition-3",
+        "user-123",
+        "tenant-abc",
+    ];
 
     for partition_id in partitions {
         let plaintext = format!("Data for partition: {}", partition_id);
@@ -207,7 +231,11 @@ fn test_multiple_partitions() {
                 data_buf.as_ptr() as *const c_char,
                 json_output.as_mut_ptr() as *mut c_char,
             );
-            assert_eq!(result, ERR_NONE, "Encrypt should succeed for partition {}", partition_id);
+            assert_eq!(
+                result, ERR_NONE,
+                "Encrypt should succeed for partition {}",
+                partition_id
+            );
         }
 
         // Decrypt
@@ -219,7 +247,11 @@ fn test_multiple_partitions() {
                 json_output.as_ptr() as *const c_char,
                 decrypted_output.as_mut_ptr() as *mut c_char,
             );
-            assert_eq!(result, ERR_NONE, "Decrypt should succeed for partition {}", partition_id);
+            assert_eq!(
+                result, ERR_NONE,
+                "Decrypt should succeed for partition {}",
+                partition_id
+            );
         }
 
         let decrypted_data = get_buffer_data(&decrypted_output);
@@ -315,7 +347,10 @@ fn test_binary_data_encryption() {
     }
 
     let decrypted_data = get_buffer_data(&decrypted_output);
-    assert_eq!(decrypted_data, plaintext, "Binary data should round-trip correctly");
+    assert_eq!(
+        decrypted_data, plaintext,
+        "Binary data should round-trip correctly"
+    );
 }
 
 // ============================================================================
@@ -325,10 +360,10 @@ fn test_binary_data_encryption() {
 fn test_unicode_data_encryption() {
     let unicode_strings = [
         "Hello, World!",
-        "Привет мир!",           // Russian
-        "你好世界！",                 // Chinese
-        "مرحبا بالعالم",           // Arabic
-        "🦀🔐🎉💾",                // Emoji
+        "Привет мир!",   // Russian
+        "你好世界！",    // Chinese
+        "مرحبا بالعالم", // Arabic
+        "🦀🔐🎉💾",      // Emoji
         "Mixed: Hello 世界 🌍",
         "Special chars: \t\n\r\"'\\",
     ];
@@ -349,7 +384,11 @@ fn test_unicode_data_encryption() {
                 data_buf.as_ptr() as *const c_char,
                 json_output.as_mut_ptr() as *mut c_char,
             );
-            assert_eq!(result, ERR_NONE, "Unicode encryption should succeed for: {}", plaintext);
+            assert_eq!(
+                result, ERR_NONE,
+                "Unicode encryption should succeed for: {}",
+                plaintext
+            );
         }
 
         // Decrypt
@@ -361,11 +400,18 @@ fn test_unicode_data_encryption() {
                 json_output.as_ptr() as *const c_char,
                 decrypted_output.as_mut_ptr() as *mut c_char,
             );
-            assert_eq!(result, ERR_NONE, "Unicode decryption should succeed for: {}", plaintext);
+            assert_eq!(
+                result, ERR_NONE,
+                "Unicode decryption should succeed for: {}",
+                plaintext
+            );
         }
 
         let decrypted_str = get_buffer_string(&decrypted_output);
-        assert_eq!(decrypted_str, plaintext, "Unicode should round-trip correctly");
+        assert_eq!(
+            decrypted_str, plaintext,
+            "Unicode should round-trip correctly"
+        );
     }
 }
 
@@ -405,7 +451,10 @@ fn test_empty_data_encryption() {
     }
 
     let decrypted_data = get_buffer_data(&decrypted_output);
-    assert_eq!(decrypted_data, plaintext, "Empty data should round-trip correctly");
+    assert_eq!(
+        decrypted_data, plaintext,
+        "Empty data should round-trip correctly"
+    );
 }
 
 // ============================================================================
@@ -446,8 +495,15 @@ fn test_large_data_encryption() {
     }
 
     let decrypted_data = get_buffer_data(&decrypted_output);
-    assert_eq!(decrypted_data.len(), plaintext.len(), "Decrypted length should match");
-    assert_eq!(decrypted_data, plaintext, "Large data should round-trip correctly");
+    assert_eq!(
+        decrypted_data.len(),
+        plaintext.len(),
+        "Decrypted length should match"
+    );
+    assert_eq!(
+        decrypted_data, plaintext,
+        "Large data should round-trip correctly"
+    );
 }
 
 // ============================================================================
@@ -455,12 +511,7 @@ fn test_large_data_encryption() {
 // ============================================================================
 
 fn test_buffer_size_estimation() {
-    let test_cases = [
-        (100, 10),
-        (1000, 50),
-        (10000, 100),
-        (50000, 200),
-    ];
+    let test_cases = [(100, 10), (1000, 50), (10000, 100), (50000, 200)];
 
     for (data_len, partition_len) in test_cases {
         let estimate = EstimateBuffer(data_len, partition_len);
@@ -643,9 +694,7 @@ fn test_set_env_integration() {
     let key1 = format!("ASHERAH_INT_TEST_1_{}", pid);
     let key2 = format!("ASHERAH_INT_TEST_2_{}", pid);
 
-    let json = format!(
-        r#"{{"{key1}": "integration_value_1", "{key2}": "integration_value_2"}}"#
-    );
+    let json = format!(r#"{{"{key1}": "integration_value_1", "{key2}": "integration_value_2"}}"#);
     let buf = create_string_buffer(&json);
 
     unsafe {
@@ -690,7 +739,7 @@ fn test_invalid_json_config() {
         "not json at all",
         "{incomplete json",
         r#"{"ServiceName": "test"}"#, // Missing required fields
-        "{}",                          // Empty config
+        "{}",                         // Empty config
     ];
 
     for config in invalid_configs {

@@ -37,6 +37,8 @@ pub struct ConfigOptions {
     pub session_cache_duration: Option<i64>,
     #[serde(rename = "KMS")]
     pub kms: Option<String>,
+    #[serde(rename = "StaticMasterKeyHex")]
+    pub static_master_key_hex: Option<String>,
     #[serde(rename = "RegionMap")]
     pub region_map: Option<HashMap<String, String>>,
     #[serde(rename = "PreferredRegion")]
@@ -126,6 +128,7 @@ impl ConfigOptions {
                 std::env::remove_var("SQLITE_PATH");
                 std::env::remove_var("POSTGRES_URL");
                 std::env::remove_var("MYSQL_URL");
+                std::env::remove_var("MSSQL_URL");
                 std::env::remove_var("DDB_TABLE");
             }
             "sqlite" => {
@@ -138,6 +141,7 @@ impl ConfigOptions {
                 }
                 std::env::remove_var("POSTGRES_URL");
                 std::env::remove_var("MYSQL_URL");
+                std::env::remove_var("MSSQL_URL");
                 std::env::remove_var("DDB_TABLE");
             }
             "rdbms" => {
@@ -158,6 +162,7 @@ impl ConfigOptions {
                 std::env::remove_var("SQLITE_PATH");
                 std::env::remove_var("POSTGRES_URL");
                 std::env::remove_var("MYSQL_URL");
+                std::env::remove_var("MSSQL_URL");
             }
             other => {
                 return Err(anyhow!("Unsupported Metastore value: {other}"));
@@ -175,6 +180,9 @@ impl ConfigOptions {
 
         let kms = self.kms.as_deref().unwrap_or("static").to_lowercase();
         std::env::set_var("KMS", &kms);
+        if let Some(hex) = self.static_master_key_hex.as_deref() {
+            set_env_opt_str("STATIC_MASTER_KEY_HEX", Some(hex));
+        }
         set_env_opt_str("PREFERRED_REGION", self.preferred_region.as_deref());
 
         let verbose = self.verbose.unwrap_or(false);
@@ -182,6 +190,12 @@ impl ConfigOptions {
             std::env::set_var("ASHERAH_VERBOSE", "1");
         } else {
             std::env::remove_var("ASHERAH_VERBOSE");
+        }
+
+        if kms == "static" && std::env::var("STATIC_MASTER_KEY_HEX").is_err() {
+            return Err(anyhow!(
+                "Static KMS requires StaticMasterKeyHex or STATIC_MASTER_KEY_HEX"
+            ));
         }
 
         Ok(AppliedConfig {
@@ -204,15 +218,27 @@ fn apply_rdbms_connection(conn: &str) {
     std::env::remove_var("SQLITE_PATH");
     std::env::remove_var("POSTGRES_URL");
     std::env::remove_var("MYSQL_URL");
+    std::env::remove_var("MSSQL_URL");
     if lower.starts_with("postgres://") || lower.starts_with("postgresql://") {
         std::env::set_var("POSTGRES_URL", conn);
     } else if lower.starts_with("mysql://") {
         std::env::set_var("MYSQL_URL", conn);
+    } else if is_mssql_connection(conn) {
+        std::env::set_var("MSSQL_URL", conn);
     } else if lower.starts_with("sqlite://") {
         std::env::set_var("SQLITE_PATH", normalize_sqlite_path(conn));
     } else {
         std::env::set_var("SQLITE_PATH", conn);
     }
+}
+
+fn is_mssql_connection(conn: &str) -> bool {
+    let lower = conn.to_lowercase();
+    lower.starts_with("sqlserver://")
+        || lower.starts_with("mssql://")
+        || lower.contains("server=")
+        || lower.contains("data source=")
+        || lower.contains("initial catalog=")
 }
 
 pub fn factory_from_config(config: &ConfigOptions) -> Result<(Factory, AppliedConfig)> {

@@ -70,6 +70,9 @@ cargo test --workspace --exclude asherah-node
 echo "[tests] build FFI debug artifact"
 cargo build -p asherah-ffi
 
+echo "[tests] build Cobhan debug artifact"
+cargo build -p asherah-cobhan
+
 # Ensure language bindings can locate build artifacts using conventional paths
 mkdir -p "$ROOT_DIR/target"
 if [ -d "$CARGO_TARGET_DIR/debug" ]; then
@@ -124,6 +127,12 @@ cargo build -p asherah-java
 
 echo "[tests] dotnet bindings"
 dotnet test asherah-dotnet/AsherahDotNet.sln --nologo
+
+echo "[tests] dotnet bindings (ffi)"
+dotnet test asherah-dotnet-ffi/tests/AsherahDotNetFfi.Tests/AsherahDotNetFfi.Tests.csproj --nologo
+
+echo "[tests] dotnet bindings (cobhan)"
+dotnet test asherah-dotnet-cobhan/tests/AsherahDotNetCobhan.Tests/AsherahDotNetCobhan.Tests.csproj --nologo
 
 echo "[tests] complete"
 

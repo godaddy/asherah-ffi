@@ -100,7 +100,7 @@ impl<
             .f
             .metastore
             .load(&meta.id, meta.created)?
-            .ok_or_else(|| anyhow::anyhow!("system key not found"))?;
+            .ok_or_else(|| anyhow::anyhow!("metadata missing: system key not found"))?;
         self.system_key_from_ekr(&ekr)
     }
 
@@ -181,7 +181,7 @@ impl<
             .f
             .metastore
             .load_latest(id)?
-            .ok_or_else(|| anyhow::anyhow!("latest not found"))?;
+            .ok_or_else(|| anyhow::anyhow!("metadata missing: latest not found"))?;
         Ok(ekr)
     }
 

@@ -50,14 +50,45 @@ impl fmt::Debug for AsherahSession {
 
 thread_local! {
     static LAST_ERROR: std::cell::RefCell<Option<CString>> = const { std::cell::RefCell::new(None) };
+    static LAST_ERROR_CODE: std::cell::RefCell<c_int> = const { std::cell::RefCell::new(0) };
 }
 
-fn set_error(msg: impl Into<String>) {
+const ERR_NONE: c_int = 0;
+const ERR_NULL_PTR: c_int = 1;
+const ERR_INVALID_INPUT: c_int = 2;
+const ERR_CONFIG: c_int = 3;
+const ERR_JSON: c_int = 4;
+const ERR_CRYPTO: c_int = 5;
+const ERR_KMS: c_int = 6;
+const ERR_METADATA: c_int = 7;
+const ERR_METASTORE: c_int = 8;
+
+fn classify_error(message: &str, fallback: c_int) -> c_int {
+    let lower = message.to_lowercase();
+    if lower.contains("metadata missing")
+        || lower.contains("system key not found")
+        || lower.contains("latest not found")
+    {
+        return ERR_METADATA;
+    }
+    if lower.contains("kms") {
+        return ERR_KMS;
+    }
+    if lower.contains("metastore") {
+        return ERR_METASTORE;
+    }
+    fallback
+}
+
+fn set_error(code: c_int, msg: impl Into<String>) {
     LAST_ERROR.with(|c| {
         let message = msg.into();
         let cstring =
             CString::new(message).unwrap_or_else(|_| CString::new("error").expect("static string"));
         *c.borrow_mut() = Some(cstring);
+    });
+    LAST_ERROR_CODE.with(|c| {
+        *c.borrow_mut() = code;
     });
 }
 
@@ -72,11 +103,16 @@ pub extern "C" fn asherah_last_error_message() -> *const c_char {
 }
 
 #[unsafe(no_mangle)]
+pub extern "C" fn asherah_last_error_code() -> c_int {
+    LAST_ERROR_CODE.with(|c| *c.borrow())
+}
+
+#[unsafe(no_mangle)]
 pub extern "C" fn asherah_factory_new_from_env() -> *mut AsherahFactory {
     match ael::builders::factory_from_env() {
         Ok(f) => Box::into_raw(Box::new(AsherahFactory { inner: f })),
         Err(e) => {
-            set_error(format!("{}", e));
+            set_error(ERR_CONFIG, format!("{}", e));
             null_mut()
         }
     }
@@ -95,9 +131,9 @@ fn factory_from_config_json(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_apply_config_json(config_json: *const c_char) -> c_int {
     match factory_from_config_json(config_json) {
-        Ok((_factory, _applied)) => 0,
+        Ok((_factory, _applied)) => ERR_NONE,
         Err(e) => {
-            set_error(format!("{e}"));
+            set_error(ERR_CONFIG, format!("{e}"));
             -1
         }
     }
@@ -112,7 +148,7 @@ pub unsafe extern "C" fn asherah_factory_new_with_config(
     match factory_from_config_json(config_json) {
         Ok((factory, _applied)) => Box::into_raw(Box::new(AsherahFactory { inner: factory })),
         Err(e) => {
-            set_error(format!("{e}"));
+            set_error(ERR_CONFIG, format!("{e}"));
             null_mut()
         }
     }
@@ -143,14 +179,14 @@ pub unsafe extern "C" fn asherah_factory_get_session(
     partition_id: *const c_char,
 ) -> *mut AsherahSession {
     if factory.is_null() {
-        set_error("null factory");
+        set_error(ERR_NULL_PTR, "null factory");
         return null_mut();
     }
     let f = &*factory;
     let pid = match cstr_to_str(partition_id) {
         Ok(s) => s,
         Err(e) => {
-            set_error(format!("{e}"));
+            set_error(ERR_INVALID_INPUT, format!("{e}"));
             return null_mut();
         }
     };
@@ -205,11 +241,11 @@ pub unsafe extern "C" fn asherah_encrypt_to_json(
     out: *mut AsherahBuffer,
 ) -> c_int {
     if session.is_null() {
-        set_error("null session");
+        set_error(ERR_NULL_PTR, "null session");
         return -1;
     }
     if data.is_null() && len > 0 {
-        set_error("null data");
+        set_error(ERR_NULL_PTR, "null data");
         return -1;
     }
     let s = &*session;
@@ -218,12 +254,14 @@ pub unsafe extern "C" fn asherah_encrypt_to_json(
         Ok(drr) => match serde_json::to_vec(&drr) {
             Ok(v) => take_vec_into_buffer(v, out),
             Err(e) => {
-                set_error(format!("{e}"));
+                set_error(ERR_JSON, format!("{e}"));
                 -1
             }
         },
         Err(e) => {
-            set_error(format!("{e}"));
+            let msg = format!("{e}");
+            let code = classify_error(&msg, ERR_CRYPTO);
+            set_error(code, msg);
             -1
         }
     }
@@ -239,11 +277,11 @@ pub unsafe extern "C" fn asherah_decrypt_from_json(
     out: *mut AsherahBuffer,
 ) -> c_int {
     if session.is_null() {
-        set_error("null session");
+        set_error(ERR_NULL_PTR, "null session");
         return -1;
     }
     if json.is_null() && len > 0 {
-        set_error("null json");
+        set_error(ERR_NULL_PTR, "null json");
         return -1;
     }
     let s = &*session;
@@ -252,12 +290,14 @@ pub unsafe extern "C" fn asherah_decrypt_from_json(
         Ok(drr) => match s.inner.decrypt(drr) {
             Ok(pt) => take_vec_into_buffer(pt, out),
             Err(e) => {
-                set_error(format!("{e}"));
+                let msg = format!("{e}");
+                let code = classify_error(&msg, ERR_CRYPTO);
+                set_error(code, msg);
                 -1
             }
         },
         Err(e) => {
-            set_error(format!("{e}"));
+            set_error(ERR_JSON, format!("{e}"));
             -1
         }
     }

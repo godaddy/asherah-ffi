@@ -99,8 +99,7 @@ public static class Asherah
         ArgumentNullException.ThrowIfNull(partitionId);
         ArgumentNullException.ThrowIfNull(plaintext);
 
-        using var session = GetSession(partitionId);
-        return session.EncryptBytes(plaintext);
+        return WithSession(partitionId, session => session.EncryptBytes(plaintext));
     }
 
     public static string EncryptString(string partitionId, string plaintext)
@@ -120,8 +119,7 @@ public static class Asherah
         ArgumentNullException.ThrowIfNull(partitionId);
         ArgumentNullException.ThrowIfNull(dataRowRecordJson);
 
-        using var session = GetSession(partitionId);
-        return session.DecryptBytes(dataRowRecordJson);
+        return WithSession(partitionId, session => session.DecryptBytes(dataRowRecordJson));
     }
 
     public static byte[] DecryptJson(string partitionId, string dataRowRecordJson) =>
@@ -139,7 +137,7 @@ public static class Asherah
     public static Task<string> DecryptStringAsync(string partitionId, string dataRowRecordJson) =>
         Task.Run(() => DecryptString(partitionId, dataRowRecordJson));
 
-    private static AsherahSession GetSession(string partitionId)
+    private static T WithSession<T>(string partitionId, Func<AsherahSession, T> action)
     {
         var factory = _sharedFactory
             ?? throw new InvalidOperationException("Asherah not configured; call Setup() first");
@@ -147,12 +145,13 @@ public static class Asherah
         // No caching - just create a new session each time
         if (!_sessionCachingEnabled || _sessionCache is null)
         {
-            return factory.GetSession(partitionId);
+            using var session = factory.GetSession(partitionId);
+            return action(session);
         }
 
         // Try to get from cache, create if not present
         // MemoryCache.GetOrCreate is thread-safe
-        return _sessionCache.GetOrCreate(partitionId, entry =>
+        var cached = _sessionCache.GetOrCreate(partitionId, entry =>
         {
             entry.SlidingExpiration = _sessionCacheDuration;
             entry.RegisterPostEvictionCallback((_, value, _, _) =>
@@ -161,5 +160,7 @@ public static class Asherah
             });
             return factory.GetSession(partitionId);
         })!;
+
+        return action(cached);
     }
 }

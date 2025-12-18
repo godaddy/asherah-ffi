@@ -47,6 +47,19 @@ internal static class NativeLibraryLoader
             }
         }
 
+        var runtimePath = TryGetRuntimeNativePath(assembly);
+        if (!string.IsNullOrWhiteSpace(runtimePath))
+        {
+            try
+            {
+                return NativeLibrary.Load(runtimePath!);
+            }
+            catch (Exception ex)
+            {
+                throw new AsherahException($"Failed to load Asherah native library from {runtimePath}: {ex.Message}");
+            }
+        }
+
         return NativeLibrary.Load(libraryName, assembly, searchPath);
     }
 
@@ -91,5 +104,55 @@ internal static class NativeLibraryLoader
         }
 
         return "libasherah_ffi.so";
+    }
+
+    private static string? TryGetRuntimeNativePath(Assembly assembly)
+    {
+        var rid = GetRuntimeIdentifier();
+        if (string.IsNullOrWhiteSpace(rid))
+        {
+            return null;
+        }
+
+        var baseDir = Path.GetDirectoryName(assembly.Location);
+        if (string.IsNullOrWhiteSpace(baseDir))
+        {
+            baseDir = AppContext.BaseDirectory;
+        }
+
+        var candidate = Path.Combine(baseDir!, "runtimes", rid, "native", GetPlatformLibraryName());
+        return File.Exists(candidate) ? candidate : null;
+    }
+
+    private static string? GetRuntimeIdentifier()
+    {
+        var arch = RuntimeInformation.OSArchitecture switch
+        {
+            Architecture.X64 => "x64",
+            Architecture.Arm64 => "arm64",
+            _ => null
+        };
+
+        if (arch is null)
+        {
+            return null;
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            return $"win-{arch}";
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+        {
+            return $"osx-{arch}";
+        }
+
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
+        {
+            return $"linux-{arch}";
+        }
+
+        return null;
     }
 }

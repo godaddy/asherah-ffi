@@ -10,10 +10,10 @@
 
 use std::os::raw::c_char;
 
+use asherah_cobhan::test_helpers::*;
 use asherah_cobhan::{
     Decrypt, DecryptFromJson, Encrypt, EncryptToJson, EstimateBuffer, SetEnv, SetupJson, Shutdown,
 };
-use asherah_cobhan::test_helpers::*;
 
 // ============================================================================
 // JSON Format Compatibility Tests
@@ -42,8 +42,7 @@ fn test_json_format_has_required_fields() {
     let json_str = get_buffer_string(&json_output);
 
     // Parse as generic JSON to verify structure
-    let parsed: serde_json::Value = serde_json::from_str(&json_str)
-        .expect("Should be valid JSON");
+    let parsed: serde_json::Value = serde_json::from_str(&json_str).expect("Should be valid JSON");
 
     // Verify required top-level fields
     assert!(parsed.get("Data").is_some(), "JSON must have 'Data' field");
@@ -63,11 +62,20 @@ fn test_json_format_has_required_fields() {
     assert!(key_field.is_object(), "'Key' field must be an object");
 
     // Verify Key sub-fields
-    assert!(key_field.get("Created").is_some(), "'Key' must have 'Created' field");
-    assert!(key_field.get("Key").is_some(), "'Key' must have 'Key' field (encrypted key)");
+    assert!(
+        key_field.get("Created").is_some(),
+        "'Key' must have 'Created' field"
+    );
+    assert!(
+        key_field.get("Key").is_some(),
+        "'Key' must have 'Key' field (encrypted key)"
+    );
 
     let created = key_field.get("Created").unwrap();
-    assert!(created.is_i64() || created.is_u64(), "'Created' must be an integer");
+    assert!(
+        created.is_i64() || created.is_u64(),
+        "'Created' must be an integer"
+    );
 
     let encrypted_key = key_field.get("Key").unwrap();
     assert!(encrypted_key.is_string(), "'Key.Key' must be a string");
@@ -80,9 +88,18 @@ fn test_json_format_has_required_fields() {
 
     // ParentKeyMeta may or may not be present
     if let Some(parent_meta) = key_field.get("ParentKeyMeta") {
-        assert!(parent_meta.is_object(), "'ParentKeyMeta' must be an object if present");
-        assert!(parent_meta.get("KeyId").is_some(), "'ParentKeyMeta' must have 'KeyId'");
-        assert!(parent_meta.get("Created").is_some(), "'ParentKeyMeta' must have 'Created'");
+        assert!(
+            parent_meta.is_object(),
+            "'ParentKeyMeta' must be an object if present"
+        );
+        assert!(
+            parent_meta.get("KeyId").is_some(),
+            "'ParentKeyMeta' must have 'KeyId'"
+        );
+        assert!(
+            parent_meta.get("Created").is_some(),
+            "'ParentKeyMeta' must have 'Created'"
+        );
     }
 
     Shutdown();
@@ -111,16 +128,37 @@ fn test_json_uses_pascal_case_field_names() {
     let json_str = get_buffer_string(&json_output);
 
     // Check for PascalCase field names (Go convention)
-    assert!(json_str.contains("\"Data\""), "Should use 'Data' not 'data'");
+    assert!(
+        json_str.contains("\"Data\""),
+        "Should use 'Data' not 'data'"
+    );
     assert!(json_str.contains("\"Key\""), "Should use 'Key' not 'key'");
-    assert!(json_str.contains("\"Created\""), "Should use 'Created' not 'created'");
+    assert!(
+        json_str.contains("\"Created\""),
+        "Should use 'Created' not 'created'"
+    );
 
     // Check that snake_case is NOT used
-    assert!(!json_str.contains("\"data\""), "Should not use snake_case 'data'");
-    assert!(!json_str.contains("\"key\""), "Should not use snake_case 'key'");
-    assert!(!json_str.contains("\"created\""), "Should not use snake_case 'created'");
-    assert!(!json_str.contains("\"encrypted_key\""), "Should not use snake_case");
-    assert!(!json_str.contains("\"parent_key_meta\""), "Should not use snake_case");
+    assert!(
+        !json_str.contains("\"data\""),
+        "Should not use snake_case 'data'"
+    );
+    assert!(
+        !json_str.contains("\"key\""),
+        "Should not use snake_case 'key'"
+    );
+    assert!(
+        !json_str.contains("\"created\""),
+        "Should not use snake_case 'created'"
+    );
+    assert!(
+        !json_str.contains("\"encrypted_key\""),
+        "Should not use snake_case"
+    );
+    assert!(
+        !json_str.contains("\"parent_key_meta\""),
+        "Should not use snake_case"
+    );
 
     Shutdown();
 }
@@ -176,7 +214,10 @@ fn test_decrypt_go_format_json() {
 /// - Bytes 4-7: int32 capacity (little-endian)
 #[test]
 fn test_cobhan_buffer_header_is_8_bytes() {
-    assert_eq!(BUFFER_HEADER_SIZE, 8, "Cobhan buffer header must be 8 bytes");
+    assert_eq!(
+        BUFFER_HEADER_SIZE, 8,
+        "Cobhan buffer header must be 8 bytes"
+    );
 }
 
 /// Test that length is stored as little-endian int32 at offset 0
@@ -184,10 +225,10 @@ fn test_cobhan_buffer_header_is_8_bytes() {
 fn test_cobhan_length_little_endian() {
     let buf = create_input_buffer(b"test");
     // Length should be 4 (little-endian)
-    assert_eq!(buf[0], 4);  // LSB
+    assert_eq!(buf[0], 4); // LSB
     assert_eq!(buf[1], 0);
     assert_eq!(buf[2], 0);
-    assert_eq!(buf[3], 0);  // MSB
+    assert_eq!(buf[3], 0); // MSB
 }
 
 /// Test that capacity is stored at offset 4 for output buffers
@@ -217,18 +258,42 @@ fn test_error_codes_match_go_implementation() {
     // These values must match github.com/godaddy/cobhan-go and asherah-cobhan
     assert_eq!(ERR_NONE, 0, "ERR_NONE should be 0");
     assert_eq!(ERR_NULL_PTR, -1, "ERR_NULL_PTR should be -1");
-    assert_eq!(ERR_BUFFER_TOO_LARGE, -2, "ERR_BUFFER_TOO_LARGE should be -2");
-    assert_eq!(ERR_BUFFER_TOO_SMALL, -3, "ERR_BUFFER_TOO_SMALL should be -3");
+    assert_eq!(
+        ERR_BUFFER_TOO_LARGE, -2,
+        "ERR_BUFFER_TOO_LARGE should be -2"
+    );
+    assert_eq!(
+        ERR_BUFFER_TOO_SMALL, -3,
+        "ERR_BUFFER_TOO_SMALL should be -3"
+    );
     assert_eq!(ERR_COPY_FAILED, -4, "ERR_COPY_FAILED should be -4");
-    assert_eq!(ERR_JSON_DECODE_FAILED, -5, "ERR_JSON_DECODE_FAILED should be -5");
-    assert_eq!(ERR_JSON_ENCODE_FAILED, -6, "ERR_JSON_ENCODE_FAILED should be -6");
+    assert_eq!(
+        ERR_JSON_DECODE_FAILED, -5,
+        "ERR_JSON_DECODE_FAILED should be -5"
+    );
+    assert_eq!(
+        ERR_JSON_ENCODE_FAILED, -6,
+        "ERR_JSON_ENCODE_FAILED should be -6"
+    );
 
     // Asherah-specific error codes
-    assert_eq!(ERR_ALREADY_INITIALIZED, -100, "ERR_ALREADY_INITIALIZED should be -100");
+    assert_eq!(
+        ERR_ALREADY_INITIALIZED, -100,
+        "ERR_ALREADY_INITIALIZED should be -100"
+    );
     assert_eq!(ERR_BAD_CONFIG, -101, "ERR_BAD_CONFIG should be -101");
-    assert_eq!(ERR_NOT_INITIALIZED, -102, "ERR_NOT_INITIALIZED should be -102");
-    assert_eq!(ERR_ENCRYPT_FAILED, -103, "ERR_ENCRYPT_FAILED should be -103");
-    assert_eq!(ERR_DECRYPT_FAILED, -104, "ERR_DECRYPT_FAILED should be -104");
+    assert_eq!(
+        ERR_NOT_INITIALIZED, -102,
+        "ERR_NOT_INITIALIZED should be -102"
+    );
+    assert_eq!(
+        ERR_ENCRYPT_FAILED, -103,
+        "ERR_ENCRYPT_FAILED should be -103"
+    );
+    assert_eq!(
+        ERR_DECRYPT_FAILED, -104,
+        "ERR_DECRYPT_FAILED should be -104"
+    );
 }
 
 // ============================================================================
@@ -240,12 +305,7 @@ fn test_error_codes_match_go_implementation() {
 fn test_estimate_buffer_sufficient_for_encryption() {
     setup_test_factory();
 
-    let test_cases = [
-        (10, 10),
-        (100, 20),
-        (1000, 50),
-        (10000, 100),
-    ];
+    let test_cases = [(10, 10), (100, 20), (1000, 50), (10000, 100)];
 
     for (data_len, partition_len) in test_cases {
         let estimate = EstimateBuffer(data_len, partition_len);
@@ -277,7 +337,10 @@ fn test_estimate_buffer_sufficient_for_encryption() {
         assert!(
             actual_len <= estimate,
             "Actual output {} should fit in estimated buffer {} for data_len={}, partition_len={}",
-            actual_len, estimate, data_len, partition_len
+            actual_len,
+            estimate,
+            data_len,
+            partition_len
         );
     }
 
@@ -338,8 +401,8 @@ fn test_rust_output_is_valid_data_row_record() {
         key: Option<EnvelopeKeyRecord>,
     }
 
-    let drr: DataRowRecord = serde_json::from_str(&json_str)
-        .expect("Should deserialize as DataRowRecord");
+    let drr: DataRowRecord =
+        serde_json::from_str(&json_str).expect("Should deserialize as DataRowRecord");
 
     // Verify structure
     assert!(!drr.data.is_empty(), "Data should not be empty");
@@ -402,7 +465,11 @@ fn test_encrypt_decrypt_json_roundtrip() {
         }
 
         let decrypted = get_buffer_string(&decrypted_output);
-        assert_eq!(decrypted, plaintext, "Round-trip should preserve data for {}", name);
+        assert_eq!(
+            decrypted, plaintext,
+            "Round-trip should preserve data for {}",
+            name
+        );
     }
 
     Shutdown();
@@ -456,7 +523,10 @@ fn test_encrypt_decrypt_components_roundtrip() {
     }
 
     let decrypted_data = get_buffer_data(&decrypted);
-    assert_eq!(decrypted_data, plaintext, "Component round-trip should preserve data");
+    assert_eq!(
+        decrypted_data, plaintext,
+        "Component round-trip should preserve data"
+    );
 
     Shutdown();
 }
@@ -488,19 +558,28 @@ fn test_exported_symbols_exist() {
     // SetupJson with null should return error (not crash)
     unsafe {
         let result = SetupJson(std::ptr::null());
-        assert_eq!(result, ERR_NULL_PTR, "SetupJson(null) should return ERR_NULL_PTR");
+        assert_eq!(
+            result, ERR_NULL_PTR,
+            "SetupJson(null) should return ERR_NULL_PTR"
+        );
     }
 
     // EncryptToJson with null should return error
     unsafe {
         let result = EncryptToJson(std::ptr::null(), std::ptr::null(), std::ptr::null_mut());
-        assert_eq!(result, ERR_NULL_PTR, "EncryptToJson(null) should return ERR_NULL_PTR");
+        assert_eq!(
+            result, ERR_NULL_PTR,
+            "EncryptToJson(null) should return ERR_NULL_PTR"
+        );
     }
 
     // DecryptFromJson with null should return error
     unsafe {
         let result = DecryptFromJson(std::ptr::null(), std::ptr::null(), std::ptr::null_mut());
-        assert_eq!(result, ERR_NULL_PTR, "DecryptFromJson(null) should return ERR_NULL_PTR");
+        assert_eq!(
+            result, ERR_NULL_PTR,
+            "DecryptFromJson(null) should return ERR_NULL_PTR"
+        );
     }
 
     // Encrypt with null should return error
@@ -514,7 +593,10 @@ fn test_exported_symbols_exist() {
             std::ptr::null_mut(),
             std::ptr::null_mut(),
         );
-        assert_eq!(result, ERR_NULL_PTR, "Encrypt(null) should return ERR_NULL_PTR");
+        assert_eq!(
+            result, ERR_NULL_PTR,
+            "Encrypt(null) should return ERR_NULL_PTR"
+        );
     }
 
     // Decrypt with null should return error
@@ -528,7 +610,10 @@ fn test_exported_symbols_exist() {
             0,
             std::ptr::null_mut(),
         );
-        assert_eq!(result, ERR_NULL_PTR, "Decrypt(null) should return ERR_NULL_PTR");
+        assert_eq!(
+            result, ERR_NULL_PTR,
+            "Decrypt(null) should return ERR_NULL_PTR"
+        );
     }
 }
 
@@ -559,4 +644,3 @@ fn setup_test_factory() {
         );
     }
 }
-

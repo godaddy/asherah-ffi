@@ -41,6 +41,9 @@ internal static class NativeMethods
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     internal static extern IntPtr asherah_last_error_message();
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int asherah_last_error_code();
 }
 
 [StructLayout(LayoutKind.Sequential)]
