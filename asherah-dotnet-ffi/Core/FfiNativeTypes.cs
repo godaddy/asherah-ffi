@@ -12,10 +12,23 @@ internal struct AsherahBuffer
 
 internal sealed class SafeFactoryHandle : SafeHandle
 {
-    public SafeFactoryHandle(IntPtr handle)
+    private SafeFactoryHandle(IntPtr handle)
         : base(IntPtr.Zero, ownsHandle: true)
     {
         SetHandle(handle);
+    }
+
+    public static SafeFactoryHandle FromNative(IntPtr handle)
+    {
+        try
+        {
+            return new SafeFactoryHandle(handle);
+        }
+        catch
+        {
+            NativeMethods.asherah_factory_free(handle);
+            throw;
+        }
     }
 
     public override bool IsInvalid => handle == IntPtr.Zero;
@@ -32,10 +45,23 @@ internal sealed class SafeFactoryHandle : SafeHandle
 
 internal sealed class SafeSessionHandle : SafeHandle
 {
-    public SafeSessionHandle(IntPtr handle)
+    private SafeSessionHandle(IntPtr handle)
         : base(IntPtr.Zero, ownsHandle: true)
     {
         SetHandle(handle);
+    }
+
+    public static SafeSessionHandle FromNative(IntPtr handle)
+    {
+        try
+        {
+            return new SafeSessionHandle(handle);
+        }
+        catch
+        {
+            NativeMethods.asherah_session_free(handle);
+            throw;
+        }
     }
 
     public override bool IsInvalid => handle == IntPtr.Zero;

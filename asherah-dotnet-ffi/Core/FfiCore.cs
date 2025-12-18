@@ -18,7 +18,7 @@ internal sealed class FfiCore : IAsherahCore
             throw NativeError.CreateException("factory_new_with_config");
         }
 
-        _factory = new SafeFactoryHandle(factoryPtr);
+        _factory = SafeFactoryHandle.FromNative(factoryPtr);
     }
 
     public byte[] EncryptToJson(string partitionId, byte[] plaintext)
@@ -82,7 +82,7 @@ internal sealed class FfiCore : IAsherahCore
         {
             throw NativeError.CreateException("factory_get_session");
         }
-        return new SafeSessionHandle(sessionPtr);
+        return SafeSessionHandle.FromNative(sessionPtr);
     }
 
     private static byte[] CopyBuffer(AsherahBuffer buffer)
