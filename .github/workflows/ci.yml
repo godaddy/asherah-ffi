@@ -575,8 +575,9 @@ jobs:
             build-${{ runner.os }}-arm64-rlib-
       - name: Install cross-compile toolchain and sccache
         run: |
+          dpkg --add-architecture arm64
           apt-get update
-          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu curl
+          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu pkg-config curl libssl-dev:arm64
           curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           mv sccache-*/sccache /usr/local/bin/
           chmod +x /usr/local/bin/sccache
