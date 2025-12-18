@@ -38,13 +38,13 @@ internal sealed class FfiCore : IAsherahCore
         using SafeSessionHandle session = GetSession(partitionId);
         AsherahBuffer buffer = default;
         int result = NativeMethods.asherah_encrypt_to_json(
-            session.DangerousGetHandle(),
+            session,
             plaintext,
             (UIntPtr)plaintext.Length,
             ref buffer);
         if (result != 0)
         {
-            throw NativeError.CreateException("encrypt_to_json", session.DangerousGetHandle());
+            throw NativeError.CreateException("encrypt_to_json", session);
         }
 
         try
@@ -62,13 +62,13 @@ internal sealed class FfiCore : IAsherahCore
         using SafeSessionHandle session = GetSession(partitionId);
         AsherahBuffer buffer = default;
         int result = NativeMethods.asherah_decrypt_from_json(
-            session.DangerousGetHandle(),
+            session,
             json,
             (UIntPtr)json.Length,
             ref buffer);
         if (result != 0)
         {
-            throw NativeError.CreateException("decrypt_from_json", session.DangerousGetHandle());
+            throw NativeError.CreateException("decrypt_from_json", session);
         }
 
         try
@@ -89,7 +89,7 @@ internal sealed class FfiCore : IAsherahCore
     private SafeSessionHandle GetSession(string partitionId)
     {
         using var partition = new Utf8String(partitionId);
-        IntPtr sessionPtr = NativeMethods.asherah_factory_get_session(_factory.DangerousGetHandle(), partition.Pointer);
+        IntPtr sessionPtr = NativeMethods.asherah_factory_get_session(_factory, partition.Pointer);
         if (sessionPtr == IntPtr.Zero)
         {
             throw NativeError.CreateException("factory_get_session");
@@ -121,7 +121,7 @@ internal sealed class FfiCore : IAsherahCore
 
 internal static class NativeError
 {
-    public static AppEncryptionException CreateException(string operation, IntPtr session = default)
+    public static AppEncryptionException CreateException(string operation, SafeSessionHandle? session = null)
     {
         string message = GetLastErrorMessage(session);
         int? code = GetLastErrorCode(session);
@@ -181,12 +181,12 @@ internal static class NativeError
     private const int ErrKms = 6;
     private const int ErrMetadata = 7;
 
-    private static string GetLastErrorMessage(IntPtr session)
+    private static string GetLastErrorMessage(SafeSessionHandle? session)
     {
-        IntPtr ptr = session != IntPtr.Zero
+        IntPtr ptr = session is not null
             ? NativeMethods.asherah_session_last_error_message(session)
             : NativeMethods.asherah_last_error_message();
-        if (ptr == IntPtr.Zero && session != IntPtr.Zero)
+        if (ptr == IntPtr.Zero && session is not null)
         {
             ptr = NativeMethods.asherah_last_error_message();
         }
@@ -198,12 +198,12 @@ internal static class NativeError
         return Marshal.PtrToStringUTF8(ptr) ?? string.Empty;
     }
 
-    private static int? GetLastErrorCode(IntPtr session)
+    private static int? GetLastErrorCode(SafeSessionHandle? session)
     {
-        int code = session != IntPtr.Zero
+        int code = session is not null
             ? NativeMethods.asherah_session_last_error_code(session)
             : NativeMethods.asherah_last_error_code();
-        if (code == 0 && session != IntPtr.Zero)
+        if (code == 0 && session is not null)
         {
             code = NativeMethods.asherah_last_error_code();
         }
@@ -227,16 +227,16 @@ internal static class NativeMethods
     internal static extern void asherah_factory_free(IntPtr factory);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
-    internal static extern IntPtr asherah_factory_get_session(IntPtr factory, IntPtr partitionId);
+    internal static extern IntPtr asherah_factory_get_session(SafeFactoryHandle factory, IntPtr partitionId);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     internal static extern void asherah_session_free(IntPtr session);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
-    internal static extern int asherah_encrypt_to_json(IntPtr session, byte[] data, UIntPtr length, ref AsherahBuffer buffer);
+    internal static extern int asherah_encrypt_to_json(SafeSessionHandle session, byte[] data, UIntPtr length, ref AsherahBuffer buffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
-    internal static extern int asherah_decrypt_from_json(IntPtr session, byte[] json, UIntPtr length, ref AsherahBuffer buffer);
+    internal static extern int asherah_decrypt_from_json(SafeSessionHandle session, byte[] json, UIntPtr length, ref AsherahBuffer buffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     internal static extern void asherah_buffer_free(ref AsherahBuffer buffer);
@@ -248,8 +248,8 @@ internal static class NativeMethods
     internal static extern int asherah_last_error_code();
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
-    internal static extern IntPtr asherah_session_last_error_message(IntPtr session);
+    internal static extern IntPtr asherah_session_last_error_message(SafeSessionHandle session);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
-    internal static extern int asherah_session_last_error_code(IntPtr session);
+    internal static extern int asherah_session_last_error_code(SafeSessionHandle session);
 }
