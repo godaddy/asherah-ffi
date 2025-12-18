@@ -12,19 +12,23 @@ internal sealed class FfiCore : IAsherahCore
     public FfiCore(ConfigOptions config)
     {
         using var json = new Utf8String(config.ToJson());
-        IntPtr factoryPtr = NativeMethods.asherah_factory_new_with_config(json.Pointer);
-        if (factoryPtr == IntPtr.Zero)
-        {
-            throw NativeError.CreateException("factory_new_with_config");
-        }
-
+        IntPtr factoryPtr = IntPtr.Zero;
         try
         {
+            factoryPtr = NativeMethods.asherah_factory_new_with_config(json.Pointer);
+            if (factoryPtr == IntPtr.Zero)
+            {
+                throw NativeError.CreateException("factory_new_with_config");
+            }
+
             _factory = new SafeFactoryHandle(factoryPtr);
         }
         catch
         {
-            NativeMethods.asherah_factory_free(factoryPtr);
+            if (factoryPtr != IntPtr.Zero)
+            {
+                NativeMethods.asherah_factory_free(factoryPtr);
+            }
             throw;
         }
     }
