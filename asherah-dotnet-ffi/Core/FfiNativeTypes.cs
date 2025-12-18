@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using Microsoft.Win32.SafeHandles;
 
 namespace GoDaddy.Asherah.Internal;
 
@@ -10,15 +11,13 @@ internal struct AsherahBuffer
     public UIntPtr len;
 }
 
-internal sealed class SafeFactoryHandle : SafeHandle
+internal sealed class SafeFactoryHandle : SafeHandleZeroOrMinusOneIsInvalid
 {
     internal SafeFactoryHandle(IntPtr handle)
-        : base(IntPtr.Zero, ownsHandle: true)
+        : base(ownsHandle: true)
     {
         SetHandle(handle);
     }
-
-    public override bool IsInvalid => handle == IntPtr.Zero;
 
     protected override bool ReleaseHandle()
     {
@@ -30,15 +29,13 @@ internal sealed class SafeFactoryHandle : SafeHandle
     }
 }
 
-internal sealed class SafeSessionHandle : SafeHandle
+internal sealed class SafeSessionHandle : SafeHandleZeroOrMinusOneIsInvalid
 {
     internal SafeSessionHandle(IntPtr handle)
-        : base(IntPtr.Zero, ownsHandle: true)
+        : base(ownsHandle: true)
     {
         SetHandle(handle);
     }
-
-    public override bool IsInvalid => handle == IntPtr.Zero;
 
     protected override bool ReleaseHandle()
     {

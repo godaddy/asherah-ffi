@@ -53,7 +53,7 @@ internal sealed class FfiCore : IAsherahCore
         }
         finally
         {
-            NativeMethods.asherah_buffer_free(ref buffer);
+            SafeFreeBuffer(ref buffer);
         }
     }
 
@@ -77,7 +77,7 @@ internal sealed class FfiCore : IAsherahCore
         }
         finally
         {
-            NativeMethods.asherah_buffer_free(ref buffer);
+            SafeFreeBuffer(ref buffer);
         }
     }
 
@@ -116,6 +116,22 @@ internal sealed class FfiCore : IAsherahCore
         byte[] result = new byte[length];
         Marshal.Copy(buffer.data, result, 0, length);
         return result;
+    }
+
+    private static void SafeFreeBuffer(ref AsherahBuffer buffer)
+    {
+        try
+        {
+            NativeMethods.asherah_buffer_free(ref buffer);
+        }
+        catch
+        {
+            buffer.data = IntPtr.Zero;
+            buffer.len = UIntPtr.Zero;
+            throw;
+        }
+        buffer.data = IntPtr.Zero;
+        buffer.len = UIntPtr.Zero;
     }
 }
 
