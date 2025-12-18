@@ -5,6 +5,7 @@ use std::fmt;
 use std::mem::ManuallyDrop;
 use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
+use std::sync::Mutex;
 
 use asherah as ael;
 use asherah_config as config;
@@ -34,6 +35,7 @@ pub struct AsherahFactory {
 #[repr(C)]
 pub struct AsherahSession {
     inner: Session,
+    last_error: Mutex<LastError>,
 }
 
 impl fmt::Debug for AsherahFactory {
@@ -62,6 +64,12 @@ const ERR_CRYPTO: c_int = 5;
 const ERR_KMS: c_int = 6;
 const ERR_METADATA: c_int = 7;
 const ERR_METASTORE: c_int = 8;
+
+#[derive(Default)]
+struct LastError {
+    code: c_int,
+    message: Option<CString>,
+}
 
 fn classify_error(message: &str, fallback: c_int) -> c_int {
     let lower = message.to_lowercase();
@@ -92,6 +100,19 @@ fn set_error(code: c_int, msg: impl Into<String>) {
     });
 }
 
+fn set_session_error(session: &AsherahSession, code: c_int, msg: impl Into<String>) {
+    let message_str = msg.into();
+    set_error(code, message_str.clone());
+    let cstring =
+        CString::new(message_str).unwrap_or_else(|_| CString::new("error").expect("static string"));
+    let mut guard = session
+        .last_error
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    guard.code = code;
+    guard.message = Some(cstring);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn asherah_last_error_message() -> *const c_char {
     LAST_ERROR.with(|c| {
@@ -105,6 +126,38 @@ pub extern "C" fn asherah_last_error_message() -> *const c_char {
 #[unsafe(no_mangle)]
 pub extern "C" fn asherah_last_error_code() -> c_int {
     LAST_ERROR_CODE.with(|c| *c.borrow())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn asherah_session_last_error_message(
+    session: *mut AsherahSession,
+) -> *const c_char {
+    if session.is_null() {
+        return std::ptr::null();
+    }
+    let s = unsafe { &*session };
+    let guard = s
+        .last_error
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    guard
+        .message
+        .as_ref()
+        .map(|c| c.as_ptr())
+        .unwrap_or(std::ptr::null())
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn asherah_session_last_error_code(session: *mut AsherahSession) -> c_int {
+    if session.is_null() {
+        return 0;
+    }
+    let s = unsafe { &*session };
+    let guard = s
+        .last_error
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    guard.code
 }
 
 #[unsafe(no_mangle)]
@@ -191,7 +244,10 @@ pub unsafe extern "C" fn asherah_factory_get_session(
         }
     };
     let s = f.inner.get_session(pid);
-    Box::into_raw(Box::new(AsherahSession { inner: s }))
+    Box::into_raw(Box::new(AsherahSession {
+        inner: s,
+        last_error: Mutex::new(LastError::default()),
+    }))
 }
 
 /// # Safety
@@ -254,14 +310,14 @@ pub unsafe extern "C" fn asherah_encrypt_to_json(
         Ok(drr) => match serde_json::to_vec(&drr) {
             Ok(v) => take_vec_into_buffer(v, out),
             Err(e) => {
-                set_error(ERR_JSON, format!("{e}"));
+                set_session_error(s, ERR_JSON, format!("{e}"));
                 -1
             }
         },
         Err(e) => {
             let msg = format!("{e}");
             let code = classify_error(&msg, ERR_CRYPTO);
-            set_error(code, msg);
+            set_session_error(s, code, msg);
             -1
         }
     }
@@ -292,12 +348,12 @@ pub unsafe extern "C" fn asherah_decrypt_from_json(
             Err(e) => {
                 let msg = format!("{e}");
                 let code = classify_error(&msg, ERR_CRYPTO);
-                set_error(code, msg);
+                set_session_error(s, code, msg);
                 -1
             }
         },
         Err(e) => {
-            set_error(ERR_JSON, format!("{e}"));
+            set_session_error(s, ERR_JSON, format!("{e}"));
             -1
         }
     }

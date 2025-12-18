@@ -33,7 +33,7 @@ internal sealed class FfiCore : IAsherahCore
             ref buffer);
         if (result != 0)
         {
-            throw NativeError.CreateException("encrypt_to_json");
+            throw NativeError.CreateException("encrypt_to_json", session.DangerousGetHandle());
         }
 
         try
@@ -57,7 +57,7 @@ internal sealed class FfiCore : IAsherahCore
             ref buffer);
         if (result != 0)
         {
-            throw NativeError.CreateException("decrypt_from_json");
+            throw NativeError.CreateException("decrypt_from_json", session.DangerousGetHandle());
         }
 
         try
@@ -102,10 +102,10 @@ internal sealed class FfiCore : IAsherahCore
 
 internal static class NativeError
 {
-    public static AppEncryptionException CreateException(string operation)
+    public static AppEncryptionException CreateException(string operation, IntPtr session = default)
     {
-        string message = GetLastErrorMessage();
-        int? code = GetLastErrorCode();
+        string message = GetLastErrorMessage(session);
+        int? code = GetLastErrorCode(session);
         string suffix = code.HasValue ? $" (code {code.Value})" : string.Empty;
         string full = string.IsNullOrWhiteSpace(message)
             ? $"Native error during {operation}{suffix}"
@@ -162,9 +162,15 @@ internal static class NativeError
     private const int ErrKms = 6;
     private const int ErrMetadata = 7;
 
-    private static string GetLastErrorMessage()
+    private static string GetLastErrorMessage(IntPtr session)
     {
-        IntPtr ptr = NativeMethods.asherah_last_error_message();
+        IntPtr ptr = session != IntPtr.Zero
+            ? NativeMethods.asherah_session_last_error_message(session)
+            : NativeMethods.asherah_last_error_message();
+        if (ptr == IntPtr.Zero && session != IntPtr.Zero)
+        {
+            ptr = NativeMethods.asherah_last_error_message();
+        }
         if (ptr == IntPtr.Zero)
         {
             return string.Empty;
@@ -173,9 +179,15 @@ internal static class NativeError
         return Marshal.PtrToStringUTF8(ptr) ?? string.Empty;
     }
 
-    private static int? GetLastErrorCode()
+    private static int? GetLastErrorCode(IntPtr session)
     {
-        int code = NativeMethods.asherah_last_error_code();
+        int code = session != IntPtr.Zero
+            ? NativeMethods.asherah_session_last_error_code(session)
+            : NativeMethods.asherah_last_error_code();
+        if (code == 0 && session != IntPtr.Zero)
+        {
+            code = NativeMethods.asherah_last_error_code();
+        }
         return code == 0 ? null : code;
     }
 }
@@ -215,6 +227,12 @@ internal static class NativeMethods
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int asherah_last_error_code();
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern IntPtr asherah_session_last_error_message(IntPtr session);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int asherah_session_last_error_code(IntPtr session);
 }
 
 [StructLayout(LayoutKind.Sequential)]
