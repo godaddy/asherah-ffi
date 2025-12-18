@@ -114,6 +114,7 @@ if [ "$CARGO_TRIPLE" = "aarch64-unknown-linux-gnu" ]; then
   export CXX_aarch64_unknown_linux_gnu="${CXX_aarch64_unknown_linux_gnu:-aarch64-linux-gnu-g++}"
   export AR_aarch64_unknown_linux_gnu="${AR_aarch64_unknown_linux_gnu:-aarch64-linux-gnu-ar}"
   export PKG_CONFIG_aarch64_unknown_linux_gnu="${PKG_CONFIG_aarch64_unknown_linux_gnu:-pkg-config}"
+  export PKG_CONFIG_PATH_aarch64_unknown_linux_gnu="${PKG_CONFIG_PATH_aarch64_unknown_linux_gnu:-/usr/lib/aarch64-linux-gnu/pkgconfig}"
   export PKG_CONFIG_ALLOW_CROSS="${PKG_CONFIG_ALLOW_CROSS:-1}"
 fi
 
