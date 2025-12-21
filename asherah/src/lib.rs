@@ -15,6 +15,8 @@ pub mod logging;
 pub mod metastore;
 #[cfg(feature = "dynamodb")]
 pub mod metastore_dynamodb;
+#[cfg(feature = "mssql")]
+pub mod metastore_mssql;
 #[cfg(feature = "mysql")]
 pub mod metastore_mysql;
 #[cfg(feature = "postgres")]

@@ -9,8 +9,9 @@ internal static class NativeError
     {
         var ptr = NativeMethods.asherah_last_error_message();
         var message = ptr != IntPtr.Zero ? Marshal.PtrToStringAnsi(ptr) : null;
+        var code = NativeMethods.asherah_last_error_code();
         var suffix = string.IsNullOrWhiteSpace(message) ? "unknown error" : message;
-        return new AsherahException($"{context}: {suffix}");
+        return new AsherahException($"{context}: {suffix}", code == 0 ? null : code);
     }
 
     internal static void ThrowIfNonZero(int status, string context)

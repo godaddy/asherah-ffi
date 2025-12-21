@@ -46,7 +46,7 @@ public class RoundTripTests
             .WithServiceName("svc")
             .WithProductId("prod")
             .WithMetastore("memory")
-            .WithKms("static")
+            .WithStaticMasterKey("22222222222222222222222222222222")
             .WithEnableSessionCaching(true)
             .WithVerbose(false)
             .Build();
@@ -73,7 +73,7 @@ public class RoundTripTests
             .WithServiceName("svc")
             .WithProductId("prod")
             .WithMetastore("memory")
-            .WithKms("static")
+            .WithStaticMasterKey("22222222222222222222222222222222")
             .Build();
 
         Asherah.Setup(config);

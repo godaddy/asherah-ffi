@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace GoDaddy.Asherah;
 
@@ -9,8 +10,9 @@ public static class Asherah
 {
     private static readonly object SyncRoot = new();
     private static AsherahFactory? _sharedFactory;
-    private static readonly Dictionary<string, AsherahSession> SessionCache = new();
+    private static MemoryCache? _sessionCache;
     private static bool _sessionCachingEnabled = true;
+    private static TimeSpan _sessionCacheDuration = TimeSpan.FromHours(2);
 
     public static AsherahFactory FactoryFromEnv()
     {
@@ -48,8 +50,13 @@ public static class Asherah
             }
 
             _sharedFactory = factory;
-            SessionCache.Clear();
             _sessionCachingEnabled = config.SessionCachingEnabled;
+            _sessionCacheDuration = TimeSpan.FromSeconds(config.SessionCacheDuration ?? 2 * 60 * 60);
+
+            _sessionCache?.Dispose();
+            _sessionCache = _sessionCachingEnabled
+                ? new MemoryCache(new MemoryCacheOptions())
+                : null;
         }
     }
 
@@ -64,19 +71,8 @@ public static class Asherah
                 return;
             }
 
-            foreach (var session in SessionCache.Values)
-            {
-                try
-                {
-                    session.Dispose();
-                }
-                catch
-                {
-                    // ignore
-                }
-            }
-
-            SessionCache.Clear();
+            _sessionCache?.Dispose();
+            _sessionCache = null;
             _sharedFactory.Dispose();
             _sharedFactory = null;
         }
@@ -86,10 +82,7 @@ public static class Asherah
 
     public static bool GetSetupStatus()
     {
-        lock (SyncRoot)
-        {
-            return _sharedFactory is not null;
-        }
+        return _sharedFactory is not null;
     }
 
     public static void SetEnv(IDictionary<string, string?> env)
@@ -105,18 +98,8 @@ public static class Asherah
     {
         ArgumentNullException.ThrowIfNull(partitionId);
         ArgumentNullException.ThrowIfNull(plaintext);
-        lock (SyncRoot)
-        {
-            var session = AcquireSession(partitionId);
-            try
-            {
-                return session.EncryptBytes(plaintext);
-            }
-            finally
-            {
-                ReleaseSession(partitionId, session);
-            }
-        }
+
+        return WithSession(partitionId, session => session.EncryptBytes(plaintext));
     }
 
     public static string EncryptString(string partitionId, string plaintext)
@@ -135,18 +118,8 @@ public static class Asherah
     {
         ArgumentNullException.ThrowIfNull(partitionId);
         ArgumentNullException.ThrowIfNull(dataRowRecordJson);
-        lock (SyncRoot)
-        {
-            var session = AcquireSession(partitionId);
-            try
-            {
-                return session.DecryptBytes(dataRowRecordJson);
-            }
-            finally
-            {
-                ReleaseSession(partitionId, session);
-            }
-        }
+
+        return WithSession(partitionId, session => session.DecryptBytes(dataRowRecordJson));
     }
 
     public static byte[] DecryptJson(string partitionId, string dataRowRecordJson) =>
@@ -164,44 +137,30 @@ public static class Asherah
     public static Task<string> DecryptStringAsync(string partitionId, string dataRowRecordJson) =>
         Task.Run(() => DecryptString(partitionId, dataRowRecordJson));
 
-    private static AsherahSession AcquireSession(string partitionId)
+    private static T WithSession<T>(string partitionId, Func<AsherahSession, T> action)
     {
-        EnsureConfigured();
-        if (_sessionCachingEnabled)
+        var factory = _sharedFactory
+            ?? throw new InvalidOperationException("Asherah not configured; call Setup() first");
+
+        // No caching - just create a new session each time
+        if (!_sessionCachingEnabled || _sessionCache is null)
         {
-            if (!SessionCache.TryGetValue(partitionId, out var session))
+            using var session = factory.GetSession(partitionId);
+            return action(session);
+        }
+
+        // Try to get from cache, create if not present
+        // MemoryCache.GetOrCreate is thread-safe
+        var cached = _sessionCache.GetOrCreate(partitionId, entry =>
+        {
+            entry.SlidingExpiration = _sessionCacheDuration;
+            entry.RegisterPostEvictionCallback((_, value, _, _) =>
             {
-                session = SharedFactory().GetSession(partitionId);
-                SessionCache[partitionId] = session;
-            }
-            return session;
-        }
+                (value as IDisposable)?.Dispose();
+            });
+            return factory.GetSession(partitionId);
+        })!;
 
-        return SharedFactory().GetSession(partitionId);
-    }
-
-    private static void ReleaseSession(string partitionId, AsherahSession session)
-    {
-        if (!_sessionCachingEnabled)
-        {
-            session.Dispose();
-            return;
-        }
-
-        if (!SessionCache.TryGetValue(partitionId, out var cached) || !ReferenceEquals(cached, session))
-        {
-            session.Dispose();
-        }
-    }
-
-    private static AsherahFactory SharedFactory() =>
-        _sharedFactory ?? throw new InvalidOperationException("Asherah not configured; call Setup() first");
-
-    private static void EnsureConfigured()
-    {
-        if (_sharedFactory is null)
-        {
-            throw new InvalidOperationException("Asherah not configured; call Setup() first");
-        }
+        return action(cached);
     }
 }

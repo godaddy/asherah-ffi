@@ -41,6 +41,7 @@ sqlite = ["dep:rusqlite"]
 mysql = ["dep:mysql"]
 postgres = ["dep:postgres"]
 dynamodb = ["dep:aws-sdk-dynamodb"]
+mssql = ["dep:tiberius", "dep:tokio-util", "dep:url", "dep:futures-util"]
 cucumber_xlang = []
 
 [dependencies.rusqlite]
@@ -68,6 +69,23 @@ optional = true
 
 [dependencies.postgres]
 version = "0.19"
+optional = true
+
+[dependencies.tiberius]
+version = "0.12"
+optional = true
+
+[dependencies.tokio-util]
+version = "0.7"
+optional = true
+features = ["compat"]
+
+[dependencies.url]
+version = "2"
+optional = true
+
+[dependencies.futures-util]
+version = "0.3"
 optional = true
 
 [dev-dependencies]

@@ -1,0 +1,364 @@
+C:GoDaddy.Asherah.AppEncryption.DefaultPartition.ctor(System.String partitionId,System.String serviceId,System.String productId)
+C:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionBytesImpl.ctor(GoDaddy.Asherah.AppEncryption.Envelope.IEnvelopeEncryption<Newtonsoft.Json.Linq.JObject> envelopeEncryptionJson,Microsoft.Extensions.Logging.ILogger logger)
+C:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionBytesImpl.ctor(GoDaddy.Asherah.AppEncryption.Envelope.IEnvelopeEncryption<Newtonsoft.Json.Linq.JObject> envelopeEncryptionJson)
+C:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionJsonImpl.ctor(GoDaddy.Asherah.AppEncryption.Partition partition,GoDaddy.Asherah.AppEncryption.Persistence.IMetastore<Newtonsoft.Json.Linq.JObject> metastore,GoDaddy.Asherah.Crypto.Keys.SecureCryptoKeyDictionary<System.DateTimeOffset> systemKeyCache,GoDaddy.Asherah.Crypto.Keys.SecureCryptoKeyDictionary<System.DateTimeOffset> intermediateKeyCache,GoDaddy.Asherah.Crypto.Envelope.AeadEnvelopeCrypto aeadEnvelopeCrypto,GoDaddy.Asherah.Crypto.CryptoPolicy cryptoPolicy,GoDaddy.Asherah.AppEncryption.Kms.IKeyManagementService keyManagementService,Microsoft.Extensions.Logging.ILogger logger)
+C:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionJsonImpl.ctor(GoDaddy.Asherah.AppEncryption.Partition partition,GoDaddy.Asherah.AppEncryption.Persistence.IMetastore<Newtonsoft.Json.Linq.JObject> metastore,GoDaddy.Asherah.Crypto.Keys.SecureCryptoKeyDictionary<System.DateTimeOffset> systemKeyCache,GoDaddy.Asherah.Crypto.Keys.SecureCryptoKeyDictionary<System.DateTimeOffset> intermediateKeyCache,GoDaddy.Asherah.Crypto.Envelope.AeadEnvelopeCrypto aeadEnvelopeCrypto,GoDaddy.Asherah.Crypto.CryptoPolicy cryptoPolicy,GoDaddy.Asherah.AppEncryption.Kms.IKeyManagementService keyManagementService)
+C:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeKeyRecord.ctor(GoDaddy.Asherah.AppEncryption.Util.Json sourceJson)
+C:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeKeyRecord.ctor(System.DateTimeOffset created,GoDaddy.Asherah.AppEncryption.Envelope.KeyMeta parentKeyMeta,System.Byte[] encryptedKey,System.Nullable<System.Boolean> revoked)
+C:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeKeyRecord.ctor(System.DateTimeOffset created,GoDaddy.Asherah.AppEncryption.Envelope.KeyMeta parentKeyMeta,System.Byte[] encryptedKey)
+C:GoDaddy.Asherah.AppEncryption.Envelope.KeyMeta.ctor(GoDaddy.Asherah.AppEncryption.Util.Json sourceJson)
+C:GoDaddy.Asherah.AppEncryption.Envelope.KeyMeta.ctor(System.String keyId,System.DateTimeOffset created)
+C:GoDaddy.Asherah.AppEncryption.Exceptions.KmsException.ctor(System.String message)
+C:GoDaddy.Asherah.AppEncryption.Exceptions.MetadataMissingException.ctor(System.String message)
+C:GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+Builder.ctor(System.Collections.Generic.Dictionary<System.String,System.String> regionToArnDictionary,System.String region)
+C:GoDaddy.Asherah.AppEncryption.Kms.AwsKmsClientFactory.ctor()
+C:GoDaddy.Asherah.AppEncryption.Kms.StaticKeyManagementServiceImpl.ctor(System.String key)
+C:GoDaddy.Asherah.AppEncryption.Persistence.AdhocPersistence<T>.ctor(System.Func<System.String,LanguageExt.Option<T>> load,System.Action<System.String,T> store)
+C:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+Builder.ctor(System.String region)
+C:GoDaddy.Asherah.AppEncryption.Persistence.InMemoryMetastoreImpl<T>.ctor()
+C:GoDaddy.Asherah.AppEncryption.SessionBytesImpl<TD>.ctor(GoDaddy.Asherah.AppEncryption.Envelope.IEnvelopeEncryption<TD> envelopeEncryption,Microsoft.Extensions.Logging.ILogger logger)
+C:GoDaddy.Asherah.AppEncryption.SessionBytesImpl<TD>.ctor(GoDaddy.Asherah.AppEncryption.Envelope.IEnvelopeEncryption<TD> envelopeEncryption)
+C:GoDaddy.Asherah.AppEncryption.SessionFactory.ctor(System.String productId,System.String serviceId,GoDaddy.Asherah.AppEncryption.Persistence.IMetastore<Newtonsoft.Json.Linq.JObject> metastore,GoDaddy.Asherah.Crypto.Keys.SecureCryptoKeyDictionary<System.DateTimeOffset> systemKeyCache,GoDaddy.Asherah.Crypto.CryptoPolicy cryptoPolicy,GoDaddy.Asherah.AppEncryption.Kms.IKeyManagementService keyManagementService,Microsoft.Extensions.Logging.ILogger logger)
+C:GoDaddy.Asherah.AppEncryption.SessionFactory.ctor(System.String productId,System.String serviceId,GoDaddy.Asherah.AppEncryption.Persistence.IMetastore<Newtonsoft.Json.Linq.JObject> metastore,GoDaddy.Asherah.Crypto.Keys.SecureCryptoKeyDictionary<System.DateTimeOffset> systemKeyCache,GoDaddy.Asherah.Crypto.CryptoPolicy cryptoPolicy,GoDaddy.Asherah.AppEncryption.Kms.IKeyManagementService keyManagementService)
+C:GoDaddy.Asherah.AppEncryption.SessionJsonImpl<TD>.ctor(GoDaddy.Asherah.AppEncryption.Envelope.IEnvelopeEncryption<TD> envelopeEncryption,Microsoft.Extensions.Logging.ILogger logger)
+C:GoDaddy.Asherah.AppEncryption.SessionJsonImpl<TD>.ctor(GoDaddy.Asherah.AppEncryption.Envelope.IEnvelopeEncryption<TD> envelopeEncryption)
+C:GoDaddy.Asherah.AppEncryption.SuffixedPartition.ctor(System.String partitionId,System.String serviceId,System.String productId,System.String regionSuffix)
+C:GoDaddy.Asherah.AppEncryption.Util.Json.ctor()
+C:GoDaddy.Asherah.AppEncryption.Util.Json.ctor(Newtonsoft.Json.Linq.JObject jObject)
+C:GoDaddy.Asherah.AppEncryption.Util.Json.ctor(System.Byte[] utf8Json)
+C:GoDaddy.Asherah.Crypto.Engine.BouncyCastle.BouncyAes256GcmCrypto.ctor()
+C:GoDaddy.Asherah.Crypto.Envelope.EnvelopeEncryptResult.ctor()
+C:GoDaddy.Asherah.Crypto.Envelope.EnvelopeEncryptResult<T>.ctor()
+C:GoDaddy.Asherah.Crypto.Exceptions.AppEncryptionException.ctor(System.String message,System.Exception cause)
+C:GoDaddy.Asherah.Crypto.Exceptions.AppEncryptionException.ctor(System.String message)
+C:GoDaddy.Asherah.Crypto.Exceptions.CipherNotSupportedException.ctor(System.String message,System.Exception inner)
+C:GoDaddy.Asherah.Crypto.Exceptions.CipherNotSupportedException.ctor(System.String message)
+C:GoDaddy.Asherah.Crypto.Keys.SecretCryptoKey.ctor(GoDaddy.Asherah.Crypto.Keys.CryptoKey otherKey)
+C:GoDaddy.Asherah.Crypto.Keys.SecretCryptoKey.ctor(GoDaddy.Asherah.SecureMemory.Secret secret,System.DateTimeOffset created,System.Boolean revoked)
+C:GoDaddy.Asherah.Crypto.Keys.SecureCryptoKeyDictionary<TKey>.ctor(System.Int64 revokeCheckPeriodMillis)
+C:GoDaddy.Asherah.Crypto.NeverExpiredCryptoPolicy.ctor()
+C:GoDaddy.Asherah.Crypto.NonceGenerator.ctor()
+F:GoDaddy.Asherah.AppEncryption.Util.MetricsUtil.AelMetricsPrefix:System.String
+F:GoDaddy.Asherah.Crypto.CipherSuites.AeadCipherSuite.Aes256Gcm:GoDaddy.Asherah.Crypto.CipherSuites.AeadCipherSuite
+F:GoDaddy.Asherah.Crypto.CipherSuites.AeadCipherSuite.value__:System.Int32
+F:GoDaddy.Asherah.Crypto.CryptoPolicy+KeyRotationStrategy.Inline:GoDaddy.Asherah.Crypto.CryptoPolicy+KeyRotationStrategy
+F:GoDaddy.Asherah.Crypto.CryptoPolicy+KeyRotationStrategy.Queued:GoDaddy.Asherah.Crypto.CryptoPolicy+KeyRotationStrategy
+F:GoDaddy.Asherah.Crypto.CryptoPolicy+KeyRotationStrategy.value__:System.Int32
+M:GoDaddy.Asherah.AppEncryption.DefaultPartition.ToString():System.String
+M:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionBytesImpl.DecryptDataRowRecord(System.Byte[] dataRowRecord):System.Byte[]
+M:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionBytesImpl.DecryptDataRowRecordAsync(System.Byte[] dataRowRecord):System.Threading.Tasks.Task<System.Byte[]>
+M:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionBytesImpl.Dispose():System.Void
+M:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionBytesImpl.EncryptPayload(System.Byte[] payload):System.Byte[]
+M:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionBytesImpl.EncryptPayloadAsync(System.Byte[] payload):System.Threading.Tasks.Task<System.Byte[]>
+M:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionJsonImpl.DecryptDataRowRecord(Newtonsoft.Json.Linq.JObject dataRowRecord):System.Byte[]
+M:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionJsonImpl.DecryptDataRowRecordAsync(Newtonsoft.Json.Linq.JObject dataRowRecord):System.Threading.Tasks.Task<System.Byte[]>
+M:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionJsonImpl.Dispose():System.Void
+M:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionJsonImpl.EncryptPayload(System.Byte[] payload):Newtonsoft.Json.Linq.JObject
+M:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionJsonImpl.EncryptPayloadAsync(System.Byte[] payload):System.Threading.Tasks.Task<Newtonsoft.Json.Linq.JObject>
+M:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeKeyRecord.ToJson():Newtonsoft.Json.Linq.JObject
+M:GoDaddy.Asherah.AppEncryption.Envelope.IEnvelopeEncryption<TD>.DecryptDataRowRecord(TD dataRowRecord):System.Byte[]
+M:GoDaddy.Asherah.AppEncryption.Envelope.IEnvelopeEncryption<TD>.DecryptDataRowRecordAsync(TD dataRowRecord):System.Threading.Tasks.Task<System.Byte[]>
+M:GoDaddy.Asherah.AppEncryption.Envelope.IEnvelopeEncryption<TD>.EncryptPayload(System.Byte[] payload):TD
+M:GoDaddy.Asherah.AppEncryption.Envelope.IEnvelopeEncryption<TD>.EncryptPayloadAsync(System.Byte[] payload):System.Threading.Tasks.Task<TD>
+M:GoDaddy.Asherah.AppEncryption.Envelope.KeyMeta.Equals(System.Object obj):System.Boolean
+M:GoDaddy.Asherah.AppEncryption.Envelope.KeyMeta.get_KeyId():System.String
+M:GoDaddy.Asherah.AppEncryption.Envelope.KeyMeta.GetHashCode():System.Int32
+M:GoDaddy.Asherah.AppEncryption.Envelope.KeyMeta.ToJson():Newtonsoft.Json.Linq.JObject
+M:GoDaddy.Asherah.AppEncryption.Envelope.KeyMeta.ToString():System.String
+M:GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl.DecryptKey(System.Byte[] keyCipherText,System.DateTimeOffset keyCreated,System.Boolean revoked):GoDaddy.Asherah.Crypto.Keys.CryptoKey
+M:GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl.EncryptKey(GoDaddy.Asherah.Crypto.Keys.CryptoKey key):System.Byte[]
+M:GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl.NewBuilder(System.Collections.Generic.Dictionary<System.String,System.String> regionToArnDictionary,System.String region):GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+Builder
+M:GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+Builder.Build():GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl
+M:GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+Builder.WithCredentials(Amazon.Runtime.AWSCredentials credentials):GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+Builder.WithLogger(Microsoft.Extensions.Logging.ILogger logger):GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+IBuildStep.Build():GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl
+M:GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+IBuildStep.WithCredentials(Amazon.Runtime.AWSCredentials credentials):GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+IBuildStep.WithLogger(Microsoft.Extensions.Logging.ILogger logger):GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Kms.IKeyManagementService.DecryptKey(System.Byte[] keyCipherText,System.DateTimeOffset keyCreated,System.Boolean revoked):GoDaddy.Asherah.Crypto.Keys.CryptoKey
+M:GoDaddy.Asherah.AppEncryption.Kms.IKeyManagementService.DecryptKeyAsync(System.Byte[] keyCipherText,System.DateTimeOffset keyCreated,System.Boolean revoked):System.Threading.Tasks.Task<GoDaddy.Asherah.Crypto.Keys.CryptoKey>
+M:GoDaddy.Asherah.AppEncryption.Kms.IKeyManagementService.EncryptKey(GoDaddy.Asherah.Crypto.Keys.CryptoKey key):System.Byte[]
+M:GoDaddy.Asherah.AppEncryption.Kms.IKeyManagementService.EncryptKeyAsync(GoDaddy.Asherah.Crypto.Keys.CryptoKey key):System.Threading.Tasks.Task<System.Byte[]>
+M:GoDaddy.Asherah.AppEncryption.Kms.KeyManagementService.DecryptKey(System.Byte[] keyCipherText,System.DateTimeOffset keyCreated,System.Boolean revoked):GoDaddy.Asherah.Crypto.Keys.CryptoKey
+M:GoDaddy.Asherah.AppEncryption.Kms.KeyManagementService.DecryptKeyAsync(System.Byte[] keyCipherText,System.DateTimeOffset keyCreated,System.Boolean revoked):System.Threading.Tasks.Task<GoDaddy.Asherah.Crypto.Keys.CryptoKey>
+M:GoDaddy.Asherah.AppEncryption.Kms.KeyManagementService.EncryptKey(GoDaddy.Asherah.Crypto.Keys.CryptoKey key):System.Byte[]
+M:GoDaddy.Asherah.AppEncryption.Kms.KeyManagementService.EncryptKeyAsync(GoDaddy.Asherah.Crypto.Keys.CryptoKey key):System.Threading.Tasks.Task<System.Byte[]>
+M:GoDaddy.Asherah.AppEncryption.Kms.KeyManagementService.WithDecryptedKey<TResult>(System.Byte[] keyCipherText,System.DateTimeOffset keyCreated,System.Boolean revoked,System.Func<GoDaddy.Asherah.Crypto.Keys.CryptoKey,System.DateTimeOffset,TResult> actionWithDecryptedKey):TResult
+M:GoDaddy.Asherah.AppEncryption.Kms.StaticKeyManagementServiceImpl.DecryptKey(System.Byte[] keyCipherText,System.DateTimeOffset keyCreated,System.Boolean revoked):GoDaddy.Asherah.Crypto.Keys.CryptoKey
+M:GoDaddy.Asherah.AppEncryption.Kms.StaticKeyManagementServiceImpl.Dispose():System.Void
+M:GoDaddy.Asherah.AppEncryption.Kms.StaticKeyManagementServiceImpl.EncryptKey(GoDaddy.Asherah.Crypto.Keys.CryptoKey key):System.Byte[]
+M:GoDaddy.Asherah.AppEncryption.Partition.get_IntermediateKeyId():System.String
+M:GoDaddy.Asherah.AppEncryption.Partition.get_SystemKeyId():System.String
+M:GoDaddy.Asherah.AppEncryption.Partition.IsValidIntermediateKeyId(System.String keyId):System.Boolean
+M:GoDaddy.Asherah.AppEncryption.Persistence.AdhocPersistence<T>.Load(System.String key):LanguageExt.Option<T>
+M:GoDaddy.Asherah.AppEncryption.Persistence.AdhocPersistence<T>.Store(System.String key,T value):System.Void
+M:GoDaddy.Asherah.AppEncryption.Persistence.AdoMetastoreImpl.GetKeySuffix():System.String
+M:GoDaddy.Asherah.AppEncryption.Persistence.AdoMetastoreImpl.Load(System.String keyId,System.DateTimeOffset created):LanguageExt.Option<Newtonsoft.Json.Linq.JObject>
+M:GoDaddy.Asherah.AppEncryption.Persistence.AdoMetastoreImpl.LoadLatest(System.String keyId):LanguageExt.Option<Newtonsoft.Json.Linq.JObject>
+M:GoDaddy.Asherah.AppEncryption.Persistence.AdoMetastoreImpl.NewBuilder(System.Data.Common.DbProviderFactory dbProviderFactory,System.String connectionString):GoDaddy.Asherah.AppEncryption.Persistence.AdoMetastoreImpl+Builder
+M:GoDaddy.Asherah.AppEncryption.Persistence.AdoMetastoreImpl.Store(System.String keyId,System.DateTimeOffset created,Newtonsoft.Json.Linq.JObject value):System.Boolean
+M:GoDaddy.Asherah.AppEncryption.Persistence.AdoMetastoreImpl+Builder.Build():GoDaddy.Asherah.AppEncryption.Persistence.AdoMetastoreImpl
+M:GoDaddy.Asherah.AppEncryption.Persistence.AdoMetastoreImpl+Builder.WithLogger(Microsoft.Extensions.Logging.ILogger logger):GoDaddy.Asherah.AppEncryption.Persistence.AdoMetastoreImpl+Builder
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl.GetKeySuffix():System.String
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl.Load(System.String keyId,System.DateTimeOffset created):LanguageExt.Option<Newtonsoft.Json.Linq.JObject>
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl.LoadLatest(System.String keyId):LanguageExt.Option<Newtonsoft.Json.Linq.JObject>
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl.NewBuilder(System.String region):GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+Builder
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl.Store(System.String keyId,System.DateTimeOffset created,Newtonsoft.Json.Linq.JObject value):System.Boolean
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+Builder.Build():GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+Builder.WithCredentials(Amazon.Runtime.AWSCredentials credentials):GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+Builder.WithDynamoDbClient(Amazon.DynamoDBv2.IAmazonDynamoDB client):GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+Builder.WithEndPointConfiguration(System.String endPoint,System.String signingRegion):GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+Builder.WithKeySuffix():GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+Builder.WithLogger(Microsoft.Extensions.Logging.ILogger logger):GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+Builder.WithRegion(System.String region):GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+Builder.WithTableName(System.String tableName):GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep.Build():GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep.WithCredentials(Amazon.Runtime.AWSCredentials credentials):GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep.WithDynamoDbClient(Amazon.DynamoDBv2.IAmazonDynamoDB client):GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep.WithEndPointConfiguration(System.String endPoint,System.String signingRegion):GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep.WithKeySuffix():GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep.WithLogger(Microsoft.Extensions.Logging.ILogger logger):GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep.WithRegion(System.String region):GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep.WithTableName(System.String tableName):GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.Persistence.IMetastore<T>.GetKeySuffix():System.String
+M:GoDaddy.Asherah.AppEncryption.Persistence.IMetastore<T>.Load(System.String keyId,System.DateTimeOffset created):LanguageExt.Option<T>
+M:GoDaddy.Asherah.AppEncryption.Persistence.IMetastore<T>.LoadLatest(System.String keyId):LanguageExt.Option<T>
+M:GoDaddy.Asherah.AppEncryption.Persistence.IMetastore<T>.Store(System.String keyId,System.DateTimeOffset created,T value):System.Boolean
+M:GoDaddy.Asherah.AppEncryption.Persistence.InMemoryMetastoreImpl<T>.Dispose():System.Void
+M:GoDaddy.Asherah.AppEncryption.Persistence.InMemoryMetastoreImpl<T>.GetKeySuffix():System.String
+M:GoDaddy.Asherah.AppEncryption.Persistence.InMemoryMetastoreImpl<T>.Load(System.String keyId,System.DateTimeOffset created):LanguageExt.Option<T>
+M:GoDaddy.Asherah.AppEncryption.Persistence.InMemoryMetastoreImpl<T>.LoadLatest(System.String keyId):LanguageExt.Option<T>
+M:GoDaddy.Asherah.AppEncryption.Persistence.InMemoryMetastoreImpl<T>.Store(System.String keyId,System.DateTimeOffset created,T value):System.Boolean
+M:GoDaddy.Asherah.AppEncryption.Persistence.Persistence<T>.GenerateKey(T value):System.String
+M:GoDaddy.Asherah.AppEncryption.Persistence.Persistence<T>.Load(System.String key):LanguageExt.Option<T>
+M:GoDaddy.Asherah.AppEncryption.Persistence.Persistence<T>.Store(System.String key,T value):System.Void
+M:GoDaddy.Asherah.AppEncryption.Persistence.Persistence<T>.Store(T value):System.String
+M:GoDaddy.Asherah.AppEncryption.Session<TP,TD>.Decrypt(TD dataRowRecord):TP
+M:GoDaddy.Asherah.AppEncryption.Session<TP,TD>.DecryptAsync(TD dataRowRecord):System.Threading.Tasks.Task<TP>
+M:GoDaddy.Asherah.AppEncryption.Session<TP,TD>.Dispose():System.Void
+M:GoDaddy.Asherah.AppEncryption.Session<TP,TD>.Encrypt(TP payLoad):TD
+M:GoDaddy.Asherah.AppEncryption.Session<TP,TD>.EncryptAsync(TP payLoad):System.Threading.Tasks.Task<TD>
+M:GoDaddy.Asherah.AppEncryption.Session<TP,TD>.Load(System.String persistenceKey,GoDaddy.Asherah.AppEncryption.Persistence.Persistence<TD> dataPersistence):LanguageExt.Option<TP>
+M:GoDaddy.Asherah.AppEncryption.Session<TP,TD>.Store(System.String key,TP payload,GoDaddy.Asherah.AppEncryption.Persistence.Persistence<TD> dataPersistence):System.Void
+M:GoDaddy.Asherah.AppEncryption.Session<TP,TD>.Store(TP payload,GoDaddy.Asherah.AppEncryption.Persistence.Persistence<TD> dataPersistence):System.String
+M:GoDaddy.Asherah.AppEncryption.SessionBytesImpl<TD>.Decrypt(TD dataRowRecord):System.Byte[]
+M:GoDaddy.Asherah.AppEncryption.SessionBytesImpl<TD>.DecryptAsync(TD dataRowRecord):System.Threading.Tasks.Task<System.Byte[]>
+M:GoDaddy.Asherah.AppEncryption.SessionBytesImpl<TD>.Dispose():System.Void
+M:GoDaddy.Asherah.AppEncryption.SessionBytesImpl<TD>.Encrypt(System.Byte[] payload):TD
+M:GoDaddy.Asherah.AppEncryption.SessionBytesImpl<TD>.EncryptAsync(System.Byte[] payload):System.Threading.Tasks.Task<TD>
+M:GoDaddy.Asherah.AppEncryption.SessionFactory.Dispose():System.Void
+M:GoDaddy.Asherah.AppEncryption.SessionFactory.GetSessionBytes(System.String partitionId):GoDaddy.Asherah.AppEncryption.Session<System.Byte[],System.Byte[]>
+M:GoDaddy.Asherah.AppEncryption.SessionFactory.GetSessionBytesAsJson(System.String partitionId):GoDaddy.Asherah.AppEncryption.Session<System.Byte[],Newtonsoft.Json.Linq.JObject>
+M:GoDaddy.Asherah.AppEncryption.SessionFactory.GetSessionJson(System.String partitionId):GoDaddy.Asherah.AppEncryption.Session<Newtonsoft.Json.Linq.JObject,System.Byte[]>
+M:GoDaddy.Asherah.AppEncryption.SessionFactory.GetSessionJsonAsJson(System.String partitionId):GoDaddy.Asherah.AppEncryption.Session<Newtonsoft.Json.Linq.JObject,Newtonsoft.Json.Linq.JObject>
+M:GoDaddy.Asherah.AppEncryption.SessionFactory.NewBuilder(System.String productId,System.String serviceId):GoDaddy.Asherah.AppEncryption.SessionFactory+IMetastoreStep
+M:GoDaddy.Asherah.AppEncryption.SessionFactory+IBuildStep.Build():GoDaddy.Asherah.AppEncryption.SessionFactory
+M:GoDaddy.Asherah.AppEncryption.SessionFactory+IBuildStep.WithLogger(Microsoft.Extensions.Logging.ILogger logger):GoDaddy.Asherah.AppEncryption.SessionFactory+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.SessionFactory+IBuildStep.WithMetrics(App.Metrics.IMetrics metrics):GoDaddy.Asherah.AppEncryption.SessionFactory+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.SessionFactory+ICryptoPolicyStep.WithCryptoPolicy(GoDaddy.Asherah.Crypto.CryptoPolicy cryptoPolicy):GoDaddy.Asherah.AppEncryption.SessionFactory+IKeyManagementServiceStep
+M:GoDaddy.Asherah.AppEncryption.SessionFactory+ICryptoPolicyStep.WithNeverExpiredCryptoPolicy():GoDaddy.Asherah.AppEncryption.SessionFactory+IKeyManagementServiceStep
+M:GoDaddy.Asherah.AppEncryption.SessionFactory+IKeyManagementServiceStep.WithKeyManagementService(GoDaddy.Asherah.AppEncryption.Kms.IKeyManagementService keyManagementService):GoDaddy.Asherah.AppEncryption.SessionFactory+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.SessionFactory+IKeyManagementServiceStep.WithStaticKeyManagementService(System.String staticMasterKey):GoDaddy.Asherah.AppEncryption.SessionFactory+IBuildStep
+M:GoDaddy.Asherah.AppEncryption.SessionFactory+IMetastoreStep.WithInMemoryMetastore():GoDaddy.Asherah.AppEncryption.SessionFactory+ICryptoPolicyStep
+M:GoDaddy.Asherah.AppEncryption.SessionFactory+IMetastoreStep.WithMetastore(GoDaddy.Asherah.AppEncryption.Persistence.IMetastore<Newtonsoft.Json.Linq.JObject> metastore):GoDaddy.Asherah.AppEncryption.SessionFactory+ICryptoPolicyStep
+M:GoDaddy.Asherah.AppEncryption.SessionJsonImpl<TD>.Decrypt(TD dataRowRecord):Newtonsoft.Json.Linq.JObject
+M:GoDaddy.Asherah.AppEncryption.SessionJsonImpl<TD>.DecryptAsync(TD dataRowRecord):System.Threading.Tasks.Task<Newtonsoft.Json.Linq.JObject>
+M:GoDaddy.Asherah.AppEncryption.SessionJsonImpl<TD>.Dispose():System.Void
+M:GoDaddy.Asherah.AppEncryption.SessionJsonImpl<TD>.Encrypt(Newtonsoft.Json.Linq.JObject payload):TD
+M:GoDaddy.Asherah.AppEncryption.SessionJsonImpl<TD>.EncryptAsync(Newtonsoft.Json.Linq.JObject payload):System.Threading.Tasks.Task<TD>
+M:GoDaddy.Asherah.AppEncryption.SuffixedPartition.get_IntermediateKeyId():System.String
+M:GoDaddy.Asherah.AppEncryption.SuffixedPartition.get_SystemKeyId():System.String
+M:GoDaddy.Asherah.AppEncryption.SuffixedPartition.IsValidIntermediateKeyId(System.String keyId):System.Boolean
+M:GoDaddy.Asherah.AppEncryption.SuffixedPartition.ToString():System.String
+M:GoDaddy.Asherah.AppEncryption.Util.Json.GetBytes(System.String key):System.Byte[]
+M:GoDaddy.Asherah.AppEncryption.Util.Json.GetDateTimeOffset(System.String key):System.DateTimeOffset
+M:GoDaddy.Asherah.AppEncryption.Util.Json.GetJson(System.String key):GoDaddy.Asherah.AppEncryption.Util.Json
+M:GoDaddy.Asherah.AppEncryption.Util.Json.GetJsonArray(System.String key):Newtonsoft.Json.Linq.JArray
+M:GoDaddy.Asherah.AppEncryption.Util.Json.GetOptionalBoolean(System.String key):LanguageExt.Option<System.Boolean>
+M:GoDaddy.Asherah.AppEncryption.Util.Json.GetOptionalJson(System.String key):LanguageExt.Option<GoDaddy.Asherah.AppEncryption.Util.Json>
+M:GoDaddy.Asherah.AppEncryption.Util.Json.GetString(System.String key):System.String
+M:GoDaddy.Asherah.AppEncryption.Util.Json.Put(System.String key,GoDaddy.Asherah.AppEncryption.Util.Json json):System.Void
+M:GoDaddy.Asherah.AppEncryption.Util.Json.Put(System.String key,Newtonsoft.Json.Linq.JObject jObject):System.Void
+M:GoDaddy.Asherah.AppEncryption.Util.Json.Put(System.String key,System.Boolean value):System.Void
+M:GoDaddy.Asherah.AppEncryption.Util.Json.Put(System.String key,System.Byte[] bytes):System.Void
+M:GoDaddy.Asherah.AppEncryption.Util.Json.Put(System.String key,System.Collections.Generic.List<Newtonsoft.Json.Linq.JObject> jsonList):System.Void
+M:GoDaddy.Asherah.AppEncryption.Util.Json.Put(System.String key,System.DateTimeOffset dateTimeOffset):System.Void
+M:GoDaddy.Asherah.AppEncryption.Util.Json.Put(System.String key,System.String text):System.Void
+M:GoDaddy.Asherah.AppEncryption.Util.Json.ToJObject():Newtonsoft.Json.Linq.JObject
+M:GoDaddy.Asherah.AppEncryption.Util.Json.ToJsonString():System.String
+M:GoDaddy.Asherah.AppEncryption.Util.Json.ToUtf8():System.Byte[]
+M:GoDaddy.Asherah.AppEncryption.Util.MetricsUtil.get_MetricsInstance():App.Metrics.IMetrics
+M:GoDaddy.Asherah.AppEncryption.Util.MetricsUtil.SetMetricsInstance(App.Metrics.IMetrics metricsInstance):System.Void
+M:GoDaddy.Asherah.Crypto.AeadCrypto.Decrypt(System.Byte[] input,GoDaddy.Asherah.Crypto.Keys.CryptoKey key):System.Byte[]
+M:GoDaddy.Asherah.Crypto.AeadCrypto.Dispose():System.Void
+M:GoDaddy.Asherah.Crypto.AeadCrypto.Encrypt(System.Byte[] input,GoDaddy.Asherah.Crypto.Keys.CryptoKey key):System.Byte[]
+M:GoDaddy.Asherah.Crypto.AeadCrypto.GenerateKey():GoDaddy.Asherah.Crypto.Keys.CryptoKey
+M:GoDaddy.Asherah.Crypto.AeadCrypto.GenerateKey(System.DateTimeOffset created):GoDaddy.Asherah.Crypto.Keys.CryptoKey
+M:GoDaddy.Asherah.Crypto.AeadCrypto.GenerateKeyFromBytes(System.Byte[] sourceBytes,System.DateTimeOffset created,System.Boolean revoked):GoDaddy.Asherah.Crypto.Keys.CryptoKey
+M:GoDaddy.Asherah.Crypto.AeadCrypto.GenerateKeyFromBytes(System.Byte[] sourceBytes,System.DateTimeOffset created):GoDaddy.Asherah.Crypto.Keys.CryptoKey
+M:GoDaddy.Asherah.Crypto.AeadCrypto.GenerateKeyFromBytes(System.Byte[] sourceBytes):GoDaddy.Asherah.Crypto.Keys.CryptoKey
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy.CanCacheIntermediateKeys():System.Boolean
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy.CanCacheSessions():System.Boolean
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy.CanCacheSystemKeys():System.Boolean
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy.GetKeyRotationStrategy():GoDaddy.Asherah.Crypto.CryptoPolicy+KeyRotationStrategy
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy.GetRevokeCheckPeriodMillis():System.Int64
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy.GetSessionCacheExpireMillis():System.Int64
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy.GetSessionCacheMaxSize():System.Int64
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy.IsKeyExpired(System.DateTimeOffset keyCreationDate):System.Boolean
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy.NewBuilder():GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IKeyExpirationDaysStep
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy.NotifyExpiredIntermediateKeyOnRead():System.Boolean
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy.NotifyExpiredSystemKeyOnRead():System.Boolean
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep.Build():GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep.WithCanCacheIntermediateKeys(System.Boolean cacheIntermediateKeys):GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep.WithCanCacheSessions(System.Boolean cacheSessions):GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep.WithCanCacheSystemKeys(System.Boolean cacheSystemKeys):GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep.WithNotifyExpiredIntermediateKeyOnRead(System.Boolean notify):GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep.WithNotifyExpiredSystemKeyOnRead(System.Boolean notify):GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep.WithRotationStrategy(GoDaddy.Asherah.Crypto.CryptoPolicy+KeyRotationStrategy rotationStrategy):GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep.WithSessionCacheExpireMillis(System.Int64 sessionCacheExpireMillis):GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep.WithSessionCacheMaxSize(System.Int64 sessionCacheMaxSize):GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IKeyExpirationDaysStep.WithKeyExpirationDays(System.Int32 days):GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IRevokeCheckMinutesStep
+M:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IRevokeCheckMinutesStep.WithRevokeCheckMinutes(System.Int32 minutes):GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep
+M:GoDaddy.Asherah.Crypto.BufferUtils.ManagedBufferUtils.WipeByteArray(System.Byte[] sensitiveData):System.Void
+M:GoDaddy.Asherah.Crypto.CryptoPolicy.CanCacheIntermediateKeys():System.Boolean
+M:GoDaddy.Asherah.Crypto.CryptoPolicy.CanCacheSessions():System.Boolean
+M:GoDaddy.Asherah.Crypto.CryptoPolicy.CanCacheSystemKeys():System.Boolean
+M:GoDaddy.Asherah.Crypto.CryptoPolicy.GetKeyRotationStrategy():GoDaddy.Asherah.Crypto.CryptoPolicy+KeyRotationStrategy
+M:GoDaddy.Asherah.Crypto.CryptoPolicy.GetRevokeCheckPeriodMillis():System.Int64
+M:GoDaddy.Asherah.Crypto.CryptoPolicy.GetSessionCacheExpireMillis():System.Int64
+M:GoDaddy.Asherah.Crypto.CryptoPolicy.GetSessionCacheMaxSize():System.Int64
+M:GoDaddy.Asherah.Crypto.CryptoPolicy.IsInlineKeyRotation():System.Boolean
+M:GoDaddy.Asherah.Crypto.CryptoPolicy.IsKeyExpired(System.DateTimeOffset keyCreationDate):System.Boolean
+M:GoDaddy.Asherah.Crypto.CryptoPolicy.IsQueuedKeyRotation():System.Boolean
+M:GoDaddy.Asherah.Crypto.CryptoPolicy.NotifyExpiredIntermediateKeyOnRead():System.Boolean
+M:GoDaddy.Asherah.Crypto.CryptoPolicy.NotifyExpiredSystemKeyOnRead():System.Boolean
+M:GoDaddy.Asherah.Crypto.CryptoPolicy.TruncateToIntermediateKeyPrecision(System.DateTimeOffset dateTimeOffset):System.DateTimeOffset
+M:GoDaddy.Asherah.Crypto.CryptoPolicy.TruncateToSystemKeyPrecision(System.DateTimeOffset dateTimeOffset):System.DateTimeOffset
+M:GoDaddy.Asherah.Crypto.Engine.BouncyCastle.BouncyAeadCrypto.Decrypt(System.Byte[] input,GoDaddy.Asherah.Crypto.Keys.CryptoKey key):System.Byte[]
+M:GoDaddy.Asherah.Crypto.Engine.BouncyCastle.BouncyAeadCrypto.Encrypt(System.Byte[] input,GoDaddy.Asherah.Crypto.Keys.CryptoKey key):System.Byte[]
+M:GoDaddy.Asherah.Crypto.Envelope.AeadEnvelopeCrypto.DecryptKey(System.Byte[] encryptedKey,System.DateTimeOffset encryptedKeyCreated,GoDaddy.Asherah.Crypto.Keys.CryptoKey keyEncryptionKey,System.Boolean revoked):GoDaddy.Asherah.Crypto.Keys.CryptoKey
+M:GoDaddy.Asherah.Crypto.Envelope.AeadEnvelopeCrypto.DecryptKey(System.Byte[] encryptedKey,System.DateTimeOffset encryptedKeyCreated,GoDaddy.Asherah.Crypto.Keys.CryptoKey keyEncryptionKey):GoDaddy.Asherah.Crypto.Keys.CryptoKey
+M:GoDaddy.Asherah.Crypto.Envelope.AeadEnvelopeCrypto.EncryptKey(GoDaddy.Asherah.Crypto.Keys.CryptoKey key,GoDaddy.Asherah.Crypto.Keys.CryptoKey keyEncryptionKey):System.Byte[]
+M:GoDaddy.Asherah.Crypto.Envelope.AeadEnvelopeCrypto.EnvelopeDecrypt(System.Byte[] cipherText,System.Byte[] encryptedKey,System.DateTimeOffset keyCreated,GoDaddy.Asherah.Crypto.Keys.CryptoKey keyEncryptionKey):System.Byte[]
+M:GoDaddy.Asherah.Crypto.Envelope.AeadEnvelopeCrypto.EnvelopeEncrypt<T>(System.Byte[] plainText,GoDaddy.Asherah.Crypto.Keys.CryptoKey keyEncryptionKey,T userState):GoDaddy.Asherah.Crypto.Envelope.EnvelopeEncryptResult<T>
+M:GoDaddy.Asherah.Crypto.Envelope.AeadEnvelopeCrypto.EnvelopeEncrypt<T>(System.Byte[] plainText,GoDaddy.Asherah.Crypto.Keys.CryptoKey keyEncryptionKey):GoDaddy.Asherah.Crypto.Envelope.EnvelopeEncryptResult<T>
+M:GoDaddy.Asherah.Crypto.Envelope.EnvelopeEncryptResult<T>.get_CipherText():System.Byte[]
+M:GoDaddy.Asherah.Crypto.Envelope.EnvelopeEncryptResult<T>.get_EncryptedKey():System.Byte[]
+M:GoDaddy.Asherah.Crypto.Envelope.EnvelopeEncryptResult<T>.get_UserState():T
+M:GoDaddy.Asherah.Crypto.Envelope.EnvelopeEncryptResult<T>.set_CipherText(System.Byte[] value):System.Void
+M:GoDaddy.Asherah.Crypto.Envelope.EnvelopeEncryptResult<T>.set_EncryptedKey(System.Byte[] value):System.Void
+M:GoDaddy.Asherah.Crypto.Envelope.EnvelopeEncryptResult<T>.set_UserState(T value):System.Void
+M:GoDaddy.Asherah.Crypto.ExtensionMethods.DateTimeOffsetExtensions.Truncate(System.DateTimeOffset dateTimeOffset,System.TimeSpan timeSpan):System.DateTimeOffset
+M:GoDaddy.Asherah.Crypto.Keys.CryptoKey.Dispose():System.Void
+M:GoDaddy.Asherah.Crypto.Keys.CryptoKey.GetCreated():System.DateTimeOffset
+M:GoDaddy.Asherah.Crypto.Keys.CryptoKey.IsRevoked():System.Boolean
+M:GoDaddy.Asherah.Crypto.Keys.CryptoKey.MarkRevoked():System.Void
+M:GoDaddy.Asherah.Crypto.Keys.CryptoKey.WithKey(System.Action<System.Byte[]> actionWithKey):System.Void
+M:GoDaddy.Asherah.Crypto.Keys.CryptoKey.WithKey<TResult>(System.Func<System.Byte[],TResult> actionWithKey):TResult
+M:GoDaddy.Asherah.Crypto.Keys.SecretCryptoKey.Dispose():System.Void
+M:GoDaddy.Asherah.Crypto.Keys.SecretCryptoKey.GetCreated():System.DateTimeOffset
+M:GoDaddy.Asherah.Crypto.Keys.SecretCryptoKey.IsRevoked():System.Boolean
+M:GoDaddy.Asherah.Crypto.Keys.SecretCryptoKey.MarkRevoked():System.Void
+M:GoDaddy.Asherah.Crypto.Keys.SecretCryptoKey.WithKey(System.Action<System.Byte[]> actionWithKey):System.Void
+M:GoDaddy.Asherah.Crypto.Keys.SecretCryptoKey.WithKey<TResult>(System.Func<System.Byte[],TResult> actionWithKey):TResult
+M:GoDaddy.Asherah.Crypto.Keys.SecureCryptoKeyDictionary<TKey>.Dispose():System.Void
+M:GoDaddy.Asherah.Crypto.Keys.SecureCryptoKeyDictionary<TKey>.Get(TKey key):GoDaddy.Asherah.Crypto.Keys.CryptoKey
+M:GoDaddy.Asherah.Crypto.Keys.SecureCryptoKeyDictionary<TKey>.GetLast():GoDaddy.Asherah.Crypto.Keys.CryptoKey
+M:GoDaddy.Asherah.Crypto.Keys.SecureCryptoKeyDictionary<TKey>.PutAndGetUsable(TKey key,GoDaddy.Asherah.Crypto.Keys.CryptoKey cryptoKey):GoDaddy.Asherah.Crypto.Keys.CryptoKey
+M:GoDaddy.Asherah.Crypto.Keys.SharedCryptoKey.Dispose():System.Void
+M:GoDaddy.Asherah.Crypto.Keys.SharedCryptoKey.GetCreated():System.DateTimeOffset
+M:GoDaddy.Asherah.Crypto.Keys.SharedCryptoKey.IsRevoked():System.Boolean
+M:GoDaddy.Asherah.Crypto.Keys.SharedCryptoKey.MarkRevoked():System.Void
+M:GoDaddy.Asherah.Crypto.Keys.SharedCryptoKey.WithKey(System.Action<System.Byte[]> actionWithKey):System.Void
+M:GoDaddy.Asherah.Crypto.Keys.SharedCryptoKey.WithKey<TResult>(System.Func<System.Byte[],TResult> actionWithKey):TResult
+M:GoDaddy.Asherah.Crypto.NeverExpiredCryptoPolicy.CanCacheIntermediateKeys():System.Boolean
+M:GoDaddy.Asherah.Crypto.NeverExpiredCryptoPolicy.CanCacheSessions():System.Boolean
+M:GoDaddy.Asherah.Crypto.NeverExpiredCryptoPolicy.CanCacheSystemKeys():System.Boolean
+M:GoDaddy.Asherah.Crypto.NeverExpiredCryptoPolicy.GetKeyRotationStrategy():GoDaddy.Asherah.Crypto.CryptoPolicy+KeyRotationStrategy
+M:GoDaddy.Asherah.Crypto.NeverExpiredCryptoPolicy.GetRevokeCheckPeriodMillis():System.Int64
+M:GoDaddy.Asherah.Crypto.NeverExpiredCryptoPolicy.GetSessionCacheExpireMillis():System.Int64
+M:GoDaddy.Asherah.Crypto.NeverExpiredCryptoPolicy.GetSessionCacheMaxSize():System.Int64
+M:GoDaddy.Asherah.Crypto.NeverExpiredCryptoPolicy.IsKeyExpired(System.DateTimeOffset keyCreationDate):System.Boolean
+M:GoDaddy.Asherah.Crypto.NeverExpiredCryptoPolicy.NotifyExpiredIntermediateKeyOnRead():System.Boolean
+M:GoDaddy.Asherah.Crypto.NeverExpiredCryptoPolicy.NotifyExpiredSystemKeyOnRead():System.Boolean
+M:GoDaddy.Asherah.Crypto.NonceGenerator.CreateNonce(System.Int32 bits):System.Byte[]
+N:GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+Builder
+N:GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+IBuildStep
+N:GoDaddy.Asherah.AppEncryption.Persistence.AdoMetastoreImpl+Builder
+N:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+Builder
+N:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+N:GoDaddy.Asherah.AppEncryption.SessionFactory+IBuildStep
+N:GoDaddy.Asherah.AppEncryption.SessionFactory+ICryptoPolicyStep
+N:GoDaddy.Asherah.AppEncryption.SessionFactory+IKeyManagementServiceStep
+N:GoDaddy.Asherah.AppEncryption.SessionFactory+IMetastoreStep
+N:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep
+N:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IKeyExpirationDaysStep
+N:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IRevokeCheckMinutesStep
+N:GoDaddy.Asherah.Crypto.CryptoPolicy+KeyRotationStrategy
+P:GoDaddy.Asherah.AppEncryption.Envelope.KeyMeta.KeyId:System.String{get}
+P:GoDaddy.Asherah.AppEncryption.Partition.IntermediateKeyId:System.String{get}
+P:GoDaddy.Asherah.AppEncryption.Partition.SystemKeyId:System.String{get}
+P:GoDaddy.Asherah.AppEncryption.SuffixedPartition.IntermediateKeyId:System.String{get}
+P:GoDaddy.Asherah.AppEncryption.SuffixedPartition.SystemKeyId:System.String{get}
+P:GoDaddy.Asherah.AppEncryption.Util.MetricsUtil.MetricsInstance:App.Metrics.IMetrics{get}
+P:GoDaddy.Asherah.Crypto.Envelope.EnvelopeEncryptResult<T>.CipherText:System.Byte[]{get,set}
+P:GoDaddy.Asherah.Crypto.Envelope.EnvelopeEncryptResult<T>.EncryptedKey:System.Byte[]{get,set}
+P:GoDaddy.Asherah.Crypto.Envelope.EnvelopeEncryptResult<T>.UserState:T{get,set}
+T:GoDaddy.Asherah.AppEncryption.DefaultPartition
+T:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionBytesImpl
+T:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeEncryptionJsonImpl
+T:GoDaddy.Asherah.AppEncryption.Envelope.EnvelopeKeyRecord
+T:GoDaddy.Asherah.AppEncryption.Envelope.IEnvelopeEncryption<TD>
+T:GoDaddy.Asherah.AppEncryption.Envelope.KeyMeta
+T:GoDaddy.Asherah.AppEncryption.Exceptions.KmsException
+T:GoDaddy.Asherah.AppEncryption.Exceptions.MetadataMissingException
+T:GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl
+T:GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+Builder
+T:GoDaddy.Asherah.AppEncryption.Kms.AwsKeyManagementServiceImpl+IBuildStep
+T:GoDaddy.Asherah.AppEncryption.Kms.AwsKmsClientFactory
+T:GoDaddy.Asherah.AppEncryption.Kms.IKeyManagementService
+T:GoDaddy.Asherah.AppEncryption.Kms.KeyManagementService
+T:GoDaddy.Asherah.AppEncryption.Kms.StaticKeyManagementServiceImpl
+T:GoDaddy.Asherah.AppEncryption.Partition
+T:GoDaddy.Asherah.AppEncryption.Persistence.AdhocPersistence<T>
+T:GoDaddy.Asherah.AppEncryption.Persistence.AdoMetastoreImpl
+T:GoDaddy.Asherah.AppEncryption.Persistence.AdoMetastoreImpl+Builder
+T:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl
+T:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+Builder
+T:GoDaddy.Asherah.AppEncryption.Persistence.DynamoDbMetastoreImpl+IBuildStep
+T:GoDaddy.Asherah.AppEncryption.Persistence.IMetastore<T>
+T:GoDaddy.Asherah.AppEncryption.Persistence.InMemoryMetastoreImpl<T>
+T:GoDaddy.Asherah.AppEncryption.Persistence.Persistence<T>
+T:GoDaddy.Asherah.AppEncryption.Session<TP,TD>
+T:GoDaddy.Asherah.AppEncryption.SessionBytesImpl<TD>
+T:GoDaddy.Asherah.AppEncryption.SessionFactory
+T:GoDaddy.Asherah.AppEncryption.SessionFactory+IBuildStep
+T:GoDaddy.Asherah.AppEncryption.SessionFactory+ICryptoPolicyStep
+T:GoDaddy.Asherah.AppEncryption.SessionFactory+IKeyManagementServiceStep
+T:GoDaddy.Asherah.AppEncryption.SessionFactory+IMetastoreStep
+T:GoDaddy.Asherah.AppEncryption.SessionJsonImpl<TD>
+T:GoDaddy.Asherah.AppEncryption.SuffixedPartition
+T:GoDaddy.Asherah.AppEncryption.Util.Json
+T:GoDaddy.Asherah.AppEncryption.Util.MetricsUtil
+T:GoDaddy.Asherah.Crypto.AeadCrypto
+T:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy
+T:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IBuildStep
+T:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IKeyExpirationDaysStep
+T:GoDaddy.Asherah.Crypto.BasicExpiringCryptoPolicy+IRevokeCheckMinutesStep
+T:GoDaddy.Asherah.Crypto.BufferUtils.ManagedBufferUtils
+T:GoDaddy.Asherah.Crypto.CipherSuites.AeadCipherSuite
+T:GoDaddy.Asherah.Crypto.CryptoPolicy
+T:GoDaddy.Asherah.Crypto.CryptoPolicy+KeyRotationStrategy
+T:GoDaddy.Asherah.Crypto.Engine.BouncyCastle.BouncyAeadCrypto
+T:GoDaddy.Asherah.Crypto.Engine.BouncyCastle.BouncyAes256GcmCrypto
+T:GoDaddy.Asherah.Crypto.Envelope.AeadEnvelopeCrypto
+T:GoDaddy.Asherah.Crypto.Envelope.EnvelopeEncryptResult
+T:GoDaddy.Asherah.Crypto.Envelope.EnvelopeEncryptResult<T>
+T:GoDaddy.Asherah.Crypto.Exceptions.AppEncryptionException
+T:GoDaddy.Asherah.Crypto.Exceptions.CipherNotSupportedException
+T:GoDaddy.Asherah.Crypto.ExtensionMethods.DateTimeOffsetExtensions
+T:GoDaddy.Asherah.Crypto.Keys.CryptoKey
+T:GoDaddy.Asherah.Crypto.Keys.SecretCryptoKey
+T:GoDaddy.Asherah.Crypto.Keys.SecureCryptoKeyDictionary<TKey>
+T:GoDaddy.Asherah.Crypto.Keys.SharedCryptoKey
+T:GoDaddy.Asherah.Crypto.NeverExpiredCryptoPolicy
+T:GoDaddy.Asherah.Crypto.NonceGenerator

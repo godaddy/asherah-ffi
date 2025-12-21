@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use anyhow::Context;
+
 use crate::traits::Metastore;
 
 type MetastoreEnvResult = (Arc<dyn Metastore>, String, String, Option<String>);
@@ -11,6 +13,8 @@ pub enum StoreChoice {
     Postgres,
     #[cfg(feature = "mysql")]
     MySql,
+    #[cfg(feature = "mssql")]
+    Mssql,
     #[cfg(feature = "dynamodb")]
     DynamoDb,
 }
@@ -26,7 +30,7 @@ pub struct FromEnvResult<M: Metastore + Clone + 'static> {
 // Build Config pieces and a Metastore from environment variables.
 // Supported env vars:
 //  SERVICE_NAME, PRODUCT_ID, REGION_SUFFIX
-//  POSTGRES_URL | MYSQL_URL | (DDB_TABLE [+ AWS_REGION/AWS_ENDPOINT_URL])
+//  POSTGRES_URL | MYSQL_URL | MSSQL_URL | (DDB_TABLE [+ AWS_REGION/AWS_ENDPOINT_URL])
 pub fn metastore_from_env() -> anyhow::Result<MetastoreEnvResult> {
     let service = std::env::var("SERVICE_NAME").unwrap_or_else(|_| "service".to_string());
     let product = std::env::var("PRODUCT_ID").unwrap_or_else(|_| "product".to_string());
@@ -85,6 +89,17 @@ pub fn metastore_from_env() -> anyhow::Result<MetastoreEnvResult> {
         #[cfg(not(feature = "mysql"))]
         if std::env::var("MYSQL_URL").is_ok() {
             anyhow::bail!("Enable feature 'mysql' to use MySQL metastore");
+        }
+    }
+    if mchoice == "rdbms" || std::env::var("MSSQL_URL").is_ok() {
+        #[cfg(feature = "mssql")]
+        if let Ok(url) = std::env::var("MSSQL_URL") {
+            let ms = crate::metastore_mssql::MssqlMetastore::connect(&url)?;
+            return Ok((Arc::new(ms), service, product, region_suffix));
+        }
+        #[cfg(not(feature = "mssql"))]
+        if std::env::var("MSSQL_URL").is_ok() {
+            anyhow::bail!("Enable feature 'mssql' to use SQL Server metastore");
         }
     }
     // Fallback to in-memory
@@ -152,10 +167,10 @@ pub fn config_from_env() -> crate::Config {
 pub struct DynKms(pub Arc<dyn crate::traits::KeyManagementService>);
 impl crate::traits::KeyManagementService for DynKms {
     fn encrypt_key(&self, ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        self.0.encrypt_key(ctx, key_bytes)
+        self.0.encrypt_key(ctx, key_bytes).context("kms encrypt")
     }
     fn decrypt_key(&self, ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        self.0.decrypt_key(ctx, blob)
+        self.0.decrypt_key(ctx, blob).context("kms decrypt")
     }
 }
 

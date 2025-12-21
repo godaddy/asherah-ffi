@@ -37,7 +37,7 @@ BASE_ENV = {
     "PRODUCT_ID": "product",
     "KMS": "static",
     "STATIC_MASTER_KEY_HEX": "22" * 32,
-    "Metastore": "rdbms",
+    "Metastore": "sqlite",
     "SESSION_CACHE": "0",
 }
 
@@ -58,15 +58,12 @@ def ensure_env(target_env):
 
 @pytest.fixture(scope="session", autouse=True)
 def build_artifacts():
-    env = ensure_env({})
-
     global SQLITE_DB
-    db_path = ROOT / "target" / "interop_metastore.sqlite"
-    if db_path.exists():
-        db_path.unlink()
-    SQLITE_DB = db_path
-    env["SQLITE_PATH"] = str(db_path)
-    env["CONNECTION_STRING"] = str(db_path)
+    if SQLITE_DB is None:
+        sqlite_tmpdir = Path(tempfile.mkdtemp(prefix="asherah-interop-sqlite-"))
+        SQLITE_DB = sqlite_tmpdir / "interop.db"
+
+    env = ensure_env({})
 
     # Build Node addon via napi
     npm_env = env.copy()
