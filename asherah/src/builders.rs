@@ -246,7 +246,7 @@ pub fn factory_from_env(
             for i in 0..key.len() {
                 key[i] = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).unwrap_or(0);
             }
-            let kms = crate::kms::StaticKMS::new(crypto.clone(), key);
+            let kms = crate::kms::StaticKMS::new(crypto.clone(), key)?;
             Arc::new(kms)
         }
     };

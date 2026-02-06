@@ -10,7 +10,7 @@ fn test_metastore_region_suffix_overrides_config() {
         "us-east-1",
     ));
     let crypto = Arc::new(ael::aead::AES256GCM::new());
-    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![7_u8; 32]));
+    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![7_u8; 32]).unwrap());
     let cfg = ael::Config::new("svc", "prod").with_region_suffix("eu-west-1");
     let factory = ael::api::new_session_factory(cfg, ms, kms, crypto);
     let session = factory.get_session("partition");

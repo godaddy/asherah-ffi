@@ -10,8 +10,14 @@ pub struct StaticKMS<A: AEAD + Send + Sync + 'static> {
 }
 
 impl<A: AEAD + Send + Sync + 'static> StaticKMS<A> {
-    pub fn new(aead: Arc<A>, master_key: Vec<u8>) -> Self {
-        Self { aead, master_key }
+    pub fn new(aead: Arc<A>, master_key: Vec<u8>) -> anyhow::Result<Self> {
+        if master_key.len() != 32 {
+            return Err(anyhow::anyhow!(
+                "invalid key size {}, must be 32 bytes",
+                master_key.len()
+            ));
+        }
+        Ok(Self { aead, master_key })
     }
 }
 
