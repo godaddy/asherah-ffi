@@ -7,10 +7,30 @@
 //    -> prints plaintext base64
 
 const fs = require('fs');
-let asherah;
-try { asherah = require('asherah'); } catch (e) {
-  console.error('asherah npm module not installed. Run `npm install` in cucumber/js');
-  process.exit(2);
+
+function loadAsherah(masterHex) {
+  let asherah;
+  try { asherah = require('asherah'); } catch (e) {
+    console.error('asherah npm module not installed. Run `npm install` in cucumber/js');
+    process.exit(2);
+  }
+  if (asherah.setenv) {
+    // Go cobhan reads the static master key from env; set the common variants for compatibility.
+    const env = {
+      STATIC_MASTER_KEY_HEX: masterHex,
+      STATIC_MASTER_KEY: masterHex,
+      ASHERAH_STATIC_MASTER_KEY_HEX: masterHex,
+      ASHERAH_STATIC_MASTER_KEY: masterHex,
+      ASHERAH_KMS_STATIC_KEY_HEX: masterHex,
+      ASHERAH_KMS_STATIC_KEY: masterHex,
+      ASHERAH_MASTER_KEY_HEX: masterHex,
+      ASHERAH_MASTER_KEY: masterHex,
+      KMS_STATIC_KEY_HEX: masterHex,
+      KMS_STATIC_KEY: masterHex
+    };
+    try { asherah.setenv(JSON.stringify(env)); } catch (e) {}
+  }
+  return asherah;
 }
 
 function hexToBytes(hex) {
@@ -49,12 +69,13 @@ async function encrypt(service, product, partition, masterHex, payloadB64) {
     PreferredRegion: null,
     EnableRegionSuffix: null
   };
-  if (asherah.setenv) {
-    try { asherah.setenv(JSON.stringify({ STATIC_MASTER_KEY_HEX: masterHex })); } catch (e) {}
-  }
+  const asherah = loadAsherah(masterHex);
   asherah.setup(config);
   const payload = Buffer.from(payloadB64, 'base64');
-  const drr = asherah.encrypt(partition, payload);
+  let drr = asherah.encrypt(partition, payload);
+  if (typeof drr === 'string') {
+    drr = JSON.parse(drr);
+  }
   // Metastore is shared via DB; no need to export entries
   const bundle = { metastore: [], drr };
   console.log(JSON.stringify(bundle));
@@ -89,9 +110,7 @@ async function decrypt(service, product, partition, masterHex) {
     PreferredRegion: null,
     EnableRegionSuffix: null
   };
-  if (asherah.setenv) {
-    try { asherah.setenv(JSON.stringify({ STATIC_MASTER_KEY_HEX: masterHex })); } catch (e) {}
-  }
+  const asherah = loadAsherah(masterHex);
   asherah.setup(config);
   const json = await new Promise(resolve => {
     let data = '';
@@ -100,7 +119,8 @@ async function decrypt(service, product, partition, masterHex) {
     process.stdin.on('end', () => resolve(data));
   });
   const bundle = JSON.parse(json);
-  const pt = asherah.decrypt(partition, bundle.drr);
+  const drr = typeof bundle.drr === 'string' ? bundle.drr : JSON.stringify(bundle.drr);
+  const pt = asherah.decrypt(partition, drr);
   process.stdout.write(Buffer.from(pt).toString('base64'));
 }
 
