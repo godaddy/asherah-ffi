@@ -8,7 +8,7 @@ use asherah as ael;
 #[test]
 fn creates_new_intermediate_key_when_expired() {
     let crypto = Arc::new(ael::aead::AES256GCM::new());
-    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![5_u8; 32]));
+    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![5_u8; 32]).unwrap());
     let store = Arc::new(ael::metastore::InMemoryMetastore::new());
     let mut cfg = ael::Config::new("svc", "prod");
     // expire keys quickly

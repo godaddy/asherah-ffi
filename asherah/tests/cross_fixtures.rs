@@ -35,7 +35,7 @@ fn cross_language_fixtures_if_present() {
             let kms = std::sync::Arc::new(ael::kms::StaticKMS::new(
                 crypto.clone(),
                 hex_to_bytes(master),
-            ));
+            ).unwrap());
             let store = std::sync::Arc::new(ael::metastore::InMemoryMetastore::new());
             // Load metastore records if provided
             if let Some(arr) = v.get("metastore").and_then(|x| x.as_array()) {

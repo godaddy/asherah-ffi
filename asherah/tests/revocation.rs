@@ -5,7 +5,7 @@ use std::sync::Arc;
 #[test]
 fn revoked_intermediate_key_triggers_rotation() {
     let crypto = Arc::new(ael::aead::AES256GCM::new());
-    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![8_u8; 32]));
+    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![8_u8; 32]).unwrap());
     let store = Arc::new(ael::metastore::InMemoryMetastore::new());
     let mut cfg = ael::Config::new("svc", "prod");
     cfg.policy.revoke_check_interval_s = 1; // ensure cache re-evaluates

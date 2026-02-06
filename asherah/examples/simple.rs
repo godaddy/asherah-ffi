@@ -6,7 +6,7 @@ fn main() -> anyhow::Result<()> {
     // Components
     let crypto = Arc::new(ael::aead::AES256GCM::new());
     let metastore = Arc::new(ael::metastore::InMemoryMetastore::new());
-    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![0_u8; 32]));
+    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![0_u8; 32]).unwrap());
     let cfg = ael::Config::new("service", "product");
 
     // Factory and session

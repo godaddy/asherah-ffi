@@ -7,7 +7,7 @@ use asherah as ael;
 fn session_encrypt_decrypt_roundtrip() {
     let crypto = Arc::new(ael::aead::AES256GCM::new());
     let metastore = Arc::new(ael::metastore::InMemoryMetastore::new());
-    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![1_u8; 32]));
+    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![1_u8; 32]).unwrap());
     let cfg = ael::Config::new("svc", "prod");
     let factory = ael::api::new_session_factory(cfg, metastore, kms, crypto);
     let session = factory.get_session("partition-x");

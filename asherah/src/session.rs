@@ -1,4 +1,4 @@
-use crate::cache::{KeyCacher, NeverCache, SimpleKeyCache};
+use crate::cache::{CachePolicy, KeyCacher, NeverCache, SimpleKeyCache};
 use crate::config::Config;
 use crate::internal::crypto_key::{generate_key, is_key_expired};
 use crate::internal::CryptoKey;
@@ -88,6 +88,9 @@ impl<
     > Session<A, K, M, P>
 {
     fn new_key_timestamp(&self) -> i64 {
+        if self.f.policy.create_date_precision_s <= 0 {
+            return now_s();
+        }
         now_s() / self.f.policy.create_date_precision_s * self.f.policy.create_date_precision_s
     }
 
@@ -192,7 +195,7 @@ impl<
     }
 }
 
-fn now_s() -> i64 {
+pub(crate) fn now_s() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_secs() as i64,
@@ -347,9 +350,17 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     PublicFactory<A, K, M>
 {
     pub fn new(cfg: Config, metastore: Arc<M>, kms: Arc<K>, crypto: Arc<A>) -> Self {
-        let shared = if cfg.policy.shared_intermediate_key_cache {
-            let cache: Arc<dyn KeyCacher> = Arc::new(SimpleKeyCache::new_with_ttl(
+        let shared = if cfg.policy.shared_intermediate_key_cache && cfg.policy.cache_intermediate_keys
+        {
+            let policy = CachePolicy::parse(
+                &cfg.policy.intermediate_key_cache_eviction_policy,
+                CachePolicy::Simple,
+            );
+            let cache: Arc<dyn KeyCacher> = Arc::new(SimpleKeyCache::new_with_policy(
                 cfg.policy.revoke_check_interval_s,
+                cfg.policy.intermediate_key_cache_max_size,
+                policy,
+                cfg.policy.expire_key_after_s,
             ));
             Some(cache)
         } else {
@@ -359,6 +370,10 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             Some(SessionCache::new(
                 cfg.policy.session_cache_max_size,
                 cfg.policy.session_cache_ttl_s,
+                CachePolicy::parse(
+                    &cfg.policy.session_cache_eviction_policy,
+                    CachePolicy::Slru,
+                ),
             ))
         } else {
             None
@@ -376,13 +391,14 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
 
     pub fn with_metrics(mut self, enabled: bool) -> Self {
         self.metrics_enabled = enabled;
+        metrics::set_enabled(enabled);
         self
     }
     pub fn get_session(&self, id: &str) -> PublicSession<A, K, M> {
-        let suffix = self
-            .metastore
-            .region_suffix()
-            .or(self.cfg.region_suffix.clone());
+        let mut suffix = self.metastore.region_suffix();
+        if suffix.as_deref().unwrap_or("").is_empty() {
+            suffix = self.cfg.region_suffix.clone();
+        }
         let part = match suffix {
             Some(s) if !s.is_empty() => DefaultPartition::new_suffixed(
                 id.to_string(),
@@ -396,6 +412,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                 self.cfg.product.clone(),
             ),
         };
+        let invalid_partition = id.is_empty();
         let construct = || {
             let inner = SessionFactory::new(
                 self.metastore.clone(),
@@ -406,8 +423,15 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             )
             .session();
             let sk_cache: Arc<dyn KeyCacher> = if self.cfg.policy.cache_system_keys {
-                Arc::new(SimpleKeyCache::new_with_ttl(
+                let policy = CachePolicy::parse(
+                    &self.cfg.policy.system_key_cache_eviction_policy,
+                    CachePolicy::Simple,
+                );
+                Arc::new(SimpleKeyCache::new_with_policy(
                     self.cfg.policy.revoke_check_interval_s,
+                    self.cfg.policy.system_key_cache_max_size,
+                    policy,
+                    self.cfg.policy.expire_key_after_s,
                 ))
             } else {
                 Arc::new(NeverCache)
@@ -416,8 +440,15 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                 Some(shared) => shared.clone(),
                 None => {
                     if self.cfg.policy.cache_intermediate_keys {
-                        Arc::new(SimpleKeyCache::new_with_ttl(
+                        let policy = CachePolicy::parse(
+                            &self.cfg.policy.intermediate_key_cache_eviction_policy,
+                            CachePolicy::Simple,
+                        );
+                        Arc::new(SimpleKeyCache::new_with_policy(
                             self.cfg.policy.revoke_check_interval_s,
+                            self.cfg.policy.intermediate_key_cache_max_size,
+                            policy,
+                            self.cfg.policy.expire_key_after_s,
                         ))
                     } else {
                         Arc::new(NeverCache)
@@ -432,6 +463,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                 sk_cache,
                 ik_cache,
                 metrics_enabled: self.metrics_enabled,
+                invalid_partition,
             }
         };
         if let Some(cache) = &self.session_cache {
@@ -447,6 +479,9 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         if let Some(c) = &self.session_cache {
             c.close();
         }
+        if let Some(c) = &self.shared_ik_cache {
+            drop(c.close());
+        }
         Ok(())
     }
 }
@@ -460,6 +495,7 @@ pub struct PublicSession<A: AEAD + Clone, K: KeyManagementService + Clone, M: Me
     sk_cache: Arc<dyn KeyCacher>,
     ik_cache: Arc<dyn KeyCacher>,
     metrics_enabled: bool,
+    invalid_partition: bool,
 }
 
 impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
@@ -476,6 +512,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             sk_cache: self.sk_cache.clone(),
             ik_cache: self.ik_cache.clone(),
             metrics_enabled: self.metrics_enabled,
+            invalid_partition: self.invalid_partition,
         }
     }
 }
@@ -484,6 +521,12 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
 impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     PublicSession<A, K, M>
 {
+    fn ensure_valid_partition(&self) -> anyhow::Result<()> {
+        if self.invalid_partition {
+            return Err(anyhow::anyhow!("partition id cannot be empty"));
+        }
+        Ok(())
+    }
     fn get_or_load_system_key(&self, meta: KeyMeta) -> anyhow::Result<Arc<CryptoKey>> {
         if meta.created == 0 {
             let id = self.inner.f.partition.system_key_id();
@@ -518,10 +561,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                 created: sk.created(),
             }),
         };
-        let stored = self
-            .metastore
-            .store(&ekr.id, ekr.created, &ekr)
-            .unwrap_or(false);
+        let stored = self.metastore.store(&ekr.id, ekr.created, &ekr).unwrap_or(false);
         if stored {
             return Ok(Arc::new(ik));
         }
@@ -540,8 +580,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                 return Ok(Arc::new(ik2));
             }
         }
-        // If latest missing/invalid, still return newly generated IK (cache will hold it for this process)
-        Ok(Arc::new(ik))
+        Err(anyhow::anyhow!("error loading intermediate key from metastore after retry"))
     }
 
     fn load_latest_or_create_intermediate_key(&self) -> anyhow::Result<Arc<CryptoKey>> {
@@ -578,6 +617,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     }
 
     pub fn encrypt(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
+        self.ensure_valid_partition()?;
         let start = std::time::Instant::now();
         let mut loader = || self.load_latest_or_create_intermediate_key();
         let ik = self
@@ -612,6 +652,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     }
 
     pub fn decrypt(&self, drr: crate::types::DataRowRecord) -> anyhow::Result<Vec<u8>> {
+        self.ensure_valid_partition()?;
         let start = std::time::Instant::now();
         let key = drr.key.ok_or_else(|| anyhow::anyhow!("missing key"))?;
         let pmeta = key
@@ -640,6 +681,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         payload: &[u8],
         storer: &T,
     ) -> anyhow::Result<serde_json::Value> {
+        self.ensure_valid_partition()?;
         self.inner.store(payload, storer)
     }
     pub fn load<T: crate::traits::Loader>(
@@ -647,9 +689,13 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         key: &serde_json::Value,
         loader: &T,
     ) -> anyhow::Result<Vec<u8>> {
+        self.ensure_valid_partition()?;
         self.inner.load(key, loader)
     }
     pub fn close(&self) -> anyhow::Result<()> {
+        if !self.inner.f.policy.shared_intermediate_key_cache {
+            drop(self.ik_cache.close());
+        }
         Ok(())
     }
 

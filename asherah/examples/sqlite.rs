@@ -14,7 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let store = Arc::new(ael::metastore_sqlite::SqliteMetastore::open(":memory:")?);
 
         let crypto = Arc::new(ael::aead::AES256GCM::new());
-        let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![9_u8; 32]));
+        let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![9_u8; 32]).unwrap());
         let cfg = ael::Config::new("svc", "prod");
 
         let factory =

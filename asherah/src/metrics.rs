@@ -1,6 +1,7 @@
 use once_cell::sync::Lazy;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
+use std::sync::atomic::AtomicBool;
 
 #[derive(Debug)]
 pub struct Timers {
@@ -24,6 +25,7 @@ impl Default for Timers {
 
 pub static ENCRYPT_TIMER: Timers = Timers::new();
 pub static DECRYPT_TIMER: Timers = Timers::new();
+static ENABLED: AtomicBool = AtomicBool::new(true);
 
 pub trait MetricsSink: Send + Sync + 'static {
     fn encrypt(&self, _dur: std::time::Duration) {}
@@ -50,6 +52,14 @@ pub fn clear_sink() {
         *guard = Box::new(NoopSink);
     }
 }
+
+pub fn set_enabled(enabled: bool) {
+    ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+fn is_enabled() -> bool {
+    ENABLED.load(Ordering::Relaxed)
+}
 fn with_sink<R>(f: impl FnOnce(&dyn MetricsSink) -> R) -> R {
     match SINK.read() {
         Ok(guard) => f(&**guard),
@@ -58,6 +68,9 @@ fn with_sink<R>(f: impl FnOnce(&dyn MetricsSink) -> R) -> R {
 }
 
 pub fn record_encrypt(start: std::time::Instant) {
+    if !is_enabled() {
+        return;
+    }
     ENCRYPT_TIMER.count.fetch_add(1, Ordering::Relaxed);
     let d = start.elapsed();
     ENCRYPT_TIMER
@@ -66,6 +79,9 @@ pub fn record_encrypt(start: std::time::Instant) {
     with_sink(|sink| sink.encrypt(d));
 }
 pub fn record_decrypt(start: std::time::Instant) {
+    if !is_enabled() {
+        return;
+    }
     DECRYPT_TIMER.count.fetch_add(1, Ordering::Relaxed);
     let d = start.elapsed();
     DECRYPT_TIMER
@@ -75,16 +91,28 @@ pub fn record_decrypt(start: std::time::Instant) {
 }
 
 pub fn record_store(start: std::time::Instant) {
+    if !is_enabled() {
+        return;
+    }
     let d = start.elapsed();
     with_sink(|sink| sink.store(d));
 }
 pub fn record_load(start: std::time::Instant) {
+    if !is_enabled() {
+        return;
+    }
     let d = start.elapsed();
     with_sink(|sink| sink.load(d));
 }
 pub fn record_cache_hit(name: &str) {
+    if !is_enabled() {
+        return;
+    }
     with_sink(|sink| sink.cache_hit(name));
 }
 pub fn record_cache_miss(name: &str) {
+    if !is_enabled() {
+        return;
+    }
     with_sink(|sink| sink.cache_miss(name));
 }
