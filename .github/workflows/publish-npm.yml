@@ -39,6 +39,7 @@ jobs:
             target: x86_64-apple-darwin
             build: |
               set -e
+              rustup target add x86_64-apple-darwin
               npm ci
               npm run build -- --target x86_64-apple-darwin
               strip -x *.node
