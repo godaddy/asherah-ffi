@@ -47,6 +47,15 @@ pub struct ConfigOptions {
     pub enable_session_caching: Option<bool>,
     #[serde(rename = "Verbose")]
     pub verbose: Option<bool>,
+    /// SQL metastore DB type (e.g., "mysql", "postgres"). Go compatibility field.
+    #[serde(rename = "SQLMetastoreDBType")]
+    pub sql_metastore_db_type: Option<String>,
+    /// Disable zero-copy optimization. Go compatibility field.
+    #[serde(rename = "DisableZeroCopy")]
+    pub disable_zero_copy: Option<bool>,
+    /// Enable null data validation. Go compatibility field.
+    #[serde(rename = "NullDataCheck")]
+    pub null_data_check: Option<bool>,
 }
 
 #[derive(Clone, Debug)]

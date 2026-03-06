@@ -32,6 +32,7 @@ fn prepare_env() {
     });
 }
 
+#[allow(clippy::unwrap_in_result)]
 fn create_vm() -> Result<JavaVM, StartJvmError> {
     let args = InitArgsBuilder::new()
         .version(JNIVersion::V8)

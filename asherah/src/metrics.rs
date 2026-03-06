@@ -1,7 +1,7 @@
 use once_cell::sync::Lazy;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::RwLock;
-use std::sync::atomic::AtomicBool;
 
 #[derive(Debug)]
 pub struct Timers {

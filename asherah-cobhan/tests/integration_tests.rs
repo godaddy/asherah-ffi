@@ -7,14 +7,14 @@
 use std::os::raw::c_char;
 
 // Import from the library
+use asherah_cobhan::test_helpers::{
+    create_input_buffer, create_output_buffer, create_scalar_buffer, create_string_buffer,
+    get_buffer_data, get_buffer_i64, get_buffer_length, get_buffer_string, ERR_ALREADY_INITIALIZED,
+    ERR_BAD_CONFIG, ERR_BUFFER_TOO_SMALL, ERR_DECRYPT_FAILED, ERR_ENCRYPT_FAILED,
+    ERR_JSON_DECODE_FAILED, ERR_NONE,
+};
 use asherah_cobhan::{
     Decrypt, DecryptFromJson, Encrypt, EncryptToJson, EstimateBuffer, SetEnv, SetupJson, Shutdown,
-};
-use asherah_cobhan::test_helpers::{
-    create_input_buffer, create_output_buffer, create_string_buffer,
-    get_buffer_data, get_buffer_i64, get_buffer_length, get_buffer_string,
-    ERR_NONE, ERR_BUFFER_TOO_SMALL, ERR_JSON_DECODE_FAILED,
-    ERR_ALREADY_INITIALIZED, ERR_BAD_CONFIG, ERR_NOT_INITIALIZED, ERR_DECRYPT_FAILED,
 };
 
 // ============================================================================
@@ -59,16 +59,23 @@ fn test_full_encryption_workflow() {
     test_decrypt_with_wrong_partition();
     test_encrypt_decrypt_consistency();
     test_multiple_encryptions_different_ciphertext();
+    test_encrypt_buffer_too_small();
+    test_decrypt_buffer_too_small();
+    test_decrypt_from_json_buffer_too_small();
+    test_decrypt_wrong_partition_components();
+    test_empty_partition_id();
+    test_buffer_edge_cases_impl();
+    test_decrypt_invalid_json_impl();
 
-    // Cleanup
-    Shutdown();
+    // Shutdown and re-initialize lifecycle test
+    test_shutdown_and_reinitialize_impl();
 }
 
 fn setup_asherah() -> i32 {
     let config = create_test_config();
     let config_buf = create_string_buffer(&config);
 
-    unsafe { SetupJson(config_buf.as_ptr() as *const c_char) }
+    unsafe { SetupJson(config_buf.as_ptr().cast::<c_char>()) }
 }
 
 // ============================================================================
@@ -89,9 +96,9 @@ fn test_encrypt_to_json_and_decrypt_from_json() {
     // Encrypt
     unsafe {
         let result = EncryptToJson(
-            partition_buf.as_ptr() as *const c_char,
-            data_buf.as_ptr() as *const c_char,
-            json_output.as_mut_ptr() as *mut c_char,
+            partition_buf.as_ptr().cast::<c_char>(),
+            data_buf.as_ptr().cast::<c_char>(),
+            json_output.as_mut_ptr().cast::<c_char>(),
         );
         assert_eq!(result, ERR_NONE, "EncryptToJson should succeed");
     }
@@ -99,24 +106,33 @@ fn test_encrypt_to_json_and_decrypt_from_json() {
     // Verify JSON output is valid
     let json_str = get_buffer_string(&json_output);
     assert!(!json_str.is_empty(), "JSON output should not be empty");
-    assert!(json_str.contains("\"Data\""), "JSON should contain Data field");
-    assert!(json_str.contains("\"Key\""), "JSON should contain Key field");
+    assert!(
+        json_str.contains("\"Data\""),
+        "JSON should contain Data field"
+    );
+    assert!(
+        json_str.contains("\"Key\""),
+        "JSON should contain Key field"
+    );
 
     // Decrypt
     let mut decrypted_output = create_output_buffer(plaintext.len() as i32 + 100);
 
     unsafe {
         let result = DecryptFromJson(
-            partition_buf.as_ptr() as *const c_char,
-            json_output.as_ptr() as *const c_char,
-            decrypted_output.as_mut_ptr() as *mut c_char,
+            partition_buf.as_ptr().cast::<c_char>(),
+            json_output.as_ptr().cast::<c_char>(),
+            decrypted_output.as_mut_ptr().cast::<c_char>(),
         );
         assert_eq!(result, ERR_NONE, "DecryptFromJson should succeed");
     }
 
     // Verify decrypted data matches original
     let decrypted_data = get_buffer_data(&decrypted_output);
-    assert_eq!(decrypted_data, plaintext, "Decrypted data should match original");
+    assert_eq!(
+        decrypted_data, plaintext,
+        "Decrypted data should match original"
+    );
 }
 
 // ============================================================================
@@ -133,30 +149,36 @@ fn test_encrypt_and_decrypt_components() {
     // Prepare output buffers for encryption
     let mut encrypted_data_buf = create_output_buffer(2048);
     let mut encrypted_key_buf = create_output_buffer(2048);
-    let mut created_buf = create_output_buffer(8);
+    let mut created_buf = create_scalar_buffer();
     let mut parent_key_id_buf = create_output_buffer(256);
-    let mut parent_key_created_buf = create_output_buffer(8);
+    let mut parent_key_created_buf = create_scalar_buffer();
 
     // Encrypt
     unsafe {
         let result = Encrypt(
-            partition_buf.as_ptr() as *const c_char,
-            data_buf.as_ptr() as *const c_char,
-            encrypted_data_buf.as_mut_ptr() as *mut c_char,
-            encrypted_key_buf.as_mut_ptr() as *mut c_char,
-            created_buf.as_mut_ptr() as *mut c_char,
-            parent_key_id_buf.as_mut_ptr() as *mut c_char,
-            parent_key_created_buf.as_mut_ptr() as *mut c_char,
+            partition_buf.as_ptr().cast::<c_char>(),
+            data_buf.as_ptr().cast::<c_char>(),
+            encrypted_data_buf.as_mut_ptr().cast::<c_char>(),
+            encrypted_key_buf.as_mut_ptr().cast::<c_char>(),
+            created_buf.as_mut_ptr().cast::<c_char>(),
+            parent_key_id_buf.as_mut_ptr().cast::<c_char>(),
+            parent_key_created_buf.as_mut_ptr().cast::<c_char>(),
         );
         assert_eq!(result, ERR_NONE, "Encrypt should succeed");
     }
 
     // Verify outputs
-    let encrypted_data = get_buffer_string(&encrypted_data_buf);
-    assert!(!encrypted_data.is_empty(), "Encrypted data should not be empty");
+    let encrypted_data = get_buffer_data(&encrypted_data_buf);
+    assert!(
+        !encrypted_data.is_empty(),
+        "Encrypted data should not be empty"
+    );
 
-    let encrypted_key = get_buffer_string(&encrypted_key_buf);
-    assert!(!encrypted_key.is_empty(), "Encrypted key should not be empty");
+    let encrypted_key = get_buffer_data(&encrypted_key_buf);
+    assert!(
+        !encrypted_key.is_empty(),
+        "Encrypted key should not be empty"
+    );
 
     let created = get_buffer_i64(&created_buf);
     assert!(created > 0, "Created timestamp should be positive");
@@ -167,20 +189,23 @@ fn test_encrypt_and_decrypt_components() {
 
     unsafe {
         let result = Decrypt(
-            partition_buf.as_ptr() as *const c_char,
-            encrypted_data_buf.as_ptr() as *const c_char,
-            encrypted_key_buf.as_ptr() as *const c_char,
+            partition_buf.as_ptr().cast::<c_char>(),
+            encrypted_data_buf.as_ptr().cast::<c_char>(),
+            encrypted_key_buf.as_ptr().cast::<c_char>(),
             created,
-            parent_key_id_buf.as_ptr() as *const c_char,
+            parent_key_id_buf.as_ptr().cast::<c_char>(),
             parent_key_created,
-            decrypted_output.as_mut_ptr() as *mut c_char,
+            decrypted_output.as_mut_ptr().cast::<c_char>(),
         );
         assert_eq!(result, ERR_NONE, "Decrypt should succeed");
     }
 
     // Verify decrypted data
     let decrypted_data = get_buffer_data(&decrypted_output);
-    assert_eq!(decrypted_data, plaintext, "Decrypted data should match original");
+    assert_eq!(
+        decrypted_data, plaintext,
+        "Decrypted data should match original"
+    );
 }
 
 // ============================================================================
@@ -188,7 +213,13 @@ fn test_encrypt_and_decrypt_components() {
 // ============================================================================
 
 fn test_multiple_partitions() {
-    let partitions = ["partition-1", "partition-2", "partition-3", "user-123", "tenant-abc"];
+    let partitions = [
+        "partition-1",
+        "partition-2",
+        "partition-3",
+        "user-123",
+        "tenant-abc",
+    ];
 
     for partition_id in partitions {
         let plaintext = format!("Data for partition: {}", partition_id);
@@ -203,11 +234,15 @@ fn test_multiple_partitions() {
         // Encrypt
         unsafe {
             let result = EncryptToJson(
-                partition_buf.as_ptr() as *const c_char,
-                data_buf.as_ptr() as *const c_char,
-                json_output.as_mut_ptr() as *mut c_char,
+                partition_buf.as_ptr().cast::<c_char>(),
+                data_buf.as_ptr().cast::<c_char>(),
+                json_output.as_mut_ptr().cast::<c_char>(),
             );
-            assert_eq!(result, ERR_NONE, "Encrypt should succeed for partition {}", partition_id);
+            assert_eq!(
+                result, ERR_NONE,
+                "Encrypt should succeed for partition {}",
+                partition_id
+            );
         }
 
         // Decrypt
@@ -215,11 +250,15 @@ fn test_multiple_partitions() {
 
         unsafe {
             let result = DecryptFromJson(
-                partition_buf.as_ptr() as *const c_char,
-                json_output.as_ptr() as *const c_char,
-                decrypted_output.as_mut_ptr() as *mut c_char,
+                partition_buf.as_ptr().cast::<c_char>(),
+                json_output.as_ptr().cast::<c_char>(),
+                decrypted_output.as_mut_ptr().cast::<c_char>(),
             );
-            assert_eq!(result, ERR_NONE, "Decrypt should succeed for partition {}", partition_id);
+            assert_eq!(
+                result, ERR_NONE,
+                "Decrypt should succeed for partition {}",
+                partition_id
+            );
         }
 
         let decrypted_data = get_buffer_data(&decrypted_output);
@@ -244,27 +283,27 @@ fn test_various_data_sizes() {
         let partition_buf = create_string_buffer("size-test");
         let data_buf = create_input_buffer(&plaintext);
 
-        let estimate = EstimateBuffer(size as i32, 9);
+        let estimate = EstimateBuffer(size, 9);
         let mut json_output = create_output_buffer(estimate);
 
         // Encrypt
         unsafe {
             let result = EncryptToJson(
-                partition_buf.as_ptr() as *const c_char,
-                data_buf.as_ptr() as *const c_char,
-                json_output.as_mut_ptr() as *mut c_char,
+                partition_buf.as_ptr().cast::<c_char>(),
+                data_buf.as_ptr().cast::<c_char>(),
+                json_output.as_mut_ptr().cast::<c_char>(),
             );
             assert_eq!(result, ERR_NONE, "Encrypt should succeed for size {}", size);
         }
 
         // Decrypt
-        let mut decrypted_output = create_output_buffer(size as i32 + 100);
+        let mut decrypted_output = create_output_buffer(size + 100);
 
         unsafe {
             let result = DecryptFromJson(
-                partition_buf.as_ptr() as *const c_char,
-                json_output.as_ptr() as *const c_char,
-                decrypted_output.as_mut_ptr() as *mut c_char,
+                partition_buf.as_ptr().cast::<c_char>(),
+                json_output.as_ptr().cast::<c_char>(),
+                decrypted_output.as_mut_ptr().cast::<c_char>(),
             );
             assert_eq!(result, ERR_NONE, "Decrypt should succeed for size {}", size);
         }
@@ -295,9 +334,9 @@ fn test_binary_data_encryption() {
     // Encrypt
     unsafe {
         let result = EncryptToJson(
-            partition_buf.as_ptr() as *const c_char,
-            data_buf.as_ptr() as *const c_char,
-            json_output.as_mut_ptr() as *mut c_char,
+            partition_buf.as_ptr().cast::<c_char>(),
+            data_buf.as_ptr().cast::<c_char>(),
+            json_output.as_mut_ptr().cast::<c_char>(),
         );
         assert_eq!(result, ERR_NONE, "Binary data encryption should succeed");
     }
@@ -307,15 +346,18 @@ fn test_binary_data_encryption() {
 
     unsafe {
         let result = DecryptFromJson(
-            partition_buf.as_ptr() as *const c_char,
-            json_output.as_ptr() as *const c_char,
-            decrypted_output.as_mut_ptr() as *mut c_char,
+            partition_buf.as_ptr().cast::<c_char>(),
+            json_output.as_ptr().cast::<c_char>(),
+            decrypted_output.as_mut_ptr().cast::<c_char>(),
         );
         assert_eq!(result, ERR_NONE, "Binary data decryption should succeed");
     }
 
     let decrypted_data = get_buffer_data(&decrypted_output);
-    assert_eq!(decrypted_data, plaintext, "Binary data should round-trip correctly");
+    assert_eq!(
+        decrypted_data, plaintext,
+        "Binary data should round-trip correctly"
+    );
 }
 
 // ============================================================================
@@ -325,10 +367,10 @@ fn test_binary_data_encryption() {
 fn test_unicode_data_encryption() {
     let unicode_strings = [
         "Hello, World!",
-        "Привет мир!",           // Russian
-        "你好世界！",                 // Chinese
-        "مرحبا بالعالم",           // Arabic
-        "🦀🔐🎉💾",                // Emoji
+        "Привет мир!",   // Russian
+        "你好世界！",    // Chinese
+        "مرحبا بالعالم", // Arabic
+        "🦀🔐🎉💾",      // Emoji
         "Mixed: Hello 世界 🌍",
         "Special chars: \t\n\r\"'\\",
     ];
@@ -345,11 +387,15 @@ fn test_unicode_data_encryption() {
         // Encrypt
         unsafe {
             let result = EncryptToJson(
-                partition_buf.as_ptr() as *const c_char,
-                data_buf.as_ptr() as *const c_char,
-                json_output.as_mut_ptr() as *mut c_char,
+                partition_buf.as_ptr().cast::<c_char>(),
+                data_buf.as_ptr().cast::<c_char>(),
+                json_output.as_mut_ptr().cast::<c_char>(),
             );
-            assert_eq!(result, ERR_NONE, "Unicode encryption should succeed for: {}", plaintext);
+            assert_eq!(
+                result, ERR_NONE,
+                "Unicode encryption should succeed for: {}",
+                plaintext
+            );
         }
 
         // Decrypt
@@ -357,15 +403,22 @@ fn test_unicode_data_encryption() {
 
         unsafe {
             let result = DecryptFromJson(
-                partition_buf.as_ptr() as *const c_char,
-                json_output.as_ptr() as *const c_char,
-                decrypted_output.as_mut_ptr() as *mut c_char,
+                partition_buf.as_ptr().cast::<c_char>(),
+                json_output.as_ptr().cast::<c_char>(),
+                decrypted_output.as_mut_ptr().cast::<c_char>(),
             );
-            assert_eq!(result, ERR_NONE, "Unicode decryption should succeed for: {}", plaintext);
+            assert_eq!(
+                result, ERR_NONE,
+                "Unicode decryption should succeed for: {}",
+                plaintext
+            );
         }
 
         let decrypted_str = get_buffer_string(&decrypted_output);
-        assert_eq!(decrypted_str, plaintext, "Unicode should round-trip correctly");
+        assert_eq!(
+            decrypted_str, plaintext,
+            "Unicode should round-trip correctly"
+        );
     }
 }
 
@@ -385,9 +438,9 @@ fn test_empty_data_encryption() {
     // Encrypt
     unsafe {
         let result = EncryptToJson(
-            partition_buf.as_ptr() as *const c_char,
-            data_buf.as_ptr() as *const c_char,
-            json_output.as_mut_ptr() as *mut c_char,
+            partition_buf.as_ptr().cast::<c_char>(),
+            data_buf.as_ptr().cast::<c_char>(),
+            json_output.as_mut_ptr().cast::<c_char>(),
         );
         assert_eq!(result, ERR_NONE, "Empty data encryption should succeed");
     }
@@ -397,15 +450,18 @@ fn test_empty_data_encryption() {
 
     unsafe {
         let result = DecryptFromJson(
-            partition_buf.as_ptr() as *const c_char,
-            json_output.as_ptr() as *const c_char,
-            decrypted_output.as_mut_ptr() as *mut c_char,
+            partition_buf.as_ptr().cast::<c_char>(),
+            json_output.as_ptr().cast::<c_char>(),
+            decrypted_output.as_mut_ptr().cast::<c_char>(),
         );
         assert_eq!(result, ERR_NONE, "Empty data decryption should succeed");
     }
 
     let decrypted_data = get_buffer_data(&decrypted_output);
-    assert_eq!(decrypted_data, plaintext, "Empty data should round-trip correctly");
+    assert_eq!(
+        decrypted_data, plaintext,
+        "Empty data should round-trip correctly"
+    );
 }
 
 // ============================================================================
@@ -420,34 +476,41 @@ fn test_large_data_encryption() {
     let partition_buf = create_string_buffer("large-test");
     let data_buf = create_input_buffer(&plaintext);
 
-    let estimate = EstimateBuffer(size as i32, 10);
+    let estimate = EstimateBuffer(size, 10);
     let mut json_output = create_output_buffer(estimate);
 
     // Encrypt
     unsafe {
         let result = EncryptToJson(
-            partition_buf.as_ptr() as *const c_char,
-            data_buf.as_ptr() as *const c_char,
-            json_output.as_mut_ptr() as *mut c_char,
+            partition_buf.as_ptr().cast::<c_char>(),
+            data_buf.as_ptr().cast::<c_char>(),
+            json_output.as_mut_ptr().cast::<c_char>(),
         );
         assert_eq!(result, ERR_NONE, "Large data encryption should succeed");
     }
 
     // Decrypt
-    let mut decrypted_output = create_output_buffer(size as i32 + 100);
+    let mut decrypted_output = create_output_buffer(size + 100);
 
     unsafe {
         let result = DecryptFromJson(
-            partition_buf.as_ptr() as *const c_char,
-            json_output.as_ptr() as *const c_char,
-            decrypted_output.as_mut_ptr() as *mut c_char,
+            partition_buf.as_ptr().cast::<c_char>(),
+            json_output.as_ptr().cast::<c_char>(),
+            decrypted_output.as_mut_ptr().cast::<c_char>(),
         );
         assert_eq!(result, ERR_NONE, "Large data decryption should succeed");
     }
 
     let decrypted_data = get_buffer_data(&decrypted_output);
-    assert_eq!(decrypted_data.len(), plaintext.len(), "Decrypted length should match");
-    assert_eq!(decrypted_data, plaintext, "Large data should round-trip correctly");
+    assert_eq!(
+        decrypted_data.len(),
+        plaintext.len(),
+        "Decrypted length should match"
+    );
+    assert_eq!(
+        decrypted_data, plaintext,
+        "Large data should round-trip correctly"
+    );
 }
 
 // ============================================================================
@@ -455,12 +518,7 @@ fn test_large_data_encryption() {
 // ============================================================================
 
 fn test_buffer_size_estimation() {
-    let test_cases = [
-        (100, 10),
-        (1000, 50),
-        (10000, 100),
-        (50000, 200),
-    ];
+    let test_cases = [(100, 10), (1000, 50), (10000, 100), (50000, 200)];
 
     for (data_len, partition_len) in test_cases {
         let estimate = EstimateBuffer(data_len, partition_len);
@@ -477,9 +535,9 @@ fn test_buffer_size_estimation() {
         // Encrypt should succeed with estimated buffer size
         unsafe {
             let result = EncryptToJson(
-                partition_buf.as_ptr() as *const c_char,
-                data_buf.as_ptr() as *const c_char,
-                json_output.as_mut_ptr() as *mut c_char,
+                partition_buf.as_ptr().cast::<c_char>(),
+                data_buf.as_ptr().cast::<c_char>(),
+                json_output.as_mut_ptr().cast::<c_char>(),
             );
             assert_eq!(
                 result, ERR_NONE,
@@ -515,9 +573,9 @@ fn test_decrypt_with_wrong_partition() {
     // Encrypt with partition 1
     unsafe {
         let result = EncryptToJson(
-            partition1_buf.as_ptr() as *const c_char,
-            data_buf.as_ptr() as *const c_char,
-            json_output.as_mut_ptr() as *mut c_char,
+            partition1_buf.as_ptr().cast::<c_char>(),
+            data_buf.as_ptr().cast::<c_char>(),
+            json_output.as_mut_ptr().cast::<c_char>(),
         );
         assert_eq!(result, ERR_NONE, "Encryption should succeed");
     }
@@ -527,9 +585,9 @@ fn test_decrypt_with_wrong_partition() {
 
     unsafe {
         let result = DecryptFromJson(
-            partition2_buf.as_ptr() as *const c_char,
-            json_output.as_ptr() as *const c_char,
-            decrypted_output.as_mut_ptr() as *mut c_char,
+            partition2_buf.as_ptr().cast::<c_char>(),
+            json_output.as_ptr().cast::<c_char>(),
+            decrypted_output.as_mut_ptr().cast::<c_char>(),
         );
         assert_eq!(
             result, ERR_DECRYPT_FAILED,
@@ -558,9 +616,9 @@ fn test_encrypt_decrypt_consistency() {
 
         unsafe {
             let result = EncryptToJson(
-                partition_buf.as_ptr() as *const c_char,
-                data_buf.as_ptr() as *const c_char,
-                json_output.as_mut_ptr() as *mut c_char,
+                partition_buf.as_ptr().cast::<c_char>(),
+                data_buf.as_ptr().cast::<c_char>(),
+                json_output.as_mut_ptr().cast::<c_char>(),
             );
             assert_eq!(result, ERR_NONE, "Encryption should succeed");
         }
@@ -574,9 +632,9 @@ fn test_encrypt_decrypt_consistency() {
 
         unsafe {
             let result = DecryptFromJson(
-                partition_buf.as_ptr() as *const c_char,
-                json_buf.as_ptr() as *const c_char,
-                decrypted_output.as_mut_ptr() as *mut c_char,
+                partition_buf.as_ptr().cast::<c_char>(),
+                json_buf.as_ptr().cast::<c_char>(),
+                decrypted_output.as_mut_ptr().cast::<c_char>(),
             );
             assert_eq!(result, ERR_NONE, "Decryption {} should succeed", i);
         }
@@ -611,9 +669,9 @@ fn test_multiple_encryptions_different_ciphertext() {
 
         unsafe {
             let result = EncryptToJson(
-                partition_buf.as_ptr() as *const c_char,
-                data_buf.as_ptr() as *const c_char,
-                json_output.as_mut_ptr() as *mut c_char,
+                partition_buf.as_ptr().cast::<c_char>(),
+                data_buf.as_ptr().cast::<c_char>(),
+                json_output.as_mut_ptr().cast::<c_char>(),
             );
             assert_eq!(result, ERR_NONE, "Encryption should succeed");
         }
@@ -634,6 +692,230 @@ fn test_multiple_encryptions_different_ciphertext() {
 }
 
 // ============================================================================
+// Buffer Too Small Tests (called from test_full_encryption_workflow)
+// ============================================================================
+
+fn test_encrypt_buffer_too_small() {
+    let partition = create_string_buffer("buffer-small-test");
+    let data = create_input_buffer(b"data to encrypt for buffer test");
+
+    // Undersized encrypted data buffer
+    let mut tiny_data = create_output_buffer(1);
+    let mut key_buf = create_output_buffer(4096);
+    let mut created = create_scalar_buffer();
+    let mut parent_key_id = create_output_buffer(256);
+    let mut parent_key_created = create_scalar_buffer();
+
+    unsafe {
+        let result = Encrypt(
+            partition.as_ptr().cast::<c_char>(),
+            data.as_ptr().cast::<c_char>(),
+            tiny_data.as_mut_ptr().cast::<c_char>(),
+            key_buf.as_mut_ptr().cast::<c_char>(),
+            created.as_mut_ptr().cast::<c_char>(),
+            parent_key_id.as_mut_ptr().cast::<c_char>(),
+            parent_key_created.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(
+            result, ERR_BUFFER_TOO_SMALL,
+            "Encrypt with tiny encrypted_data buffer should return ERR_BUFFER_TOO_SMALL"
+        );
+    }
+
+    // Undersized encrypted key buffer
+    let mut data_buf = create_output_buffer(4096);
+    let mut tiny_key = create_output_buffer(1);
+
+    unsafe {
+        let result = Encrypt(
+            partition.as_ptr().cast::<c_char>(),
+            data.as_ptr().cast::<c_char>(),
+            data_buf.as_mut_ptr().cast::<c_char>(),
+            tiny_key.as_mut_ptr().cast::<c_char>(),
+            created.as_mut_ptr().cast::<c_char>(),
+            parent_key_id.as_mut_ptr().cast::<c_char>(),
+            parent_key_created.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(
+            result, ERR_BUFFER_TOO_SMALL,
+            "Encrypt with tiny encrypted_key buffer should return ERR_BUFFER_TOO_SMALL"
+        );
+    }
+
+    // Undersized parent key ID buffer
+    let mut data_buf2 = create_output_buffer(4096);
+    let mut key_buf2 = create_output_buffer(4096);
+    let mut tiny_parent = create_output_buffer(1);
+
+    unsafe {
+        let result = Encrypt(
+            partition.as_ptr().cast::<c_char>(),
+            data.as_ptr().cast::<c_char>(),
+            data_buf2.as_mut_ptr().cast::<c_char>(),
+            key_buf2.as_mut_ptr().cast::<c_char>(),
+            created.as_mut_ptr().cast::<c_char>(),
+            tiny_parent.as_mut_ptr().cast::<c_char>(),
+            parent_key_created.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(
+            result, ERR_BUFFER_TOO_SMALL,
+            "Encrypt with tiny parent_key_id buffer should return ERR_BUFFER_TOO_SMALL"
+        );
+    }
+}
+
+fn test_decrypt_buffer_too_small() {
+    let partition = create_string_buffer("decrypt-small-test");
+    let plaintext = b"data for decrypt buffer test with enough content";
+    let data = create_input_buffer(plaintext);
+
+    // First encrypt to get valid components
+    let mut encrypted_data = create_output_buffer(4096);
+    let mut encrypted_key = create_output_buffer(4096);
+    let mut created = create_scalar_buffer();
+    let mut parent_key_id = create_output_buffer(256);
+    let mut parent_key_created = create_scalar_buffer();
+
+    unsafe {
+        let result = Encrypt(
+            partition.as_ptr().cast::<c_char>(),
+            data.as_ptr().cast::<c_char>(),
+            encrypted_data.as_mut_ptr().cast::<c_char>(),
+            encrypted_key.as_mut_ptr().cast::<c_char>(),
+            created.as_mut_ptr().cast::<c_char>(),
+            parent_key_id.as_mut_ptr().cast::<c_char>(),
+            parent_key_created.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(result, ERR_NONE, "Encrypt should succeed");
+    }
+
+    // Try to decrypt into a tiny buffer
+    let created_ts = get_buffer_i64(&created);
+    let parent_created_ts = get_buffer_i64(&parent_key_created);
+    let mut tiny_output = create_output_buffer(1);
+
+    unsafe {
+        let result = Decrypt(
+            partition.as_ptr().cast::<c_char>(),
+            encrypted_data.as_ptr().cast::<c_char>(),
+            encrypted_key.as_ptr().cast::<c_char>(),
+            created_ts,
+            parent_key_id.as_ptr().cast::<c_char>(),
+            parent_created_ts,
+            tiny_output.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(
+            result, ERR_BUFFER_TOO_SMALL,
+            "Decrypt with tiny output buffer should return ERR_BUFFER_TOO_SMALL"
+        );
+    }
+}
+
+fn test_decrypt_from_json_buffer_too_small() {
+    let partition = create_string_buffer("json-small-test");
+    let plaintext = b"data for json decrypt buffer test with enough content";
+    let data = create_input_buffer(plaintext);
+
+    // Encrypt to get valid JSON
+    let estimate = EstimateBuffer(plaintext.len() as i32, 15);
+    let mut json_output = create_output_buffer(estimate);
+
+    unsafe {
+        let result = EncryptToJson(
+            partition.as_ptr().cast::<c_char>(),
+            data.as_ptr().cast::<c_char>(),
+            json_output.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(result, ERR_NONE, "EncryptToJson should succeed");
+    }
+
+    // Try to decrypt into a tiny buffer
+    let mut tiny_output = create_output_buffer(1);
+
+    unsafe {
+        let result = DecryptFromJson(
+            partition.as_ptr().cast::<c_char>(),
+            json_output.as_ptr().cast::<c_char>(),
+            tiny_output.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(
+            result, ERR_BUFFER_TOO_SMALL,
+            "DecryptFromJson with tiny output buffer should return ERR_BUFFER_TOO_SMALL"
+        );
+    }
+}
+
+fn test_decrypt_wrong_partition_components() {
+    let partition1 = create_string_buffer("correct-component-partition");
+    let partition2 = create_string_buffer("wrong-component-partition");
+    let plaintext = b"component partition test data";
+    let data = create_input_buffer(plaintext);
+
+    // Encrypt with partition 1
+    let mut encrypted_data = create_output_buffer(4096);
+    let mut encrypted_key = create_output_buffer(4096);
+    let mut created = create_scalar_buffer();
+    let mut parent_key_id = create_output_buffer(256);
+    let mut parent_key_created = create_scalar_buffer();
+
+    unsafe {
+        let result = Encrypt(
+            partition1.as_ptr().cast::<c_char>(),
+            data.as_ptr().cast::<c_char>(),
+            encrypted_data.as_mut_ptr().cast::<c_char>(),
+            encrypted_key.as_mut_ptr().cast::<c_char>(),
+            created.as_mut_ptr().cast::<c_char>(),
+            parent_key_id.as_mut_ptr().cast::<c_char>(),
+            parent_key_created.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(result, ERR_NONE, "Encrypt should succeed");
+    }
+
+    // Decrypt with partition 2 - should fail
+    let created_ts = get_buffer_i64(&created);
+    let parent_created_ts = get_buffer_i64(&parent_key_created);
+    let mut output = create_output_buffer(plaintext.len() as i32 + 100);
+
+    unsafe {
+        let result = Decrypt(
+            partition2.as_ptr().cast::<c_char>(),
+            encrypted_data.as_ptr().cast::<c_char>(),
+            encrypted_key.as_ptr().cast::<c_char>(),
+            created_ts,
+            parent_key_id.as_ptr().cast::<c_char>(),
+            parent_created_ts,
+            output.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(
+            result, ERR_DECRYPT_FAILED,
+            "Decrypt with wrong partition should return ERR_DECRYPT_FAILED"
+        );
+    }
+}
+
+fn test_empty_partition_id() {
+    let partition = create_string_buffer("");
+    let plaintext = b"data with empty partition";
+    let data = create_input_buffer(plaintext);
+
+    let estimate = EstimateBuffer(plaintext.len() as i32, 0);
+    let mut json_output = create_output_buffer(estimate);
+
+    // Empty partition IDs are rejected by the asherah library
+    unsafe {
+        let result = EncryptToJson(
+            partition.as_ptr().cast::<c_char>(),
+            data.as_ptr().cast::<c_char>(),
+            json_output.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(
+            result, ERR_ENCRYPT_FAILED,
+            "EncryptToJson with empty partition should fail"
+        );
+    }
+}
+
+// ============================================================================
 // SetEnv Integration Test
 // ============================================================================
 
@@ -643,13 +925,11 @@ fn test_set_env_integration() {
     let key1 = format!("ASHERAH_INT_TEST_1_{}", pid);
     let key2 = format!("ASHERAH_INT_TEST_2_{}", pid);
 
-    let json = format!(
-        r#"{{"{key1}": "integration_value_1", "{key2}": "integration_value_2"}}"#
-    );
+    let json = format!(r#"{{"{key1}": "integration_value_1", "{key2}": "integration_value_2"}}"#);
     let buf = create_string_buffer(&json);
 
     unsafe {
-        let result = SetEnv(buf.as_ptr() as *const c_char);
+        let result = SetEnv(buf.as_ptr().cast::<c_char>());
         assert_eq!(result, ERR_NONE, "SetEnv should succeed");
     }
 
@@ -670,19 +950,87 @@ fn test_set_env_integration() {
 }
 
 // ============================================================================
-// Error Handling Tests (these don't need factory initialization)
+// Shutdown and Re-initialize Test
 // ============================================================================
 
-#[test]
-fn test_not_initialized_errors() {
-    // These tests verify that functions return ERR_NOT_INITIALIZED
-    // when called before SetupJson. However, since we have another test
-    // that initializes the factory, we need to be careful about test ordering.
-    // In practice, these would fail after the factory is initialized.
+fn test_shutdown_and_reinitialize_impl() {
+    // Shutdown the factory that was initialized by the parent test
+    Shutdown();
 
-    // For now, we just verify the functions don't crash with valid pointers
-    // The actual NOT_INITIALIZED check happens in test_full_encryption_workflow
+    // Re-initialize
+    let result = setup_asherah();
+    assert_eq!(result, ERR_NONE, "SetupJson after Shutdown should succeed");
+
+    // Encrypt some data with the new factory
+    let partition = create_string_buffer("reinit-test");
+    let plaintext = b"data before shutdown";
+    let data = create_input_buffer(plaintext);
+    let estimate = EstimateBuffer(plaintext.len() as i32, 11);
+    let mut json1 = create_output_buffer(estimate);
+
+    unsafe {
+        let result = EncryptToJson(
+            partition.as_ptr().cast::<c_char>(),
+            data.as_ptr().cast::<c_char>(),
+            json1.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(result, ERR_NONE, "Encrypt before shutdown should succeed");
+    }
+
+    // Shutdown
+    Shutdown();
+
+    // Re-initialize
+    let result = setup_asherah();
+    assert_eq!(result, ERR_NONE, "SetupJson after Shutdown should succeed");
+
+    // Encrypt again with the new factory
+    let plaintext2 = b"data after re-initialize";
+    let data2 = create_input_buffer(plaintext2);
+    let estimate2 = EstimateBuffer(plaintext2.len() as i32, 11);
+    let mut json2 = create_output_buffer(estimate2);
+
+    unsafe {
+        let result = EncryptToJson(
+            partition.as_ptr().cast::<c_char>(),
+            data2.as_ptr().cast::<c_char>(),
+            json2.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(
+            result, ERR_NONE,
+            "Encrypt after re-initialize should succeed"
+        );
+    }
+
+    // Decrypt the second encryption
+    let mut decrypted = create_output_buffer(plaintext2.len() as i32 + 100);
+
+    unsafe {
+        let result = DecryptFromJson(
+            partition.as_ptr().cast::<c_char>(),
+            json2.as_ptr().cast::<c_char>(),
+            decrypted.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(
+            result, ERR_NONE,
+            "Decrypt after re-initialize should succeed"
+        );
+    }
+
+    let decrypted_data = get_buffer_data(&decrypted);
+    assert_eq!(
+        decrypted_data, plaintext2,
+        "Decrypted data should match after re-initialization"
+    );
+
+    Shutdown();
 }
+
+// ============================================================================
+// Error Handling Tests
+// ============================================================================
+// NOTE: ERR_NOT_INITIALIZED tests are in tests/uninitialized_tests.rs
+// (a separate binary that runs in a guaranteed-clean process).
 
 #[test]
 fn test_invalid_json_config() {
@@ -690,14 +1038,14 @@ fn test_invalid_json_config() {
         "not json at all",
         "{incomplete json",
         r#"{"ServiceName": "test"}"#, // Missing required fields
-        "{}",                          // Empty config
+        "{}",                         // Empty config
     ];
 
     for config in invalid_configs {
         let buf = create_string_buffer(config);
 
         unsafe {
-            let result = SetupJson(buf.as_ptr() as *const c_char);
+            let result = SetupJson(buf.as_ptr().cast::<c_char>());
             // Should return BAD_CONFIG or ALREADY_INITIALIZED (if another test ran first)
             assert!(
                 result == ERR_BAD_CONFIG || result == ERR_ALREADY_INITIALIZED,
@@ -709,50 +1057,40 @@ fn test_invalid_json_config() {
     }
 }
 
-#[test]
-fn test_decrypt_invalid_json() {
-    // This test can run without initialization since it should fail on JSON parsing
+fn test_decrypt_invalid_json_impl() {
     let partition_buf = create_string_buffer("test");
     let invalid_json = create_string_buffer("not valid json");
     let mut output = create_output_buffer(100);
 
     unsafe {
         let result = DecryptFromJson(
-            partition_buf.as_ptr() as *const c_char,
-            invalid_json.as_ptr() as *const c_char,
-            output.as_mut_ptr() as *mut c_char,
+            partition_buf.as_ptr().cast::<c_char>(),
+            invalid_json.as_ptr().cast::<c_char>(),
+            output.as_mut_ptr().cast::<c_char>(),
         );
-        // Should fail with JSON decode error or NOT_INITIALIZED
-        assert!(
-            result == ERR_JSON_DECODE_FAILED || result == ERR_NOT_INITIALIZED,
-            "Invalid JSON should fail"
+        assert_eq!(
+            result, ERR_JSON_DECODE_FAILED,
+            "DecryptFromJson with invalid JSON should return ERR_JSON_DECODE_FAILED"
         );
     }
 }
 
-// ============================================================================
-// Buffer Edge Cases
-// ============================================================================
-
-#[test]
-fn test_buffer_edge_cases() {
-    // Test with minimum size output buffer
+fn test_buffer_edge_cases_impl() {
     let partition_buf = create_string_buffer("edge-test");
     let data_buf = create_input_buffer(b"x");
 
-    // Very small output buffer - should fail
+    // Very small output buffer - should fail with buffer too small
     let mut tiny_output = create_output_buffer(1);
 
     unsafe {
         let result = EncryptToJson(
-            partition_buf.as_ptr() as *const c_char,
-            data_buf.as_ptr() as *const c_char,
-            tiny_output.as_mut_ptr() as *mut c_char,
+            partition_buf.as_ptr().cast::<c_char>(),
+            data_buf.as_ptr().cast::<c_char>(),
+            tiny_output.as_mut_ptr().cast::<c_char>(),
         );
-        // Should fail with buffer too small or not initialized
-        assert!(
-            result == ERR_BUFFER_TOO_SMALL || result == ERR_NOT_INITIALIZED,
-            "Tiny buffer should fail"
+        assert_eq!(
+            result, ERR_BUFFER_TOO_SMALL,
+            "EncryptToJson with tiny buffer should return ERR_BUFFER_TOO_SMALL"
         );
     }
 }
