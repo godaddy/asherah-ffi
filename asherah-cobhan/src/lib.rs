@@ -9,13 +9,13 @@
 use std::collections::HashMap;
 use std::os::raw::c_char;
 use std::ptr;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::RwLock;
 
 use asherah::session::PublicFactory;
 use asherah::types::{DataRowRecord, EnvelopeKeyRecord, KeyMeta};
 use asherah::{aead::AES256GCM, builders::DynKms, builders::DynMetastore};
 use asherah_config::ConfigOptions;
-use base64::Engine;
 use serde::Deserialize;
 
 // ============================================================================
@@ -51,26 +51,39 @@ const ERR_JSON_DECODE_FAILED: i32 = -5;
 const ERR_JSON_ENCODE_FAILED: i32 = -6;
 
 // ============================================================================
-// Asherah-specific Error Codes (matching Go asherah-cobhan library)
+// Asherah-specific Error Codes (matching Go asherah-cobhan constants.go)
 // ============================================================================
 
-/// Already initialized error
-const ERR_ALREADY_INITIALIZED: i32 = -100;
-/// Bad configuration error
-const ERR_BAD_CONFIG: i32 = -101;
 /// Not initialized error
-const ERR_NOT_INITIALIZED: i32 = -102;
+const ERR_NOT_INITIALIZED: i32 = -100;
+/// Already initialized error
+const ERR_ALREADY_INITIALIZED: i32 = -101;
+/// Get session failed
+const ERR_GET_SESSION_FAILED: i32 = -102;
 /// Encryption failed
 const ERR_ENCRYPT_FAILED: i32 = -103;
 /// Decryption failed
 const ERR_DECRYPT_FAILED: i32 = -104;
+/// Bad configuration error
+const ERR_BAD_CONFIG: i32 = -105;
+/// Panic recovery error
+const ERR_PANIC: i32 = -106;
+
+/// Estimated encryption overhead (matches Go EstimatedEncryptionOverhead)
+const ESTIMATED_ENCRYPTION_OVERHEAD: i32 = 48;
+/// Estimated envelope overhead (matches Go EstimatedEnvelopeOverhead)
+const ESTIMATED_ENVELOPE_OVERHEAD: i32 = 185;
 
 // ============================================================================
 // Global State
 // ============================================================================
 
-/// Global factory instance (singleton pattern matching Go implementation)
-static FACTORY: OnceLock<Factory> = OnceLock::new();
+/// Global factory instance (RwLock allows proper shutdown/re-initialization)
+static FACTORY: RwLock<Option<Factory>> = RwLock::new(None);
+
+/// Estimated intermediate key overhead, set during SetupJson
+/// (len(ProductID) + len(ServiceName), matching Go behavior)
+static ESTIMATED_INTERMEDIATE_KEY_OVERHEAD: AtomicI32 = AtomicI32::new(0);
 
 // ============================================================================
 // Cobhan Buffer Format Implementation
@@ -78,18 +91,14 @@ static FACTORY: OnceLock<Factory> = OnceLock::new();
 
 /// Reads the length from a cobhan buffer header.
 /// The length is stored as a little-endian i32 at offset 0.
-/// Negative values indicate temp file references (not supported in this implementation).
+/// For output buffers, this field initially holds the capacity.
+/// Negative values indicate temp file references (not supported).
 unsafe fn cobhan_buffer_get_length(buf: *const c_char) -> i32 {
     if buf.is_null() {
         return 0;
     }
-    let bytes = buf as *const u8;
-    i32::from_le_bytes([
-        *bytes,
-        *bytes.add(1),
-        *bytes.add(2),
-        *bytes.add(3),
-    ])
+    let bytes = buf.cast::<u8>();
+    i32::from_le_bytes([*bytes, *bytes.add(1), *bytes.add(2), *bytes.add(3)])
 }
 
 /// Writes the length to a cobhan buffer header.
@@ -97,7 +106,7 @@ unsafe fn cobhan_buffer_set_length(buf: *mut c_char, len: i32) {
     if buf.is_null() {
         return;
     }
-    let bytes = buf as *mut u8;
+    let bytes = buf.cast::<u8>();
     let len_bytes = len.to_le_bytes();
     *bytes = len_bytes[0];
     *bytes.add(1) = len_bytes[1];
@@ -110,7 +119,7 @@ unsafe fn cobhan_buffer_get_data_ptr(buf: *const c_char) -> *const u8 {
     if buf.is_null() {
         return ptr::null();
     }
-    (buf as *const u8).add(BUFFER_HEADER_SIZE as usize)
+    buf.cast::<u8>().add(BUFFER_HEADER_SIZE as usize)
 }
 
 /// Gets a mutable pointer to the data section of a cobhan buffer.
@@ -118,7 +127,7 @@ unsafe fn cobhan_buffer_get_data_ptr_mut(buf: *mut c_char) -> *mut u8 {
     if buf.is_null() {
         return ptr::null_mut();
     }
-    (buf as *mut u8).add(BUFFER_HEADER_SIZE as usize)
+    buf.cast::<u8>().add(BUFFER_HEADER_SIZE as usize)
 }
 
 /// Reads bytes from a cobhan buffer into a Vec<u8>.
@@ -146,16 +155,22 @@ unsafe fn cobhan_buffer_to_string(buf: *const c_char) -> Result<String, i32> {
 }
 
 /// Deserializes JSON from a cobhan buffer into a struct.
-unsafe fn cobhan_buffer_to_json<T: for<'de> Deserialize<'de>>(buf: *const c_char) -> Result<T, i32> {
+unsafe fn cobhan_buffer_to_json<T: for<'de> Deserialize<'de>>(
+    buf: *const c_char,
+) -> Result<T, i32> {
     let bytes = cobhan_buffer_to_bytes(buf)?;
     serde_json::from_slice(&bytes).map_err(|_| ERR_JSON_DECODE_FAILED)
 }
 
 /// Writes bytes to a cobhan buffer.
-/// Returns the number of bytes written, or an error code.
-unsafe fn cobhan_bytes_to_buffer(data: &[u8], buf: *mut c_char, capacity: i32) -> i32 {
+/// Reads capacity from bytes 0-3 of the output buffer (matching Go behavior).
+unsafe fn cobhan_bytes_to_buffer(data: &[u8], buf: *mut c_char) -> i32 {
     if buf.is_null() {
         return ERR_NULL_PTR;
+    }
+    let capacity = cobhan_buffer_get_length(buf as *const c_char);
+    if capacity < 0 {
+        return ERR_BUFFER_TOO_LARGE;
     }
     let data_len = data.len() as i32;
     if data_len > capacity {
@@ -170,68 +185,60 @@ unsafe fn cobhan_bytes_to_buffer(data: &[u8], buf: *mut c_char, capacity: i32) -
 }
 
 /// Serializes a value to JSON and writes it to a cobhan buffer.
-unsafe fn cobhan_json_to_buffer<T: serde::Serialize>(value: &T, buf: *mut c_char, capacity: i32) -> i32 {
+unsafe fn cobhan_json_to_buffer<T: serde::Serialize>(value: &T, buf: *mut c_char) -> i32 {
     let json = match serde_json::to_vec(value) {
         Ok(v) => v,
         Err(_) => return ERR_JSON_ENCODE_FAILED,
     };
-    cobhan_bytes_to_buffer(&json, buf, capacity)
+    cobhan_bytes_to_buffer(&json, buf)
 }
 
-/// Writes an i32 value to a cobhan buffer (as 4 bytes in the data section).
+/// Writes an i32 value directly to a buffer (no header).
+/// Matches Go cobhan.Int32ToBuffer which writes raw value at offset 0.
 unsafe fn cobhan_int32_to_buffer(value: i32, buf: *mut c_char) -> i32 {
     if buf.is_null() {
         return ERR_NULL_PTR;
     }
-    cobhan_buffer_set_length(buf, 4);
-    let dest = cobhan_buffer_get_data_ptr_mut(buf);
     let bytes = value.to_le_bytes();
-    ptr::copy_nonoverlapping(bytes.as_ptr(), dest, 4);
+    ptr::copy_nonoverlapping(bytes.as_ptr(), buf.cast::<u8>(), 4);
     ERR_NONE
 }
 
-/// Writes an i64 value to a cobhan buffer (as 8 bytes in the data section).
+/// Writes an i64 value directly to a buffer (no header).
+/// Matches Go cobhan.Int64ToBuffer which writes raw value at offset 0.
 unsafe fn cobhan_int64_to_buffer(value: i64, buf: *mut c_char) -> i32 {
     if buf.is_null() {
         return ERR_NULL_PTR;
     }
-    cobhan_buffer_set_length(buf, 8);
-    let dest = cobhan_buffer_get_data_ptr_mut(buf);
     let bytes = value.to_le_bytes();
-    ptr::copy_nonoverlapping(bytes.as_ptr(), dest, 8);
+    ptr::copy_nonoverlapping(bytes.as_ptr(), buf.cast::<u8>(), 8);
     ERR_NONE
 }
 
-/// Gets the capacity of a cobhan output buffer.
-/// For output buffers, the capacity is stored at offset 4 (second i32).
-unsafe fn cobhan_buffer_get_capacity(buf: *const c_char) -> i32 {
-    if buf.is_null() {
-        return 0;
-    }
-    let bytes = (buf as *const u8).add(4);
-    i32::from_le_bytes([
-        *bytes,
-        *bytes.add(1),
-        *bytes.add(2),
-        *bytes.add(3),
-    ])
+/// Writes a string to a cobhan buffer.
+/// Reads capacity from bytes 0-3 of the output buffer (matching Go behavior).
+unsafe fn cobhan_string_to_buffer(s: &str, buf: *mut c_char) -> i32 {
+    cobhan_bytes_to_buffer(s.as_bytes(), buf)
 }
 
 // ============================================================================
 // Exported C ABI Functions
 // ============================================================================
 
-/// Gracefully shuts down Asherah.
-/// Note: Due to Rust's OnceLock semantics, the factory cannot be reinitialized
-/// after shutdown in the same process.
+/// Gracefully shuts down Asherah, releasing the global factory.
+/// After shutdown, SetupJson can be called again to re-initialize.
 #[unsafe(no_mangle)]
 pub extern "C" fn Shutdown() {
-    // OnceLock doesn't support taking the value out, so we just leave it.
-    // The factory will be dropped when the process exits.
-    // This matches the behavior where re-initialization isn't expected.
+    if let Ok(mut guard) = FACTORY.write() {
+        let _ = guard.take();
+    }
+    ESTIMATED_INTERMEDIATE_KEY_OVERHEAD.store(0, Ordering::Relaxed);
 }
 
 /// Sets environment variables from a JSON object.
+///
+/// # Safety
+/// `env_json` must point to a valid Cobhan buffer with a properly initialized header.
 ///
 /// # Parameters
 /// - `env_json`: Cobhan buffer containing JSON object with string key-value pairs
@@ -260,6 +267,9 @@ pub unsafe extern "C" fn SetEnv(env_json: *const c_char) -> i32 {
 
 /// Initializes Asherah with the provided JSON configuration.
 ///
+/// # Safety
+/// `config_json` must point to a valid Cobhan buffer with a properly initialized header.
+///
 /// # Parameters
 /// - `config_json`: Cobhan buffer containing JSON configuration matching ConfigOptions
 ///
@@ -274,8 +284,13 @@ pub unsafe extern "C" fn SetupJson(config_json: *const c_char) -> i32 {
         return ERR_NULL_PTR;
     }
 
+    let mut guard = match FACTORY.write() {
+        Ok(g) => g,
+        Err(_) => return ERR_PANIC,
+    };
+
     // Check if already initialized
-    if FACTORY.get().is_some() {
+    if guard.is_some() {
         return ERR_ALREADY_INITIALIZED;
     }
 
@@ -285,13 +300,18 @@ pub unsafe extern "C" fn SetupJson(config_json: *const c_char) -> i32 {
         Err(_) => return ERR_BAD_CONFIG,
     };
 
+    // Track intermediate key overhead (matching Go behavior)
+    let product_id_len = config.product_id.as_ref().map_or(0, |s| s.len());
+    let service_name_len = config.service_name.as_ref().map_or(0, |s| s.len());
+    ESTIMATED_INTERMEDIATE_KEY_OVERHEAD.store(
+        (product_id_len + service_name_len) as i32,
+        Ordering::Relaxed,
+    );
+
     // Apply configuration and create factory
     match asherah_config::factory_from_config(&config) {
         Ok((factory, _applied)) => {
-            if FACTORY.set(factory).is_err() {
-                // Race condition - another thread initialized first
-                return ERR_ALREADY_INITIALIZED;
-            }
+            *guard = Some(factory);
             ERR_NONE
         }
         Err(_) => ERR_BAD_CONFIG,
@@ -299,6 +319,7 @@ pub unsafe extern "C" fn SetupJson(config_json: *const c_char) -> i32 {
 }
 
 /// Estimates the buffer size needed for encryption output.
+/// Matches the Go implementation's formula exactly.
 ///
 /// # Parameters
 /// - `data_len`: Length of data to encrypt
@@ -308,34 +329,36 @@ pub unsafe extern "C" fn SetupJson(config_json: *const c_char) -> i32 {
 /// - Estimated buffer size in bytes
 #[unsafe(no_mangle)]
 pub extern "C" fn EstimateBuffer(data_len: i32, partition_len: i32) -> i32 {
-    // This estimation matches the Go implementation's formula:
-    // The output includes:
-    // - Base64 encoded encrypted data (4/3 * data_len, rounded up)
-    // - JSON structure overhead
-    // - Envelope key record
-    // - Key metadata
-    // - Partition ID in key ID
-    let base64_data_len = ((data_len as i64 * 4) / 3) + 4;
-    let key_overhead = 256_i64; // Key, KeyId, Created, ParentKeyMeta
-    let json_overhead = 128_i64; // JSON structure, field names
-    let partition_overhead = partition_len as i64 + 64; // Partition in KeyId
+    // Match Go formula:
+    // estimatedDataLen := ((int(dataLen) + EstimatedEncryptionOverhead + 2) / 3) * 4
+    // result := int32(BUFFER_HEADER_SIZE + EstimatedEnvelopeOverhead +
+    //           EstimatedIntermediateKeyOverhead + int(partitionLen) + estimatedDataLen)
+    let estimated_data_len = ((data_len as i64 + ESTIMATED_ENCRYPTION_OVERHEAD as i64 + 2) / 3) * 4;
+    let intermediate_key_overhead =
+        ESTIMATED_INTERMEDIATE_KEY_OVERHEAD.load(Ordering::Relaxed) as i64;
 
-    let total = base64_data_len + key_overhead + json_overhead + partition_overhead + BUFFER_HEADER_SIZE as i64;
-
-    // Round up to nearest 256 for safety margin
-    ((total + 255) / 256 * 256) as i32
+    (BUFFER_HEADER_SIZE as i64
+        + ESTIMATED_ENVELOPE_OVERHEAD as i64
+        + intermediate_key_overhead
+        + partition_len as i64
+        + estimated_data_len) as i32
 }
 
 /// Encrypts data and returns the components separately.
 ///
+/// # Safety
+/// All pointer parameters must point to valid Cobhan buffers with properly initialized headers.
+/// Output buffers must have sufficient capacity for the results.
+/// Scalar output buffers (created, parent_key_created) must be at least 8 bytes.
+///
 /// # Parameters
 /// - `partition_id_ptr`: Cobhan buffer with partition ID string
 /// - `data_ptr`: Cobhan buffer with data to encrypt
-/// - `output_encrypted_data_ptr`: Output cobhan buffer for encrypted data (base64)
-/// - `output_encrypted_key_ptr`: Output cobhan buffer for encrypted key (base64)
-/// - `output_created_ptr`: Output cobhan buffer for created timestamp (i64)
+/// - `output_encrypted_data_ptr`: Output cobhan buffer for encrypted data (raw bytes)
+/// - `output_encrypted_key_ptr`: Output cobhan buffer for encrypted key (raw bytes)
+/// - `output_created_ptr`: Output buffer for created timestamp (raw i64, no header)
 /// - `output_parent_key_id_ptr`: Output cobhan buffer for parent key ID string
-/// - `output_parent_key_created_ptr`: Output cobhan buffer for parent key created timestamp (i64)
+/// - `output_parent_key_created_ptr`: Output buffer for parent key created timestamp (raw i64, no header)
 ///
 /// # Returns
 /// - `ERR_NONE` on success
@@ -363,7 +386,11 @@ pub unsafe extern "C" fn Encrypt(
     }
 
     // Get factory
-    let factory = match FACTORY.get() {
+    let guard = match FACTORY.read() {
+        Ok(g) => g,
+        Err(_) => return ERR_PANIC,
+    };
+    let factory = match guard.as_ref() {
         Some(f) => f,
         None => return ERR_NOT_INITIALIZED,
     };
@@ -392,23 +419,19 @@ pub unsafe extern "C" fn Encrypt(
         None => return ERR_ENCRYPT_FAILED,
     };
 
-    // Write encrypted data (base64)
-    let encrypted_data_b64 = base64::engine::general_purpose::STANDARD.encode(&drr.data);
-    let data_capacity = cobhan_buffer_get_capacity(output_encrypted_data_ptr);
-    let result = cobhan_bytes_to_buffer(encrypted_data_b64.as_bytes(), output_encrypted_data_ptr, data_capacity);
+    // Write encrypted data (raw bytes, matching Go cobhan.BytesToBuffer)
+    let result = cobhan_bytes_to_buffer(&drr.data, output_encrypted_data_ptr);
     if result != ERR_NONE {
         return result;
     }
 
-    // Write encrypted key (base64)
-    let encrypted_key_b64 = base64::engine::general_purpose::STANDARD.encode(&key_record.encrypted_key);
-    let key_capacity = cobhan_buffer_get_capacity(output_encrypted_key_ptr);
-    let result = cobhan_bytes_to_buffer(encrypted_key_b64.as_bytes(), output_encrypted_key_ptr, key_capacity);
+    // Write encrypted key (raw bytes, matching Go cobhan.BytesToBuffer)
+    let result = cobhan_bytes_to_buffer(&key_record.encrypted_key, output_encrypted_key_ptr);
     if result != ERR_NONE {
         return result;
     }
 
-    // Write created timestamp
+    // Write created timestamp (raw i64 at offset 0, matching Go cobhan.Int64ToBuffer)
     let result = cobhan_int64_to_buffer(key_record.created, output_created_ptr);
     if result != ERR_NONE {
         return result;
@@ -416,8 +439,8 @@ pub unsafe extern "C" fn Encrypt(
 
     // Write parent key metadata
     if let Some(parent_meta) = &key_record.parent_key_meta {
-        let parent_id_capacity = cobhan_buffer_get_capacity(output_parent_key_id_ptr);
-        let result = cobhan_bytes_to_buffer(parent_meta.id.as_bytes(), output_parent_key_id_ptr, parent_id_capacity);
+        // Write parent key ID (matching Go cobhan.StringToBuffer)
+        let result = cobhan_string_to_buffer(&parent_meta.id, output_parent_key_id_ptr);
         if result != ERR_NONE {
             return result;
         }
@@ -440,13 +463,17 @@ pub unsafe extern "C" fn Encrypt(
 
 /// Decrypts data from components.
 ///
+/// # Safety
+/// All pointer parameters must point to valid Cobhan buffers with properly initialized headers.
+/// The output buffer must have sufficient capacity for the decrypted data.
+///
 /// # Parameters
 /// - `partition_id_ptr`: Cobhan buffer with partition ID string
-/// - `encrypted_data_ptr`: Cobhan buffer with encrypted data (base64)
-/// - `encrypted_key_ptr`: Cobhan buffer with encrypted key (base64)
-/// - `created`: Created timestamp
+/// - `encrypted_data_ptr`: Cobhan buffer with encrypted data (raw bytes)
+/// - `encrypted_key_ptr`: Cobhan buffer with encrypted key (raw bytes)
+/// - `created`: Created timestamp (raw i64 value)
 /// - `parent_key_id_ptr`: Cobhan buffer with parent key ID string
-/// - `parent_key_created`: Parent key created timestamp
+/// - `parent_key_created`: Parent key created timestamp (raw i64 value)
 /// - `output_decrypted_data_ptr`: Output cobhan buffer for decrypted data
 ///
 /// # Returns
@@ -473,24 +500,28 @@ pub unsafe extern "C" fn Decrypt(
     }
 
     // Get factory
-    let factory = match FACTORY.get() {
+    let guard = match FACTORY.read() {
+        Ok(g) => g,
+        Err(_) => return ERR_PANIC,
+    };
+    let factory = match guard.as_ref() {
         Some(f) => f,
         None => return ERR_NOT_INITIALIZED,
     };
 
-    // Read inputs
+    // Read inputs - raw bytes, no base64 (matching Go cobhan.BufferToBytes)
     let partition_id = match cobhan_buffer_to_string(partition_id_ptr) {
         Ok(s) => s,
         Err(e) => return e,
     };
 
-    let encrypted_data_b64 = match cobhan_buffer_to_string(encrypted_data_ptr) {
-        Ok(s) => s,
+    let encrypted_data = match cobhan_buffer_to_bytes(encrypted_data_ptr) {
+        Ok(d) => d,
         Err(e) => return e,
     };
 
-    let encrypted_key_b64 = match cobhan_buffer_to_string(encrypted_key_ptr) {
-        Ok(s) => s,
+    let encrypted_key = match cobhan_buffer_to_bytes(encrypted_key_ptr) {
+        Ok(k) => k,
         Err(e) => return e,
     };
 
@@ -499,33 +530,18 @@ pub unsafe extern "C" fn Decrypt(
         Err(e) => return e,
     };
 
-    // Decode base64
-    let encrypted_data = match base64::engine::general_purpose::STANDARD.decode(&encrypted_data_b64) {
-        Ok(d) => d,
-        Err(_) => return ERR_DECRYPT_FAILED,
-    };
-
-    let encrypted_key = match base64::engine::general_purpose::STANDARD.decode(&encrypted_key_b64) {
-        Ok(k) => k,
-        Err(_) => return ERR_DECRYPT_FAILED,
-    };
-
     // Build parent key metadata
-    let parent_key_meta = if !parent_key_id.is_empty() {
-        Some(KeyMeta {
-            id: parent_key_id,
-            created: parent_key_created,
-        })
-    } else {
-        None
-    };
+    let parent_key_meta = Some(KeyMeta {
+        id: parent_key_id,
+        created: parent_key_created,
+    });
 
     // Build DataRowRecord
     let drr = DataRowRecord {
         data: encrypted_data,
         key: Some(EnvelopeKeyRecord {
             revoked: None,
-            id: String::new(), // ID is not serialized anyway
+            id: String::new(),
             created,
             encrypted_key,
             parent_key_meta,
@@ -540,11 +556,14 @@ pub unsafe extern "C" fn Decrypt(
     };
 
     // Write output
-    let output_capacity = cobhan_buffer_get_capacity(output_decrypted_data_ptr);
-    cobhan_bytes_to_buffer(&plaintext, output_decrypted_data_ptr, output_capacity)
+    cobhan_bytes_to_buffer(&plaintext, output_decrypted_data_ptr)
 }
 
 /// Encrypts data and returns the result as a JSON DataRowRecord.
+///
+/// # Safety
+/// All pointer parameters must point to valid Cobhan buffers with properly initialized headers.
+/// The output buffer must have sufficient capacity for the JSON result.
 ///
 /// # Parameters
 /// - `partition_id_ptr`: Cobhan buffer with partition ID string
@@ -566,7 +585,11 @@ pub unsafe extern "C" fn EncryptToJson(
     }
 
     // Get factory
-    let factory = match FACTORY.get() {
+    let guard = match FACTORY.read() {
+        Ok(g) => g,
+        Err(_) => return ERR_PANIC,
+    };
+    let factory = match guard.as_ref() {
         Some(f) => f,
         None => return ERR_NOT_INITIALIZED,
     };
@@ -590,11 +613,14 @@ pub unsafe extern "C" fn EncryptToJson(
     };
 
     // Serialize to JSON and write to output buffer
-    let json_capacity = cobhan_buffer_get_capacity(json_ptr);
-    cobhan_json_to_buffer(&drr, json_ptr, json_capacity)
+    cobhan_json_to_buffer(&drr, json_ptr)
 }
 
 /// Decrypts data from a JSON DataRowRecord.
+///
+/// # Safety
+/// All pointer parameters must point to valid Cobhan buffers with properly initialized headers.
+/// The output buffer must have sufficient capacity for the decrypted data.
 ///
 /// # Parameters
 /// - `partition_id_ptr`: Cobhan buffer with partition ID string
@@ -616,7 +642,11 @@ pub unsafe extern "C" fn DecryptFromJson(
     }
 
     // Get factory
-    let factory = match FACTORY.get() {
+    let guard = match FACTORY.read() {
+        Ok(g) => g,
+        Err(_) => return ERR_PANIC,
+    };
+    let factory = match guard.as_ref() {
         Some(f) => f,
         None => return ERR_NOT_INITIALIZED,
     };
@@ -640,8 +670,7 @@ pub unsafe extern "C" fn DecryptFromJson(
     };
 
     // Write output
-    let output_capacity = cobhan_buffer_get_capacity(data_ptr);
-    cobhan_bytes_to_buffer(&plaintext, data_ptr, output_capacity)
+    cobhan_bytes_to_buffer(&plaintext, data_ptr)
 }
 
 // ============================================================================
@@ -661,14 +690,16 @@ pub mod test_helpers {
     pub const ERR_COPY_FAILED: i32 = -4;
     pub const ERR_JSON_DECODE_FAILED: i32 = -5;
     pub const ERR_JSON_ENCODE_FAILED: i32 = -6;
-    pub const ERR_ALREADY_INITIALIZED: i32 = -100;
-    pub const ERR_BAD_CONFIG: i32 = -101;
-    pub const ERR_NOT_INITIALIZED: i32 = -102;
+    pub const ERR_NOT_INITIALIZED: i32 = -100;
+    pub const ERR_ALREADY_INITIALIZED: i32 = -101;
+    pub const ERR_GET_SESSION_FAILED: i32 = -102;
     pub const ERR_ENCRYPT_FAILED: i32 = -103;
     pub const ERR_DECRYPT_FAILED: i32 = -104;
+    pub const ERR_BAD_CONFIG: i32 = -105;
+    pub const ERR_PANIC: i32 = -106;
 
     /// Creates a cobhan input buffer from bytes.
-    /// Returns a Vec<u8> that can be cast to *const c_char.
+    /// Layout: [length:i32le][reserved:i32le=0][data...]
     pub fn create_input_buffer(data: &[u8]) -> Vec<u8> {
         let mut buf = vec![0u8; BUFFER_HEADER_SIZE as usize + data.len()];
         let len = data.len() as i32;
@@ -683,14 +714,19 @@ pub mod test_helpers {
     }
 
     /// Creates a cobhan output buffer with the given capacity.
-    /// The capacity is stored in bytes 4-7 of the header.
+    /// Capacity is stored at bytes 0-3 (matching Go cobhan.AllocateBuffer).
     pub fn create_output_buffer(capacity: i32) -> Vec<u8> {
         let mut buf = vec![0u8; BUFFER_HEADER_SIZE as usize + capacity as usize];
-        // Length starts at 0
-        buf[0..4].copy_from_slice(&0_i32.to_le_bytes());
-        // Capacity in bytes 4-7
-        buf[4..8].copy_from_slice(&capacity.to_le_bytes());
+        // Capacity in bytes 0-3 (Go convention: output buffer length = capacity)
+        buf[0..4].copy_from_slice(&capacity.to_le_bytes());
+        // Bytes 4-7 are reserved (zero)
         buf
+    }
+
+    /// Creates a scalar buffer for int64 values (no header, just 8 bytes).
+    /// Matches Go cobhan scalar buffer convention.
+    pub fn create_scalar_buffer() -> Vec<u8> {
+        vec![0u8; 8]
     }
 
     /// Reads the length from a cobhan buffer.
@@ -709,12 +745,11 @@ pub mod test_helpers {
         String::from_utf8_lossy(get_buffer_data(buf)).to_string()
     }
 
-    /// Reads an i64 from a cobhan buffer's data section.
+    /// Reads an i64 directly from a scalar buffer (no header, offset 0).
+    /// Matches Go cobhan.BufferToInt64 which reads raw value at offset 0.
     pub fn get_buffer_i64(buf: &[u8]) -> i64 {
-        let data = get_buffer_data(buf);
         i64::from_le_bytes([
-            data[0], data[1], data[2], data[3],
-            data[4], data[5], data[6], data[7],
+            buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7],
         ])
     }
 }
@@ -725,21 +760,15 @@ pub mod test_helpers {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::test_helpers::{
-        create_input_buffer, create_output_buffer, create_string_buffer,
+        create_input_buffer, create_output_buffer, create_scalar_buffer, create_string_buffer,
         get_buffer_data, get_buffer_i64, get_buffer_length, get_buffer_string,
     };
+    use super::*;
 
     // ========================================================================
     // Buffer Length Tests
     // ========================================================================
-
-    #[test]
-    fn test_buffer_length_zero() {
-        let buf = create_output_buffer(100);
-        assert_eq!(get_buffer_length(&buf), 0);
-    }
 
     #[test]
     fn test_buffer_length_positive() {
@@ -751,8 +780,8 @@ mod tests {
     fn test_buffer_length_set_and_get() {
         let mut buf = [0u8; 16];
         unsafe {
-            cobhan_buffer_set_length(buf.as_mut_ptr() as *mut c_char, 42);
-            let len = cobhan_buffer_get_length(buf.as_ptr() as *const c_char);
+            cobhan_buffer_set_length(buf.as_mut_ptr().cast::<c_char>(), 42);
+            let len = cobhan_buffer_get_length(buf.as_ptr().cast::<c_char>());
             assert_eq!(len, 42);
         }
     }
@@ -761,8 +790,8 @@ mod tests {
     fn test_buffer_length_max_positive() {
         let mut buf = [0u8; 16];
         unsafe {
-            cobhan_buffer_set_length(buf.as_mut_ptr() as *mut c_char, i32::MAX);
-            let len = cobhan_buffer_get_length(buf.as_ptr() as *const c_char);
+            cobhan_buffer_set_length(buf.as_mut_ptr().cast::<c_char>(), i32::MAX);
+            let len = cobhan_buffer_get_length(buf.as_ptr().cast::<c_char>());
             assert_eq!(len, i32::MAX);
         }
     }
@@ -771,8 +800,8 @@ mod tests {
     fn test_buffer_length_negative() {
         let mut buf = [0u8; 16];
         unsafe {
-            cobhan_buffer_set_length(buf.as_mut_ptr() as *mut c_char, -1);
-            let len = cobhan_buffer_get_length(buf.as_ptr() as *const c_char);
+            cobhan_buffer_set_length(buf.as_mut_ptr().cast::<c_char>(), -1);
+            let len = cobhan_buffer_get_length(buf.as_ptr().cast::<c_char>());
             assert_eq!(len, -1);
         }
     }
@@ -788,29 +817,7 @@ mod tests {
     #[test]
     fn test_buffer_set_length_null_is_safe() {
         unsafe {
-            // Should not panic or crash
             cobhan_buffer_set_length(ptr::null_mut(), 42);
-        }
-    }
-
-    // ========================================================================
-    // Buffer Capacity Tests
-    // ========================================================================
-
-    #[test]
-    fn test_buffer_capacity_read() {
-        let buf = create_output_buffer(1024);
-        unsafe {
-            let capacity = cobhan_buffer_get_capacity(buf.as_ptr() as *const c_char);
-            assert_eq!(capacity, 1024);
-        }
-    }
-
-    #[test]
-    fn test_buffer_capacity_null_returns_zero() {
-        unsafe {
-            let capacity = cobhan_buffer_get_capacity(ptr::null());
-            assert_eq!(capacity, 0);
         }
     }
 
@@ -822,7 +829,7 @@ mod tests {
     fn test_buffer_data_ptr_offset() {
         let buf = create_input_buffer(b"test data");
         unsafe {
-            let data_ptr = cobhan_buffer_get_data_ptr(buf.as_ptr() as *const c_char);
+            let data_ptr = cobhan_buffer_get_data_ptr(buf.as_ptr().cast::<c_char>());
             let expected_ptr = buf.as_ptr().add(BUFFER_HEADER_SIZE as usize);
             assert_eq!(data_ptr, expected_ptr);
         }
@@ -852,9 +859,9 @@ mod tests {
     fn test_buffer_to_bytes_empty() {
         let buf = create_input_buffer(b"");
         unsafe {
-            let result = cobhan_buffer_to_bytes(buf.as_ptr() as *const c_char);
+            let result = cobhan_buffer_to_bytes(buf.as_ptr().cast::<c_char>());
             assert!(result.is_ok());
-            assert_eq!(result.unwrap(), Vec::<u8>::new());
+            assert_eq!(result.expect("should be ok"), Vec::<u8>::new());
         }
     }
 
@@ -863,9 +870,9 @@ mod tests {
         let data = b"hello world";
         let buf = create_input_buffer(data);
         unsafe {
-            let result = cobhan_buffer_to_bytes(buf.as_ptr() as *const c_char);
+            let result = cobhan_buffer_to_bytes(buf.as_ptr().cast::<c_char>());
             assert!(result.is_ok());
-            assert_eq!(result.unwrap(), data.to_vec());
+            assert_eq!(result.expect("should be ok"), data.to_vec());
         }
     }
 
@@ -874,9 +881,9 @@ mod tests {
         let data: Vec<u8> = (0u8..=255).collect();
         let buf = create_input_buffer(&data);
         unsafe {
-            let result = cobhan_buffer_to_bytes(buf.as_ptr() as *const c_char);
+            let result = cobhan_buffer_to_bytes(buf.as_ptr().cast::<c_char>());
             assert!(result.is_ok());
-            assert_eq!(result.unwrap(), data);
+            assert_eq!(result.expect("should be ok"), data);
         }
     }
 
@@ -885,9 +892,9 @@ mod tests {
         let data = b"hello\0world\0test";
         let buf = create_input_buffer(data);
         unsafe {
-            let result = cobhan_buffer_to_bytes(buf.as_ptr() as *const c_char);
+            let result = cobhan_buffer_to_bytes(buf.as_ptr().cast::<c_char>());
             assert!(result.is_ok());
-            assert_eq!(result.unwrap(), data.to_vec());
+            assert_eq!(result.expect("should be ok"), data.to_vec());
         }
     }
 
@@ -896,7 +903,7 @@ mod tests {
         unsafe {
             let result = cobhan_buffer_to_bytes(ptr::null());
             assert!(result.is_err());
-            assert_eq!(result.unwrap_err(), ERR_NULL_PTR);
+            assert_eq!(result.expect_err("should be err"), ERR_NULL_PTR);
         }
     }
 
@@ -905,9 +912,9 @@ mod tests {
         let mut buf = [0u8; 16];
         buf[0..4].copy_from_slice(&(-1_i32).to_le_bytes());
         unsafe {
-            let result = cobhan_buffer_to_bytes(buf.as_ptr() as *const c_char);
+            let result = cobhan_buffer_to_bytes(buf.as_ptr().cast::<c_char>());
             assert!(result.is_err());
-            assert_eq!(result.unwrap_err(), ERR_BUFFER_TOO_LARGE);
+            assert_eq!(result.expect_err("should be err"), ERR_BUFFER_TOO_LARGE);
         }
     }
 
@@ -919,9 +926,9 @@ mod tests {
     fn test_buffer_to_string_simple() {
         let buf = create_string_buffer("hello world");
         unsafe {
-            let result = cobhan_buffer_to_string(buf.as_ptr() as *const c_char);
+            let result = cobhan_buffer_to_string(buf.as_ptr().cast::<c_char>());
             assert!(result.is_ok());
-            assert_eq!(result.unwrap(), "hello world");
+            assert_eq!(result.expect("should be ok"), "hello world");
         }
     }
 
@@ -929,9 +936,9 @@ mod tests {
     fn test_buffer_to_string_empty() {
         let buf = create_string_buffer("");
         unsafe {
-            let result = cobhan_buffer_to_string(buf.as_ptr() as *const c_char);
+            let result = cobhan_buffer_to_string(buf.as_ptr().cast::<c_char>());
             assert!(result.is_ok());
-            assert_eq!(result.unwrap(), "");
+            assert_eq!(result.expect("should be ok"), "");
         }
     }
 
@@ -939,9 +946,9 @@ mod tests {
     fn test_buffer_to_string_unicode() {
         let buf = create_string_buffer("Hello, 世界! 🦀");
         unsafe {
-            let result = cobhan_buffer_to_string(buf.as_ptr() as *const c_char);
+            let result = cobhan_buffer_to_string(buf.as_ptr().cast::<c_char>());
             assert!(result.is_ok());
-            assert_eq!(result.unwrap(), "Hello, 世界! 🦀");
+            assert_eq!(result.expect("should be ok"), "Hello, 世界! 🦀");
         }
     }
 
@@ -950,9 +957,9 @@ mod tests {
         let invalid_utf8 = vec![0xFF, 0xFE, 0x00, 0x01];
         let buf = create_input_buffer(&invalid_utf8);
         unsafe {
-            let result = cobhan_buffer_to_string(buf.as_ptr() as *const c_char);
+            let result = cobhan_buffer_to_string(buf.as_ptr().cast::<c_char>());
             assert!(result.is_err());
-            assert_eq!(result.unwrap_err(), ERR_JSON_DECODE_FAILED);
+            assert_eq!(result.expect_err("should be err"), ERR_JSON_DECODE_FAILED);
         }
     }
 
@@ -961,7 +968,7 @@ mod tests {
         unsafe {
             let result = cobhan_buffer_to_string(ptr::null());
             assert!(result.is_err());
-            assert_eq!(result.unwrap_err(), ERR_NULL_PTR);
+            assert_eq!(result.expect_err("should be err"), ERR_NULL_PTR);
         }
     }
 
@@ -974,11 +981,7 @@ mod tests {
         let data = b"hello world";
         let mut buf = create_output_buffer(data.len() as i32);
         unsafe {
-            let result = cobhan_bytes_to_buffer(
-                data,
-                buf.as_mut_ptr() as *mut c_char,
-                data.len() as i32,
-            );
+            let result = cobhan_bytes_to_buffer(data, buf.as_mut_ptr().cast::<c_char>());
             assert_eq!(result, ERR_NONE);
             assert_eq!(get_buffer_length(&buf), data.len() as i32);
             assert_eq!(get_buffer_data(&buf), data);
@@ -990,11 +993,7 @@ mod tests {
         let data = b"";
         let mut buf = create_output_buffer(100);
         unsafe {
-            let result = cobhan_bytes_to_buffer(
-                data,
-                buf.as_mut_ptr() as *mut c_char,
-                100,
-            );
+            let result = cobhan_bytes_to_buffer(data, buf.as_mut_ptr().cast::<c_char>());
             assert_eq!(result, ERR_NONE);
             assert_eq!(get_buffer_length(&buf), 0);
         }
@@ -1005,11 +1004,7 @@ mod tests {
         let data = b"exactly fits";
         let mut buf = create_output_buffer(data.len() as i32);
         unsafe {
-            let result = cobhan_bytes_to_buffer(
-                data,
-                buf.as_mut_ptr() as *mut c_char,
-                data.len() as i32,
-            );
+            let result = cobhan_bytes_to_buffer(data, buf.as_mut_ptr().cast::<c_char>());
             assert_eq!(result, ERR_NONE);
             assert_eq!(get_buffer_data(&buf), data);
         }
@@ -1020,11 +1015,7 @@ mod tests {
         let data = b"this is too long for the buffer";
         let mut buf = create_output_buffer(10);
         unsafe {
-            let result = cobhan_bytes_to_buffer(
-                data,
-                buf.as_mut_ptr() as *mut c_char,
-                10,
-            );
+            let result = cobhan_bytes_to_buffer(data, buf.as_mut_ptr().cast::<c_char>());
             assert_eq!(result, ERR_BUFFER_TOO_SMALL);
         }
     }
@@ -1033,7 +1024,7 @@ mod tests {
     fn test_bytes_to_buffer_null_ptr() {
         let data = b"hello";
         unsafe {
-            let result = cobhan_bytes_to_buffer(data, ptr::null_mut(), 100);
+            let result = cobhan_bytes_to_buffer(data, ptr::null_mut());
             assert_eq!(result, ERR_NULL_PTR);
         }
     }
@@ -1043,11 +1034,7 @@ mod tests {
         let data: Vec<u8> = (0u8..=255).collect();
         let mut buf = create_output_buffer(data.len() as i32);
         unsafe {
-            let result = cobhan_bytes_to_buffer(
-                &data,
-                buf.as_mut_ptr() as *mut c_char,
-                data.len() as i32,
-            );
+            let result = cobhan_bytes_to_buffer(&data, buf.as_mut_ptr().cast::<c_char>());
             assert_eq!(result, ERR_NONE);
             assert_eq!(get_buffer_data(&buf), data.as_slice());
         }
@@ -1063,16 +1050,12 @@ mod tests {
         let mut buf = create_output_buffer(data.len() as i32);
 
         unsafe {
-            let write_result = cobhan_bytes_to_buffer(
-                data,
-                buf.as_mut_ptr() as *mut c_char,
-                data.len() as i32,
-            );
+            let write_result = cobhan_bytes_to_buffer(data, buf.as_mut_ptr().cast::<c_char>());
             assert_eq!(write_result, ERR_NONE);
 
-            let read_result = cobhan_buffer_to_bytes(buf.as_ptr() as *const c_char);
+            let read_result = cobhan_buffer_to_bytes(buf.as_ptr().cast::<c_char>());
             assert!(read_result.is_ok());
-            assert_eq!(read_result.unwrap(), data.to_vec());
+            assert_eq!(read_result.expect("should be ok"), data.to_vec());
         }
     }
 
@@ -1082,16 +1065,12 @@ mod tests {
         let mut buf = create_output_buffer(data.len() as i32);
 
         unsafe {
-            let write_result = cobhan_bytes_to_buffer(
-                &data,
-                buf.as_mut_ptr() as *mut c_char,
-                data.len() as i32,
-            );
+            let write_result = cobhan_bytes_to_buffer(&data, buf.as_mut_ptr().cast::<c_char>());
             assert_eq!(write_result, ERR_NONE);
 
-            let read_result = cobhan_buffer_to_bytes(buf.as_ptr() as *const c_char);
+            let read_result = cobhan_buffer_to_bytes(buf.as_ptr().cast::<c_char>());
             assert!(read_result.is_ok());
-            assert_eq!(read_result.unwrap(), data);
+            assert_eq!(read_result.expect("should be ok"), data);
         }
     }
 
@@ -1105,9 +1084,9 @@ mod tests {
         let buf = create_string_buffer(json);
         unsafe {
             let result: Result<HashMap<String, String>, i32> =
-                cobhan_buffer_to_json(buf.as_ptr() as *const c_char);
+                cobhan_buffer_to_json(buf.as_ptr().cast::<c_char>());
             assert!(result.is_ok());
-            let map = result.unwrap();
+            let map = result.expect("should be ok");
             assert_eq!(map.get("key"), Some(&"value".to_string()));
         }
     }
@@ -1125,10 +1104,9 @@ mod tests {
         }
 
         unsafe {
-            let result: Result<TestObj, i32> =
-                cobhan_buffer_to_json(buf.as_ptr() as *const c_char);
+            let result: Result<TestObj, i32> = cobhan_buffer_to_json(buf.as_ptr().cast::<c_char>());
             assert!(result.is_ok());
-            let obj = result.unwrap();
+            let obj = result.expect("should be ok");
             assert_eq!(obj.name, "test");
             assert_eq!(obj.count, 42);
             assert!(obj.active);
@@ -1141,34 +1119,30 @@ mod tests {
         let buf = create_string_buffer(invalid_json);
         unsafe {
             let result: Result<HashMap<String, String>, i32> =
-                cobhan_buffer_to_json(buf.as_ptr() as *const c_char);
+                cobhan_buffer_to_json(buf.as_ptr().cast::<c_char>());
             assert!(result.is_err());
-            assert_eq!(result.unwrap_err(), ERR_JSON_DECODE_FAILED);
+            assert_eq!(result.expect_err("should be err"), ERR_JSON_DECODE_FAILED);
         }
     }
 
     #[test]
     fn test_buffer_to_json_null_ptr() {
         unsafe {
-            let result: Result<HashMap<String, String>, i32> =
-                cobhan_buffer_to_json(ptr::null());
+            let result: Result<HashMap<String, String>, i32> = cobhan_buffer_to_json(ptr::null());
             assert!(result.is_err());
-            assert_eq!(result.unwrap_err(), ERR_NULL_PTR);
+            assert_eq!(result.expect_err("should be err"), ERR_NULL_PTR);
         }
     }
 
     #[test]
     fn test_json_to_buffer_simple() {
-        let map: HashMap<String, String> =
-            [("key".to_string(), "value".to_string())].into_iter().collect();
+        let map: HashMap<String, String> = [("key".to_string(), "value".to_string())]
+            .into_iter()
+            .collect();
         let mut buf = create_output_buffer(100);
 
         unsafe {
-            let result = cobhan_json_to_buffer(
-                &map,
-                buf.as_mut_ptr() as *mut c_char,
-                100,
-            );
+            let result = cobhan_json_to_buffer(&map, buf.as_mut_ptr().cast::<c_char>());
             assert_eq!(result, ERR_NONE);
 
             let json_str = get_buffer_string(&buf);
@@ -1185,41 +1159,31 @@ mod tests {
         let mut buf = create_output_buffer(10);
 
         unsafe {
-            let result = cobhan_json_to_buffer(
-                &large_map,
-                buf.as_mut_ptr() as *mut c_char,
-                10,
-            );
+            let result = cobhan_json_to_buffer(&large_map, buf.as_mut_ptr().cast::<c_char>());
             assert_eq!(result, ERR_BUFFER_TOO_SMALL);
         }
     }
 
     // ========================================================================
-    // Int64 Buffer Tests
+    // Scalar Buffer Tests (int64/int32 - no header, raw value at offset 0)
     // ========================================================================
 
     #[test]
     fn test_int64_to_buffer_positive() {
-        let mut buf = create_output_buffer(8);
+        let mut buf = create_scalar_buffer();
         unsafe {
-            let result = cobhan_int64_to_buffer(
-                1234567890123_i64,
-                buf.as_mut_ptr() as *mut c_char,
-            );
+            let result =
+                cobhan_int64_to_buffer(1234567890123_i64, buf.as_mut_ptr().cast::<c_char>());
             assert_eq!(result, ERR_NONE);
-            assert_eq!(get_buffer_length(&buf), 8);
             assert_eq!(get_buffer_i64(&buf), 1234567890123_i64);
         }
     }
 
     #[test]
     fn test_int64_to_buffer_negative() {
-        let mut buf = create_output_buffer(8);
+        let mut buf = create_scalar_buffer();
         unsafe {
-            let result = cobhan_int64_to_buffer(
-                -9876543210_i64,
-                buf.as_mut_ptr() as *mut c_char,
-            );
+            let result = cobhan_int64_to_buffer(-9876543210_i64, buf.as_mut_ptr().cast::<c_char>());
             assert_eq!(result, ERR_NONE);
             assert_eq!(get_buffer_i64(&buf), -9876543210_i64);
         }
@@ -1227,9 +1191,9 @@ mod tests {
 
     #[test]
     fn test_int64_to_buffer_zero() {
-        let mut buf = create_output_buffer(8);
+        let mut buf = create_scalar_buffer();
         unsafe {
-            let result = cobhan_int64_to_buffer(0, buf.as_mut_ptr() as *mut c_char);
+            let result = cobhan_int64_to_buffer(0, buf.as_mut_ptr().cast::<c_char>());
             assert_eq!(result, ERR_NONE);
             assert_eq!(get_buffer_i64(&buf), 0);
         }
@@ -1237,12 +1201,9 @@ mod tests {
 
     #[test]
     fn test_int64_to_buffer_max() {
-        let mut buf = create_output_buffer(8);
+        let mut buf = create_scalar_buffer();
         unsafe {
-            let result = cobhan_int64_to_buffer(
-                i64::MAX,
-                buf.as_mut_ptr() as *mut c_char,
-            );
+            let result = cobhan_int64_to_buffer(i64::MAX, buf.as_mut_ptr().cast::<c_char>());
             assert_eq!(result, ERR_NONE);
             assert_eq!(get_buffer_i64(&buf), i64::MAX);
         }
@@ -1250,12 +1211,9 @@ mod tests {
 
     #[test]
     fn test_int64_to_buffer_min() {
-        let mut buf = create_output_buffer(8);
+        let mut buf = create_scalar_buffer();
         unsafe {
-            let result = cobhan_int64_to_buffer(
-                i64::MIN,
-                buf.as_mut_ptr() as *mut c_char,
-            );
+            let result = cobhan_int64_to_buffer(i64::MIN, buf.as_mut_ptr().cast::<c_char>());
             assert_eq!(result, ERR_NONE);
             assert_eq!(get_buffer_i64(&buf), i64::MIN);
         }
@@ -1269,20 +1227,14 @@ mod tests {
         }
     }
 
-    // ========================================================================
-    // Int32 Buffer Tests
-    // ========================================================================
-
     #[test]
     fn test_int32_to_buffer_positive() {
-        let mut buf = create_output_buffer(4);
+        let mut buf = vec![0u8; 4];
         unsafe {
-            let result = cobhan_int32_to_buffer(
-                123456,
-                buf.as_mut_ptr() as *mut c_char,
-            );
+            let result = cobhan_int32_to_buffer(123456, buf.as_mut_ptr().cast::<c_char>());
             assert_eq!(result, ERR_NONE);
-            assert_eq!(get_buffer_length(&buf), 4);
+            let value = i32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]);
+            assert_eq!(value, 123456);
         }
     }
 
@@ -1302,29 +1254,27 @@ mod tests {
     fn test_estimate_buffer_small_data() {
         let estimate = EstimateBuffer(10, 10);
         assert!(estimate > 10, "Estimate should be larger than data length");
-        assert!(estimate >= BUFFER_HEADER_SIZE + 256, "Should include minimum overhead");
     }
 
     #[test]
     fn test_estimate_buffer_medium_data() {
         let estimate = EstimateBuffer(1000, 50);
-        // Base64 encoding expands data by ~33%
-        let min_expected = (1000 * 4 / 3) + BUFFER_HEADER_SIZE;
-        assert!(estimate > min_expected, "Should account for base64 expansion");
+        assert!(estimate > 1000, "Should be larger than data length");
     }
 
     #[test]
     fn test_estimate_buffer_large_data() {
         let estimate = EstimateBuffer(100_000, 100);
-        let min_expected = (100_000 * 4 / 3) + BUFFER_HEADER_SIZE;
-        assert!(estimate > min_expected, "Should handle large data");
+        assert!(estimate > 100_000, "Should handle large data");
     }
 
     #[test]
     fn test_estimate_buffer_zero_data() {
         let estimate = EstimateBuffer(0, 10);
-        assert!(estimate > 0, "Should return positive estimate even for zero data");
-        assert!(estimate >= 256, "Should include minimum overhead");
+        assert!(
+            estimate > 0,
+            "Should return positive estimate even for zero data"
+        );
     }
 
     #[test]
@@ -1345,7 +1295,6 @@ mod tests {
 
     #[test]
     fn test_estimate_buffer_consistent() {
-        // Same inputs should produce same output
         let e1 = EstimateBuffer(500, 25);
         let e2 = EstimateBuffer(500, 25);
         assert_eq!(e1, e2, "EstimateBuffer should be deterministic");
@@ -1353,7 +1302,6 @@ mod tests {
 
     #[test]
     fn test_estimate_buffer_monotonic_with_data() {
-        // Larger data should produce larger or equal estimate
         let e1 = EstimateBuffer(100, 20);
         let e2 = EstimateBuffer(200, 20);
         let e3 = EstimateBuffer(300, 20);
@@ -1362,7 +1310,7 @@ mod tests {
     }
 
     // ========================================================================
-    // SetEnv Tests (using null pointer - no factory needed)
+    // SetEnv Tests
     // ========================================================================
 
     #[test]
@@ -1377,7 +1325,7 @@ mod tests {
     fn test_set_env_invalid_json() {
         let buf = create_string_buffer("not json");
         unsafe {
-            let result = SetEnv(buf.as_ptr() as *const c_char);
+            let result = SetEnv(buf.as_ptr().cast::<c_char>());
             assert_eq!(result, ERR_JSON_DECODE_FAILED);
         }
     }
@@ -1386,7 +1334,7 @@ mod tests {
     fn test_set_env_empty_object() {
         let buf = create_string_buffer("{}");
         unsafe {
-            let result = SetEnv(buf.as_ptr() as *const c_char);
+            let result = SetEnv(buf.as_ptr().cast::<c_char>());
             assert_eq!(result, ERR_NONE);
         }
     }
@@ -1397,17 +1345,18 @@ mod tests {
         let json = format!(r#"{{"{unique_key}": "test_value"}}"#);
         let buf = create_string_buffer(&json);
 
-        // Ensure variable doesn't exist
         std::env::remove_var(&unique_key);
 
         unsafe {
-            let result = SetEnv(buf.as_ptr() as *const c_char);
+            let result = SetEnv(buf.as_ptr().cast::<c_char>());
             assert_eq!(result, ERR_NONE);
         }
 
-        assert_eq!(std::env::var(&unique_key).ok(), Some("test_value".to_string()));
+        assert_eq!(
+            std::env::var(&unique_key).ok(),
+            Some("test_value".to_string())
+        );
 
-        // Cleanup
         std::env::remove_var(&unique_key);
     }
 
@@ -1420,20 +1369,19 @@ mod tests {
         let buf = create_string_buffer(&json);
 
         unsafe {
-            let result = SetEnv(buf.as_ptr() as *const c_char);
+            let result = SetEnv(buf.as_ptr().cast::<c_char>());
             assert_eq!(result, ERR_NONE);
         }
 
         assert_eq!(std::env::var(&key1).ok(), Some("value1".to_string()));
         assert_eq!(std::env::var(&key2).ok(), Some("value2".to_string()));
 
-        // Cleanup
         std::env::remove_var(&key1);
         std::env::remove_var(&key2);
     }
 
     // ========================================================================
-    // SetupJson Tests (null pointer checks only - no factory initialization)
+    // SetupJson Tests
     // ========================================================================
 
     #[test]
@@ -1445,7 +1393,7 @@ mod tests {
     }
 
     // ========================================================================
-    // Encrypt/Decrypt Null Pointer Tests (no factory needed)
+    // Encrypt/Decrypt Null Pointer Tests
     // ========================================================================
 
     #[test]
@@ -1453,19 +1401,19 @@ mod tests {
         let data = create_input_buffer(b"test");
         let mut out1 = create_output_buffer(1000);
         let mut out2 = create_output_buffer(1000);
-        let mut out3 = create_output_buffer(8);
+        let mut out3 = create_scalar_buffer();
         let mut out4 = create_output_buffer(100);
-        let mut out5 = create_output_buffer(8);
+        let mut out5 = create_scalar_buffer();
 
         unsafe {
             let result = Encrypt(
                 ptr::null(),
-                data.as_ptr() as *const c_char,
-                out1.as_mut_ptr() as *mut c_char,
-                out2.as_mut_ptr() as *mut c_char,
-                out3.as_mut_ptr() as *mut c_char,
-                out4.as_mut_ptr() as *mut c_char,
-                out5.as_mut_ptr() as *mut c_char,
+                data.as_ptr().cast::<c_char>(),
+                out1.as_mut_ptr().cast::<c_char>(),
+                out2.as_mut_ptr().cast::<c_char>(),
+                out3.as_mut_ptr().cast::<c_char>(),
+                out4.as_mut_ptr().cast::<c_char>(),
+                out5.as_mut_ptr().cast::<c_char>(),
             );
             assert_eq!(result, ERR_NULL_PTR);
         }
@@ -1476,19 +1424,19 @@ mod tests {
         let partition = create_string_buffer("partition");
         let mut out1 = create_output_buffer(1000);
         let mut out2 = create_output_buffer(1000);
-        let mut out3 = create_output_buffer(8);
+        let mut out3 = create_scalar_buffer();
         let mut out4 = create_output_buffer(100);
-        let mut out5 = create_output_buffer(8);
+        let mut out5 = create_scalar_buffer();
 
         unsafe {
             let result = Encrypt(
-                partition.as_ptr() as *const c_char,
+                partition.as_ptr().cast::<c_char>(),
                 ptr::null(),
-                out1.as_mut_ptr() as *mut c_char,
-                out2.as_mut_ptr() as *mut c_char,
-                out3.as_mut_ptr() as *mut c_char,
-                out4.as_mut_ptr() as *mut c_char,
-                out5.as_mut_ptr() as *mut c_char,
+                out1.as_mut_ptr().cast::<c_char>(),
+                out2.as_mut_ptr().cast::<c_char>(),
+                out3.as_mut_ptr().cast::<c_char>(),
+                out4.as_mut_ptr().cast::<c_char>(),
+                out5.as_mut_ptr().cast::<c_char>(),
             );
             assert_eq!(result, ERR_NULL_PTR);
         }
@@ -1500,10 +1448,9 @@ mod tests {
         let data = create_input_buffer(b"test");
 
         unsafe {
-            // Test each output being null
             let result = Encrypt(
-                partition.as_ptr() as *const c_char,
-                data.as_ptr() as *const c_char,
+                partition.as_ptr().cast::<c_char>(),
+                data.as_ptr().cast::<c_char>(),
                 ptr::null_mut(),
                 ptr::null_mut(),
                 ptr::null_mut(),
@@ -1522,12 +1469,12 @@ mod tests {
         unsafe {
             let result = Decrypt(
                 ptr::null(),
-                partition.as_ptr() as *const c_char,
-                partition.as_ptr() as *const c_char,
+                partition.as_ptr().cast::<c_char>(),
+                partition.as_ptr().cast::<c_char>(),
                 0,
-                partition.as_ptr() as *const c_char,
+                partition.as_ptr().cast::<c_char>(),
                 0,
-                output.as_mut_ptr() as *mut c_char,
+                output.as_mut_ptr().cast::<c_char>(),
             );
             assert_eq!(result, ERR_NULL_PTR);
         }
@@ -1540,26 +1487,23 @@ mod tests {
         let mut output = create_output_buffer(1000);
 
         unsafe {
-            // Null partition
             let result = EncryptToJson(
                 ptr::null(),
-                data.as_ptr() as *const c_char,
-                output.as_mut_ptr() as *mut c_char,
+                data.as_ptr().cast::<c_char>(),
+                output.as_mut_ptr().cast::<c_char>(),
             );
             assert_eq!(result, ERR_NULL_PTR);
 
-            // Null data
             let result = EncryptToJson(
-                partition.as_ptr() as *const c_char,
+                partition.as_ptr().cast::<c_char>(),
                 ptr::null(),
-                output.as_mut_ptr() as *mut c_char,
+                output.as_mut_ptr().cast::<c_char>(),
             );
             assert_eq!(result, ERR_NULL_PTR);
 
-            // Null output
             let result = EncryptToJson(
-                partition.as_ptr() as *const c_char,
-                data.as_ptr() as *const c_char,
+                partition.as_ptr().cast::<c_char>(),
+                data.as_ptr().cast::<c_char>(),
                 ptr::null_mut(),
             );
             assert_eq!(result, ERR_NULL_PTR);
@@ -1573,26 +1517,23 @@ mod tests {
         let mut output = create_output_buffer(1000);
 
         unsafe {
-            // Null partition
             let result = DecryptFromJson(
                 ptr::null(),
-                json.as_ptr() as *const c_char,
-                output.as_mut_ptr() as *mut c_char,
+                json.as_ptr().cast::<c_char>(),
+                output.as_mut_ptr().cast::<c_char>(),
             );
             assert_eq!(result, ERR_NULL_PTR);
 
-            // Null json
             let result = DecryptFromJson(
-                partition.as_ptr() as *const c_char,
+                partition.as_ptr().cast::<c_char>(),
                 ptr::null(),
-                output.as_mut_ptr() as *mut c_char,
+                output.as_mut_ptr().cast::<c_char>(),
             );
             assert_eq!(result, ERR_NULL_PTR);
 
-            // Null output
             let result = DecryptFromJson(
-                partition.as_ptr() as *const c_char,
-                json.as_ptr() as *const c_char,
+                partition.as_ptr().cast::<c_char>(),
+                json.as_ptr().cast::<c_char>(),
                 ptr::null_mut(),
             );
             assert_eq!(result, ERR_NULL_PTR);
@@ -1605,9 +1546,7 @@ mod tests {
 
     #[test]
     fn test_shutdown_is_safe() {
-        // Shutdown should be safe to call even without initialization
         Shutdown();
-        // And safe to call multiple times
         Shutdown();
         Shutdown();
     }

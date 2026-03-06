@@ -88,10 +88,8 @@ fn rust_decrypt(w: &mut World, expect: String) {
     // Build factory/session with StaticKMS master key
     let crypto = Arc::new(ael::aead::AES256GCM::new());
     // Use StaticKMS with the provided master key (hex)
-    let kms = Arc::new(ael::kms::StaticKMS::new(
-        crypto.clone(),
-        hex_to_bytes(&w.master_hex),
-    ).unwrap());
+    let kms =
+        Arc::new(ael::kms::StaticKMS::new(crypto.clone(), hex_to_bytes(&w.master_hex)).unwrap());
     let cfg = ael::Config::new(&w.service, &w.product);
     let f = ael::api::new_session_factory(cfg, store, kms, crypto);
     let s = f.get_session(&w.partition);
@@ -103,10 +101,8 @@ fn rust_decrypt(w: &mut World, expect: String) {
 fn rust_encrypt(w: &mut World, payload: String) {
     let store = create_store();
     let crypto = Arc::new(ael::aead::AES256GCM::new());
-    let kms = Arc::new(ael::kms::StaticKMS::new(
-        crypto.clone(),
-        hex_to_bytes(&w.master_hex),
-    ).unwrap());
+    let kms =
+        Arc::new(ael::kms::StaticKMS::new(crypto.clone(), hex_to_bytes(&w.master_hex)).unwrap());
     let cfg = ael::Config::new(&w.service, &w.product);
     let f = ael::api::new_session_factory(cfg, store.clone(), kms, crypto);
     let s = f.get_session(&w.partition);

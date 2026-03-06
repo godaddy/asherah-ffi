@@ -90,7 +90,7 @@ mod tests {
             }),
             data: vec![4, 5, 6],
         };
-        let json = serde_json::to_string(&record).unwrap();
+        let json = serde_json::to_string(&record).expect("serialization should succeed");
         assert!(json.contains("\"Data\":\""), "data not base64: {json}");
         assert!(json.contains("\"Key\":\""), "key not base64: {json}");
     }

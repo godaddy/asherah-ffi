@@ -6,7 +6,7 @@ use std::sync::Arc;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(not(feature = "sqlite"))]
     {
-        return Err("Enable with --features sqlite".into());
+        Err("Enable with --features sqlite".into())
     }
     #[cfg(feature = "sqlite")]
     {
@@ -14,7 +14,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let store = Arc::new(ael::metastore_sqlite::SqliteMetastore::open(":memory:")?);
 
         let crypto = Arc::new(ael::aead::AES256GCM::new());
-        let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![9_u8; 32]).unwrap());
+        let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![9_u8; 32])?);
+
         let cfg = ael::Config::new("svc", "prod");
 
         let factory =

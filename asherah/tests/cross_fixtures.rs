@@ -32,10 +32,9 @@ fn cross_language_fixtures_if_present() {
             let master = v.get("master_hex").and_then(|x| x.as_str()).unwrap_or("00");
             // Build components
             let crypto = std::sync::Arc::new(ael::aead::AES256GCM::new());
-            let kms = std::sync::Arc::new(ael::kms::StaticKMS::new(
-                crypto.clone(),
-                hex_to_bytes(master),
-            ).unwrap());
+            let kms = std::sync::Arc::new(
+                ael::kms::StaticKMS::new(crypto.clone(), hex_to_bytes(master)).unwrap(),
+            );
             let store = std::sync::Arc::new(ael::metastore::InMemoryMetastore::new());
             // Load metastore records if provided
             if let Some(arr) = v.get("metastore").and_then(|x| x.as_array()) {
@@ -43,10 +42,10 @@ fn cross_language_fixtures_if_present() {
                     let mut ekr: ael::EnvelopeKeyRecord =
                         serde_json::from_value(item.clone()).unwrap();
                     // In-memory key under test expects an id; fill if omitted
-                    if ekr.parent_key_meta.is_none() {
-                        ekr.id = "_SK_fixture".into();
+                    if let Some(ref parent) = ekr.parent_key_meta {
+                        ekr.id = parent.id.clone();
                     } else {
-                        ekr.id = ekr.parent_key_meta.as_ref().unwrap().id.clone();
+                        ekr.id = "_SK_fixture".into();
                     }
                     store.store(&ekr.id, ekr.created, &ekr).unwrap();
                 }

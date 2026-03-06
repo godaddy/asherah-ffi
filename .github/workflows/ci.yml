@@ -306,8 +306,8 @@ jobs:
       - name: Package FFI artifacts (x86_64)
         run: |
           mkdir -p artifacts/x86_64/ffi artifacts/x86_64/ruby
-          find target/release -name 'libasherah_ffi.*' -type f -exec cp {} artifacts/x86_64/ffi/ \;
-          find target/release -name 'libasherah_ffi.*' -type f -exec cp {} artifacts/x86_64/ruby/ \;
+          find target/release -name 'libasherah_ffi.*' -type f ! -name '*.d' -exec cp {} artifacts/x86_64/ffi/ \;
+          find target/release -name 'libasherah_ffi.*' -type f ! -name '*.d' -exec cp {} artifacts/x86_64/ruby/ \;
       - name: Upload x86_64 ffi artifact
         uses: actions/upload-artifact@v4
         with:
@@ -856,8 +856,8 @@ jobs:
       - name: Package FFI artifacts (arm64)
         run: |
           mkdir -p artifacts/aarch64/ffi artifacts/aarch64/ruby
-          find target -name 'libasherah_ffi.*' -type f -exec cp {} artifacts/aarch64/ffi/ \;
-          find target -name 'libasherah_ffi.*' -type f -exec cp {} artifacts/aarch64/ruby/ \;
+          find target -name 'libasherah_ffi.*' -type f ! -name '*.d' -exec cp {} artifacts/aarch64/ffi/ \;
+          find target -name 'libasherah_ffi.*' -type f ! -name '*.d' -exec cp {} artifacts/aarch64/ruby/ \;
       - name: Upload FFI artifact
         uses: actions/upload-artifact@v4
         with:
