@@ -1,5 +1,11 @@
 #![allow(unsafe_code)]
 
+// Link in asherah-cobhan to export its Cobhan-compatible symbols
+// (SetupJson, Shutdown, SetEnv, EstimateBuffer, Encrypt, Decrypt,
+// EncryptToJson, DecryptFromJson) from this shared library.
+#[allow(unused_extern_crates)]
+extern crate asherah_cobhan;
+
 use std::ffi::{CStr, CString};
 use std::fmt;
 use std::mem::ManuallyDrop;

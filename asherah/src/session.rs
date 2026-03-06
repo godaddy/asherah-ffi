@@ -350,30 +350,27 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     PublicFactory<A, K, M>
 {
     pub fn new(cfg: Config, metastore: Arc<M>, kms: Arc<K>, crypto: Arc<A>) -> Self {
-        let shared = if cfg.policy.shared_intermediate_key_cache && cfg.policy.cache_intermediate_keys
-        {
-            let policy = CachePolicy::parse(
-                &cfg.policy.intermediate_key_cache_eviction_policy,
-                CachePolicy::Simple,
-            );
-            let cache: Arc<dyn KeyCacher> = Arc::new(SimpleKeyCache::new_with_policy(
-                cfg.policy.revoke_check_interval_s,
-                cfg.policy.intermediate_key_cache_max_size,
-                policy,
-                cfg.policy.expire_key_after_s,
-            ));
-            Some(cache)
-        } else {
-            None
-        };
+        let shared =
+            if cfg.policy.shared_intermediate_key_cache && cfg.policy.cache_intermediate_keys {
+                let policy = CachePolicy::parse(
+                    &cfg.policy.intermediate_key_cache_eviction_policy,
+                    CachePolicy::Simple,
+                );
+                let cache: Arc<dyn KeyCacher> = Arc::new(SimpleKeyCache::new_with_policy(
+                    cfg.policy.revoke_check_interval_s,
+                    cfg.policy.intermediate_key_cache_max_size,
+                    policy,
+                    cfg.policy.expire_key_after_s,
+                ));
+                Some(cache)
+            } else {
+                None
+            };
         let sess_cache = if cfg.policy.cache_sessions {
             Some(SessionCache::new(
                 cfg.policy.session_cache_max_size,
                 cfg.policy.session_cache_ttl_s,
-                CachePolicy::parse(
-                    &cfg.policy.session_cache_eviction_policy,
-                    CachePolicy::Slru,
-                ),
+                CachePolicy::parse(&cfg.policy.session_cache_eviction_policy, CachePolicy::Slru),
             ))
         } else {
             None
@@ -561,7 +558,10 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                 created: sk.created(),
             }),
         };
-        let stored = self.metastore.store(&ekr.id, ekr.created, &ekr).unwrap_or(false);
+        let stored = self
+            .metastore
+            .store(&ekr.id, ekr.created, &ekr)
+            .unwrap_or(false);
         if stored {
             return Ok(Arc::new(ik));
         }
@@ -580,7 +580,9 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                 return Ok(Arc::new(ik2));
             }
         }
-        Err(anyhow::anyhow!("error loading intermediate key from metastore after retry"))
+        Err(anyhow::anyhow!(
+            "error loading intermediate key from metastore after retry"
+        ))
     }
 
     fn load_latest_or_create_intermediate_key(&self) -> anyhow::Result<Arc<CryptoKey>> {

@@ -19,7 +19,6 @@ pub enum CachePolicy {
 impl CachePolicy {
     pub fn parse(s: &str, default: CachePolicy) -> CachePolicy {
         match s.to_ascii_lowercase().as_str() {
-            "" => default,
             "simple" => CachePolicy::Simple,
             "lru" => CachePolicy::Lru,
             "lfu" => CachePolicy::Lfu,
@@ -125,50 +124,7 @@ impl SimpleKeyCache {
     pub fn new() -> Self {
         Self::new_with_ttl(60 * 60)
     }
-}
 
-impl Default for SimpleKeyCache {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl KeyCacher for SimpleKeyCache {
-    fn get_or_load_latest(
-        &self,
-        id: &str,
-        loader: &mut dyn FnMut() -> anyhow::Result<Arc<CryptoKey>>,
-    ) -> anyhow::Result<Arc<CryptoKey>> {
-        if let Some((v, expired, invalid)) = self.get_latest_if_fresh(id) {
-            if !expired && !invalid {
-                crate::metrics::record_cache_hit("latest");
-                return Ok(v);
-            }
-        }
-        crate::metrics::record_cache_miss("latest");
-        let v = loader()?;
-        self.insert_latest(id, v.clone());
-        Ok(v)
-    }
-    fn get_or_load(
-        &self,
-        meta: &KeyMeta,
-        loader: &mut dyn FnMut() -> anyhow::Result<Arc<CryptoKey>>,
-    ) -> anyhow::Result<Arc<CryptoKey>> {
-        if let Some((v, expired)) = self.get_meta_if_fresh(meta) {
-            if !expired {
-                crate::metrics::record_cache_hit("meta");
-                return Ok(v);
-            }
-        }
-        crate::metrics::record_cache_miss("meta");
-        let v = loader()?;
-        self.insert_meta(meta, v.clone());
-        Ok(v)
-    }
-}
-
-impl SimpleKeyCache {
     fn next_access(&self) -> u64 {
         self.access_ctr.fetch_add(1, Ordering::Relaxed) + 1
     }
@@ -193,59 +149,44 @@ impl SimpleKeyCache {
 
     fn get_latest_if_fresh(&self, id: &str) -> Option<(Arc<CryptoKey>, bool, bool)> {
         let latest = { self.latest.lock().get(id).cloned() };
-        let meta = match latest {
-            Some(m) => m,
-            None => return None,
-        };
+        let meta = latest?;
         let key = (meta.id.clone(), meta.created);
         let mut map = self.by_meta.lock();
-        if map.contains_key(&key) {
-            let (key_ref, expired, invalid, promote) = {
-                let entry = map.get_mut(&key).expect("entry present");
-                let expired = self.is_expired(entry.loaded_at);
-                let invalid = self.is_invalid(&entry.key);
-                entry.last_access = self.next_access();
-                entry.freq = entry.freq.saturating_add(1);
-                let promote =
-                    self.policy == CachePolicy::Slru && entry.segment == Segment::Probationary;
-                if promote {
-                    entry.segment = Segment::Protected;
-                }
-                (entry.key.clone(), expired, invalid, promote)
-            };
-            if promote {
-                self.slru_rebalance(&mut map);
-            }
-            return Some((key_ref, expired, invalid));
+        let entry = map.get_mut(&key)?;
+        let expired = self.is_expired(entry.loaded_at);
+        let invalid = self.is_invalid(&entry.key);
+        entry.last_access = self.next_access();
+        entry.freq = entry.freq.saturating_add(1);
+        let promote = self.policy == CachePolicy::Slru && entry.segment == Segment::Probationary;
+        if promote {
+            entry.segment = Segment::Protected;
         }
-        None
+        let key_ref = entry.key.clone();
+        if promote {
+            self.slru_rebalance(&mut map);
+        }
+        Some((key_ref, expired, invalid))
     }
 
     fn get_meta_if_fresh(&self, meta: &KeyMeta) -> Option<(Arc<CryptoKey>, bool)> {
         let key = (meta.id.clone(), meta.created);
         let mut map = self.by_meta.lock();
-        if map.contains_key(&key) {
-            let (key_ref, expired, promote) = {
-                let entry = map.get_mut(&key).expect("entry present");
-                let mut expired = self.is_expired(entry.loaded_at);
-                if entry.key.revoked() {
-                    expired = false;
-                }
-                entry.last_access = self.next_access();
-                entry.freq = entry.freq.saturating_add(1);
-                let promote =
-                    self.policy == CachePolicy::Slru && entry.segment == Segment::Probationary;
-                if promote {
-                    entry.segment = Segment::Protected;
-                }
-                (entry.key.clone(), expired, promote)
-            };
-            if promote {
-                self.slru_rebalance(&mut map);
-            }
-            return Some((key_ref, expired));
+        let entry = map.get_mut(&key)?;
+        let mut expired = self.is_expired(entry.loaded_at);
+        if entry.key.revoked() {
+            expired = false;
         }
-        None
+        entry.last_access = self.next_access();
+        entry.freq = entry.freq.saturating_add(1);
+        let promote = self.policy == CachePolicy::Slru && entry.segment == Segment::Probationary;
+        if promote {
+            entry.segment = Segment::Protected;
+        }
+        let key_ref = entry.key.clone();
+        if promote {
+            self.slru_rebalance(&mut map);
+        }
+        Some((key_ref, expired))
     }
 
     fn insert_latest(&self, id: &str, key: Arc<CryptoKey>) {
@@ -371,10 +312,51 @@ impl SimpleKeyCache {
         }
         let threshold = std::cmp::max(1, self.max as u64 * 10);
         let n = self.decay_ctr.fetch_add(1, Ordering::Relaxed) + 1;
-        if n % threshold == 0 {
+        if n.is_multiple_of(threshold) {
             for v in map.values_mut() {
                 v.freq = std::cmp::max(1, v.freq / 2);
             }
         }
+    }
+}
+
+impl Default for SimpleKeyCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl KeyCacher for SimpleKeyCache {
+    fn get_or_load_latest(
+        &self,
+        id: &str,
+        loader: &mut dyn FnMut() -> anyhow::Result<Arc<CryptoKey>>,
+    ) -> anyhow::Result<Arc<CryptoKey>> {
+        if let Some((v, expired, invalid)) = self.get_latest_if_fresh(id) {
+            if !expired && !invalid {
+                crate::metrics::record_cache_hit("latest");
+                return Ok(v);
+            }
+        }
+        crate::metrics::record_cache_miss("latest");
+        let v = loader()?;
+        self.insert_latest(id, v.clone());
+        Ok(v)
+    }
+    fn get_or_load(
+        &self,
+        meta: &KeyMeta,
+        loader: &mut dyn FnMut() -> anyhow::Result<Arc<CryptoKey>>,
+    ) -> anyhow::Result<Arc<CryptoKey>> {
+        if let Some((v, expired)) = self.get_meta_if_fresh(meta) {
+            if !expired {
+                crate::metrics::record_cache_hit("meta");
+                return Ok(v);
+            }
+        }
+        crate::metrics::record_cache_miss("meta");
+        let v = loader()?;
+        self.insert_meta(meta, v.clone());
+        Ok(v)
     }
 }

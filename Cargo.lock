@@ -167,7 +167,6 @@ dependencies = [
  "asherah",
  "asherah-cobhan",
  "asherah-config",
- "base64 0.22.1",
  "serde",
  "serde_json",
 ]
@@ -188,6 +187,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "asherah",
+ "asherah-cobhan",
  "asherah-config",
  "serde_json",
 ]
