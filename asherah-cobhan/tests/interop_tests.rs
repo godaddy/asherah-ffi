@@ -12,7 +12,7 @@ use std::os::raw::c_char;
 
 use asherah_cobhan::test_helpers::*;
 use asherah_cobhan::{
-    Decrypt, DecryptFromJson, Encrypt, EncryptToJson, EstimateBuffer, SetEnv, SetupJson, Shutdown,
+    Decrypt, DecryptFromJson, Encrypt, EncryptToJson, EstimateBuffer, SetEnv, SetupJson,
 };
 
 // ============================================================================
@@ -542,8 +542,8 @@ fn test_exported_symbols_exist() {
     // These functions must exist and be callable
     // (We're testing by actually calling them, which proves they're exported)
 
-    // Shutdown can be called without initialization
-    Shutdown();
+    // NOTE: Shutdown() is NOT called here because it runs in parallel
+    // with other tests and would tear down the shared factory.
 
     // SetEnv with empty JSON
     let empty_json = create_string_buffer("{}");
