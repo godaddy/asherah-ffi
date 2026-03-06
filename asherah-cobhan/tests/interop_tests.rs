@@ -12,7 +12,7 @@ use std::os::raw::c_char;
 
 use asherah_cobhan::test_helpers::*;
 use asherah_cobhan::{
-    Decrypt, DecryptFromJson, Encrypt, EncryptToJson, EstimateBuffer, SetEnv, SetupJson,
+    Decrypt, DecryptFromJson, Encrypt, EncryptToJson, EstimateBuffer, SetEnv, SetupJson, Shutdown,
 };
 
 // ============================================================================

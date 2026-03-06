@@ -312,8 +312,7 @@ impl SimpleKeyCache {
         }
         let threshold = std::cmp::max(1, self.max as u64 * 10);
         let n = self.decay_ctr.fetch_add(1, Ordering::Relaxed) + 1;
-        #[allow(clippy::manual_is_multiple_of)]
-        if n % threshold == 0 {
+        if n.is_multiple_of(threshold) {
             for v in map.values_mut() {
                 v.freq = std::cmp::max(1, v.freq / 2);
             }
