@@ -80,7 +80,7 @@ jobs:
       - name: Verify Docker availability
         run: docker version
       - name: Run integration tests (MySQL, Postgres, DynamoDB, KMS via containers)
-        run: cargo test -p asherah --features mysql,postgres,dynamodb --test integration_containers -- --test-threads=1
+        run: cargo +1.88.0 test -p asherah --features mysql,postgres,dynamodb --test integration_containers -- --test-threads=1
 
   build-rlib-x86_64:
     runs-on: ubuntu-latest
