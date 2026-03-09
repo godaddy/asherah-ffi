@@ -49,3 +49,8 @@ path = "tests/integration_tests.rs"
 [[test]]
 name = "uninitialized_tests"
 path = "tests/uninitialized_tests.rs"
+
+[[test]]
+name = "config_options_tests"
+path = "tests/config_options_tests.rs"
+harness = false

@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::os::raw::c_char;
 use std::ptr;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::RwLock;
 
 use asherah::session::PublicFactory;
@@ -30,6 +30,81 @@ type Factory = PublicFactory<AES256GCM, DynKms, DynMetastore>;
 
 /// Size of the cobhan buffer header in bytes (64-bit aligned)
 const BUFFER_HEADER_SIZE: i32 = 8;
+
+/// Canary values placed after data in cobhan buffers (matching C++ CobhanBuffer)
+const CANARY1_VALUE: i32 = 0;
+const CANARY2_VALUE: i32 = 0xDEADBEEFu32 as i32;
+/// Size of canary region: two i32 values
+const CANARY_SIZE: usize = 8;
+/// Safety padding after canaries (matching C++ safety_padding_bytes)
+const SAFETY_PADDING_SIZE: usize = 8;
+
+/// Global flag controlling canary checks (default: false, matching C++)
+static CANARIES_ENABLED: AtomicBool = AtomicBool::new(false);
+
+/// Enable or disable canary buffer overflow detection.
+pub fn set_canaries_enabled(enabled: bool) {
+    CANARIES_ENABLED.store(enabled, Ordering::Relaxed);
+}
+
+/// Returns whether canaries are currently enabled.
+pub fn canaries_enabled() -> bool {
+    CANARIES_ENABLED.load(Ordering::Relaxed)
+}
+
+/// Writes canary values at the given offset in a buffer.
+fn write_canaries(buf: &mut [u8], offset: usize) {
+    if offset + CANARY_SIZE <= buf.len() {
+        buf[offset..offset + 4].copy_from_slice(&CANARY1_VALUE.to_le_bytes());
+        buf[offset + 4..offset + 8].copy_from_slice(&CANARY2_VALUE.to_le_bytes());
+    }
+}
+
+/// Verifies canary values at the given offset in a buffer.
+/// Panics (aborts) if canaries are corrupted, matching C++ std::terminate behavior.
+fn verify_canaries(buf: &[u8], offset: usize) {
+    if !canaries_enabled() {
+        return;
+    }
+    if offset + CANARY_SIZE > buf.len() {
+        eprintln!("CobhanBuffer: Canary region out of bounds. Buffer too small.");
+        std::process::abort();
+    }
+    let c1 = i32::from_le_bytes([
+        buf[offset],
+        buf[offset + 1],
+        buf[offset + 2],
+        buf[offset + 3],
+    ]);
+    let c2 = i32::from_le_bytes([
+        buf[offset + 4],
+        buf[offset + 5],
+        buf[offset + 6],
+        buf[offset + 7],
+    ]);
+    if c1 != CANARY1_VALUE {
+        eprintln!("Canary 1 corrupted! Expected: 0, Found: {:#010x}", c1);
+        eprintln!("CobhanBuffer: Memory corruption detected: Canary values are corrupted. Terminating process.");
+        std::process::abort();
+    }
+    if c2 != CANARY2_VALUE {
+        eprintln!(
+            "Canary 2 corrupted! Expected: 0xdeadbeef, Found: {:#010x}",
+            c2
+        );
+        eprintln!("CobhanBuffer: Memory corruption detected: Canary values are corrupted. Terminating process.");
+        std::process::abort();
+    }
+}
+
+/// Returns the total extra bytes needed per buffer when canaries are enabled.
+fn canary_overhead() -> usize {
+    if canaries_enabled() {
+        CANARY_SIZE + SAFETY_PADDING_SIZE
+    } else {
+        0
+    }
+}
 
 // ============================================================================
 // Cobhan Error Codes (matching Go cobhan library)
@@ -310,7 +385,8 @@ pub unsafe extern "C" fn SetupJson(config_json: *const c_char) -> i32 {
 
     // Apply configuration and create factory
     match asherah_config::factory_from_config(&config) {
-        Ok((factory, _applied)) => {
+        Ok((factory, applied)) => {
+            set_canaries_enabled(applied.enable_canaries);
             *guard = Some(factory);
             ERR_NONE
         }
@@ -679,6 +755,8 @@ pub unsafe extern "C" fn DecryptFromJson(
 
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers {
+    use super::{canaries_enabled, canary_overhead, verify_canaries, write_canaries};
+
     /// Buffer header size constant
     pub const BUFFER_HEADER_SIZE: i32 = 8;
 
@@ -699,12 +777,18 @@ pub mod test_helpers {
     pub const ERR_PANIC: i32 = -106;
 
     /// Creates a cobhan input buffer from bytes.
-    /// Layout: [length:i32le][reserved:i32le=0][data...]
+    /// Layout: [length:i32le][reserved:i32le=0][data...][canary1?][canary2?][padding?]
     pub fn create_input_buffer(data: &[u8]) -> Vec<u8> {
-        let mut buf = vec![0u8; BUFFER_HEADER_SIZE as usize + data.len()];
+        let overhead = canary_overhead();
+        let mut buf = vec![0u8; BUFFER_HEADER_SIZE as usize + data.len() + overhead];
         let len = data.len() as i32;
         buf[0..4].copy_from_slice(&len.to_le_bytes());
-        buf[BUFFER_HEADER_SIZE as usize..].copy_from_slice(data);
+        buf[BUFFER_HEADER_SIZE as usize..BUFFER_HEADER_SIZE as usize + data.len()]
+            .copy_from_slice(data);
+        if canaries_enabled() {
+            let canary_offset = BUFFER_HEADER_SIZE as usize + data.len();
+            write_canaries(&mut buf, canary_offset);
+        }
         buf
     }
 
@@ -715,11 +799,18 @@ pub mod test_helpers {
 
     /// Creates a cobhan output buffer with the given capacity.
     /// Capacity is stored at bytes 0-3 (matching Go cobhan.AllocateBuffer).
+    /// When canaries are enabled, canary values are placed after the capacity region.
     pub fn create_output_buffer(capacity: i32) -> Vec<u8> {
-        let mut buf = vec![0u8; BUFFER_HEADER_SIZE as usize + capacity as usize];
+        let overhead = canary_overhead();
+        let mut buf = vec![0u8; BUFFER_HEADER_SIZE as usize + capacity as usize + overhead];
         // Capacity in bytes 0-3 (Go convention: output buffer length = capacity)
         buf[0..4].copy_from_slice(&capacity.to_le_bytes());
         // Bytes 4-7 are reserved (zero)
+        if canaries_enabled() {
+            // Canaries go after the full capacity region
+            let canary_offset = BUFFER_HEADER_SIZE as usize + capacity as usize;
+            write_canaries(&mut buf, canary_offset);
+        }
         buf
     }
 
@@ -738,6 +829,27 @@ pub mod test_helpers {
     pub fn get_buffer_data(buf: &[u8]) -> &[u8] {
         let len = get_buffer_length(buf) as usize;
         &buf[BUFFER_HEADER_SIZE as usize..BUFFER_HEADER_SIZE as usize + len]
+    }
+
+    /// Reads the data from a cobhan input buffer, verifying canaries if enabled.
+    /// For input buffers, canaries are placed right after the data.
+    pub fn get_input_buffer_data(buf: &[u8]) -> &[u8] {
+        let len = get_buffer_length(buf) as usize;
+        if canaries_enabled() {
+            let canary_offset = BUFFER_HEADER_SIZE as usize + len;
+            verify_canaries(buf, canary_offset);
+        }
+        &buf[BUFFER_HEADER_SIZE as usize..BUFFER_HEADER_SIZE as usize + len]
+    }
+
+    /// Verifies canaries on an output buffer that has been written to.
+    /// For output buffers, canaries are placed after the full capacity region.
+    /// Call this after an FFI function has written to the output buffer.
+    pub fn verify_output_canaries(buf: &[u8], original_capacity: i32) {
+        if canaries_enabled() {
+            let canary_offset = BUFFER_HEADER_SIZE as usize + original_capacity as usize;
+            verify_canaries(buf, canary_offset);
+        }
     }
 
     /// Reads a string from a cobhan buffer.
