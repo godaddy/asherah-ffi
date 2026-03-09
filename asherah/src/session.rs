@@ -193,24 +193,9 @@ impl<
         let revoked = ekr.revoked.unwrap_or(false);
         expired || revoked
     }
-}
 
-pub(crate) fn now_s() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(duration) => duration.as_secs() as i64,
-        Err(_) => 0,
-    }
-}
+    // Public API compatible with Go shapes
 
-// Public API compatible with Go shapes
-impl<
-        A: AEAD + Clone,
-        K: KeyManagementService + Clone,
-        M: Metastore + Clone,
-        P: Partition + Clone,
-    > Session<A, K, M, P>
-{
     pub fn encrypt(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
         // Load or create IK
         let ik_ekr = self
@@ -298,16 +283,9 @@ impl<
         drk.fill(0);
         Ok(pt)
     }
-}
 
-// High-level helpers akin to Go API
-impl<
-        A: AEAD + Clone,
-        K: KeyManagementService + Clone,
-        M: Metastore + Clone,
-        P: Partition + Clone,
-    > Session<A, K, M, P>
-{
+    // High-level helpers akin to Go API
+
     pub fn store<T: crate::traits::Storer>(
         &self,
         payload: &[u8],
@@ -331,6 +309,14 @@ impl<
         let res = self.decrypt(drr);
         metrics::record_load(start);
         res
+    }
+}
+
+pub(crate) fn now_s() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    match SystemTime::now().duration_since(UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs() as i64,
+        Err(_) => 0,
     }
 }
 
@@ -495,6 +481,7 @@ pub struct PublicSession<A: AEAD + Clone, K: KeyManagementService + Clone, M: Me
     invalid_partition: bool,
 }
 
+#[allow(clippy::same_name_method)]
 impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     PublicSession<A, K, M>
 {
@@ -512,12 +499,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             invalid_partition: self.invalid_partition,
         }
     }
-}
 
-#[allow(clippy::same_name_method)]
-impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
-    PublicSession<A, K, M>
-{
     fn ensure_valid_partition(&self) -> anyhow::Result<()> {
         if self.invalid_partition {
             return Err(anyhow::anyhow!("partition id cannot be empty"));

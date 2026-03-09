@@ -236,7 +236,8 @@ impl Metastore for DynamoDbMetastore {
             Ok(_) => Ok(true),
             Err(e) => {
                 // ConditionalCheckFailedException => already exists => return false
-                let msg = format!("{e}");
+                // Use Debug format to capture the full error chain including cause
+                let msg = format!("{e:?}");
                 if msg.contains("ConditionalCheckFailed") {
                     Ok(false)
                 } else {

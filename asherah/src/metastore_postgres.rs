@@ -121,9 +121,10 @@ impl PostgresMetastore {
 impl Metastore for PostgresMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         let mut c = self.client()?;
+        let created_f = created as f64;
         let rows = c.query(
             "SELECT key_record::text FROM encryption_key WHERE id=$1 AND created=to_timestamp($2)",
-            &[&id, &created],
+            &[&id, &created_f],
         )?;
         match rows.into_iter().next() {
             Some(row) => {
@@ -157,9 +158,11 @@ impl Metastore for PostgresMetastore {
     ) -> Result<bool, anyhow::Error> {
         let mut c = self.client()?;
         let v = serde_json::to_string(ekr)?;
+        let created_f = created as f64;
+        let v_json: serde_json::Value = serde_json::from_str(&v)?;
         let res = c.execute(
-            "INSERT INTO encryption_key(id, created, key_record) VALUES ($1, to_timestamp($2), $3::jsonb) ON CONFLICT DO NOTHING",
-            &[&id, &created, &v],
+            "INSERT INTO encryption_key(id, created, key_record) VALUES ($1, to_timestamp($2), $3) ON CONFLICT DO NOTHING",
+            &[&id, &created_f, &v_json],
         )?;
         Ok(res > 0)
     }

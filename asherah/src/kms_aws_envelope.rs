@@ -180,9 +180,11 @@ impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKmsEnvelope<A>
         };
         let resp = match &self.rt {
             Some(rt) => rt.block_on(fut)?,
-            None => {
-                tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(fut))?
-            }
+            None => tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(fut)
+                    .map_err(|e| anyhow::anyhow!(e))
+            })?,
         };
         let plaintext = resp
             .plaintext()
@@ -216,9 +218,11 @@ impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKmsEnvelope<A>
             };
             let out = match &self.rt {
                 Some(rt) => rt.block_on(fut)?,
-                None => {
-                    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(fut))?
-                }
+                None => tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(fut)
+                        .map_err(|e| anyhow::anyhow!(e))
+                })?,
             };
             let blob = out
                 .ciphertext_blob()
@@ -260,10 +264,12 @@ impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKmsEnvelope<A>
                     .await
             };
             let out = match &self.rt {
-                Some(rt) => rt.block_on(fut),
-                None => {
-                    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(fut))
-                }
+                Some(rt) => rt.block_on(fut).map_err(|e| anyhow::anyhow!(e)),
+                None => tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(fut)
+                        .map_err(|e| anyhow::anyhow!(e))
+                }),
             };
             let out = match out {
                 Ok(v) => v,
