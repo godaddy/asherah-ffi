@@ -77,6 +77,8 @@ jobs:
             integration-${{ runner.os }}-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.88.0"
       - name: Verify Docker availability
         run: docker version
       - name: Run integration tests (MySQL, Postgres, DynamoDB, KMS via containers)
