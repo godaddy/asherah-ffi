@@ -72,7 +72,6 @@ pub struct AsherahConfig {
     pub enable_session_caching: Option<bool>,
     pub replica_read_consistency: Option<String>,
     pub verbose: Option<bool>,
-    pub replica_read_consistency: Option<String>,
     pub sql_metastore_db_type: Option<String>,
     pub disable_zero_copy: Option<bool>,
     pub null_data_check: Option<bool>,

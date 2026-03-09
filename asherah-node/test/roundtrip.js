@@ -40,6 +40,7 @@ if (!addon) {
 }
 
 function main() {
+  // --- Native camelCase API tests ---
   const cfg = {
     serviceName: 'svc',
     productId: 'prod',
@@ -66,6 +67,50 @@ function main() {
   assert.strictEqual(recovered.toString(), 'second-pass');
   addon.shutdown();
   console.log('asherah-node roundtrip OK');
+
+  // --- Canonical godaddy/asherah-node compat API tests ---
+
+  // Test PascalCase config with debug aliases
+  addon.setup({
+    ServiceName: 'compat-svc',
+    ProductID: 'compat-prod',
+    Metastore: 'test-debug-memory',
+    KMS: 'test-debug-static',
+    EnableSessionCaching: false,
+  });
+  assert.strictEqual(addon.get_setup_status(), true);
+
+  // Test snake_case encrypt/decrypt aliases
+  const compat_drr = addon.encrypt_string('cp1', 'compat-payload');
+  assert.ok(typeof compat_drr === 'string' && compat_drr.includes('"Key"'));
+  const compat_out = addon.decrypt_string('cp1', compat_drr);
+  assert.strictEqual(compat_out, 'compat-payload');
+
+  addon.shutdown();
+  assert.strictEqual(addon.get_setup_status(), false);
+  console.log('asherah-node compat API OK');
+
+  // --- Test PascalCase config with standard values ---
+  addon.setup({
+    ServiceName: 'std-svc',
+    ProductID: 'std-prod',
+    Metastore: 'memory',
+    KMS: 'static',
+    EnableSessionCaching: false,
+    // Go-specific fields should be silently ignored
+    DisableZeroCopy: true,
+    NullDataCheck: true,
+  });
+  const std_drr = addon.encryptString('sp1', 'standard');
+  const std_out = addon.decryptString('sp1', std_drr);
+  assert.strictEqual(std_out, 'standard');
+  addon.shutdown();
+  console.log('asherah-node PascalCase standard config OK');
+
+  // --- Test set_max_stack_alloc_item_size and set_safety_padding_overhead ---
+  addon.set_max_stack_alloc_item_size(2048);
+  addon.set_safety_padding_overhead(256);
+  console.log('asherah-node compat stubs OK');
 }
 
 function testCompatApi() {

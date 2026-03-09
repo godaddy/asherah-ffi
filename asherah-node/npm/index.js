@@ -76,60 +76,61 @@ const CONFIG_MAP = {
   PreferredRegion: 'preferredRegion',
   EnableRegionSuffix: 'enableRegionSuffix',
   EnableSessionCaching: 'enableSessionCaching',
-  ReplicaReadConsistency: 'replicaReadConsistency',
   Verbose: 'verbose',
+  SQLMetastoreDBType: 'sqlMetastoreDBType',
+  ReplicaReadConsistency: 'replicaReadConsistency',
+  DisableZeroCopy: 'disableZeroCopy',
+  NullDataCheck: 'nullDataCheck',
+  EnableCanaries: 'enableCanaries',
 };
 
-// Fields from canonical API that we silently ignore (Go-specific)
-const IGNORED_FIELDS = new Set([
-  'DisableZeroCopy',
-  'EnableCanaries',
-]);
-
-// Metastore value normalization (canonical test values → ours)
-const METASTORE_MAP = {
+// Legacy/debug metastore aliases (match Go behavior)
+const METASTORE_ALIASES = {
   'test-debug-memory': 'memory',
+  'test-debug-sqlite': 'sqlite',
   'test-debug-static': 'static',
 };
 
-// KMS value normalization
-const KMS_MAP = {
+// Legacy/debug KMS aliases
+const KMS_ALIASES = {
   'test-debug-static': 'static',
 };
 
 function normalizeConfig(config) {
-  // Detect PascalCase format by checking for capital-S ServiceName
-  if (!config || typeof config.ServiceName !== 'string') {
+  // Detect PascalCase format by checking for ServiceName (capital S)
+  if (!config || typeof config !== 'object' || !('ServiceName' in config)) {
     return config;
   }
 
-  const normalized = {};
+  const out = {};
   for (const [key, value] of Object.entries(config)) {
-    if (IGNORED_FIELDS.has(key)) continue;
-    const camelKey = CONFIG_MAP[key];
-    if (camelKey) {
-      normalized[camelKey] = value;
-    } else {
-      // Pass through unknown fields as-is
-      normalized[key] = value;
+    const mapped = CONFIG_MAP[key];
+    if (mapped === undefined) {
+      // Unknown field — pass through as-is (may be a camelCase field mixed in)
+      out[key] = value;
+    } else if (mapped !== null) {
+      out[mapped] = value;
     }
+    // mapped === null means ignored (Go-specific)
   }
 
-  // Normalize metastore values
-  if (normalized.metastore && METASTORE_MAP[normalized.metastore]) {
-    normalized.metastore = METASTORE_MAP[normalized.metastore];
+  // Normalize metastore aliases
+  if (typeof out.metastore === 'string') {
+    const lower = out.metastore.toLowerCase();
+    out.metastore = METASTORE_ALIASES[lower] || lower;
   }
 
-  // Normalize KMS values
-  if (normalized.kms && KMS_MAP[normalized.kms]) {
-    normalized.kms = KMS_MAP[normalized.kms];
+  // Normalize KMS aliases
+  if (typeof out.kms === 'string') {
+    const lower = out.kms.toLowerCase();
+    out.kms = KMS_ALIASES[lower] || lower;
   }
 
-  return normalized;
+  return out;
 }
 
-// Log level mapping: our string levels → zerolog numeric levels (used by canonical Go asherah)
-const LOG_LEVEL_MAP = {
+// Log level mapping: Rust level string → zerolog numeric (used by Go asherah)
+const LEVEL_TO_NUMBER = {
   trace: -1,
   debug: 0,
   info: 1,
@@ -137,78 +138,51 @@ const LOG_LEVEL_MAP = {
   error: 3,
 };
 
-function wrapLogHook(callback) {
-  // Canonical callback signature: (level: number, message: string) => void
-  // Ours: (event: {level: string, message: string, target: string}) => void
-  // Detect arity-2 callbacks and wrap them
-  if (callback && callback.length === 2) {
-    return function (event) {
-      const numLevel = LOG_LEVEL_MAP[event.level] !== undefined ? LOG_LEVEL_MAP[event.level] : 1;
-      callback(numLevel, event.message);
-    };
-  }
-  return callback;
+// Wrap setup to normalize config
+function setup(config) {
+  return native.setup(normalizeConfig(config));
 }
 
-// Build the wrapped module
-const wrapped = Object.assign({}, native);
-
-// Wrap setup to normalize config
-wrapped.setup = function setup(config) {
-  return native.setup(normalizeConfig(config));
-};
-
-wrapped.setupAsync = function setupAsync(config) {
+function setupAsync(config) {
   return native.setupAsync(normalizeConfig(config));
-};
+}
 
-// Snake_case function aliases
-wrapped.setup_async = function setup_async(config) {
-  return native.setupAsync(normalizeConfig(config));
-};
+// set_log_hook: accept canonical (level, message) callback or native (event) callback
+function set_log_hook(callback) {
+  if (callback == null) {
+    return native.setLogHook(null);
+  }
+  // Canonical callback: (level: number, message: string) => void (arity 2)
+  // Native callback: (event: {level, message, target}) => void (arity 1)
+  if (callback.length >= 2) {
+    return native.setLogHook(function (event) {
+      const numLevel =
+        LEVEL_TO_NUMBER[event.level] !== undefined
+          ? LEVEL_TO_NUMBER[event.level]
+          : 1;
+      callback(numLevel, event.message);
+    });
+  }
+  return native.setLogHook(callback);
+}
 
-wrapped.shutdown_async = function shutdown_async() {
-  return native.shutdownAsync();
-};
+// Export everything from native addon
+Object.assign(module.exports, native);
 
-wrapped.encrypt_async = function encrypt_async(partitionId, data) {
-  return native.encryptAsync(partitionId, data);
-};
+// Override setup/setupAsync with normalizing versions
+module.exports.setup = setup;
+module.exports.setupAsync = setupAsync;
 
-wrapped.encrypt_string = function encrypt_string(partitionId, data) {
-  return native.encryptString(partitionId, data);
-};
-
-wrapped.encrypt_string_async = function encrypt_string_async(partitionId, data) {
-  return native.encryptStringAsync(partitionId, data);
-};
-
-wrapped.decrypt_async = function decrypt_async(partitionId, dataRowRecordJson) {
-  return native.decryptAsync(partitionId, dataRowRecordJson);
-};
-
-wrapped.decrypt_string = function decrypt_string(partitionId, dataRowRecordJson) {
-  return native.decryptString(partitionId, dataRowRecordJson);
-};
-
-wrapped.decrypt_string_async = function decrypt_string_async(partitionId, dataRowRecordJson) {
-  return native.decryptStringAsync(partitionId, dataRowRecordJson);
-};
-
-wrapped.set_max_stack_alloc_item_size = function set_max_stack_alloc_item_size(n) {
-  return native.setMaxStackAllocItemSize(n);
-};
-
-wrapped.set_safety_padding_overhead = function set_safety_padding_overhead(n) {
-  return native.setSafetyPaddingOverhead(n);
-};
-
-wrapped.set_log_hook = function set_log_hook(callback) {
-  return native.setLogHook(callback ? wrapLogHook(callback) : callback);
-};
-
-wrapped.get_setup_status = function get_setup_status() {
-  return native.getSetupStatus();
-};
-
-module.exports = wrapped;
+// snake_case aliases for canonical API compatibility
+module.exports.setup_async = setupAsync;
+module.exports.shutdown_async = native.shutdownAsync;
+module.exports.encrypt_async = native.encryptAsync;
+module.exports.encrypt_string = native.encryptString;
+module.exports.encrypt_string_async = native.encryptStringAsync;
+module.exports.decrypt_async = native.decryptAsync;
+module.exports.decrypt_string = native.decryptString;
+module.exports.decrypt_string_async = native.decryptStringAsync;
+module.exports.set_max_stack_alloc_item_size = native.setMaxStackAllocItemSize;
+module.exports.set_safety_padding_overhead = native.setSafetyPaddingOverhead;
+module.exports.set_log_hook = set_log_hook;
+module.exports.get_setup_status = native.getSetupStatus;
