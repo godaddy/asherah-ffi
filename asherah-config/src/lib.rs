@@ -50,18 +50,22 @@ pub struct ConfigOptions {
     /// SQL metastore DB type (e.g., "mysql", "postgres"). Go compatibility field.
     #[serde(rename = "SQLMetastoreDBType")]
     pub sql_metastore_db_type: Option<String>,
-    /// Disable zero-copy optimization. Go compatibility field.
+    /// Disable zero-copy optimization.
     #[serde(rename = "DisableZeroCopy")]
     pub disable_zero_copy: Option<bool>,
-    /// Enable null data validation. Go compatibility field.
+    /// Enable null data validation.
     #[serde(rename = "NullDataCheck")]
     pub null_data_check: Option<bool>,
+    /// Enable canary buffer overflow detection.
+    #[serde(rename = "EnableCanaries")]
+    pub enable_canaries: Option<bool>,
 }
 
 #[derive(Clone, Debug)]
 pub struct AppliedConfig {
     pub verbose: bool,
     pub enable_session_caching: bool,
+    pub enable_canaries: bool,
 }
 
 fn set_env_opt_str(key: &str, value: Option<&str>) {
@@ -204,9 +208,12 @@ impl ConfigOptions {
             std::env::remove_var("ASHERAH_VERBOSE");
         }
 
+        let enable_canaries = self.enable_canaries.unwrap_or(false);
+
         Ok(AppliedConfig {
             verbose,
             enable_session_caching,
+            enable_canaries,
         })
     }
 }

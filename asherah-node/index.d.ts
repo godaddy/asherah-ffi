@@ -7,6 +7,7 @@ export type AsherahConfig = {
   checkInterval?: number | null;
   metastore: 'memory' | 'rdbms' | 'dynamodb';
   connectionString?: string | null;
+  replicaReadConsistency?: string | null;
   dynamoDBEndpoint?: string | null;
   dynamoDBRegion?: string | null;
   dynamoDBTableName?: string | null;
@@ -17,8 +18,11 @@ export type AsherahConfig = {
   preferredRegion?: string | null;
   enableRegionSuffix?: boolean | null;
   enableSessionCaching?: boolean | null;
-  replicaReadConsistency?: 'eventual' | 'global' | 'session' | null;
   verbose?: boolean | null;
+  sqlMetastoreDBType?: string | null;
+  disableZeroCopy?: boolean | null;
+  nullDataCheck?: boolean | null;
+  enableCanaries?: boolean | null;
 };
 
 /** Canonical godaddy/asherah-node PascalCase config format */
@@ -40,8 +44,10 @@ export type AsherahConfigCompat = {
   readonly EnableRegionSuffix?: boolean | null;
   readonly EnableSessionCaching?: boolean | null;
   readonly Verbose?: boolean | null;
+  readonly SQLMetastoreDBType?: string | null;
   readonly ReplicaReadConsistency?: 'eventual' | 'global' | 'session' | null;
   readonly DisableZeroCopy?: boolean | null;
+  readonly NullDataCheck?: boolean | null;
   readonly EnableCanaries?: boolean | null;
 };
 
@@ -67,6 +73,7 @@ export declare function decryptStringAsync(partitionId: string, dataRowRecordJso
 
 export declare function setMaxStackAllocItemSize(n: number): void;
 export declare function setSafetyPaddingOverhead(n: number): void;
+
 export type LogEvent = {
   level: 'trace' | 'debug' | 'info' | 'warn' | 'error';
   message: string;
