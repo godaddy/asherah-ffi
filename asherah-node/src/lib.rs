@@ -70,6 +70,7 @@ pub struct AsherahConfig {
     pub preferred_region: Option<String>,
     pub enable_region_suffix: Option<bool>,
     pub enable_session_caching: Option<bool>,
+    pub replica_read_consistency: Option<String>,
     pub verbose: Option<bool>,
 }
 
@@ -106,6 +107,11 @@ fn apply_config_env(cfg: &AsherahConfig) -> Result<()> {
     set_env_u32("SESSION_CACHE_MAX_SIZE", cfg.session_cache_max_size);
     set_env_i64("SESSION_CACHE_DURATION_SECS", cfg.session_cache_duration);
 
+    set_env_str(
+        "REPLICA_READ_CONSISTENCY",
+        cfg.replica_read_consistency.clone(),
+    );
+
     // Metastore selection
     let mut m = cfg.metastore.to_lowercase();
     if m == "sqlite" {
@@ -127,15 +133,12 @@ fn apply_config_env(cfg: &AsherahConfig) -> Result<()> {
         "memory" => {}
         "rdbms" => {
             if let Some(cs) = &cfg.connection_string {
-                if cs.starts_with("postgres://") || cs.starts_with("postgresql://") {
-                    std::env::set_var("POSTGRES_URL", cs);
-                } else if cs.starts_with("mysql://") {
-                    std::env::set_var("MYSQL_URL", cs);
-                } else if cs.starts_with("sqlite://") {
-                    let trimmed = cs.trim_start_matches("sqlite://");
-                    std::env::set_var("SQLITE_PATH", trimmed);
-                } else {
-                    std::env::set_var("SQLITE_PATH", cs);
+                use asherah::builders::{classify_connection_string, DbKind};
+                match classify_connection_string(cs) {
+                    DbKind::Postgres(url) => std::env::set_var("POSTGRES_URL", url),
+                    DbKind::Mysql(url) => std::env::set_var("MYSQL_URL", url),
+                    DbKind::Sqlite(path) => std::env::set_var("SQLITE_PATH", path),
+                    DbKind::Unknown(s) => std::env::set_var("SQLITE_PATH", s),
                 }
             }
         }
