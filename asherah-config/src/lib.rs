@@ -149,6 +149,7 @@ impl ConfigOptions {
                 std::env::remove_var("SQLITE_PATH");
                 std::env::remove_var("POSTGRES_URL");
                 std::env::remove_var("MYSQL_URL");
+                std::env::remove_var("MYSQL_TLS_MODE");
                 std::env::remove_var("DDB_TABLE");
             }
             "sqlite" => {
@@ -161,11 +162,12 @@ impl ConfigOptions {
                 }
                 std::env::remove_var("POSTGRES_URL");
                 std::env::remove_var("MYSQL_URL");
+                std::env::remove_var("MYSQL_TLS_MODE");
                 std::env::remove_var("DDB_TABLE");
             }
             "rdbms" => {
                 if let Some(conn) = &self.connection_string {
-                    apply_rdbms_connection(conn);
+                    apply_rdbms_connection(conn, self.sql_metastore_db_type.as_deref());
                 } else {
                     return Err(anyhow!(
                         "ConnectionString is required when Metastore is rdbms"
@@ -181,6 +183,7 @@ impl ConfigOptions {
                 std::env::remove_var("SQLITE_PATH");
                 std::env::remove_var("POSTGRES_URL");
                 std::env::remove_var("MYSQL_URL");
+                std::env::remove_var("MYSQL_TLS_MODE");
             }
             other => {
                 return Err(anyhow!("Unsupported Metastore value: {other}"));
@@ -226,15 +229,45 @@ fn normalize_sqlite_path(conn: &str) -> String {
     }
 }
 
-fn apply_rdbms_connection(conn: &str) {
+/// Extract Go `go-sql-driver/mysql` `tls` parameter value from a connection string.
+fn extract_go_mysql_tls(conn: &str) -> Option<String> {
+    let query = conn.split_once('?').map(|(_, q)| q)?;
+    for param in query.split('&') {
+        if let Some(("tls", value)) = param.split_once('=') {
+            return Some(value.to_string());
+        }
+    }
+    None
+}
+
+fn apply_rdbms_connection(conn: &str, db_type_hint: Option<&str>) {
     use asherah::builders::{classify_connection_string, DbKind};
 
     std::env::remove_var("SQLITE_PATH");
     std::env::remove_var("POSTGRES_URL");
     std::env::remove_var("MYSQL_URL");
-    match classify_connection_string(conn) {
+    std::env::remove_var("MYSQL_TLS_MODE");
+
+    let kind = classify_connection_string(conn);
+    // Use SQLMetastoreDBType hint to resolve Unknown connection strings
+    let kind = match kind {
+        DbKind::Unknown(s) => match db_type_hint.map(|h| h.to_lowercase()).as_deref() {
+            Some("mysql") => DbKind::Mysql(format!("mysql://{s}")),
+            Some("postgres" | "postgresql") => DbKind::Postgres(format!("postgres://{s}")),
+            _ => DbKind::Unknown(s),
+        },
+        other => other,
+    };
+
+    match kind {
         DbKind::Postgres(url) => std::env::set_var("POSTGRES_URL", url),
-        DbKind::Mysql(url) => std::env::set_var("MYSQL_URL", url),
+        DbKind::Mysql(url) => {
+            std::env::set_var("MYSQL_URL", url);
+            // Pass through Go tls= parameter as MYSQL_TLS_MODE for MySqlMetastore
+            if let Some(tls_mode) = extract_go_mysql_tls(conn) {
+                std::env::set_var("MYSQL_TLS_MODE", tls_mode);
+            }
+        }
         DbKind::Sqlite(path) => std::env::set_var("SQLITE_PATH", path),
         DbKind::Unknown(s) => std::env::set_var("SQLITE_PATH", s),
     }

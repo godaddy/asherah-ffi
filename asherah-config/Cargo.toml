@@ -17,5 +17,10 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 asherah = { path = "../asherah" }
 
+[[test]]
+name = "config_apply_env"
+path = "tests/config_apply_env.rs"
+harness = false
+
 [lints]
 workspace = true
