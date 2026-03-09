@@ -1,7 +1,7 @@
 use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
 use mysql::prelude::Queryable;
-use mysql::{Opts, OptsBuilder, Pool, PooledConn};
+use mysql::{Opts, OptsBuilder, Pool, PooledConn, SslOpts};
 
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
@@ -13,6 +13,31 @@ impl MySqlMetastore {
     pub fn connect(url: &str) -> anyhow::Result<Self> {
         let opts: Opts = url.try_into()?;
         let mut builder = OptsBuilder::from_opts(opts);
+
+        // Apply TLS configuration from MYSQL_TLS_MODE env var.
+        // Values match Go go-sql-driver/mysql `tls` parameter:
+        //   "skip-verify" → TLS required, skip certificate verification
+        //   "true"        → TLS required with certificate verification
+        //   "false"       → TLS disabled (explicit)
+        //   "preferred"   → TLS required with verification (best-effort mapping)
+        if let Ok(tls_mode) = std::env::var("MYSQL_TLS_MODE") {
+            match tls_mode.as_str() {
+                "skip-verify" => {
+                    builder = builder.ssl_opts(Some(
+                        SslOpts::default()
+                            .with_danger_accept_invalid_certs(true)
+                            .with_danger_skip_domain_validation(true),
+                    ));
+                }
+                "false" => {
+                    builder = builder.ssl_opts(None::<SslOpts>);
+                }
+                // "true", "preferred", or any other value → require TLS with verification
+                _ => {
+                    builder = builder.ssl_opts(Some(SslOpts::default()));
+                }
+            }
+        }
 
         // Aurora MySQL write forwarding: set replica read consistency on each connection
         if let Ok(consistency) = std::env::var("REPLICA_READ_CONSISTENCY") {
