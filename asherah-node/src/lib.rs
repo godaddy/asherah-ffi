@@ -72,133 +72,52 @@ pub struct AsherahConfig {
     pub enable_session_caching: Option<bool>,
     pub replica_read_consistency: Option<String>,
     pub verbose: Option<bool>,
+    pub sql_metastore_db_type: Option<String>,
+    pub disable_zero_copy: Option<bool>,
+    pub null_data_check: Option<bool>,
+    pub enable_canaries: Option<bool>,
 }
 
-fn set_env_bool(key: &str, v: Option<bool>) {
-    if let Some(b) = v {
-        std::env::set_var(key, if b { "1" } else { "0" });
+fn to_config_options(cfg: &AsherahConfig) -> asherah_config::ConfigOptions {
+    asherah_config::ConfigOptions {
+        service_name: Some(cfg.service_name.clone()),
+        product_id: Some(cfg.product_id.clone()),
+        expire_after: cfg.expire_after,
+        check_interval: cfg.check_interval,
+        metastore: Some(cfg.metastore.clone()),
+        connection_string: cfg.connection_string.clone(),
+        replica_read_consistency: cfg.replica_read_consistency.clone(),
+        dynamo_db_endpoint: cfg.dynamo_db_endpoint.clone(),
+        dynamo_db_region: cfg.dynamo_db_region.clone(),
+        dynamo_db_table_name: cfg.dynamo_db_table_name.clone(),
+        session_cache_max_size: cfg.session_cache_max_size,
+        session_cache_duration: cfg.session_cache_duration,
+        kms: cfg.kms.clone(),
+        region_map: cfg.region_map.clone(),
+        preferred_region: cfg.preferred_region.clone(),
+        enable_region_suffix: cfg.enable_region_suffix,
+        enable_session_caching: cfg.enable_session_caching,
+        verbose: cfg.verbose,
+        sql_metastore_db_type: cfg.sql_metastore_db_type.clone(),
+        disable_zero_copy: cfg.disable_zero_copy,
+        null_data_check: cfg.null_data_check,
+        enable_canaries: cfg.enable_canaries,
     }
-}
-fn set_env_i64(key: &str, v: Option<i64>) {
-    if let Some(x) = v {
-        std::env::set_var(key, x.to_string());
-    }
-}
-fn set_env_u32(key: &str, v: Option<u32>) {
-    if let Some(x) = v {
-        std::env::set_var(key, x.to_string());
-    }
-}
-fn set_env_str(key: &str, v: Option<String>) {
-    if let Some(s) = v {
-        std::env::set_var(key, s);
-    }
-}
-
-fn apply_config_env(cfg: &AsherahConfig) -> Result<()> {
-    // Core service identifiers
-    std::env::set_var("SERVICE_NAME", &cfg.service_name);
-    std::env::set_var("PRODUCT_ID", &cfg.product_id);
-
-    // Policy
-    set_env_i64("EXPIRE_AFTER_SECS", cfg.expire_after);
-    set_env_i64("REVOKE_CHECK_INTERVAL_SECS", cfg.check_interval);
-    set_env_bool("SESSION_CACHE", cfg.enable_session_caching);
-    set_env_u32("SESSION_CACHE_MAX_SIZE", cfg.session_cache_max_size);
-    set_env_i64("SESSION_CACHE_DURATION_SECS", cfg.session_cache_duration);
-
-    set_env_str(
-        "REPLICA_READ_CONSISTENCY",
-        cfg.replica_read_consistency.clone(),
-    );
-
-    // Metastore selection
-    let mut m = cfg.metastore.to_lowercase();
-    if m == "sqlite" {
-        if let Some(path) = &cfg.connection_string {
-            std::env::set_var("SQLITE_PATH", path);
-        }
-        m = "rdbms".into();
-    }
-    if std::env::var("ASHERAH_INTEROP_DEBUG").is_ok() {
-        log::debug!(
-            "asherah-node metastore={} connection_string={:?} sqlite_path={:?}",
-            m,
-            cfg.connection_string,
-            std::env::var("SQLITE_PATH").ok()
-        );
-    }
-    std::env::set_var("Metastore", &m);
-    match m.as_str() {
-        "memory" => {}
-        "rdbms" => {
-            if let Some(cs) = &cfg.connection_string {
-                use asherah::builders::{classify_connection_string, DbKind};
-                match classify_connection_string(cs) {
-                    DbKind::Postgres(url) => std::env::set_var("POSTGRES_URL", url),
-                    DbKind::Mysql(url) => std::env::set_var("MYSQL_URL", url),
-                    DbKind::Sqlite(path) => std::env::set_var("SQLITE_PATH", path),
-                    DbKind::Unknown(s) => std::env::set_var("SQLITE_PATH", s),
-                }
-            }
-        }
-        "dynamodb" => {
-            set_env_str("AWS_ENDPOINT_URL", cfg.dynamo_db_endpoint.clone());
-            set_env_str("AWS_REGION", cfg.dynamo_db_region.clone());
-            set_env_str(
-                "DDB_TABLE",
-                cfg.dynamo_db_table_name
-                    .clone()
-                    .or(Some("EncryptionKey".into())),
-            );
-            set_env_bool("DDB_REGION_SUFFIX", cfg.enable_region_suffix);
-        }
-        other => {
-            return Err(Error::from_reason(format!(
-                "unsupported metastore: {}",
-                other
-            )))
-        }
-    }
-
-    // KMS selection
-    let kms = cfg
-        .kms
-        .clone()
-        .unwrap_or_else(|| "static".into())
-        .to_lowercase();
-    std::env::set_var("KMS", &kms);
-    match kms.as_str() {
-        "aws" => {
-            if let Some(map) = &cfg.region_map {
-                std::env::set_var(
-                    "REGION_MAP",
-                    serde_json::to_string(map).unwrap_or_else(|_| "{}".into()),
-                );
-            }
-            set_env_str("PREFERRED_REGION", cfg.preferred_region.clone());
-        }
-        "static" => { /* expects STATIC_MASTER_KEY_HEX env externally or uses default in Rust */ }
-        other => return Err(Error::from_reason(format!("unsupported kms: {}", other))),
-    }
-
-    Ok(())
 }
 
 #[napi]
 pub fn setup(config: AsherahConfig) -> Result<()> {
-    apply_config_env(&config)?;
+    let opts = to_config_options(&config);
+    let (factory, applied) = asherah_config::factory_from_config(&opts)
+        .map_err(|e| Error::from_reason(format!("setup error: {e}")))?;
+
     let dbg_env = std::env::var("ASHERAH_NODE_DEBUG")
         .ok()
         .map(|v| matches!(v.as_str(), "1" | "true" | "on" | "yes"));
     DEBUG_ENABLED.store(
-        config.verbose.unwrap_or(false) || dbg_env.unwrap_or(false),
+        applied.verbose || dbg_env.unwrap_or(false),
         Ordering::Relaxed,
     );
-
-    let factory = asherah::builders::factory_from_env()
-        .map_err(|e| Error::from_reason(format!("setup error: {e}")))?;
-    let session_caching = config.enable_session_caching.unwrap_or(true);
 
     let mut guard = STATE.lock();
     if guard.is_some() {
@@ -210,7 +129,7 @@ pub fn setup(config: AsherahConfig) -> Result<()> {
     *guard = Some(GlobalState {
         factory,
         sessions: HashMap::new(),
-        session_caching,
+        session_caching: applied.enable_session_caching,
     });
     Ok(())
 }
