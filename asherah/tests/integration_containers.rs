@@ -213,13 +213,15 @@ async fn dynamodb_metastore_contract() {
     let endpoint = format!("http://{host}:{port}");
     let table = "EncryptionKey";
 
+    // Set credentials before table creation — CI runners have no ambient AWS creds
+    std::env::set_var("AWS_ACCESS_KEY_ID", "test");
+    std::env::set_var("AWS_SECRET_ACCESS_KEY", "test");
+
     create_dynamodb_table(&endpoint, table).await;
 
     let endpoint_clone = endpoint.clone();
     tokio::task::spawn_blocking(move || {
         std::env::set_var("AWS_ENDPOINT_URL", &endpoint_clone);
-        std::env::set_var("AWS_ACCESS_KEY_ID", "test");
-        std::env::set_var("AWS_SECRET_ACCESS_KEY", "test");
 
         let store =
             asherah::metastore_dynamodb::DynamoDbMetastore::new(table, Some("us-east-1".into()))
