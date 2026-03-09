@@ -1,6 +1,7 @@
 use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
-use mysql::{prelude::Queryable, Pool, PooledConn};
+use mysql::prelude::Queryable;
+use mysql::{Opts, OptsBuilder, Pool, PooledConn};
 
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
@@ -10,7 +11,27 @@ pub struct MySqlMetastore {
 
 impl MySqlMetastore {
     pub fn connect(url: &str) -> anyhow::Result<Self> {
-        let pool = Pool::new(url)?;
+        let opts: Opts = url.try_into()?;
+        let mut builder = OptsBuilder::from_opts(opts);
+
+        // Aurora MySQL write forwarding: set replica read consistency on each connection
+        if let Ok(consistency) = std::env::var("REPLICA_READ_CONSISTENCY") {
+            match consistency.as_str() {
+                "eventual" | "global" | "session" => {
+                    builder = builder.init(vec![format!(
+                        "SET aurora_replica_read_consistency = '{consistency}'"
+                    )]);
+                }
+                _ => {
+                    anyhow::bail!(
+                        "invalid REPLICA_READ_CONSISTENCY value: '{}' (expected eventual, global, or session)",
+                        consistency
+                    );
+                }
+            }
+        }
+
+        let pool = Pool::new(builder)?;
         let mut conn = pool.get_conn()?;
         conn.query_drop(
             r#"CREATE TABLE IF NOT EXISTS encryption_key (

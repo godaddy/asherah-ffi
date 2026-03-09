@@ -220,18 +220,16 @@ fn normalize_sqlite_path(conn: &str) -> String {
 }
 
 fn apply_rdbms_connection(conn: &str) {
-    let lower = conn.to_lowercase();
+    use asherah::builders::{classify_connection_string, DbKind};
+
     std::env::remove_var("SQLITE_PATH");
     std::env::remove_var("POSTGRES_URL");
     std::env::remove_var("MYSQL_URL");
-    if lower.starts_with("postgres://") || lower.starts_with("postgresql://") {
-        std::env::set_var("POSTGRES_URL", conn);
-    } else if lower.starts_with("mysql://") {
-        std::env::set_var("MYSQL_URL", conn);
-    } else if lower.starts_with("sqlite://") {
-        std::env::set_var("SQLITE_PATH", normalize_sqlite_path(conn));
-    } else {
-        std::env::set_var("SQLITE_PATH", conn);
+    match classify_connection_string(conn) {
+        DbKind::Postgres(url) => std::env::set_var("POSTGRES_URL", url),
+        DbKind::Mysql(url) => std::env::set_var("MYSQL_URL", url),
+        DbKind::Sqlite(path) => std::env::set_var("SQLITE_PATH", path),
+        DbKind::Unknown(s) => std::env::set_var("SQLITE_PATH", s),
     }
 }
 

@@ -68,4 +68,34 @@ function main() {
   console.log('asherah-node roundtrip OK');
 }
 
+function testCompatApi() {
+  // Load via npm/index.js to get the compat wrapper layer
+  const compat = require(path.resolve(__dirname, '../npm/index.js'));
+
+  // Test PascalCase config with canonical metastore/KMS values
+  const compatCfg = {
+    ServiceName: 'compat-svc',
+    ProductID: 'compat-prod',
+    Metastore: 'test-debug-memory',
+    KMS: 'test-debug-static',
+    EnableSessionCaching: false,
+  };
+
+  compat.setup(compatCfg);
+  assert.strictEqual(compat.get_setup_status(), true, 'get_setup_status should return true after setup');
+
+  // Test snake_case encrypt/decrypt string roundtrip
+  const pid = 'compat-partition';
+  const drr = compat.encrypt_string(pid, 'compat-payload');
+  assert.ok(typeof drr === 'string' && drr.includes('"Key"'));
+  const decrypted = compat.decrypt_string(pid, drr);
+  assert.strictEqual(decrypted, 'compat-payload');
+
+  compat.shutdown();
+  assert.strictEqual(compat.get_setup_status(), false, 'get_setup_status should return false after shutdown');
+
+  console.log('asherah-node compat API OK');
+}
+
 main();
+testCompatApi();

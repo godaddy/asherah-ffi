@@ -17,11 +17,39 @@ export type AsherahConfig = {
   preferredRegion?: string | null;
   enableRegionSuffix?: boolean | null;
   enableSessionCaching?: boolean | null;
+  replicaReadConsistency?: 'eventual' | 'global' | 'session' | null;
   verbose?: boolean | null;
 };
 
-export declare function setup(config: AsherahConfig): void;
-export declare function setupAsync(config: AsherahConfig): Promise<void>;
+/** Canonical godaddy/asherah-node PascalCase config format */
+export type AsherahConfigCompat = {
+  readonly ServiceName: string;
+  readonly ProductID: string;
+  readonly ExpireAfter?: number | null;
+  readonly CheckInterval?: number | null;
+  readonly Metastore: 'memory' | 'rdbms' | 'dynamodb' | 'test-debug-memory';
+  readonly ConnectionString?: string | null;
+  readonly DynamoDBEndpoint?: string | null;
+  readonly DynamoDBRegion?: string | null;
+  readonly DynamoDBTableName?: string | null;
+  readonly SessionCacheMaxSize?: number | null;
+  readonly SessionCacheDuration?: number | null;
+  readonly KMS?: 'aws' | 'static' | 'test-debug-static' | null;
+  readonly RegionMap?: Record<string, string> | null;
+  readonly PreferredRegion?: string | null;
+  readonly EnableRegionSuffix?: boolean | null;
+  readonly EnableSessionCaching?: boolean | null;
+  readonly Verbose?: boolean | null;
+  readonly ReplicaReadConsistency?: 'eventual' | 'global' | 'session' | null;
+  readonly DisableZeroCopy?: boolean | null;
+  readonly EnableCanaries?: boolean | null;
+};
+
+/** Canonical godaddy/asherah-node log hook callback: (level: number, message: string) => void */
+export type LogHookCallback = (level: number, message: string) => void;
+
+export declare function setup(config: AsherahConfig | AsherahConfigCompat): void;
+export declare function setupAsync(config: AsherahConfig | AsherahConfigCompat): Promise<void>;
 export declare function shutdown(): void;
 export declare function shutdownAsync(): Promise<void>;
 export declare function getSetupStatus(): boolean;
@@ -49,5 +77,19 @@ export type MetricsEvent =
   | { type: 'encrypt' | 'decrypt' | 'store' | 'load'; durationNs: number }
   | { type: 'cache_hit' | 'cache_miss'; name: string };
 
-export declare function setLogHook(hook: ((event: LogEvent) => void) | null): void;
+export declare function setLogHook(hook: ((event: LogEvent) => void) | LogHookCallback | null): void;
 export declare function setMetricsHook(hook: ((event: MetricsEvent) => void) | null): void;
+
+// Canonical godaddy/asherah-node snake_case aliases
+export declare function setup_async(config: AsherahConfig | AsherahConfigCompat): Promise<void>;
+export declare function shutdown_async(): Promise<void>;
+export declare function encrypt_async(partitionId: string, data: Buffer): Promise<string>;
+export declare function encrypt_string(partitionId: string, data: string): string;
+export declare function encrypt_string_async(partitionId: string, data: string): Promise<string>;
+export declare function decrypt_async(partitionId: string, dataRowRecordJson: string): Promise<Buffer>;
+export declare function decrypt_string(partitionId: string, dataRowRecordJson: string): string;
+export declare function decrypt_string_async(partitionId: string, dataRowRecordJson: string): Promise<string>;
+export declare function set_max_stack_alloc_item_size(n: number): void;
+export declare function set_safety_padding_overhead(n: number): void;
+export declare function set_log_hook(hook: ((event: LogEvent) => void) | LogHookCallback | null): void;
+export declare function get_setup_status(): boolean;

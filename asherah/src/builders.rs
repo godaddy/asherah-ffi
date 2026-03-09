@@ -4,6 +4,145 @@ use crate::traits::Metastore;
 
 type MetastoreEnvResult = (Arc<dyn Metastore>, String, String, Option<String>);
 
+/// Classify a connection string as MySQL, Postgres, or SQLite.
+/// Detects both URL-scheme prefixes and Go `go-sql-driver/mysql` DSN format
+/// (`user:pass@tcp(host:port)/db`).
+#[derive(Debug)]
+pub enum DbKind {
+    Mysql(String),
+    Postgres(String),
+    Sqlite(String),
+    Unknown(String),
+}
+
+/// Convert a Go `go-sql-driver/mysql` DSN to a standard `mysql://` URL.
+///
+/// Go format: `[user[:pass]@][tcp[(host[:port])]]/dbname[?params]`
+/// Output:    `mysql://user:pass@host:port/dbname[?params]`
+///
+/// Go-specific query params (`tls`, `parseTime`, `loc`, `allowNativePasswords`,
+/// etc.) are stripped since the Rust `mysql` crate doesn't recognize them.
+fn convert_go_mysql_dsn(dsn: &str) -> String {
+    // Split off query string
+    let (base, query) = match dsn.split_once('?') {
+        Some((b, q)) => (b, Some(q)),
+        None => (dsn, None),
+    };
+
+    // Split userinfo from the rest at the last '@'
+    let (userinfo, rest) = match base.rsplit_once('@') {
+        Some((u, r)) => (u, r),
+        None => ("", base),
+    };
+
+    // Extract host:port from tcp(host:port) or tcp(host)
+    let (host_port, db_part) = if let Some(after_tcp) = rest
+        .strip_prefix("tcp(")
+        .or_else(|| rest.strip_prefix("tcp ("))
+    {
+        match after_tcp.split_once(')') {
+            Some((addr, remainder)) => {
+                let db = remainder.strip_prefix('/').unwrap_or(remainder);
+                // Default port if not specified
+                let hp = if addr.contains(':') {
+                    addr.to_string()
+                } else {
+                    format!("{addr}:3306")
+                };
+                (hp, db.to_string())
+            }
+            None => {
+                // Malformed, pass through
+                return format!("mysql://{dsn}");
+            }
+        }
+    } else {
+        // No tcp(...) — might be just host/db or /db
+        match rest.split_once('/') {
+            Some((host, db)) => {
+                let hp = if host.is_empty() {
+                    "localhost:3306".to_string()
+                } else if host.contains(':') {
+                    host.to_string()
+                } else {
+                    format!("{host}:3306")
+                };
+                (hp, db.to_string())
+            }
+            None => (rest.to_string(), String::new()),
+        }
+    };
+
+    // Filter out Go-specific query params that the Rust mysql crate doesn't understand
+    let filtered_query = query.map(|q| {
+        let go_params = [
+            "tls",
+            "parseTime",
+            "loc",
+            "allowNativePasswords",
+            "allowOldPasswords",
+            "charset",
+            "collation",
+            "clientFoundRows",
+            "columnsWithAlias",
+            "interpolateParams",
+            "maxAllowedPacket",
+            "multiStatements",
+            "readTimeout",
+            "writeTimeout",
+            "timeout",
+            "rejectReadOnly",
+            "checkConnLiveness",
+        ];
+        let kept: Vec<&str> = q
+            .split('&')
+            .filter(|p| {
+                if let Some((key, _)) = p.split_once('=') {
+                    !go_params.contains(&key)
+                } else {
+                    true
+                }
+            })
+            .collect();
+        if kept.is_empty() {
+            String::new()
+        } else {
+            format!("?{}", kept.join("&"))
+        }
+    });
+
+    let qs = filtered_query.unwrap_or_default();
+
+    if userinfo.is_empty() {
+        format!("mysql://{host_port}/{db_part}{qs}")
+    } else {
+        format!("mysql://{userinfo}@{host_port}/{db_part}{qs}")
+    }
+}
+
+/// Classify a connection string and normalize it for our Rust drivers.
+pub fn classify_connection_string(conn: &str) -> DbKind {
+    let lower = conn.to_lowercase();
+    if lower.starts_with("postgres://") || lower.starts_with("postgresql://") {
+        DbKind::Postgres(conn.to_string())
+    } else if lower.starts_with("mysql://") {
+        let rest = &conn["mysql://".len()..];
+        if rest.contains("tcp(") {
+            // mysql:// prefix on a Go DSN body — strip prefix and convert
+            DbKind::Mysql(convert_go_mysql_dsn(rest))
+        } else {
+            DbKind::Mysql(conn.to_string())
+        }
+    } else if lower.starts_with("sqlite://") {
+        DbKind::Sqlite(conn.strip_prefix("sqlite://").unwrap_or(conn).to_string())
+    } else if conn.contains("tcp(") {
+        // Go go-sql-driver/mysql DSN format: user:pass@tcp(host:port)/db
+        DbKind::Mysql(convert_go_mysql_dsn(conn))
+    } else {
+        DbKind::Unknown(conn.to_string())
+    }
+}
+
 #[derive(Debug)]
 pub enum StoreChoice {
     InMemory,
@@ -252,4 +391,93 @@ pub fn factory_from_env(
     };
     let kms = Arc::new(DynKms(kms_dyn));
     Ok(crate::api::new_session_factory(cfg, metastore, kms, crypto))
+}
+
+#[cfg(test)]
+#[allow(clippy::panic)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_convert_go_mysql_dsn_full() {
+        let dsn = "root:pass@tcp(localhost:3306)/testdb?tls=skip-verify";
+        match classify_connection_string(dsn) {
+            DbKind::Mysql(url) => assert_eq!(url, "mysql://root:pass@localhost:3306/testdb"),
+            other => panic!("expected Mysql, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_convert_go_mysql_dsn_no_params() {
+        let dsn = "user:password@tcp(db.example.com:3306)/mydb";
+        match classify_connection_string(dsn) {
+            DbKind::Mysql(url) => {
+                assert_eq!(url, "mysql://user:password@db.example.com:3306/mydb")
+            }
+            other => panic!("expected Mysql, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_convert_go_mysql_dsn_no_port() {
+        let dsn = "root@tcp(localhost)/testdb";
+        match classify_connection_string(dsn) {
+            DbKind::Mysql(url) => assert_eq!(url, "mysql://root@localhost:3306/testdb"),
+            other => panic!("expected Mysql, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_convert_go_mysql_dsn_multiple_go_params() {
+        let dsn = "root:pass@tcp(host:3306)/db?parseTime=true&tls=skip-verify&loc=UTC";
+        match classify_connection_string(dsn) {
+            DbKind::Mysql(url) => assert_eq!(url, "mysql://root:pass@host:3306/db"),
+            other => panic!("expected Mysql, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_convert_go_mysql_dsn_with_mysql_prefix() {
+        let dsn = "mysql://root:pass@tcp(localhost:3306)/testdb?tls=skip-verify";
+        match classify_connection_string(dsn) {
+            DbKind::Mysql(url) => assert_eq!(url, "mysql://root:pass@localhost:3306/testdb"),
+            other => panic!("expected Mysql, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_classify_standard_mysql_url() {
+        let url = "mysql://root:pass@localhost:3306/testdb";
+        match classify_connection_string(url) {
+            DbKind::Mysql(u) => assert_eq!(u, url),
+            other => panic!("expected Mysql, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_classify_postgres_url() {
+        let url = "postgres://user:pass@localhost/db";
+        match classify_connection_string(url) {
+            DbKind::Postgres(u) => assert_eq!(u, url),
+            other => panic!("expected Postgres, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_classify_sqlite_url() {
+        let url = "sqlite:///tmp/test.db";
+        match classify_connection_string(url) {
+            DbKind::Sqlite(path) => assert_eq!(path, "/tmp/test.db"),
+            other => panic!("expected Sqlite, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_classify_unknown_fallback() {
+        let conn = "/some/path/to/db";
+        match classify_connection_string(conn) {
+            DbKind::Unknown(s) => assert_eq!(s, conn),
+            other => panic!("expected Unknown, got {other:?}"),
+        }
+    }
 }
