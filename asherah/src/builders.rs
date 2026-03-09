@@ -126,7 +126,13 @@ pub fn classify_connection_string(conn: &str) -> DbKind {
     if lower.starts_with("postgres://") || lower.starts_with("postgresql://") {
         DbKind::Postgres(conn.to_string())
     } else if lower.starts_with("mysql://") {
-        DbKind::Mysql(conn.to_string())
+        let rest = &conn["mysql://".len()..];
+        if rest.contains("tcp(") {
+            // mysql:// prefix on a Go DSN body — strip prefix and convert
+            DbKind::Mysql(convert_go_mysql_dsn(rest))
+        } else {
+            DbKind::Mysql(conn.to_string())
+        }
     } else if lower.starts_with("sqlite://") {
         DbKind::Sqlite(conn.strip_prefix("sqlite://").unwrap_or(conn).to_string())
     } else if conn.contains("tcp(") {
@@ -426,6 +432,15 @@ mod tests {
         let dsn = "root:pass@tcp(host:3306)/db?parseTime=true&tls=skip-verify&loc=UTC";
         match classify_connection_string(dsn) {
             DbKind::Mysql(url) => assert_eq!(url, "mysql://root:pass@host:3306/db"),
+            other => panic!("expected Mysql, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_convert_go_mysql_dsn_with_mysql_prefix() {
+        let dsn = "mysql://root:pass@tcp(localhost:3306)/testdb?tls=skip-verify";
+        match classify_connection_string(dsn) {
+            DbKind::Mysql(url) => assert_eq!(url, "mysql://root:pass@localhost:3306/testdb"),
             other => panic!("expected Mysql, got {other:?}"),
         }
     }
