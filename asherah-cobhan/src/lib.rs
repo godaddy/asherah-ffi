@@ -372,7 +372,13 @@ pub unsafe extern "C" fn SetupJson(config_json: *const c_char) -> i32 {
     // Parse configuration
     let config: ConfigOptions = match cobhan_buffer_to_json(config_json) {
         Ok(c) => c,
-        Err(_) => return ERR_BAD_CONFIG,
+        Err(code) => {
+            log::error!(
+                "SetupJson: failed to parse config JSON (error code {})",
+                code
+            );
+            return ERR_BAD_CONFIG;
+        }
     };
 
     // Track intermediate key overhead (matching Go behavior)
@@ -390,7 +396,10 @@ pub unsafe extern "C" fn SetupJson(config_json: *const c_char) -> i32 {
             *guard = Some(factory);
             ERR_NONE
         }
-        Err(_) => ERR_BAD_CONFIG,
+        Err(e) => {
+            log::error!("SetupJson failed: {:#}", e);
+            ERR_BAD_CONFIG
+        }
     }
 }
 
