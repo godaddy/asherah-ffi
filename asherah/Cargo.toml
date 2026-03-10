@@ -98,6 +98,11 @@ path = "tests/integration_containers.rs"
 required-features = ["mysql", "postgres", "dynamodb"]
 
 [[test]]
+name = "sqlite_tests"
+path = "tests/sqlite_tests.rs"
+required-features = ["sqlite"]
+
+[[test]]
 name = "cucumber"
 harness = false
 required-features = ["cucumber_xlang"]

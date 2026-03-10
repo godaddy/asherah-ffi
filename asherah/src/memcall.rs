@@ -364,3 +364,103 @@ mod os {
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn membuf_alloc_and_free() {
+        let buf = MemBuf::alloc(4096).unwrap();
+        assert_eq!(buf.len(), 4096);
+        assert!(!buf.is_empty());
+        buf.free().unwrap();
+    }
+
+    #[test]
+    fn membuf_read_write() {
+        let mut buf = MemBuf::alloc(64).unwrap();
+        let data = buf.as_mut_slice();
+        data[0] = 0xAA;
+        data[63] = 0xBB;
+        assert_eq!(buf.as_slice()[0], 0xAA);
+        assert_eq!(buf.as_slice()[63], 0xBB);
+        buf.free().unwrap();
+    }
+
+    #[test]
+    fn membuf_lock_unlock() {
+        let buf = MemBuf::alloc(4096).unwrap();
+        buf.lock().unwrap();
+        buf.unlock().unwrap();
+        buf.free().unwrap();
+    }
+
+    #[test]
+    fn membuf_protect_read_write() {
+        let mut buf = MemBuf::alloc(4096).unwrap();
+        // Set read-only
+        buf.protect(MemoryProtectionFlag::read_only()).unwrap();
+        // Restore read-write so we can free
+        buf.protect(MemoryProtectionFlag::read_write()).unwrap();
+        buf.as_mut_slice()[0] = 42;
+        assert_eq!(buf.as_slice()[0], 42);
+        buf.free().unwrap();
+    }
+
+    #[test]
+    fn membuf_protect_no_access_and_restore() {
+        let buf = MemBuf::alloc(4096).unwrap();
+        buf.protect(MemoryProtectionFlag::no_access()).unwrap();
+        // Restore so we can free
+        buf.protect(MemoryProtectionFlag::read_write()).unwrap();
+        buf.free().unwrap();
+    }
+
+    #[test]
+    fn membuf_drop_without_explicit_free() {
+        // Should not leak or panic
+        let mut buf = MemBuf::alloc(128).unwrap();
+        buf.as_mut_slice()[0] = 1;
+        drop(buf);
+    }
+
+    #[test]
+    fn membuf_various_sizes() {
+        for size in [1, 16, 256, 4096, 8192] {
+            let mut buf = MemBuf::alloc(size).unwrap();
+            assert_eq!(buf.len(), size);
+            // Verify all bytes are zero-initialized
+            assert!(buf.as_slice().iter().all(|&b| b == 0));
+            buf.as_mut_slice()[size - 1] = 0xFF;
+            assert_eq!(buf.as_slice()[size - 1], 0xFF);
+            buf.free().unwrap();
+        }
+    }
+
+    #[test]
+    fn memory_protection_flag_values() {
+        let na = MemoryProtectionFlag::no_access();
+        let ro = MemoryProtectionFlag::read_only();
+        let rw = MemoryProtectionFlag::read_write();
+        // They should all be different
+        assert_ne!(na, ro);
+        assert_ne!(ro, rw);
+        assert_ne!(na, rw);
+    }
+
+    #[test]
+    fn disable_core_dumps_succeeds() {
+        disable_core_dumps().unwrap();
+    }
+
+    #[test]
+    fn mem_error_display() {
+        let sys = MemError::Sys("test error".into());
+        assert_eq!(format!("{sys}"), "test error");
+
+        let inv = MemError::InvalidFlag;
+        assert_eq!(format!("{inv}"), ERR_INVALID_FLAG);
+    }
+}
