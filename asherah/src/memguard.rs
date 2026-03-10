@@ -298,7 +298,7 @@ impl Enclave {
         pool_release(key);
         Ok(Self { ciphertext: ct })
     }
-    pub fn open(&self) -> Result<Buffer, Error> {
+    pub fn open(&self) -> Result<PoolSlot, Error> {
         let mut out = pool_acquire(self.plaintext_len())?;
         let mut key = get_or_create_key().view()?;
         let n = decrypt(&self.ciphertext, key.bytes(), out.bytes())?;
@@ -314,68 +314,152 @@ impl Enclave {
     }
 }
 
-// -- Buffer pool for mlock robustness --
-// Lazily grows a pool of reusable mlock'd Buffers. When mlock is exhausted,
-// callers block until a buffer is returned rather than failing.
-const POOL_BUFFER_SIZE: usize = 32; // AES-256 key size
+// -- Slab pool for mlock robustness --
+// Subdivides mlock'd pages into 32-byte slots so one page serves many keys.
+// Guard pages on each slab page protect the entire region from memory scanning.
+// Free list gives O(1) acquire/release. When mlock is exhausted, callers block.
+const SLOT_SIZE: usize = 32; // AES-256 key size
 
-struct BufferPool {
-    free: Vec<Buffer>,
+struct FreeSlot {
+    ptr: *mut u8,
+}
+
+// SAFETY: ptr points into mlock'd mmap memory that is never freed.
+unsafe impl Send for FreeSlot {}
+
+struct SlabPool {
+    #[allow(dead_code)] // own the mmaps — must not be dropped
+    pages: Vec<Buffer>,
+    free: Vec<FreeSlot>,
     outstanding: usize,
 }
 
-static POOL: Lazy<Mutex<BufferPool>> = Lazy::new(|| {
-    Mutex::new(BufferPool {
+static POOL: Lazy<Mutex<SlabPool>> = Lazy::new(|| {
+    Mutex::new(SlabPool {
+        pages: Vec::new(),
         free: Vec::new(),
         outstanding: 0,
     })
 });
 static POOL_CONDVAR: Lazy<Condvar> = Lazy::new(Condvar::new);
 
-pub fn pool_acquire(size: usize) -> Result<Buffer, Error> {
-    if size != POOL_BUFFER_SIZE {
-        return Buffer::new(size);
+/// Allocate a new slab page (mmap+mlock outside lock), then push slots.
+fn grow_pool_unlocked() -> Result<(), Error> {
+    let ps = *PAGE_SIZE;
+    let mut buffer = Buffer::new(ps)?;
+    let base = buffer.bytes().as_mut_ptr();
+    wipe_bytes(buffer.bytes());
+    let slot_count = ps / SLOT_SIZE;
+    let mut pool = POOL.lock();
+    pool.pages.push(buffer);
+    pool.free.reserve(slot_count);
+    for i in 0..slot_count {
+        let ptr = unsafe { base.add(i * SLOT_SIZE) };
+        pool.free.push(FreeSlot { ptr });
     }
-    // 1. Try free list
+    Ok(())
+}
+
+/// A handle to a 32-byte slot in a slab page or a standalone Buffer.
+/// Provides `bytes()` / `as_slice()` like Buffer.
+#[allow(missing_debug_implementations)]
+pub struct PoolSlot {
+    ptr: *mut u8,
+    len: usize,
+    origin: SlotOrigin,
+}
+
+enum SlotOrigin {
+    Slab,
+    Standalone(Buffer),
+}
+
+// SAFETY: Slab-backed slots point into mlock'd mmap regions that outlive
+// the slot. Standalone slots own their Buffer. Neither is aliased.
+unsafe impl Send for PoolSlot {}
+
+impl PoolSlot {
+    pub fn bytes(&mut self) -> &mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
+    }
+    pub fn as_slice(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
+    }
+    pub fn size(&self) -> usize {
+        self.len
+    }
+}
+
+pub fn pool_acquire(size: usize) -> Result<PoolSlot, Error> {
+    if size != SLOT_SIZE {
+        let buf = Buffer::new(size)?;
+        let ptr = buf.data_ptr();
+        let len = buf.data_len;
+        return Ok(PoolSlot {
+            ptr,
+            len,
+            origin: SlotOrigin::Standalone(buf),
+        });
+    }
+    // 1. Try free list (O(1) pop)
     {
         let mut pool = POOL.lock();
-        if let Some(buf) = pool.free.pop() {
+        if let Some(slot) = pool.free.pop() {
             pool.outstanding += 1;
-            return Ok(buf);
+            return Ok(PoolSlot {
+                ptr: slot.ptr,
+                len: SLOT_SIZE,
+                origin: SlotOrigin::Slab,
+            });
         }
     }
-    // 2. Try fresh allocation
-    match Buffer::new(size) {
-        Ok(buf) => {
-            POOL.lock().outstanding += 1;
-            Ok(buf)
+    // 2. Try allocating a new slab page — unlocked so mmap/mlock don't block others
+    match grow_pool_unlocked() {
+        Ok(()) => {
+            let mut pool = POOL.lock();
+            let slot = pool.free.pop().expect("just grew pool");
+            pool.outstanding += 1;
+            Ok(PoolSlot {
+                ptr: slot.ptr,
+                len: SLOT_SIZE,
+                origin: SlotOrigin::Slab,
+            })
         }
         Err(alloc_err) => {
-            // 3. Block until a buffer is returned
+            // 3. mlock exhausted — block until a slot is freed
             let mut pool = POOL.lock();
             if pool.outstanding == 0 && pool.free.is_empty() {
-                // No buffers in flight — hard failure
                 return Err(alloc_err);
             }
             while pool.free.is_empty() {
                 POOL_CONDVAR.wait(&mut pool);
             }
+            let slot = pool
+                .free
+                .pop()
+                .expect("condvar signaled but free list empty");
             pool.outstanding += 1;
-            Ok(pool.free.pop().expect("condvar signaled but pool empty"))
+            Ok(PoolSlot {
+                ptr: slot.ptr,
+                len: SLOT_SIZE,
+                origin: SlotOrigin::Slab,
+            })
         }
     }
 }
 
-pub fn pool_release(mut buf: Buffer) {
-    if buf.alive() && buf.size() == POOL_BUFFER_SIZE {
-        drop(buf.melt());
-        wipe_bytes(buf.bytes());
-        let mut pool = POOL.lock();
-        pool.outstanding = pool.outstanding.saturating_sub(1);
-        pool.free.push(buf);
-        POOL_CONDVAR.notify_one();
-    } else {
-        drop(buf.destroy());
+pub fn pool_release(mut slot: PoolSlot) {
+    match slot.origin {
+        SlotOrigin::Slab => {
+            wipe_bytes(slot.bytes());
+            let mut pool = POOL.lock();
+            pool.free.push(FreeSlot { ptr: slot.ptr });
+            pool.outstanding = pool.outstanding.saturating_sub(1);
+            POOL_CONDVAR.notify_one();
+        }
+        SlotOrigin::Standalone(mut buf) => {
+            drop(buf.destroy());
+        }
     }
 }
 
@@ -396,7 +480,7 @@ impl CofferInner {
         }
         Ok(())
     }
-    fn view(&mut self) -> Result<Buffer, Error> {
+    fn view(&mut self) -> Result<PoolSlot, Error> {
         let mut b = pool_acquire(32)?;
         let h = hash(self.right.as_slice());
         for (dst, (hash_byte, left_byte)) in
@@ -404,7 +488,6 @@ impl CofferInner {
         {
             *dst = hash_byte ^ left_byte;
         }
-        b.freeze()?;
         Ok(b)
     }
     fn rekey(&mut self) -> Result<(), Error> {
@@ -453,7 +536,7 @@ impl Coffer {
         });
         Ok(c)
     }
-    pub fn view(&self) -> Result<Buffer, Error> {
+    pub fn view(&self) -> Result<PoolSlot, Error> {
         self.0.lock().view()
     }
     pub fn destroy(&self) -> Result<(), Error> {

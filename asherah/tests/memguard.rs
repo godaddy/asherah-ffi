@@ -286,9 +286,9 @@ fn enclave_seal_and_open_preserves_data() {
     // Original buffer should be destroyed after seal
     assert!(!buf.alive());
 
-    let mut opened = enclave.open().unwrap();
+    let opened = enclave.open().unwrap();
     assert_eq!(opened.as_slice(), b"hello world");
-    opened.destroy().unwrap();
+    memguard::pool_release(opened);
 }
 
 #[test]
@@ -303,9 +303,9 @@ fn enclave_open_multiple_times() {
 
     // Open multiple times -- each open should return the same data
     for _ in 0..3 {
-        let mut opened = enclave.open().unwrap();
+        let opened = enclave.open().unwrap();
         assert_eq!(opened.as_slice(), b"abcde");
-        opened.destroy().unwrap();
+        memguard::pool_release(opened);
     }
 }
 
@@ -403,9 +403,9 @@ fn locked_buffer_seal_open_roundtrip() {
     // After seal, the inner buffer is destroyed
     assert!(!lb.is_alive());
 
-    let mut opened = enclave.open().unwrap();
+    let opened = enclave.open().unwrap();
     assert_eq!(opened.as_slice(), b"sealed secret");
-    opened.destroy().unwrap();
+    memguard::pool_release(opened);
 }
 
 // ---------------------------------------------------------------------------
@@ -670,17 +670,15 @@ fn purge_does_not_panic() {
 #[test]
 fn coffer_view_returns_32_byte_key() {
     let coffer = memguard::Coffer::new().unwrap();
-    let mut key = coffer.view().unwrap();
+    let key = coffer.view().unwrap();
     assert_eq!(key.size(), 32);
-    assert!(key.alive());
-    assert!(!key.mutable()); // view returns frozen buffer
 
     // Key should be deterministic within same coffer (before rekey)
-    let mut key2 = coffer.view().unwrap();
+    let key2 = coffer.view().unwrap();
     assert_eq!(key.as_slice(), key2.as_slice());
 
-    key.destroy().unwrap();
-    key2.destroy().unwrap();
+    memguard::pool_release(key);
+    memguard::pool_release(key2);
     coffer.destroy().unwrap();
 }
 
@@ -733,7 +731,6 @@ fn pool_acquire_release_roundtrip() {
 
     let mut buf = memguard::pool_acquire(32).unwrap();
     assert_eq!(buf.size(), 32);
-    assert!(buf.alive());
     buf.bytes().copy_from_slice(&[0xAB; 32]);
     assert_eq!(buf.as_slice(), &[0xAB; 32]);
     memguard::pool_release(buf);
