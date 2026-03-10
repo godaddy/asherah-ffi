@@ -722,3 +722,90 @@ fn encrypt_uses_random_nonce() {
     // due to random nonce
     assert_ne!(ct1, ct2);
 }
+
+// ---------------------------------------------------------------------------
+// Buffer pool tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn pool_acquire_release_roundtrip() {
+    let _guard = GLOBAL_KEY_LOCK.lock().unwrap();
+
+    let mut buf = memguard::pool_acquire(32).unwrap();
+    assert_eq!(buf.size(), 32);
+    assert!(buf.alive());
+    buf.bytes().copy_from_slice(&[0xAB; 32]);
+    assert_eq!(buf.as_slice(), &[0xAB; 32]);
+    memguard::pool_release(buf);
+}
+
+#[test]
+fn pool_recycles_buffers() {
+    let _guard = GLOBAL_KEY_LOCK.lock().unwrap();
+
+    // Acquire and release a buffer, then acquire again — should reuse
+    let buf1 = memguard::pool_acquire(32).unwrap();
+    let ptr1 = buf1.as_slice().as_ptr();
+    memguard::pool_release(buf1);
+
+    let buf2 = memguard::pool_acquire(32).unwrap();
+    let ptr2 = buf2.as_slice().as_ptr();
+    memguard::pool_release(buf2);
+
+    // Same underlying mmap'd page should be reused
+    assert_eq!(ptr1, ptr2);
+}
+
+#[test]
+fn pool_release_wipes_data() {
+    let _guard = GLOBAL_KEY_LOCK.lock().unwrap();
+
+    let mut buf = memguard::pool_acquire(32).unwrap();
+    buf.bytes().copy_from_slice(&[0xFF; 32]);
+    memguard::pool_release(buf);
+
+    // Re-acquire — data should be wiped
+    let buf = memguard::pool_acquire(32).unwrap();
+    assert!(
+        buf.as_slice().iter().all(|&b| b == 0),
+        "recycled buffer should be wiped"
+    );
+    memguard::pool_release(buf);
+}
+
+#[test]
+fn pool_non_matching_size_falls_through() {
+    // Non-32-byte sizes bypass the pool and allocate directly
+    let buf = memguard::pool_acquire(64).unwrap();
+    assert_eq!(buf.size(), 64);
+    // pool_release on non-pool-size buffer destroys it instead of pooling
+    memguard::pool_release(buf);
+}
+
+#[test]
+fn pool_concurrent_acquire_release() {
+    use std::sync::Arc;
+    use std::thread;
+
+    let _guard = GLOBAL_KEY_LOCK.lock().unwrap();
+
+    let barrier = Arc::new(std::sync::Barrier::new(8));
+    let handles: Vec<_> = (0..8)
+        .map(|_| {
+            let b = barrier.clone();
+            thread::spawn(move || {
+                b.wait();
+                for _ in 0..100 {
+                    let mut buf = memguard::pool_acquire(32).unwrap();
+                    buf.bytes().copy_from_slice(&[0xCC; 32]);
+                    assert_eq!(buf.as_slice(), &[0xCC; 32]);
+                    memguard::pool_release(buf);
+                }
+            })
+        })
+        .collect();
+
+    for h in handles {
+        h.join().unwrap();
+    }
+}
