@@ -72,9 +72,11 @@ impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKms<A> {
         };
         let resp = match &self.rt {
             Some(rt) => rt.block_on(fut)?,
-            None => {
-                tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(fut))?
-            }
+            None => tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(fut)
+                    .map_err(|e| anyhow::anyhow!(e))
+            })?,
         };
         let ct = resp
             .ciphertext_blob()
@@ -93,9 +95,11 @@ impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKms<A> {
         };
         let resp = match &self.rt {
             Some(rt) => rt.block_on(fut)?,
-            None => {
-                tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(fut))?
-            }
+            None => tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(fut)
+                    .map_err(|e| anyhow::anyhow!(e))
+            })?,
         };
         let pt = resp
             .plaintext()

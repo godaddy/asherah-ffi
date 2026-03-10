@@ -131,11 +131,16 @@ jobs:
           #define ERR_COPY_FAILED          -4
           #define ERR_JSON_DECODE_FAILED   -5
           #define ERR_JSON_ENCODE_FAILED   -6
-          #define ERR_ALREADY_INITIALIZED  -100
-          #define ERR_BAD_CONFIG           -101
-          #define ERR_NOT_INITIALIZED      -102
+          #define ERR_INVALID_UTF8         -7
+          #define ERR_READ_TEMP_FILE_FAILED -8
+          #define ERR_WRITE_TEMP_FILE_FAILED -9
+          #define ERR_NOT_INITIALIZED      -100
+          #define ERR_ALREADY_INITIALIZED  -101
+          #define ERR_GET_SESSION_FAILED   -102
           #define ERR_ENCRYPT_FAILED       -103
           #define ERR_DECRYPT_FAILED       -104
+          #define ERR_BAD_CONFIG           -105
+          #define ERR_PANIC                -106
 
           /* Cobhan buffer format:
            * - Bytes 0-3: int32_t length (little-endian)

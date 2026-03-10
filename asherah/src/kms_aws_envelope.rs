@@ -180,9 +180,11 @@ impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKmsEnvelope<A>
         };
         let resp = match &self.rt {
             Some(rt) => rt.block_on(fut)?,
-            None => {
-                tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(fut))?
-            }
+            None => tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current()
+                    .block_on(fut)
+                    .map_err(|e| anyhow::anyhow!(e))
+            })?,
         };
         let plaintext = resp
             .plaintext()
@@ -216,9 +218,11 @@ impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKmsEnvelope<A>
             };
             let out = match &self.rt {
                 Some(rt) => rt.block_on(fut)?,
-                None => {
-                    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(fut))?
-                }
+                None => tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(fut)
+                        .map_err(|e| anyhow::anyhow!(e))
+                })?,
             };
             let blob = out
                 .ciphertext_blob()
@@ -260,10 +264,12 @@ impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKmsEnvelope<A>
                     .await
             };
             let out = match &self.rt {
-                Some(rt) => rt.block_on(fut),
-                None => {
-                    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(fut))
-                }
+                Some(rt) => rt.block_on(fut).map_err(|e| anyhow::anyhow!(e)),
+                None => tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current()
+                        .block_on(fut)
+                        .map_err(|e| anyhow::anyhow!(e))
+                }),
             };
             let out = match out {
                 Ok(v) => v,
@@ -285,6 +291,7 @@ impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKmsEnvelope<A>
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -313,5 +320,59 @@ mod tests {
         assert_eq!(back.keks[0].arn, "arn:aws:kms:...");
         assert_eq!(back.keks[0].encrypted_kek, vec![9, 8, 7]);
         Ok(())
+    }
+
+    #[test]
+    fn new_multi_empty_entries_fails() {
+        let aead = Arc::new(crate::aead::AES256GCM::new());
+        let result = AwsKmsEnvelope::new_multi(aead, 0, vec![]);
+        assert!(result.is_err());
+        let msg = result.err().unwrap().to_string();
+        assert!(
+            msg.contains("no kms entries provided"),
+            "expected 'no kms entries provided', got: {msg}"
+        );
+    }
+
+    #[test]
+    fn decrypt_key_invalid_envelope_json_fails() {
+        // decrypt_key deserializes the blob as KekEnvelope JSON.
+        // Invalid JSON should return an error.
+        let aead = Arc::new(crate::aead::AES256GCM::new());
+        let kms = AwsKmsEnvelope {
+            clients: vec![],
+            preferred: 0,
+            aead,
+            rt: None,
+        };
+        let result = kms.decrypt_key(&(), b"not json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decrypt_key_no_matching_region_fails() {
+        // Valid envelope JSON but no clients to decrypt with
+        let aead = Arc::new(crate::aead::AES256GCM::new());
+        let env = KekEnvelope {
+            encrypted_key: vec![1, 2, 3],
+            keks: vec![RegionalKek {
+                region: "us-east-1".into(),
+                arn: "arn:...".into(),
+                encrypted_kek: vec![9, 8, 7],
+            }],
+        };
+        let blob = serde_json::to_vec(&env).unwrap();
+        let kms = AwsKmsEnvelope {
+            clients: vec![], // no clients
+            preferred: 0,
+            aead,
+            rt: None,
+        };
+        let err = kms.decrypt_key(&(), &blob).unwrap_err();
+        assert!(
+            err.to_string().contains("all KMS backends failed"),
+            "expected 'all KMS backends failed', got: {}",
+            err
+        );
     }
 }
