@@ -403,3 +403,131 @@ fn simple_cache_default() {
         .unwrap();
     assert!(!reloaded);
 }
+
+// ──────────────────────────── SLRU rebalance edge cases ────────────────────────────
+
+#[test]
+fn slru_max_size_1() {
+    // max=1, protected_cap = max(1, 1/2) = max(1, 0) = 1
+    let cache = SimpleKeyCache::new_with_policy(3600, 1, CachePolicy::Slru, 0);
+    let _ = cache
+        .get_or_load_latest("a", &mut || Ok(make_key(1)))
+        .unwrap();
+    // Access again to promote to protected
+    let _ = cache
+        .get_or_load_latest("a", &mut || Ok(make_key(99)))
+        .unwrap();
+    // Insert "b" — "b" enters as probationary and is immediately evicted
+    // because SLRU evicts from probationary first, and "a" is protected
+    let _ = cache
+        .get_or_load_latest("b", &mut || Ok(make_key(2)))
+        .unwrap();
+    // "a" should still be cached (protected segment survives eviction)
+    let mut a_reloaded = false;
+    let _ = cache
+        .get_or_load_latest("a", &mut || {
+            a_reloaded = true;
+            Ok(make_key(3))
+        })
+        .unwrap();
+    assert!(
+        !a_reloaded,
+        "protected key in SLRU max=1 should survive eviction"
+    );
+    // "b" should have been evicted (it was probationary)
+    let mut b_reloaded = false;
+    let _ = cache
+        .get_or_load_latest("b", &mut || {
+            b_reloaded = true;
+            Ok(make_key(4))
+        })
+        .unwrap();
+    assert!(
+        b_reloaded,
+        "probationary key should be evicted in SLRU max=1"
+    );
+}
+
+#[test]
+fn slru_max_size_2() {
+    // max=2, protected_cap = max(1, 2/2) = 1
+    let cache = SimpleKeyCache::new_with_policy(3600, 2, CachePolicy::Slru, 0);
+    let _ = cache
+        .get_or_load_latest("a", &mut || Ok(make_key(1)))
+        .unwrap();
+    let _ = cache
+        .get_or_load_latest("b", &mut || Ok(make_key(2)))
+        .unwrap();
+    // Access both to promote to protected
+    let _ = cache
+        .get_or_load_latest("a", &mut || Ok(make_key(99)))
+        .unwrap();
+    let _ = cache
+        .get_or_load_latest("b", &mut || Ok(make_key(99)))
+        .unwrap();
+    // Now both are protected, but protected_cap=1, so rebalance should demote one
+    // Insert "c" — triggers eviction
+    let _ = cache
+        .get_or_load_latest("c", &mut || Ok(make_key(3)))
+        .unwrap();
+    // At least "c" should be present, and the most recently accessed of a/b
+    let mut c_reloaded = false;
+    let _ = cache
+        .get_or_load_latest("c", &mut || {
+            c_reloaded = true;
+            Ok(make_key(99))
+        })
+        .unwrap();
+    assert!(!c_reloaded, "latest insert should be cached");
+}
+
+// ──────────────────────────── Revoked-but-not-expired via get_or_load ────────────────────────────
+
+#[test]
+fn cache_meta_revoked_but_not_expired_returns_cached() {
+    // The get_meta_if_fresh function forces expired=false for revoked keys,
+    // meaning get_or_load returns the cached revoked key without reloading.
+    let cache = SimpleKeyCache::new_with_policy(3600, 0, CachePolicy::Simple, 3600);
+    let meta = KeyMeta {
+        id: "k".into(),
+        created: 1,
+    };
+
+    // Load a revoked key into cache
+    let _ = cache
+        .get_or_load(&meta, &mut || Ok(make_revoked_key(1)))
+        .unwrap();
+
+    // Second load should return cached (revoked) key without calling loader
+    let mut reloaded = false;
+    let k = cache
+        .get_or_load(&meta, &mut || {
+            reloaded = true;
+            Ok(make_key(1))
+        })
+        .unwrap();
+    assert!(
+        !reloaded,
+        "revoked key via get_or_load should be returned from cache (not reloaded)"
+    );
+    assert!(k.revoked(), "returned key should still be revoked");
+}
+
+#[test]
+fn cache_latest_revoked_key_triggers_reload() {
+    // Contrasts with get_meta_if_fresh: get_latest_if_fresh returns invalid=true for revoked
+    let cache = SimpleKeyCache::new_with_policy(3600, 0, CachePolicy::Simple, 3600);
+    let _ = cache
+        .get_or_load_latest("k", &mut || Ok(make_revoked_key(100)))
+        .unwrap();
+    let mut reloaded = false;
+    let k = cache
+        .get_or_load_latest("k", &mut || {
+            reloaded = true;
+            Ok(make_key(200))
+        })
+        .unwrap();
+    assert!(reloaded, "revoked key should trigger reload for latest");
+    assert!(!k.revoked());
+    assert_eq!(k.created(), 200);
+}

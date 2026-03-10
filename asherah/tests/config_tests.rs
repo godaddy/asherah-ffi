@@ -299,3 +299,98 @@ fn factory_tinylfu_eviction_policy() {
     let drr = session.encrypt(b"tinylfu test").unwrap();
     assert_eq!(session.decrypt(drr).unwrap(), b"tinylfu test");
 }
+
+// ──────────────────────────── Factory options edge cases ────────────────────────────
+
+#[test]
+fn factory_with_empty_options() {
+    let crypto = Arc::new(ael::aead::AES256GCM::new());
+    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![12_u8; 32]).unwrap());
+    let store = Arc::new(ael::metastore::InMemoryMetastore::new());
+    let factory = ael::api::new_session_factory_with_options(
+        ael::Config::new("svc", "prod"),
+        store,
+        kms,
+        crypto,
+        &[], // empty options
+    );
+    let session = factory.get_session("p1");
+    let drr = session.encrypt(b"empty opts").unwrap();
+    assert_eq!(session.decrypt(drr).unwrap(), b"empty opts");
+}
+
+#[test]
+fn factory_with_duplicate_metrics_options() {
+    let crypto = Arc::new(ael::aead::AES256GCM::new());
+    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![13_u8; 32]).unwrap());
+    let store = Arc::new(ael::metastore::InMemoryMetastore::new());
+    // Last Metrics option should win
+    let factory = ael::api::new_session_factory_with_options(
+        ael::Config::new("svc", "prod"),
+        store,
+        kms,
+        crypto,
+        &[
+            ael::FactoryOption::Metrics(true),
+            ael::FactoryOption::Metrics(false),
+            ael::FactoryOption::Metrics(true),
+        ],
+    );
+    let session = factory.get_session("p1");
+    let drr = session.encrypt(b"dup opts").unwrap();
+    assert_eq!(session.decrypt(drr).unwrap(), b"dup opts");
+}
+
+#[test]
+fn factory_with_all_options() {
+    let crypto = Arc::new(ael::aead::AES256GCM::new());
+    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![14_u8; 32]).unwrap());
+    let store = Arc::new(ael::metastore::InMemoryMetastore::new());
+    let factory = ael::api::new_session_factory_with_options(
+        ael::Config::new("svc", "prod"),
+        store,
+        kms,
+        crypto,
+        &[
+            ael::FactoryOption::Metrics(true),
+            ael::FactoryOption::SecretFactory,
+        ],
+    );
+    let session = factory.get_session("p1");
+    let drr = session.encrypt(b"all opts").unwrap();
+    assert_eq!(session.decrypt(drr).unwrap(), b"all opts");
+}
+
+// ──────────────────────────── Gap 13: Config builder chaining ────────────────────────────
+
+#[test]
+fn config_with_policy_chaining() {
+    let policy1 = ael::CryptoPolicy::default();
+    let policy2 = ael::policy::new_crypto_policy(&[ael::policy::PolicyOption::ExpireAfterSecs(42)]);
+    let cfg = ael::Config::new("svc", "prod")
+        .with_policy(policy1)
+        .with_policy(policy2);
+    assert_eq!(
+        cfg.policy.expire_key_after_s, 42,
+        "last with_policy should win"
+    );
+}
+
+#[test]
+fn config_with_region_suffix_empty_string() {
+    let cfg = ael::Config::new("svc", "prod").with_region_suffix("");
+    assert_eq!(cfg.region_suffix.as_deref(), Some(""));
+}
+
+#[test]
+fn config_builder_full_chain() {
+    let cfg = ael::Config::new("svc", "prod")
+        .with_region_suffix("us-east-1")
+        .with_policy_options(&[
+            ael::policy::PolicyOption::ExpireAfterSecs(3600),
+            ael::policy::PolicyOption::NoCache,
+        ]);
+    assert_eq!(cfg.region_suffix.as_deref(), Some("us-east-1"));
+    assert_eq!(cfg.policy.expire_key_after_s, 3600);
+    assert!(!cfg.policy.cache_system_keys);
+}
