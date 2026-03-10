@@ -181,6 +181,7 @@ dependencies = [
  "asherah",
  "asherah-cobhan",
  "asherah-config",
+ "log",
  "serde",
  "serde_json",
 ]

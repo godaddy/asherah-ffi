@@ -74,18 +74,18 @@ fn connect_client(url: &str) -> anyhow::Result<Client> {
 
 impl PostgresMetastore {
     pub fn connect(url: &str) -> anyhow::Result<Self> {
-        let mut cli = connect_client(url)?;
-        cli.batch_execute(
-            r#"CREATE TABLE IF NOT EXISTS encryption_key (
-                id TEXT NOT NULL,
-                created TIMESTAMP NOT NULL,
-                key_record JSONB NOT NULL,
-                PRIMARY KEY(id, created)
-            );"#,
-        )?;
-
-        // Aurora PostgreSQL write forwarding: set consistency mode on initial connection
-        Self::apply_replica_read_consistency(&mut cli)?;
+        // Validate REPLICA_READ_CONSISTENCY early (before any connection)
+        if let Ok(consistency) = std::env::var("REPLICA_READ_CONSISTENCY") {
+            match consistency.as_str() {
+                "eventual" | "global" | "session" => {}
+                _ => {
+                    anyhow::bail!(
+                        "invalid REPLICA_READ_CONSISTENCY value: '{}' (expected eventual, global, or session)",
+                        consistency
+                    );
+                }
+            }
+        }
 
         Ok(Self {
             url: url.to_string(),

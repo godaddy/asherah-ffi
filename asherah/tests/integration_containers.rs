@@ -29,6 +29,65 @@ use testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 use testcontainers_modules::{localstack::LocalStack, postgres::Postgres};
+use tokio::sync::OnceCell;
+
+struct SharedMySQL {
+    _container: ContainerAsync<GenericImage>,
+    url: String,
+}
+
+struct SharedPostgres {
+    _container: ContainerAsync<Postgres>,
+    url: String,
+}
+
+struct SharedLocalStack {
+    _container: ContainerAsync<LocalStack>,
+    endpoint: String,
+}
+
+static SHARED_MYSQL: OnceCell<Option<SharedMySQL>> = OnceCell::const_new();
+static SHARED_POSTGRES: OnceCell<Option<SharedPostgres>> = OnceCell::const_new();
+static SHARED_LOCALSTACK: OnceCell<Option<SharedLocalStack>> = OnceCell::const_new();
+
+async fn shared_mysql() -> Option<String> {
+    SHARED_MYSQL
+        .get_or_init(async || {
+            start_mysql()
+                .await
+                .map(|(c, url)| SharedMySQL { _container: c, url })
+        })
+        .await
+        .as_ref()
+        .map(|s| s.url.clone())
+}
+
+async fn shared_postgres() -> Option<String> {
+    SHARED_POSTGRES
+        .get_or_init(async || {
+            start_postgres()
+                .await
+                .map(|(c, url)| SharedPostgres { _container: c, url })
+        })
+        .await
+        .as_ref()
+        .map(|s| s.url.clone())
+}
+
+async fn shared_localstack() -> Option<String> {
+    SHARED_LOCALSTACK
+        .get_or_init(async || {
+            start_localstack_with_creds()
+                .await
+                .map(|(c, endpoint)| SharedLocalStack {
+                    _container: c,
+                    endpoint,
+                })
+        })
+        .await
+        .as_ref()
+        .map(|s| s.endpoint.clone())
+}
 
 /// Helper: create a KMS key in LocalStack and return its key ID.
 async fn create_kms_key(endpoint: &str) -> String {
@@ -68,6 +127,36 @@ fn with_endpoint<T>(endpoint: &str, f: impl FnOnce() -> T) -> T {
     let _guard = ENV_MUTEX.lock().unwrap();
     std::env::set_var("AWS_ENDPOINT_URL", endpoint);
     f()
+}
+
+/// Create the encryption_key table in MySQL.
+fn create_mysql_table(url: &str) {
+    use mysql::prelude::Queryable;
+    let pool = mysql::Pool::new(mysql::Opts::try_from(url).unwrap()).unwrap();
+    let mut conn = pool.get_conn().unwrap();
+    conn.query_drop(
+        r#"CREATE TABLE IF NOT EXISTS encryption_key (
+            id VARCHAR(255) NOT NULL,
+            created TIMESTAMP NOT NULL,
+            key_record JSON NOT NULL,
+            PRIMARY KEY(id, created)
+        ) ENGINE=InnoDB"#,
+    )
+    .unwrap();
+}
+
+/// Create the encryption_key table in Postgres.
+fn create_postgres_table(url: &str) {
+    let mut cli = postgres::Client::connect(url, postgres::NoTls).unwrap();
+    cli.batch_execute(
+        r#"CREATE TABLE IF NOT EXISTS encryption_key (
+            id TEXT NOT NULL,
+            created TIMESTAMP NOT NULL,
+            key_record JSONB NOT NULL,
+            PRIMARY KEY(id, created)
+        );"#,
+    )
+    .unwrap();
 }
 
 /// Connect to MySQL with retries, returning the connected metastore.
@@ -151,6 +240,24 @@ async fn start_mysql() -> Option<(ContainerAsync<GenericImage>, String)> {
         match container.get_host_port_ipv4(3306).await {
             Ok(port) => {
                 let url = format!("mysql://root@127.0.0.1:{port}/test");
+                // Create table before returning — matches Go behavior where tables must pre-exist
+                let url_clone = url.clone();
+                let table_ok = tokio::task::spawn_blocking(move || {
+                    // Retry table creation since MySQL may still be starting
+                    for _ in 0..30 {
+                        if std::panic::catch_unwind(|| create_mysql_table(&url_clone)).is_ok() {
+                            return true;
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                    }
+                    false
+                })
+                .await
+                .unwrap();
+                if !table_ok {
+                    eprintln!("MySQL table creation failed after retries (attempt {attempt})");
+                    continue;
+                }
                 return Some((container, url));
             }
             Err(e) => {
@@ -179,6 +286,11 @@ async fn start_postgres() -> Option<(ContainerAsync<Postgres>, String)> {
                 let url = format!(
                     "host=127.0.0.1 port={port} user=postgres password=postgres dbname=postgres"
                 );
+                // Create table before returning — matches Go behavior where tables must pre-exist
+                let url_clone = url.clone();
+                tokio::task::spawn_blocking(move || create_postgres_table(&url_clone))
+                    .await
+                    .unwrap();
                 return Some((container, url));
             }
             Err(e) => {
@@ -195,7 +307,7 @@ async fn start_postgres() -> Option<(ContainerAsync<Postgres>, String)> {
 
 #[tokio::test]
 async fn mysql_metastore_contract() {
-    let (_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -212,7 +324,7 @@ async fn mysql_metastore_contract() {
 
 #[tokio::test]
 async fn postgres_metastore_contract() {
-    let (_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -323,16 +435,16 @@ async fn create_dynamodb_table(endpoint: &str, table: &str) {
         .billing_mode(aws_sdk_dynamodb::types::BillingMode::PayPerRequest)
         .send()
         .await
-        .unwrap();
+        .ok(); // Ignore "table already exists" when sharing a LocalStack instance
 }
 
 #[tokio::test]
 async fn dynamodb_metastore_contract() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
-    let table = "EncryptionKey";
+    let table = "EncryptionKeyContract";
 
     create_dynamodb_table(&endpoint, table).await;
 
@@ -353,7 +465,7 @@ async fn dynamodb_metastore_contract() {
 
 #[tokio::test]
 async fn kms_envelope_roundtrip() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -389,7 +501,7 @@ async fn kms_envelope_roundtrip() {
 /// End-to-end: MySQL metastore + StaticKMS → SessionFactory → encrypt → decrypt
 #[tokio::test]
 async fn mysql_full_stack_roundtrip() {
-    let (_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -414,7 +526,7 @@ async fn mysql_full_stack_roundtrip() {
 /// End-to-end: Postgres metastore + StaticKMS → SessionFactory → encrypt → decrypt
 #[tokio::test]
 async fn postgres_full_stack_roundtrip() {
-    let (_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -440,7 +552,7 @@ async fn postgres_full_stack_roundtrip() {
 /// This is the most realistic test — both metastore and KMS backed by LocalStack.
 #[tokio::test]
 async fn dynamodb_kms_full_stack_roundtrip() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -496,7 +608,7 @@ async fn dynamodb_kms_full_stack_roundtrip() {
 /// Multi-region KMS envelope: create two keys, encrypt with preferred, decrypt with either.
 #[tokio::test]
 async fn kms_multi_region_envelope() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -545,7 +657,7 @@ async fn kms_multi_region_envelope() {
 /// Concurrent encrypt/decrypt against MySQL-backed SessionFactory.
 #[tokio::test]
 async fn mysql_concurrent_roundtrip() {
-    let (_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -584,7 +696,7 @@ async fn mysql_concurrent_roundtrip() {
 /// Concurrent encrypt/decrypt against Postgres-backed SessionFactory.
 #[tokio::test]
 async fn postgres_concurrent_roundtrip() {
-    let (_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -627,7 +739,7 @@ async fn postgres_concurrent_roundtrip() {
 /// Key rotation: expire keys after 1s, verify new IK is created against Postgres.
 #[tokio::test]
 async fn postgres_key_rotation() {
-    let (_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -687,7 +799,7 @@ async fn postgres_key_rotation() {
 /// Key rotation against DynamoDB + real KMS envelope.
 #[tokio::test]
 async fn dynamodb_kms_key_rotation() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -768,7 +880,7 @@ async fn dynamodb_kms_key_rotation() {
 /// Verify that data encrypted under one partition cannot be decrypted by another.
 #[tokio::test]
 async fn postgres_cross_partition_isolation() {
-    let (_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -803,7 +915,7 @@ async fn postgres_cross_partition_isolation() {
 /// Test the direct (non-envelope) AwsKms encrypt/decrypt roundtrip.
 #[tokio::test]
 async fn kms_direct_roundtrip() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -837,7 +949,7 @@ async fn kms_direct_roundtrip() {
 /// Test AwsKmsBuilder: build a multi-region KMS via the fluent API, encrypt/decrypt roundtrip.
 #[tokio::test]
 async fn kms_builder_multi_region() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -869,7 +981,7 @@ async fn kms_builder_multi_region() {
 /// AwsKmsBuilder with no entries should fail.
 #[tokio::test]
 async fn kms_builder_empty_entries_fails() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -893,7 +1005,7 @@ async fn kms_builder_empty_entries_fails() {
 /// Encrypting with an invalid KMS key ID should produce an error, not a panic.
 #[tokio::test]
 async fn kms_encrypt_with_invalid_key_returns_error() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -920,7 +1032,7 @@ async fn kms_encrypt_with_invalid_key_returns_error() {
 /// Decrypting garbage ciphertext with a valid KMS key should produce an error.
 #[tokio::test]
 async fn kms_decrypt_garbage_returns_error() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -944,7 +1056,7 @@ async fn kms_decrypt_garbage_returns_error() {
 /// Envelope KMS: decrypting tampered envelope JSON should fail gracefully.
 #[tokio::test]
 async fn kms_envelope_decrypt_tampered_fails() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -981,7 +1093,7 @@ async fn kms_envelope_decrypt_tampered_fails() {
 /// Full-stack: decrypting a tampered DataRowRecord should fail.
 #[tokio::test]
 async fn postgres_decrypt_tampered_drr_fails() {
-    let (_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -1022,14 +1134,15 @@ async fn mysql_bad_connection_returns_error() {
 /// Postgres metastore: connecting to a bad URL should return an error, not panic.
 #[tokio::test]
 async fn postgres_bad_connection_returns_error() {
+    use asherah::traits::Metastore;
     tokio::task::spawn_blocking(|| {
-        let result = asherah::metastore_postgres::PostgresMetastore::connect(
+        let store = asherah::metastore_postgres::PostgresMetastore::connect(
             "host=127.0.0.1 port=1 user=nobody dbname=nonexist connect_timeout=1",
-        );
-        assert!(
-            result.is_err(),
-            "connecting to bad Postgres URL should fail"
-        );
+        )
+        .expect("connect() should succeed (lazy connection)");
+        // Actual connection happens on first use
+        let result = store.load("test", 0);
+        assert!(result.is_err(), "load on bad Postgres URL should fail");
     })
     .await
     .unwrap();
@@ -1042,16 +1155,13 @@ async fn postgres_bad_connection_returns_error() {
 /// End-to-end: MySQL metastore + KMS Envelope → SessionFactory → encrypt → decrypt
 #[tokio::test]
 async fn mysql_kms_envelope_full_stack_roundtrip() {
-    let (mysql_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(mysql_container);
-            return;
-        }
+        None => return,
     };
 
     let key_id = create_kms_key(&endpoint).await;
@@ -1087,16 +1197,13 @@ async fn mysql_kms_envelope_full_stack_roundtrip() {
 /// End-to-end: Postgres metastore + KMS Envelope → SessionFactory → encrypt → decrypt
 #[tokio::test]
 async fn postgres_kms_envelope_full_stack_roundtrip() {
-    let (pg_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(pg_container);
-            return;
-        }
+        None => return,
     };
 
     let key_id = create_kms_key(&endpoint).await;
@@ -1132,7 +1239,7 @@ async fn postgres_kms_envelope_full_stack_roundtrip() {
 /// End-to-end: DynamoDB metastore + StaticKMS → SessionFactory → encrypt → decrypt
 #[tokio::test]
 async fn dynamodb_static_kms_full_stack_roundtrip() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -1175,7 +1282,7 @@ async fn dynamodb_static_kms_full_stack_roundtrip() {
 /// Cross-partition isolation against MySQL.
 #[tokio::test]
 async fn mysql_cross_partition_isolation() {
-    let (_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -1204,7 +1311,7 @@ async fn mysql_cross_partition_isolation() {
 /// Cross-partition isolation against DynamoDB.
 #[tokio::test]
 async fn dynamodb_cross_partition_isolation() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -1251,7 +1358,7 @@ async fn dynamodb_cross_partition_isolation() {
 /// Tampered DRR against MySQL.
 #[tokio::test]
 async fn mysql_decrypt_tampered_drr_fails() {
-    let (_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -1278,7 +1385,7 @@ async fn mysql_decrypt_tampered_drr_fails() {
 /// Tampered DRR against DynamoDB.
 #[tokio::test]
 async fn dynamodb_decrypt_tampered_drr_fails() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -1323,7 +1430,7 @@ async fn dynamodb_decrypt_tampered_drr_fails() {
 /// Key rotation against MySQL + StaticKMS.
 #[tokio::test]
 async fn mysql_key_rotation() {
-    let (_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -1383,7 +1490,7 @@ async fn mysql_key_rotation() {
 /// Concurrent encrypt/decrypt against DynamoDB-backed SessionFactory.
 #[tokio::test]
 async fn dynamodb_concurrent_roundtrip() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -1435,7 +1542,7 @@ async fn dynamodb_concurrent_roundtrip() {
 /// Session caching enabled against Postgres.
 #[tokio::test]
 async fn postgres_session_caching() {
-    let (_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -1480,7 +1587,7 @@ async fn postgres_session_caching() {
 /// Region suffix via RegionSuffixMetastore wrapping MySQL.
 #[tokio::test]
 async fn mysql_region_suffix() {
-    let (_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -1524,7 +1631,7 @@ async fn mysql_region_suffix() {
 /// Region suffix via config against Postgres.
 #[tokio::test]
 async fn postgres_region_suffix_via_config() {
-    let (_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -1568,7 +1675,7 @@ async fn postgres_region_suffix_via_config() {
 /// Store/Load API against Postgres.
 #[tokio::test]
 async fn postgres_store_load_api() {
-    let (_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -1597,16 +1704,13 @@ async fn postgres_store_load_api() {
 /// Concurrent encrypt/decrypt against MySQL + KMS Envelope.
 #[tokio::test]
 async fn mysql_kms_envelope_concurrent() {
-    let (mysql_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(mysql_container);
-            return;
-        }
+        None => return,
     };
 
     let key_id = create_kms_key(&endpoint).await;
@@ -1664,16 +1768,13 @@ async fn mysql_kms_envelope_concurrent() {
 /// Full-stack: Postgres + multi-region KMS envelope.
 #[tokio::test]
 async fn postgres_multi_region_kms_full_stack() {
-    let (pg_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(pg_container);
-            return;
-        }
+        None => return,
     };
 
     let key_id_1 = create_kms_key(&endpoint).await;
@@ -1717,7 +1818,7 @@ async fn postgres_multi_region_kms_full_stack() {
 /// Full-stack: DynamoDB + AwsKmsBuilder-constructed KMS.
 #[tokio::test]
 async fn dynamodb_kms_builder_full_stack() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -1765,16 +1866,13 @@ async fn dynamodb_kms_builder_full_stack() {
 /// Key rotation: Postgres + KMS Envelope.
 #[tokio::test]
 async fn postgres_kms_envelope_key_rotation() {
-    let (pg_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(pg_container);
-            return;
-        }
+        None => return,
     };
 
     let key_id = create_kms_key(&endpoint).await;
@@ -1841,16 +1939,13 @@ async fn postgres_kms_envelope_key_rotation() {
 /// Key rotation: MySQL + KMS Envelope.
 #[tokio::test]
 async fn mysql_kms_envelope_key_rotation() {
-    let (mysql_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(mysql_container);
-            return;
-        }
+        None => return,
     };
 
     let key_id = create_kms_key(&endpoint).await;
@@ -1921,7 +2016,7 @@ async fn mysql_kms_envelope_key_rotation() {
 /// Concurrent encrypt/decrypt against DynamoDB + KMS Envelope (both on same LocalStack).
 #[tokio::test]
 async fn dynamodb_kms_envelope_concurrent() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -1984,7 +2079,7 @@ async fn dynamodb_kms_envelope_concurrent() {
 /// Shared IK cache: multiple partitions share the same IK cache against Postgres.
 #[tokio::test]
 async fn postgres_shared_ik_cache() {
-    let (_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -2035,7 +2130,7 @@ async fn postgres_shared_ik_cache() {
 /// Shared IK cache concurrent: multiple threads using shared cache against MySQL.
 #[tokio::test]
 async fn mysql_shared_ik_cache_concurrent() {
-    let (_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -2085,16 +2180,13 @@ async fn mysql_shared_ik_cache_concurrent() {
 
 #[tokio::test]
 async fn postgres_kms_envelope_concurrent() {
-    let (pg_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(pg_container);
-            return;
-        }
+        None => return,
     };
     let key_id = create_kms_key(&endpoint).await;
     let factory = with_endpoint(&endpoint, || {
@@ -2143,7 +2235,7 @@ async fn postgres_kms_envelope_concurrent() {
 
 #[tokio::test]
 async fn dynamodb_static_key_rotation() {
-    let (_c, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -2201,16 +2293,13 @@ async fn dynamodb_static_key_rotation() {
 
 #[tokio::test]
 async fn mysql_kms_envelope_cross_partition() {
-    let (mc, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(mc);
-            return;
-        }
+        None => return,
     };
     let key_id = create_kms_key(&endpoint).await;
     let ep = endpoint.clone();
@@ -2239,16 +2328,13 @@ async fn mysql_kms_envelope_cross_partition() {
 
 #[tokio::test]
 async fn postgres_kms_envelope_cross_partition() {
-    let (pc, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(pc);
-            return;
-        }
+        None => return,
     };
     let key_id = create_kms_key(&endpoint).await;
     let ep = endpoint.clone();
@@ -2277,7 +2363,7 @@ async fn postgres_kms_envelope_cross_partition() {
 
 #[tokio::test]
 async fn dynamodb_kms_envelope_cross_partition() {
-    let (_c, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -2318,16 +2404,13 @@ async fn dynamodb_kms_envelope_cross_partition() {
 
 #[tokio::test]
 async fn mysql_kms_envelope_tampered_drr() {
-    let (mc, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(mc);
-            return;
-        }
+        None => return,
     };
     let key_id = create_kms_key(&endpoint).await;
     let ep = endpoint.clone();
@@ -2358,16 +2441,13 @@ async fn mysql_kms_envelope_tampered_drr() {
 
 #[tokio::test]
 async fn postgres_kms_envelope_tampered_drr() {
-    let (pc, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(pc);
-            return;
-        }
+        None => return,
     };
     let key_id = create_kms_key(&endpoint).await;
     let ep = endpoint.clone();
@@ -2398,7 +2478,7 @@ async fn postgres_kms_envelope_tampered_drr() {
 
 #[tokio::test]
 async fn dynamodb_kms_envelope_tampered_drr() {
-    let (_c, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -2441,7 +2521,7 @@ async fn dynamodb_kms_envelope_tampered_drr() {
 
 #[tokio::test]
 async fn mysql_session_caching() {
-    let (_c, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -2466,16 +2546,13 @@ async fn mysql_session_caching() {
 
 #[tokio::test]
 async fn mysql_kms_envelope_session_caching() {
-    let (mc, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(mc);
-            return;
-        }
+        None => return,
     };
     let key_id = create_kms_key(&endpoint).await;
     let ep = endpoint.clone();
@@ -2510,16 +2587,13 @@ async fn mysql_kms_envelope_session_caching() {
 
 #[tokio::test]
 async fn postgres_kms_envelope_session_caching() {
-    let (pc, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(pc);
-            return;
-        }
+        None => return,
     };
     let key_id = create_kms_key(&endpoint).await;
     let ep = endpoint.clone();
@@ -2554,7 +2628,7 @@ async fn postgres_kms_envelope_session_caching() {
 
 #[tokio::test]
 async fn dynamodb_session_caching() {
-    let (_c, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -2592,7 +2666,7 @@ async fn dynamodb_session_caching() {
 
 #[tokio::test]
 async fn dynamodb_kms_envelope_session_caching() {
-    let (_c, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -2642,16 +2716,13 @@ async fn dynamodb_kms_envelope_session_caching() {
 
 #[tokio::test]
 async fn mysql_kms_envelope_region_suffix() {
-    let (mc, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(mc);
-            return;
-        }
+        None => return,
     };
     let key_id = create_kms_key(&endpoint).await;
     let ep = endpoint.clone();
@@ -2698,16 +2769,13 @@ async fn mysql_kms_envelope_region_suffix() {
 
 #[tokio::test]
 async fn postgres_kms_envelope_region_suffix() {
-    let (pc, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(pc);
-            return;
-        }
+        None => return,
     };
     let key_id = create_kms_key(&endpoint).await;
     let ep = endpoint.clone();
@@ -2755,7 +2823,7 @@ async fn postgres_kms_envelope_region_suffix() {
 
 #[tokio::test]
 async fn dynamodb_region_suffix() {
-    let (_c, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -2805,7 +2873,7 @@ async fn dynamodb_region_suffix() {
 
 #[tokio::test]
 async fn dynamodb_kms_envelope_region_suffix() {
-    let (_c, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -2864,7 +2932,7 @@ async fn dynamodb_kms_envelope_region_suffix() {
 
 #[tokio::test]
 async fn mysql_store_load_api() {
-    let (_c, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -2885,16 +2953,13 @@ async fn mysql_store_load_api() {
 
 #[tokio::test]
 async fn mysql_kms_envelope_store_load_api() {
-    let (mc, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(mc);
-            return;
-        }
+        None => return,
     };
     let key_id = create_kms_key(&endpoint).await;
     let ep = endpoint.clone();
@@ -2925,16 +2990,13 @@ async fn mysql_kms_envelope_store_load_api() {
 
 #[tokio::test]
 async fn postgres_kms_envelope_store_load_api() {
-    let (pc, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(pc);
-            return;
-        }
+        None => return,
     };
     let key_id = create_kms_key(&endpoint).await;
     let ep = endpoint.clone();
@@ -2965,7 +3027,7 @@ async fn postgres_kms_envelope_store_load_api() {
 
 #[tokio::test]
 async fn dynamodb_store_load_api() {
-    let (_c, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -2999,7 +3061,7 @@ async fn dynamodb_store_load_api() {
 
 #[tokio::test]
 async fn dynamodb_kms_envelope_store_load_api() {
-    let (_c, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -3042,16 +3104,13 @@ async fn dynamodb_kms_envelope_store_load_api() {
 
 #[tokio::test]
 async fn mysql_kms_envelope_shared_ik_cache() {
-    let (mc, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(mc);
-            return;
-        }
+        None => return,
     };
     let key_id = create_kms_key(&endpoint).await;
     let ep = endpoint.clone();
@@ -3089,16 +3148,13 @@ async fn mysql_kms_envelope_shared_ik_cache() {
 
 #[tokio::test]
 async fn postgres_kms_envelope_shared_ik_cache() {
-    let (pc, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
-        None => {
-            drop(pc);
-            return;
-        }
+        None => return,
     };
     let key_id = create_kms_key(&endpoint).await;
     let ep = endpoint.clone();
@@ -3136,7 +3192,7 @@ async fn postgres_kms_envelope_shared_ik_cache() {
 
 #[tokio::test]
 async fn dynamodb_shared_ik_cache() {
-    let (_c, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -3177,7 +3233,7 @@ async fn dynamodb_shared_ik_cache() {
 
 #[tokio::test]
 async fn dynamodb_kms_envelope_shared_ik_cache() {
-    let (_c, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -3233,7 +3289,7 @@ async fn dynamodb_kms_envelope_shared_ik_cache() {
 /// LRU IK cache eviction against MySQL: evict keys, verify reload.
 #[tokio::test]
 async fn mysql_lru_ik_cache_eviction() {
-    let (_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -3277,7 +3333,7 @@ async fn mysql_lru_ik_cache_eviction() {
 /// LFU IK cache eviction against Postgres.
 #[tokio::test]
 async fn postgres_lfu_ik_cache_eviction() {
-    let (_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -3319,7 +3375,7 @@ async fn postgres_lfu_ik_cache_eviction() {
 /// SLRU session cache eviction against DynamoDB.
 #[tokio::test]
 async fn dynamodb_slru_session_cache_eviction() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -3375,11 +3431,11 @@ async fn dynamodb_slru_session_cache_eviction() {
 /// TinyLFU IK cache eviction against MySQL with KMS envelope.
 #[tokio::test]
 async fn mysql_kms_envelope_tinylfu_cache_eviction() {
-    let (_mysql, mysql_url) = match start_mysql().await {
+    let mysql_url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -3433,11 +3489,11 @@ async fn mysql_kms_envelope_tinylfu_cache_eviction() {
 /// LRU session + IK cache eviction against Postgres with KMS envelope.
 #[tokio::test]
 async fn postgres_kms_envelope_lru_session_cache_eviction() {
-    let (_pg, pg_url) = match start_postgres().await {
+    let pg_url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -3493,7 +3549,7 @@ async fn postgres_kms_envelope_lru_session_cache_eviction() {
 
 #[tokio::test]
 async fn mysql_lfu_cache_eviction() {
-    let (_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -3533,7 +3589,7 @@ async fn mysql_lfu_cache_eviction() {
 
 #[tokio::test]
 async fn mysql_slru_cache_eviction() {
-    let (_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -3573,7 +3629,7 @@ async fn mysql_slru_cache_eviction() {
 
 #[tokio::test]
 async fn mysql_tinylfu_cache_eviction() {
-    let (_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -3615,11 +3671,11 @@ async fn mysql_tinylfu_cache_eviction() {
 
 #[tokio::test]
 async fn mysql_kms_envelope_lru_cache_eviction() {
-    let (_mysql, mysql_url) = match start_mysql().await {
+    let mysql_url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -3670,11 +3726,11 @@ async fn mysql_kms_envelope_lru_cache_eviction() {
 
 #[tokio::test]
 async fn mysql_kms_envelope_lfu_cache_eviction() {
-    let (_mysql, mysql_url) = match start_mysql().await {
+    let mysql_url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -3725,11 +3781,11 @@ async fn mysql_kms_envelope_lfu_cache_eviction() {
 
 #[tokio::test]
 async fn mysql_kms_envelope_slru_cache_eviction() {
-    let (_mysql, mysql_url) = match start_mysql().await {
+    let mysql_url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -3782,7 +3838,7 @@ async fn mysql_kms_envelope_slru_cache_eviction() {
 
 #[tokio::test]
 async fn postgres_lru_cache_eviction() {
-    let (_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -3822,7 +3878,7 @@ async fn postgres_lru_cache_eviction() {
 
 #[tokio::test]
 async fn postgres_slru_cache_eviction() {
-    let (_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -3862,7 +3918,7 @@ async fn postgres_slru_cache_eviction() {
 
 #[tokio::test]
 async fn postgres_tinylfu_cache_eviction() {
-    let (_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -3904,11 +3960,11 @@ async fn postgres_tinylfu_cache_eviction() {
 
 #[tokio::test]
 async fn postgres_kms_envelope_lfu_cache_eviction() {
-    let (_pg, pg_url) = match start_postgres().await {
+    let pg_url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -3959,11 +4015,11 @@ async fn postgres_kms_envelope_lfu_cache_eviction() {
 
 #[tokio::test]
 async fn postgres_kms_envelope_slru_cache_eviction() {
-    let (_pg, pg_url) = match start_postgres().await {
+    let pg_url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -4014,11 +4070,11 @@ async fn postgres_kms_envelope_slru_cache_eviction() {
 
 #[tokio::test]
 async fn postgres_kms_envelope_tinylfu_cache_eviction() {
-    let (_pg, pg_url) = match start_postgres().await {
+    let pg_url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
-    let (_ls, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -4071,7 +4127,7 @@ async fn postgres_kms_envelope_tinylfu_cache_eviction() {
 
 #[tokio::test]
 async fn dynamodb_lru_cache_eviction() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -4124,7 +4180,7 @@ async fn dynamodb_lru_cache_eviction() {
 
 #[tokio::test]
 async fn dynamodb_lfu_cache_eviction() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -4177,7 +4233,7 @@ async fn dynamodb_lfu_cache_eviction() {
 
 #[tokio::test]
 async fn dynamodb_tinylfu_cache_eviction() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -4232,7 +4288,7 @@ async fn dynamodb_tinylfu_cache_eviction() {
 
 #[tokio::test]
 async fn dynamodb_kms_envelope_lru_cache_eviction() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -4292,7 +4348,7 @@ async fn dynamodb_kms_envelope_lru_cache_eviction() {
 
 #[tokio::test]
 async fn dynamodb_kms_envelope_lfu_cache_eviction() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -4352,7 +4408,7 @@ async fn dynamodb_kms_envelope_lfu_cache_eviction() {
 
 #[tokio::test]
 async fn dynamodb_kms_envelope_slru_cache_eviction() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -4412,7 +4468,7 @@ async fn dynamodb_kms_envelope_slru_cache_eviction() {
 
 #[tokio::test]
 async fn dynamodb_kms_envelope_tinylfu_cache_eviction() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -4479,7 +4535,7 @@ async fn dynamodb_kms_envelope_tinylfu_cache_eviction() {
 #[cfg(feature = "mysql")]
 #[tokio::test]
 async fn mysql_many_sequential_operations() {
-    let (_container, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -4510,7 +4566,7 @@ async fn mysql_many_sequential_operations() {
 #[cfg(feature = "postgres")]
 #[tokio::test]
 async fn postgres_many_sequential_operations() {
-    let (_container, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -4545,7 +4601,7 @@ async fn postgres_many_sequential_operations() {
 /// in the envelope KEKs. The decrypt should fall back to the us-east-1 entry.
 #[tokio::test]
 async fn kms_envelope_decrypt_fallback_when_preferred_region_not_in_envelope() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -4591,7 +4647,7 @@ async fn kms_envelope_decrypt_fallback_when_preferred_region_not_in_envelope() {
 /// DDB_REGION_SUFFIX=true should enable region suffix on DynamoDbMetastore.
 #[tokio::test]
 async fn dynamodb_native_region_suffix() {
-    let (_c, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -4638,7 +4694,7 @@ async fn dynamodb_native_region_suffix() {
 /// Without DDB_REGION_SUFFIX, region_suffix() should return None.
 #[tokio::test]
 async fn dynamodb_region_suffix_disabled_by_default() {
-    let (_c, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -4666,7 +4722,7 @@ async fn dynamodb_region_suffix_disabled_by_default() {
 /// Passing an empty table name to DynamoDbMetastore should default to "EncryptionKey".
 #[tokio::test]
 async fn dynamodb_empty_table_name_defaults() {
-    let (_c, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -4703,7 +4759,7 @@ async fn dynamodb_empty_table_name_defaults() {
 /// An invalid REPLICA_READ_CONSISTENCY value should be rejected by PostgresMetastore.
 #[tokio::test]
 async fn postgres_invalid_replica_read_consistency_rejected() {
-    let (_c, url) = match start_postgres().await {
+    let url = match shared_postgres().await {
         Some(v) => v,
         None => return,
     };
@@ -4731,7 +4787,7 @@ async fn postgres_invalid_replica_read_consistency_rejected() {
 /// An invalid REPLICA_READ_CONSISTENCY value should be rejected by MySqlMetastore.
 #[tokio::test]
 async fn mysql_invalid_replica_read_consistency_rejected() {
-    let (_c, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -4757,7 +4813,7 @@ async fn mysql_invalid_replica_read_consistency_rejected() {
 /// MYSQL_TLS_MODE=false should disable TLS without breaking the connection.
 #[tokio::test]
 async fn mysql_tls_mode_false_disables_ssl() {
-    let (_c, url) = match start_mysql().await {
+    let url = match shared_mysql().await {
         Some(v) => v,
         None => return,
     };
@@ -4793,7 +4849,7 @@ async fn mysql_tls_mode_false_disables_ssl() {
 /// kms_aws_envelope.rs).
 #[tokio::test]
 async fn kms_envelope_encrypt_fails_when_non_preferred_region_key_invalid() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
@@ -4835,7 +4891,7 @@ async fn kms_envelope_encrypt_fails_when_non_preferred_region_key_invalid() {
 /// This exercises lines 274-279 of kms_aws_envelope.rs (Err → continue).
 #[tokio::test]
 async fn kms_envelope_decrypt_fallback_on_preferred_api_error() {
-    let (_container, endpoint) = match start_localstack_with_creds().await {
+    let endpoint = match shared_localstack().await {
         Some(v) => v,
         None => return,
     };
