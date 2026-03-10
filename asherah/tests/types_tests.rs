@@ -361,3 +361,64 @@ fn ekr_empty_string_key_is_empty_vec() {
     );
     assert_eq!(ekr.created, 1);
 }
+
+// ──────────────────────────── Base64 edge cases ────────────────────────────
+
+#[test]
+fn base64_with_whitespace_fails() {
+    // STANDARD engine does not accept whitespace in base64
+    let json = r#"{"Key":null,"Data":"AQ ID"}"#;
+    let result: Result<DataRowRecord, _> = serde_json::from_str(json);
+    assert!(result.is_err(), "whitespace in base64 should fail");
+}
+
+#[test]
+fn base64_with_newline_fails() {
+    let json = "{\"Key\":null,\"Data\":\"AQ\\nID\"}";
+    let result: Result<DataRowRecord, _> = serde_json::from_str(json);
+    assert!(result.is_err(), "newline in base64 should fail");
+}
+
+#[test]
+fn base64_url_safe_chars_fail() {
+    // URL-safe base64 uses - and _ instead of + and /
+    // STANDARD engine should reject these
+    let json = r#"{"Key":null,"Data":"ab-_"}"#;
+    let result: Result<DataRowRecord, _> = serde_json::from_str(json);
+    assert!(
+        result.is_err(),
+        "URL-safe base64 chars should fail with STANDARD engine"
+    );
+}
+
+#[test]
+fn base64_standard_with_plus_and_slash() {
+    // + and / are valid in STANDARD base64
+    // "+/" decodes to [0xFB, 0xFF] (base64: +/8= for [0xFB, 0xFF])
+    let json = r#"{"Key":null,"Data":"+/8="}"#;
+    let drr: DataRowRecord = serde_json::from_str(json).unwrap();
+    assert_eq!(drr.data, vec![0xFB, 0xFF]);
+}
+
+#[test]
+fn base64_with_trailing_garbage_fails() {
+    let json = r#"{"Key":null,"Data":"AQID!!!"}"#;
+    let result: Result<DataRowRecord, _> = serde_json::from_str(json);
+    assert!(result.is_err(), "trailing non-base64 chars should fail");
+}
+
+#[test]
+fn base64_single_pad_char() {
+    // "AQ==" is valid base64 for [0x01]
+    let json = r#"{"Key":null,"Data":"AQ=="}"#;
+    let drr: DataRowRecord = serde_json::from_str(json).unwrap();
+    assert_eq!(drr.data, vec![0x01]);
+}
+
+#[test]
+fn base64_double_pad_char() {
+    // "AQI=" is valid base64 for [0x01, 0x02]
+    let json = r#"{"Key":null,"Data":"AQI="}"#;
+    let drr: DataRowRecord = serde_json::from_str(json).unwrap();
+    assert_eq!(drr.data, vec![0x01, 0x02]);
+}
