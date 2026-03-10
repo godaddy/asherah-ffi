@@ -480,6 +480,82 @@ fn test_rdbms_sql_metastore_db_type_postgres() {
     assert!(get_env("MYSQL_URL").is_none());
 }
 
+fn test_customer_config_mysql_url_with_db_type_hint() {
+    // Exact JSON a customer would pass to SetupJson — standard mysql:// URL with SQLMetastoreDBType hint
+    let json = r#"{"ServiceName":"service","ProductID":"product","KMS":"static","Metastore":"rdbms","ConnectionString":"mysql://root:pass@localhost:3306/testdb","SQLMetastoreDBType":"mysql","EnableSessionCaching":true,"Verbose":true}"#;
+    let cfg = ConfigOptions::from_json(json).unwrap();
+
+    assert_eq!(cfg.service_name.as_deref(), Some("service"));
+    assert_eq!(cfg.product_id.as_deref(), Some("product"));
+    assert_eq!(cfg.kms.as_deref(), Some("static"));
+    assert_eq!(cfg.metastore.as_deref(), Some("rdbms"));
+    assert_eq!(
+        cfg.connection_string.as_deref(),
+        Some("mysql://root:pass@localhost:3306/testdb")
+    );
+    assert_eq!(cfg.sql_metastore_db_type.as_deref(), Some("mysql"));
+    assert_eq!(cfg.enable_session_caching, Some(true));
+    assert_eq!(cfg.verbose, Some(true));
+
+    let applied = cfg.apply_env().unwrap();
+    assert!(applied.verbose);
+    assert!(applied.enable_session_caching);
+
+    assert_eq!(get_env("SERVICE_NAME").as_deref(), Some("service"));
+    assert_eq!(get_env("PRODUCT_ID").as_deref(), Some("product"));
+    assert_eq!(get_env("KMS").as_deref(), Some("static"));
+    assert_eq!(
+        get_env("MYSQL_URL").as_deref(),
+        Some("mysql://root:pass@localhost:3306/testdb")
+    );
+    assert!(
+        get_env("POSTGRES_URL").is_none(),
+        "mysql:// URL should not set POSTGRES_URL"
+    );
+    assert!(get_env("MYSQL_TLS_MODE").is_none());
+    assert_eq!(get_env("SESSION_CACHE").as_deref(), Some("1"));
+    assert_eq!(get_env("ASHERAH_VERBOSE").as_deref(), Some("1"));
+}
+
+fn test_customer_config_go_mysql_dsn_with_tls() {
+    // Exact JSON a customer would pass to SetupJson — Go MySQL DSN format with tls=skip-verify
+    let json = r#"{"ServiceName":"service","ProductID":"product","KMS":"static","Metastore":"rdbms","ConnectionString":"root:pass@tcp(localhost:3306)/testdb?tls=skip-verify","EnableSessionCaching":true,"Verbose":false}"#;
+    let cfg = ConfigOptions::from_json(json).unwrap();
+
+    assert_eq!(cfg.service_name.as_deref(), Some("service"));
+    assert_eq!(cfg.product_id.as_deref(), Some("product"));
+    assert_eq!(cfg.kms.as_deref(), Some("static"));
+    assert_eq!(cfg.metastore.as_deref(), Some("rdbms"));
+    assert_eq!(
+        cfg.connection_string.as_deref(),
+        Some("root:pass@tcp(localhost:3306)/testdb?tls=skip-verify")
+    );
+    assert_eq!(cfg.sql_metastore_db_type, None);
+    assert_eq!(cfg.enable_session_caching, Some(true));
+    assert_eq!(cfg.verbose, Some(false));
+
+    let applied = cfg.apply_env().unwrap();
+    assert!(!applied.verbose);
+    assert!(applied.enable_session_caching);
+
+    assert_eq!(get_env("SERVICE_NAME").as_deref(), Some("service"));
+    assert_eq!(get_env("PRODUCT_ID").as_deref(), Some("product"));
+    assert_eq!(get_env("KMS").as_deref(), Some("static"));
+    // Go DSN should be converted to mysql:// URL
+    assert_eq!(
+        get_env("MYSQL_URL").as_deref(),
+        Some("mysql://root:pass@localhost:3306/testdb")
+    );
+    assert!(
+        get_env("POSTGRES_URL").is_none(),
+        "Go MySQL DSN should not set POSTGRES_URL"
+    );
+    // tls=skip-verify should be extracted as MYSQL_TLS_MODE
+    assert_eq!(get_env("MYSQL_TLS_MODE").as_deref(), Some("skip-verify"));
+    assert_eq!(get_env("SESSION_CACHE").as_deref(), Some("1"));
+    assert!(get_env("ASHERAH_VERBOSE").is_none());
+}
+
 fn test_memory_metastore_clears_mysql_tls_mode() {
     // First set up MySQL with TLS
     let cfg1 = ConfigOptions {
@@ -592,9 +668,17 @@ fn main() {
         test_rdbms_sql_metastore_db_type_postgres,
     );
     run_test(
+        "test_customer_config_mysql_url_with_db_type_hint",
+        test_customer_config_mysql_url_with_db_type_hint,
+    );
+    run_test(
+        "test_customer_config_go_mysql_dsn_with_tls",
+        test_customer_config_go_mysql_dsn_with_tls,
+    );
+    run_test(
         "test_memory_metastore_clears_mysql_tls_mode",
         test_memory_metastore_clears_mysql_tls_mode,
     );
 
-    println!("\ntest result: ok. 34 passed; 0 failed");
+    println!("\ntest result: ok. 36 passed; 0 failed");
 }
