@@ -191,3 +191,84 @@ fn empty_connection_string() {
         other => panic!("expected Unknown, got {other:?}"),
     }
 }
+
+// ──────────────────────────── Gap 9: malformed tcp( ────────────────────────────
+
+#[test]
+fn go_dsn_malformed_tcp_no_closing_paren() {
+    // tcp( without ) should fall through to passthrough
+    let dsn = "root:pass@tcp(localhost:3306/db";
+    match classify_connection_string(dsn) {
+        DbKind::Mysql(url) => {
+            // Malformed tcp should produce mysql://{dsn}
+            assert!(url.starts_with("mysql://"), "got: {url}");
+        }
+        other => panic!("expected Mysql, got {other:?}"),
+    }
+}
+
+// ──────────────────────────── Gap 10: DSN edge cases ────────────────────────────
+
+#[test]
+fn go_dsn_empty_query_params_after_filtering() {
+    // All params are Go-specific, result should have no query string
+    let dsn = "u:p@tcp(h:3306)/db?parseTime=true&loc=UTC";
+    match classify_connection_string(dsn) {
+        DbKind::Mysql(url) => {
+            assert!(
+                !url.contains('?'),
+                "all Go params should be stripped: {url}"
+            );
+        }
+        other => panic!("expected Mysql, got {other:?}"),
+    }
+}
+
+#[test]
+fn go_dsn_param_without_equals() {
+    // A query param without = should be kept (per the filter logic)
+    let dsn = "u:p@tcp(h:3306)/db?bareParam&tls=true";
+    match classify_connection_string(dsn) {
+        DbKind::Mysql(url) => {
+            assert!(
+                url.contains("bareParam"),
+                "bare param should be kept: {url}"
+            );
+            assert!(!url.contains("tls="), "tls should be stripped: {url}");
+        }
+        other => panic!("expected Mysql, got {other:?}"),
+    }
+}
+
+#[test]
+fn go_dsn_no_database() {
+    let dsn = "u:p@tcp(h:3306)";
+    match classify_connection_string(dsn) {
+        DbKind::Mysql(url) => {
+            assert_eq!(url, "mysql://u:p@h:3306/");
+        }
+        other => panic!("expected Mysql, got {other:?}"),
+    }
+}
+
+#[test]
+fn go_dsn_no_tcp_no_scheme_with_slash() {
+    // No tcp(), no mysql:// → just host/db format
+    // Since there's no tcp() and no mysql:// prefix, classify returns Unknown
+    let dsn = "localhost/mydb";
+    match classify_connection_string(dsn) {
+        DbKind::Unknown(s) => assert_eq!(s, dsn),
+        other => panic!("expected Unknown (no tcp, no scheme), got {other:?}"),
+    }
+}
+
+#[test]
+fn go_dsn_tcp_with_space_falls_to_unknown() {
+    // "tcp (" with a space is NOT detected by classify_connection_string
+    // because it checks for "tcp(" (no space). This is a known limitation.
+    let dsn = "u:p@tcp (host:3306)/db";
+    match classify_connection_string(dsn) {
+        DbKind::Unknown(_) => {}
+        other => panic!("expected Unknown (tcp with space not detected), got {other:?}"),
+    }
+}

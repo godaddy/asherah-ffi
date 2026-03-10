@@ -285,3 +285,128 @@ fn close_clears_cache() {
     assert_eq!(create_count.load(Ordering::SeqCst), 1);
     assert!(!Arc::ptr_eq(&s1, &s2));
 }
+
+#[test]
+fn close_multiple_times_is_safe() {
+    let factory = make_factory();
+    let cache = make_cache(10, 60, CachePolicy::Lru);
+    let _ = cache.get_or_create("p1", || factory.get_session("p1"));
+    cache.close();
+    cache.close();
+    cache.close();
+    // Should be able to use cache again after close
+    let _ = cache.get_or_create("p2", || factory.get_session("p2"));
+}
+
+#[test]
+fn slru_max_size_1_eviction() {
+    let factory = make_factory();
+    let cache = make_cache(1, 60, CachePolicy::Slru);
+
+    let s1 = cache.get_or_create("p1", || factory.get_session("p1"));
+    // Access again to promote to protected
+    let _ = cache.get_or_create("p1", || factory.get_session("p1"));
+    // Insert p2 — p2 enters as probationary and is immediately evicted
+    // because p1 is protected and protected_cap=max(1,1/2)=1
+    let _s2 = cache.get_or_create("p2", || factory.get_session("p2"));
+
+    // p1 should still be cached (protected segment survives)
+    let create_count = AtomicUsize::new(0);
+    let s1_again = cache.get_or_create("p1", || {
+        create_count.fetch_add(1, Ordering::SeqCst);
+        factory.get_session("p1")
+    });
+    assert_eq!(
+        create_count.load(Ordering::SeqCst),
+        0,
+        "p1 should still be cached (protected)"
+    );
+    assert!(Arc::ptr_eq(&s1, &s1_again));
+
+    // p2 should have been evicted (probationary, evicted on insert)
+    let p2_count = AtomicUsize::new(0);
+    let _ = cache.get_or_create("p2", || {
+        p2_count.fetch_add(1, Ordering::SeqCst);
+        factory.get_session("p2")
+    });
+    assert_eq!(
+        p2_count.load(Ordering::SeqCst),
+        1,
+        "p2 should have been evicted"
+    );
+}
+
+#[test]
+fn slru_max_size_2_rebalance() {
+    let factory = make_factory();
+    let cache = make_cache(2, 60, CachePolicy::Slru);
+
+    // Insert and promote both to protected
+    let _ = cache.get_or_create("p1", || factory.get_session("p1"));
+    let _ = cache.get_or_create("p2", || factory.get_session("p2"));
+    let _ = cache.get_or_create("p1", || factory.get_session("p1")); // promote p1
+    let _ = cache.get_or_create("p2", || factory.get_session("p2")); // promote p2
+
+    // Insert p3 — triggers rebalance (protected_cap=1, but 2 protected)
+    // Should demote the least recently accessed protected entry, then evict from probationary
+    let _s3 = cache.get_or_create("p3", || factory.get_session("p3"));
+
+    // p2 (most recently promoted) should survive, p1 may be evicted
+    let create_count = AtomicUsize::new(0);
+    let _ = cache.get_or_create("p2", || {
+        create_count.fetch_add(1, Ordering::SeqCst);
+        factory.get_session("p2")
+    });
+    // p2 was most recently accessed, should still be cached
+    assert_eq!(
+        create_count.load(Ordering::SeqCst),
+        0,
+        "most recent should survive"
+    );
+}
+
+#[test]
+fn negative_ttl_always_creates() {
+    let factory = make_factory();
+    let cache = make_cache(10, -1, CachePolicy::Lru);
+    let create_count = AtomicUsize::new(0);
+
+    let _ = cache.get_or_create("p1", || {
+        create_count.fetch_add(1, Ordering::SeqCst);
+        factory.get_session("p1")
+    });
+    let _ = cache.get_or_create("p1", || {
+        create_count.fetch_add(1, Ordering::SeqCst);
+        factory.get_session("p1")
+    });
+    assert_eq!(
+        create_count.load(Ordering::SeqCst),
+        2,
+        "negative TTL should always create"
+    );
+}
+
+#[test]
+fn max_zero_never_evicts() {
+    let factory = make_factory();
+    let cache = make_cache(0, 60, CachePolicy::Lru);
+
+    // Insert many items — max=0 means eviction is skipped
+    for i in 0..10 {
+        let _ = cache.get_or_create(&format!("p{i}"), || factory.get_session(&format!("p{i}")));
+    }
+
+    // All should still be cached
+    let create_count = AtomicUsize::new(0);
+    for i in 0..10 {
+        let _ = cache.get_or_create(&format!("p{i}"), || {
+            create_count.fetch_add(1, Ordering::SeqCst);
+            factory.get_session(&format!("p{i}"))
+        });
+    }
+    assert_eq!(
+        create_count.load(Ordering::SeqCst),
+        0,
+        "max=0 should not evict"
+    );
+}

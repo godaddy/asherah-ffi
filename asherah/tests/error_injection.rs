@@ -547,3 +547,146 @@ fn create_ik_store_fails_falls_back_to_load_latest() {
     let pt2 = session.decrypt(drr2).unwrap();
     assert_eq!(pt2, b"after store fail");
 }
+
+// ──────────────────────────── Gap Coverage Tests ────────────────────────────
+
+fn make_factory_with_expire(
+    metastore: Arc<FailableMetastore>,
+    kms: Arc<FailableKms<AES256GCM>>,
+    expire_s: i64,
+) -> asherah::session::PublicFactory<AES256GCM, FailableKms<AES256GCM>, FailableMetastore> {
+    let crypto = make_crypto();
+    let mut cfg = asherah::Config::new("err-svc", "err-prod");
+    cfg.policy.cache_system_keys = false;
+    cfg.policy.cache_intermediate_keys = false;
+    cfg.policy.cache_sessions = false;
+    cfg.policy.expire_key_after_s = expire_s;
+    cfg.policy.create_date_precision_s = 1; // 1 second precision to get different timestamps
+    asherah::api::new_session_factory(cfg, metastore, kms, crypto)
+}
+
+// Gap #1: Decrypt DRR encrypted under an old SK after SK rotation.
+//
+// When an IK was encrypted under SK1 and then SK1 is revoked/expired,
+// a new encrypt creates SK2 and IK2. Decrypting the original DRR (which
+// references IK1 → SK1) should still succeed because the code loads the
+// correct SK1 by its exact (id, created) metadata.
+#[test]
+fn decrypt_succeeds_after_system_key_rotation() {
+    let ms = Arc::new(FailableMetastore::new());
+    let kms = default_kms();
+    let factory = make_factory_with_expire(ms.clone(), kms, 1);
+
+    let session = factory.get_session("cross-sk");
+
+    // Step 1: Encrypt DRR1 under SK1/IK1
+    let drr1 = session.encrypt(b"old payload").unwrap();
+
+    // Extract IK metadata from DRR1 so we can find the SK
+    let ik_meta = drr1.key.as_ref().unwrap().parent_key_meta.as_ref().unwrap();
+    let ik_id = &ik_meta.id;
+    let ik_created = ik_meta.created;
+
+    // Load the IK to find the SK metadata
+    let ik_ekr = ms.inner.load(ik_id, ik_created).unwrap().unwrap();
+    let sk_meta = ik_ekr.parent_key_meta.as_ref().unwrap();
+    let sk_id = sk_meta.id.clone();
+    let sk_created = sk_meta.created;
+
+    // Step 2: Revoke SK1
+    ms.inner.mark_revoked(&sk_id, sk_created);
+
+    // Step 3: Wait for at least 1 second so the old SK is considered expired
+    // (expire_key_after_s = 1) and a new timestamp is generated (precision = 1s)
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+
+    // Step 4: Encrypt again — old SK is revoked+expired, so a new SK2 is created
+    let drr2 = session.encrypt(b"new payload").unwrap();
+
+    // Verify a new SK was created (different IK with different parent SK created time)
+    let ik2_meta = drr2.key.as_ref().unwrap().parent_key_meta.as_ref().unwrap();
+    let ik2_ekr = ms
+        .inner
+        .load(&ik2_meta.id, ik2_meta.created)
+        .unwrap()
+        .unwrap();
+    let sk2_created = ik2_ekr.parent_key_meta.as_ref().unwrap().created;
+    assert_ne!(
+        sk_created, sk2_created,
+        "SK should have been rotated to a new timestamp"
+    );
+
+    // Step 5: Decrypt DRR1 — this must succeed by loading SK1 via its exact metadata
+    let pt1 = session.decrypt(drr1).unwrap();
+    assert_eq!(pt1, b"old payload");
+
+    // Step 6: Decrypt DRR2 as well
+    let pt2 = session.decrypt(drr2).unwrap();
+    assert_eq!(pt2, b"new payload");
+}
+
+// Gap #2: create_intermediate_key full fallback → error.
+//
+// When store fails AND load_latest returns a revoked IK (invalid), the
+// "error loading intermediate key from metastore after retry" error should
+// be returned. This covers the final Err arm in create_intermediate_key.
+#[test]
+fn encrypt_fails_when_store_fails_and_latest_ik_is_revoked() {
+    let ms = Arc::new(FailableMetastore::new());
+    let kms = default_kms();
+    // Use large expiration so revocation is the only reason for invalidity
+    let factory = make_factory_with_expire(ms.clone(), kms, 86400);
+
+    let session = factory.get_session("gap2");
+
+    // Step 1: Encrypt to populate keys
+    let drr = session.encrypt(b"seed data").unwrap();
+
+    // Step 2: Extract IK metadata and revoke it
+    let ik_meta = drr.key.as_ref().unwrap().parent_key_meta.as_ref().unwrap();
+    ms.inner.mark_revoked(&ik_meta.id, ik_meta.created);
+
+    // Step 3: Make store fail so create_intermediate_key can't store a new IK
+    ms.set_fail_store(true);
+
+    // Step 4: Encrypt should fail because:
+    // - load_latest IK → revoked (invalid) → enters create path
+    // - create_intermediate_key creates new IK → store fails
+    // - fallback: load_latest IK → still revoked (invalid)
+    // - returns "error loading intermediate key from metastore after retry"
+    let err = session.encrypt(b"should fail").unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("error loading intermediate key from metastore after retry"),
+        "expected 'error loading intermediate key from metastore after retry', got: {msg}"
+    );
+}
+
+// Gap #3: PublicFactory::close with session cache and shared IK cache.
+//
+// Create a factory with both session_cache and shared_intermediate_key_cache
+// enabled, do some work, then call close(). Verify it doesn't panic and
+// double close also succeeds.
+#[test]
+fn factory_close_with_caches() {
+    let ms = Arc::new(FailableMetastore::new());
+    let kms = default_kms();
+    let crypto = make_crypto();
+    let mut cfg = asherah::Config::new("close-svc", "close-prod");
+    cfg.policy.cache_sessions = true;
+    cfg.policy.session_cache_max_size = 10;
+    cfg.policy.session_cache_ttl_s = 3600;
+    cfg.policy.shared_intermediate_key_cache = true;
+    cfg.policy.cache_intermediate_keys = true;
+    cfg.policy.cache_system_keys = true;
+    let factory = asherah::api::new_session_factory(cfg, ms, kms, crypto);
+
+    let s = factory.get_session("p1");
+    let drr = s.encrypt(b"close test").unwrap();
+    assert_eq!(s.decrypt(drr).unwrap(), b"close test");
+
+    factory.close().unwrap();
+
+    // Double close should also work
+    factory.close().unwrap();
+}

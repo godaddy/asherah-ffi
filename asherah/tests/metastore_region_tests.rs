@@ -83,3 +83,42 @@ fn region_suffix_used_in_factory() {
     let pt = session.decrypt(drr).unwrap();
     assert_eq!(pt, b"region test");
 }
+
+// ──────────────────────────── Gap 15: empty region suffix ────────────────────────────
+
+#[test]
+fn empty_suffix_returns_some_empty() {
+    let inner = Arc::new(InMemoryMetastore::new());
+    let rsm = RegionSuffixMetastore::new(inner, "");
+    // region_suffix() returns Some("") even with empty suffix
+    assert_eq!(rsm.region_suffix(), Some(String::new()));
+}
+
+#[test]
+fn empty_suffix_in_factory_treated_as_no_suffix() {
+    // When region_suffix is Some(""), PublicFactory::get_session treats it as no suffix
+    let crypto = Arc::new(asherah::aead::AES256GCM::new());
+    let kms = Arc::new(asherah::kms::StaticKMS::new(crypto.clone(), vec![1_u8; 32]).unwrap());
+    let inner = Arc::new(InMemoryMetastore::new());
+    let store = Arc::new(RegionSuffixMetastore::new(inner, ""));
+    let cfg = asherah::Config::new("svc", "prod");
+    let factory = asherah::api::new_session_factory(cfg, store, kms, crypto);
+    let session = factory.get_session("p1");
+    let drr = session.encrypt(b"empty suffix test").unwrap();
+    // Empty suffix is treated as no suffix, so IK ID should NOT have a trailing underscore
+    let ik_id = drr
+        .key
+        .as_ref()
+        .unwrap()
+        .parent_key_meta
+        .as_ref()
+        .unwrap()
+        .id
+        .clone();
+    assert_eq!(
+        ik_id, "_IK_p1_svc_prod",
+        "empty suffix should be treated as no suffix: {ik_id}"
+    );
+    let pt = session.decrypt(drr).unwrap();
+    assert_eq!(pt, b"empty suffix test");
+}

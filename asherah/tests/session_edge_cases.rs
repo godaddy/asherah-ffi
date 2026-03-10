@@ -298,3 +298,57 @@ fn encrypt_decrypt_with_no_cache() {
     let result = session.decrypt(drr).unwrap();
     assert_eq!(result, b"uncached");
 }
+
+// ──────────────────────────── Gap 11: is_valid_intermediate_key_id edge cases ────────────────────────────
+
+#[test]
+fn is_valid_ik_id_suffix_with_special_chars() {
+    use ael::partition::DefaultPartition;
+    use ael::Partition;
+
+    let p = DefaultPartition::new_suffixed("u".into(), "s".into(), "p".into(), "us-east-1".into());
+    // Suffix containing special chars like dots and colons
+    let weird = DefaultPartition::new_suffixed("u".into(), "s".into(), "p".into(), "a.b:c".into());
+
+    // Exact match with the configured suffix
+    assert!(p.is_valid_intermediate_key_id("_IK_u_s_p_us-east-1"));
+    // Prefix match with a different suffix
+    assert!(p.is_valid_intermediate_key_id("_IK_u_s_p_eu-west-1"));
+    // Prefix match with special chars in the suffix
+    assert!(weird.is_valid_intermediate_key_id("_IK_u_s_p_a.b:c"));
+    assert!(weird.is_valid_intermediate_key_id("_IK_u_s_p_other"));
+    // Non-matching prefix should fail
+    assert!(!p.is_valid_intermediate_key_id("_IK_x_s_p_us-east-1"));
+    assert!(!weird.is_valid_intermediate_key_id("_IK_x_s_p_a.b:c"));
+}
+
+#[test]
+fn is_valid_ik_id_empty_suffix() {
+    use ael::partition::DefaultPartition;
+    use ael::Partition;
+
+    // Empty string suffix — still Some(""), so prefix matching applies
+    let p = DefaultPartition::new_suffixed("u".into(), "s".into(), "p".into(), "".into());
+    // Exact match: _IK_u_s_p_ (with trailing underscore from empty suffix)
+    assert!(p.is_valid_intermediate_key_id("_IK_u_s_p_"));
+    // Prefix match: starts with _IK_u_s_p
+    assert!(p.is_valid_intermediate_key_id("_IK_u_s_p_anything"));
+    // The base without suffix also prefix-matches
+    assert!(p.is_valid_intermediate_key_id("_IK_u_s_p"));
+    // Wrong id does not match
+    assert!(!p.is_valid_intermediate_key_id("_IK_x_s_p_"));
+}
+
+#[test]
+fn is_valid_ik_id_no_suffix_rejects_extra() {
+    use ael::partition::DefaultPartition;
+    use ael::Partition;
+
+    // Without suffix, only exact match allowed
+    let p = DefaultPartition::new("u".into(), "s".into(), "p".into());
+    assert!(p.is_valid_intermediate_key_id("_IK_u_s_p"));
+    assert!(!p.is_valid_intermediate_key_id("_IK_u_s_p_extra"));
+    assert!(!p.is_valid_intermediate_key_id("_IK_u_s_p_"));
+    assert!(!p.is_valid_intermediate_key_id("_IK_u_s_"));
+    assert!(!p.is_valid_intermediate_key_id(""));
+}
