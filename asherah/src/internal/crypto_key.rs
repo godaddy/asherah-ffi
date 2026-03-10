@@ -1,20 +1,23 @@
-use crate::memguard::LockedBuffer;
+use crate::memguard::{wipe_bytes, Buffer, Enclave};
 
 #[derive(Debug)]
 pub struct CryptoKey {
     created: i64,
     revoked: bool,
-    secret: LockedBuffer,
+    secret: Enclave,
 }
 
 impl CryptoKey {
-    pub fn new(created: i64, revoked: bool, bytes: Vec<u8>) -> anyhow::Result<Self> {
-        let buf =
-            LockedBuffer::from_bytes(bytes).map_err(|e| anyhow::anyhow!(format!("{:?}", e)))?;
+    pub fn new(created: i64, revoked: bool, mut bytes: Vec<u8>) -> anyhow::Result<Self> {
+        let mut buf = Buffer::new(bytes.len()).map_err(|e| anyhow::anyhow!(format!("{:?}", e)))?;
+        buf.bytes().copy_from_slice(&bytes);
+        wipe_bytes(&mut bytes);
+        let enclave =
+            Enclave::new_from(&mut buf).map_err(|e| anyhow::anyhow!(format!("{:?}", e)))?;
         Ok(Self {
             created,
             revoked,
-            secret: buf,
+            secret: enclave,
         })
     }
     pub fn created(&self) -> i64 {
@@ -24,9 +27,13 @@ impl CryptoKey {
         self.revoked
     }
     pub fn with_key_func<R>(&self, f: impl FnOnce(&[u8]) -> R) -> anyhow::Result<R> {
-        self.secret
-            .with_bytes(|b| f(b))
-            .map_err(|e| anyhow::anyhow!(format!("{:?}", e)))
+        let buf = self
+            .secret
+            .open()
+            .map_err(|e| anyhow::anyhow!(format!("{:?}", e)))?;
+        let result = f(buf.as_slice());
+        crate::memguard::pool_release(buf);
+        Ok(result)
     }
 }
 

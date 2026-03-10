@@ -3,7 +3,7 @@
 
 use blake2::{Blake2b512, Digest};
 use once_cell::sync::Lazy;
-use parking_lot::Mutex;
+use parking_lot::{Condvar, Mutex};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use subtle::ConstantTimeEq;
@@ -295,15 +295,15 @@ impl Enclave {
         buf.melt()?;
         buf.scramble();
         buf.destroy()?;
-        key.destroy()?;
+        pool_release(key);
         Ok(Self { ciphertext: ct })
     }
     pub fn open(&self) -> Result<Buffer, Error> {
-        let mut out = Buffer::new(self.plaintext_len())?;
+        let mut out = pool_acquire(self.plaintext_len())?;
         let mut key = get_or_create_key().view()?;
         let n = decrypt(&self.ciphertext, key.bytes(), out.bytes())?;
         debug_assert_eq!(n, out.size());
-        key.destroy()?;
+        pool_release(key);
         Ok(out)
     }
     pub fn plaintext_len(&self) -> usize {
@@ -311,6 +311,71 @@ impl Enclave {
     }
     pub fn size(&self) -> usize {
         self.plaintext_len()
+    }
+}
+
+// -- Buffer pool for mlock robustness --
+// Lazily grows a pool of reusable mlock'd Buffers. When mlock is exhausted,
+// callers block until a buffer is returned rather than failing.
+const POOL_BUFFER_SIZE: usize = 32; // AES-256 key size
+
+struct BufferPool {
+    free: Vec<Buffer>,
+    outstanding: usize,
+}
+
+static POOL: Lazy<Mutex<BufferPool>> = Lazy::new(|| {
+    Mutex::new(BufferPool {
+        free: Vec::new(),
+        outstanding: 0,
+    })
+});
+static POOL_CONDVAR: Lazy<Condvar> = Lazy::new(Condvar::new);
+
+pub fn pool_acquire(size: usize) -> Result<Buffer, Error> {
+    if size != POOL_BUFFER_SIZE {
+        return Buffer::new(size);
+    }
+    // 1. Try free list
+    {
+        let mut pool = POOL.lock();
+        if let Some(buf) = pool.free.pop() {
+            pool.outstanding += 1;
+            return Ok(buf);
+        }
+    }
+    // 2. Try fresh allocation
+    match Buffer::new(size) {
+        Ok(buf) => {
+            POOL.lock().outstanding += 1;
+            Ok(buf)
+        }
+        Err(alloc_err) => {
+            // 3. Block until a buffer is returned
+            let mut pool = POOL.lock();
+            if pool.outstanding == 0 && pool.free.is_empty() {
+                // No buffers in flight — hard failure
+                return Err(alloc_err);
+            }
+            while pool.free.is_empty() {
+                POOL_CONDVAR.wait(&mut pool);
+            }
+            pool.outstanding += 1;
+            Ok(pool.free.pop().expect("condvar signaled but pool empty"))
+        }
+    }
+}
+
+pub fn pool_release(mut buf: Buffer) {
+    if buf.alive() && buf.size() == POOL_BUFFER_SIZE {
+        drop(buf.melt());
+        wipe_bytes(buf.bytes());
+        let mut pool = POOL.lock();
+        pool.outstanding = pool.outstanding.saturating_sub(1);
+        pool.free.push(buf);
+        POOL_CONDVAR.notify_one();
+    } else {
+        drop(buf.destroy());
     }
 }
 
@@ -332,7 +397,7 @@ impl CofferInner {
         Ok(())
     }
     fn view(&mut self) -> Result<Buffer, Error> {
-        let mut b = Buffer::new(32)?;
+        let mut b = pool_acquire(32)?;
         let h = hash(self.right.as_slice());
         for (dst, (hash_byte, left_byte)) in
             b.bytes().iter_mut().zip(h.iter().zip(self.left.as_slice()))
