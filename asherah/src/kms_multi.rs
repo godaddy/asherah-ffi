@@ -53,6 +53,7 @@ impl KeyManagementService for MultiKms {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -91,5 +92,52 @@ mod tests {
         let out = mk2.decrypt_key(&(), &blob)?;
         assert_eq!(out, pt);
         Ok(())
+    }
+
+    #[test]
+    fn multi_kms_empty_backends_fails() {
+        let result = MultiKms::new(0, vec![]);
+        let err_msg = result.err().expect("should be Err").to_string();
+        assert!(
+            err_msg.contains("no KMS backends provided"),
+            "expected 'no KMS backends provided', got: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn multi_kms_preferred_out_of_bounds_clamps_to_zero() {
+        static C3: AtomicUsize = AtomicUsize::new(0);
+        let kms1: Arc<dyn KeyManagementService> = Arc::new(DummyKms(&C3, 1));
+        let mk = MultiKms::new(999, vec![kms1]).unwrap();
+        let blob = mk.encrypt_key(&(), b"data").unwrap();
+        // DummyKms with id=1 prefixes 0x01
+        assert_eq!(
+            blob[0], 1,
+            "should use backend at index 0 (region prefix 1)"
+        );
+    }
+
+    #[test]
+    fn multi_kms_all_backends_fail_returns_error() {
+        static C4: AtomicUsize = AtomicUsize::new(0);
+        static C5: AtomicUsize = AtomicUsize::new(0);
+        static C6: AtomicUsize = AtomicUsize::new(0);
+
+        // Encrypt with region id=3
+        let encryptor: Arc<dyn KeyManagementService> = Arc::new(DummyKms(&C4, 3));
+        let blob = encryptor.encrypt_key(&(), b"secret").unwrap();
+
+        // Build a MultiKms with two backends that use different region ids (1 and 2)
+        let kms1: Arc<dyn KeyManagementService> = Arc::new(DummyKms(&C5, 1));
+        let kms2: Arc<dyn KeyManagementService> = Arc::new(DummyKms(&C6, 2));
+        let mk = MultiKms::new(0, vec![kms1, kms2]).unwrap();
+
+        let result = mk.decrypt_key(&(), &blob);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("all KMS backends failed to decrypt"),
+            "expected 'all KMS backends failed to decrypt', got: {err_msg}"
+        );
     }
 }

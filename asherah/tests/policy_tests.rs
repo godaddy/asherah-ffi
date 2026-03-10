@@ -175,3 +175,15 @@ fn very_large_cache_size() {
     let p = new_crypto_policy(&[PolicyOption::IntermediateKeyCacheMaxSize(usize::MAX)]);
     assert_eq!(p.intermediate_key_cache_max_size, usize::MAX);
 }
+
+#[test]
+fn negative_create_date_precision() {
+    let p = new_crypto_policy(&[PolicyOption::CreateDatePrecisionSecs(-1)]);
+    assert_eq!(p.create_date_precision_s, -1);
+}
+
+#[test]
+fn zero_create_date_precision() {
+    let p = new_crypto_policy(&[PolicyOption::CreateDatePrecisionSecs(0)]);
+    assert_eq!(p.create_date_precision_s, 0);
+}

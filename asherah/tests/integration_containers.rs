@@ -32,9 +32,13 @@ use testcontainers_modules::{localstack::LocalStack, postgres::Postgres};
 
 /// Helper: create a KMS key in LocalStack and return its key ID.
 async fn create_kms_key(endpoint: &str) -> String {
+    create_kms_key_in_region(endpoint, "us-east-1").await
+}
+
+async fn create_kms_key_in_region(endpoint: &str, region: &str) -> String {
     let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
         .region(aws_config::meta::region::RegionProviderChain::first_try(
-            aws_sdk_kms::config::Region::new("us-east-1"),
+            aws_sdk_kms::config::Region::new(region.to_string()),
         ))
         .load()
         .await;
@@ -4527,6 +4531,358 @@ async fn postgres_many_sequential_operations() {
             assert_eq!(decrypted, plaintext.as_bytes(), "mismatch on iteration {i}");
         }
         factory.close().unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+// ════════════════════════════════════════════════════════════════
+// Category B gap tests
+// ════════════════════════════════════════════════════════════════
+
+/// Encrypt with a single-region envelope (us-east-1 only), then decrypt with
+/// a multi-region envelope whose preferred region (eu-west-1) is NOT present
+/// in the envelope KEKs. The decrypt should fall back to the us-east-1 entry.
+#[tokio::test]
+async fn kms_envelope_decrypt_fallback_when_preferred_region_not_in_envelope() {
+    let (_container, endpoint) = match start_localstack_with_creds().await {
+        Some(v) => v,
+        None => return,
+    };
+    let key_id = create_kms_key(&endpoint).await;
+
+    let endpoint_clone = endpoint.clone();
+    let key_clone = key_id.clone();
+    tokio::task::spawn_blocking(move || {
+        let crypto = Arc::new(asherah::aead::AES256GCM::new());
+
+        // Encrypt with single-region envelope (us-east-1 only)
+        let encrypt_kms = with_endpoint(&endpoint_clone, || {
+            asherah::kms_aws_envelope::AwsKmsEnvelope::new_multi(
+                crypto.clone(),
+                0,
+                vec![("us-east-1".into(), key_clone.clone())],
+            )
+            .unwrap()
+        });
+        let original = b"fallback-test-key-32-bytes!!!!!!";
+        let encrypted = encrypt_kms.encrypt_key(&(), original).unwrap();
+
+        // Decrypt with multi-region envelope where preferred is eu-west-1
+        // (NOT in the envelope KEKs), fallback is us-east-1 (IS in the KEKs)
+        let decrypt_kms = with_endpoint(&endpoint_clone, || {
+            asherah::kms_aws_envelope::AwsKmsEnvelope::new_multi(
+                crypto.clone(),
+                0, // preferred = index 0 = eu-west-1 (not in envelope)
+                vec![
+                    ("eu-west-1".into(), key_clone.clone()), // preferred but not in envelope
+                    ("us-east-1".into(), key_clone.clone()), // fallback, IS in envelope
+                ],
+            )
+            .unwrap()
+        });
+        let decrypted = decrypt_kms.decrypt_key(&(), &encrypted).unwrap();
+        assert_eq!(decrypted, original);
+    })
+    .await
+    .unwrap();
+}
+
+/// DDB_REGION_SUFFIX=true should enable region suffix on DynamoDbMetastore.
+#[tokio::test]
+async fn dynamodb_native_region_suffix() {
+    let (_c, endpoint) = match start_localstack_with_creds().await {
+        Some(v) => v,
+        None => return,
+    };
+    let table = "EncryptionKeyNativeRegionSuffix";
+    create_dynamodb_table(&endpoint, table).await;
+    let ep = endpoint.clone();
+    tokio::task::spawn_blocking(move || {
+        let store = {
+            let _guard = ENV_MUTEX.lock().unwrap();
+            std::env::set_var("AWS_ENDPOINT_URL", &ep);
+            std::env::set_var("DDB_REGION_SUFFIX", "true");
+            let s = asherah::metastore_dynamodb::DynamoDbMetastore::new(
+                table,
+                Some("us-east-1".into()),
+            )
+            .unwrap();
+            std::env::remove_var("DDB_REGION_SUFFIX");
+            s
+        };
+        assert_eq!(
+            store.region_suffix().as_deref(),
+            Some("us-east-1"),
+            "DDB_REGION_SUFFIX=true should enable region suffix"
+        );
+        // Verify it works as a metastore (store/load roundtrip)
+        let ekr = EnvelopeKeyRecord {
+            revoked: Some(false),
+            id: "test-id".into(),
+            created: 100,
+            encrypted_key: vec![1, 2, 3],
+            parent_key_meta: Some(KeyMeta {
+                id: "parent".into(),
+                created: 10,
+            }),
+        };
+        assert!(store.store("test-id", 100, &ekr).unwrap());
+        let loaded = store.load("test-id", 100).unwrap().unwrap();
+        assert_eq!(loaded.encrypted_key, vec![1, 2, 3]);
+    })
+    .await
+    .unwrap();
+}
+
+/// Without DDB_REGION_SUFFIX, region_suffix() should return None.
+#[tokio::test]
+async fn dynamodb_region_suffix_disabled_by_default() {
+    let (_c, endpoint) = match start_localstack_with_creds().await {
+        Some(v) => v,
+        None => return,
+    };
+    let ep = endpoint.clone();
+    tokio::task::spawn_blocking(move || {
+        let store = {
+            let _guard = ENV_MUTEX.lock().unwrap();
+            std::env::set_var("AWS_ENDPOINT_URL", &ep);
+            std::env::remove_var("DDB_REGION_SUFFIX");
+            asherah::metastore_dynamodb::DynamoDbMetastore::new(
+                "EncryptionKeyNoSuffix",
+                Some("us-east-1".into()),
+            )
+            .unwrap()
+        };
+        assert!(
+            store.region_suffix().is_none(),
+            "region suffix should be None by default"
+        );
+    })
+    .await
+    .unwrap();
+}
+
+/// Passing an empty table name to DynamoDbMetastore should default to "EncryptionKey".
+#[tokio::test]
+async fn dynamodb_empty_table_name_defaults() {
+    let (_c, endpoint) = match start_localstack_with_creds().await {
+        Some(v) => v,
+        None => return,
+    };
+    // Create the default table "EncryptionKey"
+    create_dynamodb_table(&endpoint, "EncryptionKey").await;
+    let ep = endpoint.clone();
+    tokio::task::spawn_blocking(move || {
+        let store = with_endpoint(&ep, || {
+            asherah::metastore_dynamodb::DynamoDbMetastore::new(
+                "", // empty table name
+                Some("us-east-1".into()),
+            )
+            .unwrap()
+        });
+        // Should use "EncryptionKey" as default table name — verify via roundtrip
+        let ekr = EnvelopeKeyRecord {
+            revoked: None,
+            id: "default-table-test".into(),
+            created: 42,
+            encrypted_key: vec![7, 8, 9],
+            parent_key_meta: Some(KeyMeta {
+                id: "p".into(),
+                created: 1,
+            }),
+        };
+        assert!(store.store("default-table-test", 42, &ekr).unwrap());
+        let loaded = store.load("default-table-test", 42).unwrap().unwrap();
+        assert_eq!(loaded.encrypted_key, vec![7, 8, 9]);
+    })
+    .await
+    .unwrap();
+}
+
+/// An invalid REPLICA_READ_CONSISTENCY value should be rejected by PostgresMetastore.
+#[tokio::test]
+async fn postgres_invalid_replica_read_consistency_rejected() {
+    let (_c, url) = match start_postgres().await {
+        Some(v) => v,
+        None => return,
+    };
+    // Wait for Postgres to be ready
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+    let url_clone = url.clone();
+    tokio::task::spawn_blocking(move || {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("REPLICA_READ_CONSISTENCY", "invalid_value");
+        let result = asherah::metastore_postgres::PostgresMetastore::connect(&url_clone);
+        std::env::remove_var("REPLICA_READ_CONSISTENCY");
+        let msg = match result {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("invalid REPLICA_READ_CONSISTENCY should fail"),
+        };
+        assert!(
+            msg.contains("invalid REPLICA_READ_CONSISTENCY"),
+            "error should mention invalid value, got: {msg}"
+        );
+    })
+    .await
+    .unwrap();
+}
+
+/// An invalid REPLICA_READ_CONSISTENCY value should be rejected by MySqlMetastore.
+#[tokio::test]
+async fn mysql_invalid_replica_read_consistency_rejected() {
+    let (_c, url) = match start_mysql().await {
+        Some(v) => v,
+        None => return,
+    };
+    let url_clone = url.clone();
+    tokio::task::spawn_blocking(move || {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("REPLICA_READ_CONSISTENCY", "bogus");
+        let result = asherah::metastore_mysql::MySqlMetastore::connect(&url_clone);
+        std::env::remove_var("REPLICA_READ_CONSISTENCY");
+        let msg = match result {
+            Err(e) => e.to_string(),
+            Ok(_) => panic!("invalid REPLICA_READ_CONSISTENCY should fail"),
+        };
+        assert!(
+            msg.contains("invalid REPLICA_READ_CONSISTENCY"),
+            "error should mention invalid value, got: {msg}"
+        );
+    })
+    .await
+    .unwrap();
+}
+
+/// MYSQL_TLS_MODE=false should disable TLS without breaking the connection.
+#[tokio::test]
+async fn mysql_tls_mode_false_disables_ssl() {
+    let (_c, url) = match start_mysql().await {
+        Some(v) => v,
+        None => return,
+    };
+    let url_clone = url.clone();
+    tokio::task::spawn_blocking(move || {
+        let _guard = ENV_MUTEX.lock().unwrap();
+        std::env::set_var("MYSQL_TLS_MODE", "false");
+        let store = connect_mysql_with_retries(&url_clone);
+        std::env::remove_var("MYSQL_TLS_MODE");
+        // Should connect successfully with TLS disabled — verify via store
+        let ekr = EnvelopeKeyRecord {
+            revoked: None,
+            id: "tls-test".into(),
+            created: 1,
+            encrypted_key: vec![1],
+            parent_key_meta: Some(KeyMeta {
+                id: "p".into(),
+                created: 0,
+            }),
+        };
+        assert!(store.store("tls-test", 1, &ekr).unwrap());
+    })
+    .await
+    .unwrap();
+}
+
+// ════════════════════════════════════════════════════════════════
+// KMS envelope error propagation and fallback
+// ════════════════════════════════════════════════════════════════
+
+/// When a non-preferred region's KMS encrypt call fails (bogus key ARN),
+/// encrypt_key should propagate the error (the `?` at line 220 of
+/// kms_aws_envelope.rs).
+#[tokio::test]
+async fn kms_envelope_encrypt_fails_when_non_preferred_region_key_invalid() {
+    let (_container, endpoint) = match start_localstack_with_creds().await {
+        Some(v) => v,
+        None => return,
+    };
+    let key_id = create_kms_key(&endpoint).await;
+
+    let endpoint_clone = endpoint.clone();
+    tokio::task::spawn_blocking(move || {
+        let crypto = Arc::new(asherah::aead::AES256GCM::new());
+        // Preferred region has a valid key, non-preferred has a bogus key ARN
+        let kms = with_endpoint(&endpoint_clone, || {
+            asherah::kms_aws_envelope::AwsKmsEnvelope::new_multi(
+                crypto.clone(),
+                0, // preferred = us-east-1 (valid)
+                vec![
+                    ("us-east-1".into(), key_id.clone()),
+                    (
+                        "eu-west-1".into(),
+                        "arn:aws:kms:eu-west-1:000000000000:key/ffffffff-ffff-ffff-ffff-ffffffffffff"
+                            .into(),
+                    ),
+                ],
+            )
+            .unwrap()
+        });
+        // encrypt_key generates data key in preferred region (succeeds), then
+        // tries to encrypt KEK in eu-west-1 with bogus key → API error → propagated
+        let result = kms.encrypt_key(&(), b"test-key-for-error-propagation!!");
+        assert!(
+            result.is_err(),
+            "encrypt should fail when non-preferred region has invalid key"
+        );
+    })
+    .await
+    .unwrap();
+}
+
+/// When the preferred region's KMS decrypt call fails (bogus key ARN),
+/// decrypt_key should fall back to other regions that can decrypt.
+/// This exercises lines 274-279 of kms_aws_envelope.rs (Err → continue).
+#[tokio::test]
+async fn kms_envelope_decrypt_fallback_on_preferred_api_error() {
+    let (_container, endpoint) = match start_localstack_with_creds().await {
+        Some(v) => v,
+        None => return,
+    };
+    let key_a = create_kms_key(&endpoint).await;
+    // Create key_b in eu-west-1 so it's accessible from eu-west-1-configured clients
+    let key_b = create_kms_key_in_region(&endpoint, "eu-west-1").await;
+
+    let endpoint_clone = endpoint.clone();
+    tokio::task::spawn_blocking(move || {
+        let crypto = Arc::new(asherah::aead::AES256GCM::new());
+
+        // Step 1: Encrypt with two valid keys (both regions get valid KEKs)
+        let encrypt_kms = with_endpoint(&endpoint_clone, || {
+            asherah::kms_aws_envelope::AwsKmsEnvelope::new_multi(
+                crypto.clone(),
+                0,
+                vec![
+                    ("us-east-1".into(), key_a.clone()),
+                    ("eu-west-1".into(), key_b.clone()),
+                ],
+            )
+            .unwrap()
+        });
+        let original = b"decrypt-fallback-api-error-test!";
+        let encrypted = encrypt_kms.encrypt_key(&(), original).unwrap();
+
+        // Step 2: Decrypt with preferred pointing to a BOGUS key ARN for us-east-1.
+        // The KMS decrypt API call will fail (NotFoundException), triggering the
+        // continue at line 278. Then it falls back to eu-west-1 with the correct
+        // key_b, which succeeds.
+        let decrypt_kms = with_endpoint(&endpoint_clone, || {
+            asherah::kms_aws_envelope::AwsKmsEnvelope::new_multi(
+                crypto.clone(),
+                0, // preferred = us-east-1 (bogus key → API error)
+                vec![
+                    (
+                        "us-east-1".into(),
+                        "arn:aws:kms:us-east-1:000000000000:key/ffffffff-ffff-ffff-ffff-ffffffffffff"
+                            .into(),
+                    ),
+                    ("eu-west-1".into(), key_b.clone()), // fallback with correct key
+                ],
+            )
+            .unwrap()
+        });
+        let decrypted = decrypt_kms.decrypt_key(&(), &encrypted).unwrap();
+        assert_eq!(decrypted, original);
     })
     .await
     .unwrap();

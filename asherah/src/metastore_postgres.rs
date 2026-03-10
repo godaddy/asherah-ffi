@@ -167,3 +167,90 @@ impl Metastore for PostgresMetastore {
         Ok(res > 0)
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    // URL format tests
+    #[test]
+    fn parse_sslmode_url_require() {
+        assert_eq!(
+            parse_sslmode("postgres://host/db?sslmode=require").as_deref(),
+            Some("require")
+        );
+    }
+
+    #[test]
+    fn parse_sslmode_url_verify_full() {
+        assert_eq!(
+            parse_sslmode("postgres://host/db?sslmode=verify-full").as_deref(),
+            Some("verify-full")
+        );
+    }
+
+    #[test]
+    fn parse_sslmode_url_verify_ca() {
+        assert_eq!(
+            parse_sslmode("postgres://host/db?sslmode=verify-ca").as_deref(),
+            Some("verify-ca")
+        );
+    }
+
+    #[test]
+    fn parse_sslmode_url_disable() {
+        assert_eq!(
+            parse_sslmode("postgres://host/db?sslmode=disable").as_deref(),
+            Some("disable")
+        );
+    }
+
+    #[test]
+    fn parse_sslmode_url_absent() {
+        assert_eq!(parse_sslmode("postgres://host/db"), None);
+    }
+
+    #[test]
+    fn parse_sslmode_url_other_params() {
+        assert_eq!(
+            parse_sslmode(
+                "postgres://host/db?connect_timeout=10&sslmode=require&application_name=test"
+            )
+            .as_deref(),
+            Some("require")
+        );
+    }
+
+    #[test]
+    fn parse_sslmode_url_no_query() {
+        assert_eq!(parse_sslmode("postgres://user:pass@host:5432/db"), None);
+    }
+
+    // Key-value format tests
+    #[test]
+    fn parse_sslmode_kv_require() {
+        assert_eq!(
+            parse_sslmode("host=localhost sslmode=require dbname=test").as_deref(),
+            Some("require")
+        );
+    }
+
+    #[test]
+    fn parse_sslmode_kv_absent() {
+        assert_eq!(parse_sslmode("host=localhost dbname=test"), None);
+    }
+
+    #[test]
+    fn parse_sslmode_kv_disable() {
+        assert_eq!(
+            parse_sslmode("host=localhost sslmode=disable").as_deref(),
+            Some("disable")
+        );
+    }
+
+    #[test]
+    fn parse_sslmode_empty_string() {
+        assert_eq!(parse_sslmode(""), None);
+    }
+}

@@ -27,6 +27,8 @@ struct FailableMetastore {
     load_returns_none: Arc<AtomicBool>,
     /// When true, load_latest() returns Ok(None) instead of Err
     load_latest_returns_none: Arc<AtomicBool>,
+    /// When true, store() returns Ok(false) without storing
+    store_returns_false: Arc<AtomicBool>,
     /// Counts store calls (used to fail only on Nth call)
     store_call_count: Arc<AtomicU64>,
     /// If non-zero, only fail store when call_count == this value
@@ -42,6 +44,7 @@ impl FailableMetastore {
             fail_store: Arc::new(AtomicBool::new(false)),
             load_returns_none: Arc::new(AtomicBool::new(false)),
             load_latest_returns_none: Arc::new(AtomicBool::new(false)),
+            store_returns_false: Arc::new(AtomicBool::new(false)),
             store_call_count: Arc::new(AtomicU64::new(0)),
             fail_store_on_call: Arc::new(AtomicU64::new(0)),
         }
@@ -65,6 +68,11 @@ impl FailableMetastore {
 
     fn set_fail_store(&self, fail: bool) {
         self.fail_store.store(fail, Ordering::SeqCst);
+    }
+
+    /// When true, store() returns Ok(false) without storing (simulates lost race).
+    fn set_store_returns_false(&self, yes: bool) {
+        self.store_returns_false.store(yes, Ordering::SeqCst);
     }
 
     /// Fail store only on the Nth call (1-indexed). 0 = disabled.
@@ -111,6 +119,9 @@ impl Metastore for FailableMetastore {
         }
         if self.fail_store.load(Ordering::SeqCst) {
             return Err(anyhow::anyhow!("injected store failure"));
+        }
+        if self.store_returns_false.load(Ordering::SeqCst) {
+            return Ok(false);
         }
         self.inner.store(id, created, ekr)
     }
@@ -689,4 +700,93 @@ fn factory_close_with_caches() {
 
     // Double close should also work
     factory.close().unwrap();
+}
+
+// ──────────────────────────── Gap A3: create_intermediate_key store returns Ok(false) ────────────────────────────
+
+// When metastore.store() returns Ok(false) (lost race — another process stored first),
+// create_intermediate_key should fall back to load_latest and use the existing IK.
+// This differs from store returning Err (which also leads to fallback via unwrap_or(false)),
+// because Ok(false) is the normal race condition case.
+#[test]
+fn create_ik_store_ok_false_falls_back_to_load_latest() {
+    let ms = Arc::new(FailableMetastore::new());
+    let kms = default_kms();
+    let factory = make_factory(ms.clone(), kms);
+
+    // Pre-populate: encrypt to create SK and IK in metastore
+    let session = factory.get_session("ok-false");
+    let drr1 = session.encrypt(b"seed data").unwrap();
+
+    // Make store return Ok(false) — simulates lost race
+    ms.set_store_returns_false(true);
+
+    // Second encrypt should still work: create_intermediate_key's store returns
+    // Ok(false) → unwrap_or(false) → stored=false → fallback to load_latest
+    // → finds existing valid IK
+    let drr2 = session.encrypt(b"after ok-false").unwrap();
+
+    // Restore normal store behavior for decrypt
+    ms.set_store_returns_false(false);
+    assert_eq!(session.decrypt(drr1).unwrap(), b"seed data");
+    assert_eq!(session.decrypt(drr2).unwrap(), b"after ok-false");
+}
+
+// When store returns Ok(false) and load_latest returns None (shouldn't happen in
+// production, but tests the final error arm in create_intermediate_key).
+#[test]
+fn create_ik_store_ok_false_and_no_latest_fails() {
+    let ms = Arc::new(FailableMetastore::new());
+    let kms = default_kms();
+    let factory = make_factory(ms.clone(), kms);
+
+    // Make store return Ok(false) and load_latest return None
+    ms.set_store_returns_false(true);
+    ms.set_load_latest_returns_none(true);
+
+    let session = factory.get_session("ok-false-none");
+    let err = session.encrypt(b"should fail").unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("not found") || msg.contains("error loading"),
+        "expected fallback failure, got: {msg}"
+    );
+}
+
+// ──────────────────────────── Gap A5: zero/negative create_date_precision ────────────────────────────
+
+// When create_date_precision_s <= 0, new_key_timestamp() returns now_s() directly
+// (skips the rounding division). Verify encrypt/decrypt still works.
+#[test]
+fn encrypt_decrypt_with_zero_precision() {
+    let ms = Arc::new(FailableMetastore::new());
+    let kms = default_kms();
+    let crypto = make_crypto();
+    let mut cfg = asherah::Config::new("prec-svc", "prec-prod");
+    cfg.policy.cache_system_keys = false;
+    cfg.policy.cache_intermediate_keys = false;
+    cfg.policy.cache_sessions = false;
+    cfg.policy.create_date_precision_s = 0;
+    let factory = asherah::api::new_session_factory(cfg, ms, kms, crypto);
+
+    let session = factory.get_session("p1");
+    let drr = session.encrypt(b"zero precision").unwrap();
+    assert_eq!(session.decrypt(drr).unwrap(), b"zero precision");
+}
+
+#[test]
+fn encrypt_decrypt_with_negative_precision() {
+    let ms = Arc::new(FailableMetastore::new());
+    let kms = default_kms();
+    let crypto = make_crypto();
+    let mut cfg = asherah::Config::new("neg-prec-svc", "neg-prec-prod");
+    cfg.policy.cache_system_keys = false;
+    cfg.policy.cache_intermediate_keys = false;
+    cfg.policy.cache_sessions = false;
+    cfg.policy.create_date_precision_s = -1;
+    let factory = asherah::api::new_session_factory(cfg, ms, kms, crypto);
+
+    let session = factory.get_session("p1");
+    let drr = session.encrypt(b"negative precision").unwrap();
+    assert_eq!(session.decrypt(drr).unwrap(), b"negative precision");
 }
