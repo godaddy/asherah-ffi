@@ -74,18 +74,18 @@ fn connect_client(url: &str) -> anyhow::Result<Client> {
 
 impl PostgresMetastore {
     pub fn connect(url: &str) -> anyhow::Result<Self> {
-        let mut cli = connect_client(url)?;
-        cli.batch_execute(
-            r#"CREATE TABLE IF NOT EXISTS encryption_key (
-                id TEXT NOT NULL,
-                created TIMESTAMP NOT NULL,
-                key_record JSONB NOT NULL,
-                PRIMARY KEY(id, created)
-            );"#,
-        )?;
-
-        // Aurora PostgreSQL write forwarding: set consistency mode on initial connection
-        Self::apply_replica_read_consistency(&mut cli)?;
+        // Validate REPLICA_READ_CONSISTENCY early (before any connection)
+        if let Ok(consistency) = std::env::var("REPLICA_READ_CONSISTENCY") {
+            match consistency.as_str() {
+                "eventual" | "global" | "session" => {}
+                _ => {
+                    anyhow::bail!(
+                        "invalid REPLICA_READ_CONSISTENCY value: '{}' (expected eventual, global, or session)",
+                        consistency
+                    );
+                }
+            }
+        }
 
         Ok(Self {
             url: url.to_string(),
@@ -121,9 +121,10 @@ impl PostgresMetastore {
 impl Metastore for PostgresMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         let mut c = self.client()?;
+        let created_f = created as f64;
         let rows = c.query(
             "SELECT key_record::text FROM encryption_key WHERE id=$1 AND created=to_timestamp($2)",
-            &[&id, &created],
+            &[&id, &created_f],
         )?;
         match rows.into_iter().next() {
             Some(row) => {
@@ -157,10 +158,99 @@ impl Metastore for PostgresMetastore {
     ) -> Result<bool, anyhow::Error> {
         let mut c = self.client()?;
         let v = serde_json::to_string(ekr)?;
+        let created_f = created as f64;
+        let v_json: serde_json::Value = serde_json::from_str(&v)?;
         let res = c.execute(
-            "INSERT INTO encryption_key(id, created, key_record) VALUES ($1, to_timestamp($2), $3::jsonb) ON CONFLICT DO NOTHING",
-            &[&id, &created, &v],
+            "INSERT INTO encryption_key(id, created, key_record) VALUES ($1, to_timestamp($2), $3) ON CONFLICT DO NOTHING",
+            &[&id, &created_f, &v_json],
         )?;
         Ok(res > 0)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    // URL format tests
+    #[test]
+    fn parse_sslmode_url_require() {
+        assert_eq!(
+            parse_sslmode("postgres://host/db?sslmode=require").as_deref(),
+            Some("require")
+        );
+    }
+
+    #[test]
+    fn parse_sslmode_url_verify_full() {
+        assert_eq!(
+            parse_sslmode("postgres://host/db?sslmode=verify-full").as_deref(),
+            Some("verify-full")
+        );
+    }
+
+    #[test]
+    fn parse_sslmode_url_verify_ca() {
+        assert_eq!(
+            parse_sslmode("postgres://host/db?sslmode=verify-ca").as_deref(),
+            Some("verify-ca")
+        );
+    }
+
+    #[test]
+    fn parse_sslmode_url_disable() {
+        assert_eq!(
+            parse_sslmode("postgres://host/db?sslmode=disable").as_deref(),
+            Some("disable")
+        );
+    }
+
+    #[test]
+    fn parse_sslmode_url_absent() {
+        assert_eq!(parse_sslmode("postgres://host/db"), None);
+    }
+
+    #[test]
+    fn parse_sslmode_url_other_params() {
+        assert_eq!(
+            parse_sslmode(
+                "postgres://host/db?connect_timeout=10&sslmode=require&application_name=test"
+            )
+            .as_deref(),
+            Some("require")
+        );
+    }
+
+    #[test]
+    fn parse_sslmode_url_no_query() {
+        assert_eq!(parse_sslmode("postgres://user:pass@host:5432/db"), None);
+    }
+
+    // Key-value format tests
+    #[test]
+    fn parse_sslmode_kv_require() {
+        assert_eq!(
+            parse_sslmode("host=localhost sslmode=require dbname=test").as_deref(),
+            Some("require")
+        );
+    }
+
+    #[test]
+    fn parse_sslmode_kv_absent() {
+        assert_eq!(parse_sslmode("host=localhost dbname=test"), None);
+    }
+
+    #[test]
+    fn parse_sslmode_kv_disable() {
+        assert_eq!(
+            parse_sslmode("host=localhost sslmode=disable").as_deref(),
+            Some("disable")
+        );
+    }
+
+    #[test]
+    fn parse_sslmode_empty_string() {
+        assert_eq!(parse_sslmode(""), None);
     }
 }

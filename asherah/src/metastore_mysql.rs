@@ -57,15 +57,6 @@ impl MySqlMetastore {
         }
 
         let pool = Pool::new(builder)?;
-        let mut conn = pool.get_conn()?;
-        conn.query_drop(
-            r#"CREATE TABLE IF NOT EXISTS encryption_key (
-                id VARCHAR(255) NOT NULL,
-                created TIMESTAMP NOT NULL,
-                key_record JSON NOT NULL,
-                PRIMARY KEY(id, created)
-            ) ENGINE=InnoDB"#,
-        )?;
         Ok(Self { pool })
     }
 
