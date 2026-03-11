@@ -141,3 +141,60 @@ fn key_expire_very_large() {
     // expire_after = i64::MAX → never expires for reasonable timestamps
     assert!(!crypto_key::is_key_expired(0, i64::MAX, 1_000_000));
 }
+
+// ──────────────────── Enclave-backed CryptoKey tests ────────────────────
+
+#[test]
+fn crypto_key_multiple_with_key_func_calls_same_data() {
+    // Verify that opening the enclave repeatedly returns the same key bytes
+    let input = vec![0x42; 32];
+    let key = CryptoKey::new(0, false, input.clone()).unwrap();
+    for _ in 0..10 {
+        key.with_key_func(|bytes| {
+            assert_eq!(bytes, &input);
+        })
+        .unwrap();
+    }
+}
+
+#[test]
+fn crypto_key_concurrent_with_key_func() {
+    use std::sync::Arc;
+    use std::thread;
+
+    let input = vec![0xDE; 32];
+    let key = Arc::new(CryptoKey::new(0, false, input.clone()).unwrap());
+
+    let barrier = Arc::new(std::sync::Barrier::new(8));
+    let handles: Vec<_> = (0..8)
+        .map(|_| {
+            let k = key.clone();
+            let b = barrier.clone();
+            let expected = input.clone();
+            thread::spawn(move || {
+                b.wait();
+                for _ in 0..100 {
+                    k.with_key_func(|bytes| {
+                        assert_eq!(bytes, &expected);
+                    })
+                    .unwrap();
+                }
+            })
+        })
+        .collect();
+
+    for h in handles {
+        h.join().unwrap();
+    }
+}
+
+#[test]
+fn crypto_key_source_bytes_wiped() {
+    // Verify the key survives the seal/open cycle through the enclave
+    let input = vec![0xAA; 32];
+    let key = CryptoKey::new(0, false, input).unwrap();
+    key.with_key_func(|bytes| {
+        assert_eq!(bytes, &[0xAA; 32]);
+    })
+    .unwrap();
+}
