@@ -24,7 +24,7 @@ pub enum DbKind {
 /// etc.) are stripped since the Rust `mysql` crate doesn't recognize them.
 /// The `tls` value is preserved separately via the `MYSQL_TLS_MODE` env var
 /// (set by asherah-config).
-fn convert_go_mysql_dsn(dsn: &str) -> String {
+pub fn convert_go_mysql_dsn(dsn: &str) -> String {
     // Split off query string
     let (base, query) = match dsn.split_once('?') {
         Some((b, q)) => (b, Some(q)),
