@@ -39,7 +39,9 @@ impl CryptoKey {
 
 pub fn generate_key(created: i64) -> anyhow::Result<CryptoKey> {
     let mut raw = vec![0_u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut raw);
+    rand::rngs::OsRng
+        .try_fill_bytes(&mut raw)
+        .map_err(|e| anyhow::anyhow!("OsRng: {e}"))?;
     CryptoKey::new(created, false, raw)
 }
 
@@ -47,4 +49,4 @@ pub fn is_key_expired(created_s: i64, expire_after_s: i64, now_s: i64) -> bool {
     now_s - created_s >= expire_after_s
 }
 
-use rand::RngCore;
+use rand::TryRngCore;
