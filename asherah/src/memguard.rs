@@ -1,18 +1,17 @@
 // Embedded memguard (was memguard-rs)
 // Provides locked, page-protected buffers and sealed enclaves.
 
+use crate::memcall;
 use blake2::{Blake2b512, Digest};
 use once_cell::sync::Lazy;
 use parking_lot::{Condvar, Mutex};
 use rand::rngs::OsRng;
 use rand::RngCore;
+use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
+use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 use subtle::ConstantTimeEq;
-use xsalsa20poly1305::aead::{Aead, KeyInit};
-use xsalsa20poly1305::{Key, Nonce, XSalsa20Poly1305};
-// use std::collections::VecDeque; // not used in this embedded subset
-use crate::memcall; // use embedded memcall
 
-const INTERVAL_MS: u64 = 500; // coffer rekey interval
 static PAGE_SIZE: Lazy<usize> = Lazy::new(page_size);
 
 fn page_size() -> usize {
@@ -249,68 +248,106 @@ impl Buffer {
     }
 }
 
-pub const OVERHEAD: usize = 24 + 16; // nonce + tag
+pub const OVERHEAD: usize = 12 + 16; // nonce + tag
+
+static NONCE_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 pub fn encrypt(plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>, Error> {
     if key.len() != 32 {
         return Err(Error::InvalidKeyLength);
     }
-    let cipher = XSalsa20Poly1305::new(Key::from_slice(key));
-    let mut nonce = [0_u8; 24];
-    OsRng.fill_bytes(&mut nonce);
-    let mut out = nonce.to_vec();
-    let ct = cipher
-        .encrypt(Nonce::from_slice(&nonce), plaintext)
+    let unbound = UnboundKey::new(&AES_256_GCM, key).map_err(|_| Error::InvalidKeyLength)?;
+    let aead_key = LessSafeKey::new(unbound);
+    let ctr = NONCE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let mut nonce_bytes = [0_u8; 12];
+    nonce_bytes[4..].copy_from_slice(&ctr.to_le_bytes());
+    let nonce = Nonce::assume_unique_for_key(nonce_bytes);
+    let mut in_out = plaintext.to_vec();
+    aead_key
+        .seal_in_place_append_tag(nonce, Aad::empty(), &mut in_out)
         .map_err(|_| Error::DecryptionFailed)?;
-    out.extend_from_slice(&ct);
+    let mut out = Vec::with_capacity(12 + in_out.len());
+    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&in_out);
     Ok(out)
 }
+
 pub fn decrypt(ciphertext: &[u8], key: &[u8], output: &mut [u8]) -> Result<usize, Error> {
     if key.len() != 32 {
         return Err(Error::InvalidKeyLength);
     }
-    if output.len() < ciphertext.len().saturating_sub(OVERHEAD) {
-        return Err(Error::BufferTooSmall);
-    }
     if ciphertext.len() < OVERHEAD {
         return Err(Error::DecryptionFailed);
     }
-    let cipher = XSalsa20Poly1305::new(Key::from_slice(key));
-    let (nonce, ct) = ciphertext.split_at(24);
-    let pt = cipher
-        .decrypt(Nonce::from_slice(nonce), ct)
+    if output.len() < ciphertext.len() - OVERHEAD {
+        return Err(Error::BufferTooSmall);
+    }
+    let unbound = UnboundKey::new(&AES_256_GCM, key).map_err(|_| Error::InvalidKeyLength)?;
+    let aead_key = LessSafeKey::new(unbound);
+    let (nonce_bytes, ct_and_tag) = ciphertext.split_at(12);
+    let nonce =
+        Nonce::try_assume_unique_for_key(nonce_bytes).map_err(|_| Error::DecryptionFailed)?;
+    let mut in_out = ct_and_tag.to_vec();
+    let pt = aead_key
+        .open_in_place(nonce, Aad::empty(), &mut in_out)
         .map_err(|_| Error::DecryptionFailed)?;
     let n = pt.len();
-    output[..n].copy_from_slice(&pt);
+    output[..n].copy_from_slice(pt);
     Ok(n)
 }
 
+static ENCLAVE_ID: AtomicU64 = AtomicU64::new(0);
+
 #[derive(Debug)]
 pub struct Enclave {
+    id: u64,
     ciphertext: Vec<u8>,
+    data_len: usize,
 }
 impl Enclave {
     pub fn new_from(buf: &mut Buffer) -> Result<Self, Error> {
         let mut key = get_or_create_key().view()?;
+        let data_len = buf.size();
+        let id = ENCLAVE_ID.fetch_add(1, Ordering::Relaxed);
+        // Populate hot cache before we destroy the plaintext
+        if data_len == SLOT_SIZE {
+            hot_cache_insert_plaintext(id, buf.as_slice());
+        }
         let ct = encrypt(buf.as_slice(), key.bytes())?;
         buf.melt()?;
         buf.scramble();
         buf.destroy()?;
         pool_release(key);
-        Ok(Self { ciphertext: ct })
+        Ok(Self {
+            id,
+            ciphertext: ct,
+            data_len,
+        })
     }
     pub fn open(&self) -> Result<PoolSlot, Error> {
-        let mut out = pool_acquire(self.plaintext_len())?;
+        // Fast path: check hot cache (no crypto needed)
+        if self.data_len == SLOT_SIZE {
+            if let Some(slot) = hot_cache_get(self.id) {
+                return Ok(slot);
+            }
+        }
+        // Slow path: XSalsa20 unseal
+        let mut out = pool_acquire(self.data_len)?;
         let mut key = get_or_create_key().view()?;
         let n = decrypt(&self.ciphertext, key.bytes(), out.bytes())?;
         debug_assert_eq!(n, out.size());
         pool_release(key);
+        // Promote to hot cache for next time
+        if self.data_len == SLOT_SIZE {
+            hot_cache_insert_plaintext(self.id, out.as_slice());
+        }
         Ok(out)
     }
     pub fn plaintext_len(&self) -> usize {
-        self.ciphertext.len().saturating_sub(OVERHEAD)
+        self.data_len
     }
     pub fn size(&self) -> usize {
-        self.plaintext_len()
+        self.data_len
     }
 }
 
@@ -463,12 +500,107 @@ pub fn pool_release(mut slot: PoolSlot) {
     }
 }
 
+// -- Hot key cache --
+// One mlock'd slab page of decrypted keys, LRU-evicted.
+// Avoids XSalsa20 unseal for frequently-used keys.
+struct HotKeyCache {
+    #[allow(dead_code)] // owns the mmap — must not be dropped
+    page: Buffer,
+    base_ptr: *mut u8,
+    slot_count: usize,
+    index: HashMap<u64, usize>, // enclave_id -> slot_idx
+    slot_to_id: Vec<u64>,       // slot_idx -> enclave_id (0 = empty)
+    lru: VecDeque<usize>,       // slot indices, front = least recent
+}
+
+// SAFETY: base_ptr points into mlock'd mmap memory owned by `page`.
+unsafe impl Send for HotKeyCache {}
+
+impl HotKeyCache {
+    fn new() -> Result<Self, Error> {
+        let ps = *PAGE_SIZE;
+        let mut page = Buffer::new(ps)?;
+        let base_ptr = page.bytes().as_mut_ptr();
+        wipe_bytes(page.bytes());
+        let slot_count = ps / SLOT_SIZE;
+        Ok(Self {
+            page,
+            base_ptr,
+            slot_count,
+            index: HashMap::with_capacity(slot_count),
+            slot_to_id: vec![0; slot_count],
+            lru: VecDeque::with_capacity(slot_count),
+        })
+    }
+
+    fn get(&mut self, enclave_id: u64) -> Option<*const u8> {
+        let &slot_idx = self.index.get(&enclave_id)?;
+        // Touch LRU: move to back (most recent)
+        if let Some(pos) = self.lru.iter().position(|&s| s == slot_idx) {
+            self.lru.remove(pos);
+        }
+        self.lru.push_back(slot_idx);
+        let ptr = unsafe { self.base_ptr.add(slot_idx * SLOT_SIZE) };
+        Some(ptr as *const u8)
+    }
+
+    fn insert(&mut self, enclave_id: u64, plaintext: &[u8]) {
+        debug_assert_eq!(plaintext.len(), SLOT_SIZE);
+        // Already cached?
+        if self.index.contains_key(&enclave_id) {
+            return;
+        }
+        let slot_idx = if self.index.len() < self.slot_count {
+            // Free slot available
+            self.index.len()
+        } else {
+            // Evict LRU
+            let evict_idx = self.lru.pop_front().expect("LRU non-empty when full");
+            let evict_id = self.slot_to_id[evict_idx];
+            self.index.remove(&evict_id);
+            // Wipe evicted slot
+            let evict_ptr = unsafe { self.base_ptr.add(evict_idx * SLOT_SIZE) };
+            let evict_slice = unsafe { std::slice::from_raw_parts_mut(evict_ptr, SLOT_SIZE) };
+            wipe_bytes(evict_slice);
+            evict_idx
+        };
+        // Write plaintext into slot
+        let ptr = unsafe { self.base_ptr.add(slot_idx * SLOT_SIZE) };
+        let dst = unsafe { std::slice::from_raw_parts_mut(ptr, SLOT_SIZE) };
+        dst.copy_from_slice(plaintext);
+        self.index.insert(enclave_id, slot_idx);
+        self.slot_to_id[slot_idx] = enclave_id;
+        self.lru.push_back(slot_idx);
+    }
+}
+
+static HOT_CACHE: Lazy<Mutex<Option<HotKeyCache>>> = Lazy::new(|| Mutex::new(None));
+
+fn hot_cache_get(enclave_id: u64) -> Option<PoolSlot> {
+    let mut guard = HOT_CACHE.lock();
+    let cache = guard.as_mut()?;
+    let src_ptr = cache.get(enclave_id)?;
+    // Copy from hot cache into a pool slot (so caller has an owned buffer)
+    let mut slot = pool_acquire(SLOT_SIZE).ok()?;
+    let src = unsafe { std::slice::from_raw_parts(src_ptr, SLOT_SIZE) };
+    slot.bytes().copy_from_slice(src);
+    Some(slot)
+}
+
+fn hot_cache_insert_plaintext(enclave_id: u64, plaintext: &[u8]) {
+    if plaintext.len() != SLOT_SIZE {
+        return;
+    }
+    let mut guard = HOT_CACHE.lock();
+    let cache = guard.get_or_insert_with(|| HotKeyCache::new().expect("hot cache page allocation"));
+    cache.insert(enclave_id, plaintext);
+}
+
 use std::sync::{Arc, Weak};
 #[derive(Debug)]
 struct CofferInner {
     left: Buffer,
     right: Buffer,
-    rand: Buffer,
 }
 impl CofferInner {
     fn init(&mut self) -> Result<(), Error> {
@@ -490,24 +622,6 @@ impl CofferInner {
         }
         Ok(b)
     }
-    fn rekey(&mut self) -> Result<(), Error> {
-        scramble_bytes(self.rand.bytes());
-        let right_cur_h = hash(self.right.as_slice());
-        for (slot, rnd) in self.right.bytes().iter_mut().zip(self.rand.as_slice()) {
-            *slot ^= rnd;
-        }
-        let right_new_h = hash(self.right.as_slice());
-        for ((slot, cur), new) in self
-            .left
-            .bytes()
-            .iter_mut()
-            .zip(right_cur_h.iter())
-            .zip(right_new_h.iter())
-        {
-            *slot ^= cur ^ new;
-        }
-        Ok(())
-    }
 }
 #[derive(Debug)]
 pub struct Coffer(Arc<Mutex<CofferInner>>);
@@ -516,25 +630,9 @@ impl Coffer {
         let mut inner = CofferInner {
             left: Buffer::new(32)?,
             right: Buffer::new(32)?,
-            rand: Buffer::new(32)?,
         };
         inner.init()?;
-        let c = Coffer(Arc::new(Mutex::new(inner)));
-        let weak = Arc::downgrade(&c.0);
-        std::thread::spawn(move || {
-            use std::time::Duration;
-            loop {
-                match weak.upgrade() {
-                    None => break,
-                    Some(strong) => {
-                        let mut g = strong.lock();
-                        let _ignored = g.rekey();
-                        std::thread::sleep(Duration::from_millis(INTERVAL_MS));
-                    }
-                }
-            }
-        });
-        Ok(c)
+        Ok(Coffer(Arc::new(Mutex::new(inner))))
     }
     pub fn view(&self) -> Result<PoolSlot, Error> {
         self.0.lock().view()
@@ -543,7 +641,6 @@ impl Coffer {
         let mut g = self.0.lock();
         let _left = g.left.destroy();
         let _right = g.right.destroy();
-        let _rand = g.rand.destroy();
         Ok(())
     }
 }
