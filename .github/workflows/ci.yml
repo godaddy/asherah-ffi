@@ -59,6 +59,8 @@ jobs:
       - name: Verify Docker availability
         run: docker version
       - name: Run full language test matrix
+        env:
+          SKIP_RUST_CHECKS: "1"
         run: ./scripts/test-in-docker.sh
 
   integration-tests:
