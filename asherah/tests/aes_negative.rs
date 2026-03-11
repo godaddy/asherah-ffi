@@ -1,13 +1,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use asherah as ael;
 use asherah::AEAD;
-use rand::RngCore;
+use rand::TryRngCore;
 
 #[test]
 fn decrypt_fails_on_tamper() {
     let c = ael::aead::AES256GCM::new();
     let mut key = vec![0_u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut key);
+    rand::rngs::OsRng.try_fill_bytes(&mut key).unwrap();
     let pt = b"attack at dawn".to_vec();
     let mut ct = c.encrypt(&pt, &key).unwrap();
     // flip last byte

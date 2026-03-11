@@ -610,8 +610,10 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         // Fast DRK path: avoid memguard for ephemeral data-row key
         let created = now_s();
         let mut drk = vec![0_u8; 32];
-        use rand::RngCore;
-        rand::rngs::OsRng.fill_bytes(&mut drk);
+        use rand::TryRngCore;
+        rand::rngs::OsRng
+            .try_fill_bytes(&mut drk)
+            .map_err(|e| anyhow::anyhow!("OsRng: {e}"))?;
         let enc_data = self.crypto.encrypt(data, &drk)?;
         let enc_drk = ik.with_key_func(|ikb| self.crypto.encrypt(&drk, ikb))??;
         // wipe drk

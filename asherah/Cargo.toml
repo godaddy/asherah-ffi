@@ -16,7 +16,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 once_cell = "1.19"
 parking_lot = "0.12"
-rand = "0.8"
+rand = "0.9"
 anyhow = "1.0"
 log = "0.4"
 # aes-gcm kept as optional fallback; ring is default backend now
@@ -27,7 +27,7 @@ base64 = "0.22"
 subtle = "2.5"
 signal-hook = "0.4"
 libc = "0.2"
-windows-sys = { version = "0.48", features = ["Win32_Foundation", "Win32_System_Memory"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Memory"] }
 ring = "0.17"
 
 [[bin]]
@@ -42,7 +42,7 @@ dynamodb = ["dep:aws-sdk-dynamodb"]
 cucumber_xlang = []
 
 [dependencies.rusqlite]
-version = "0.31"
+version = "0.38"
 optional = true
 features = ["bundled"]
 
@@ -61,7 +61,7 @@ version = "1"
 features = ["rt-multi-thread", "macros"]
 
 [dependencies.mysql]
-version = "25"
+version = "27"
 optional = true
 
 [dependencies.postgres]
