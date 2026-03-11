@@ -1,14 +1,36 @@
 use crate::memguard::{wipe_bytes, Buffer, Enclave};
+use ring::aead::{LessSafeKey, UnboundKey, AES_256_GCM};
 
-#[derive(Debug)]
 pub struct CryptoKey {
     created: i64,
     revoked: bool,
     secret: Enclave,
+    /// Pre-expanded AES-256-GCM key schedule (avoids re-expansion on every use).
+    cached_lsk: Option<LessSafeKey>,
+}
+
+// LessSafeKey doesn't impl Debug
+impl std::fmt::Debug for CryptoKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CryptoKey")
+            .field("created", &self.created)
+            .field("revoked", &self.revoked)
+            .field("secret", &self.secret)
+            .field("cached_lsk", &self.cached_lsk.is_some())
+            .finish()
+    }
 }
 
 impl CryptoKey {
     pub fn new(created: i64, revoked: bool, mut bytes: Vec<u8>) -> anyhow::Result<Self> {
+        // Pre-expand key schedule for 32-byte keys
+        let cached_lsk = if bytes.len() == 32 {
+            UnboundKey::new(&AES_256_GCM, &bytes)
+                .ok()
+                .map(LessSafeKey::new)
+        } else {
+            None
+        };
         let mut buf = Buffer::new(bytes.len()).map_err(|e| {
             anyhow::anyhow!(
                 "failed to allocate secure buffer ({} bytes): {:?}",
@@ -24,6 +46,7 @@ impl CryptoKey {
             created,
             revoked,
             secret: enclave,
+            cached_lsk,
         })
     }
     pub fn created(&self) -> i64 {
@@ -31,6 +54,10 @@ impl CryptoKey {
     }
     pub fn revoked(&self) -> bool {
         self.revoked
+    }
+    /// Returns the pre-expanded LessSafeKey if available (32-byte AES-256 keys).
+    pub fn less_safe_key(&self) -> Option<&LessSafeKey> {
+        self.cached_lsk.as_ref()
     }
     pub fn with_key_func<R>(&self, f: impl FnOnce(&[u8]) -> R) -> anyhow::Result<R> {
         let buf = self

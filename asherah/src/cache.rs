@@ -44,8 +44,11 @@ struct CacheEntry {
     segment: Segment,
 }
 
-type MetaCacheInner = HashMap<(String, i64), CacheEntry>;
-type LatestMetaInner = HashMap<String, KeyMeta>;
+// Use Arc<str> keys to avoid String clones on cache lookups.
+type CacheKey = (Arc<str>, i64);
+type MetaCacheInner = HashMap<CacheKey, CacheEntry>;
+// latest map: id -> (interned_id, created) so we can look up by_meta cheaply
+type LatestMetaInner = HashMap<Arc<str>, i64>;
 
 pub trait KeyCacher: Send + Sync {
     fn get_or_load_latest(
@@ -148,11 +151,16 @@ impl SimpleKeyCache {
     }
 
     fn get_latest_if_fresh(&self, id: &str) -> Option<(Arc<CryptoKey>, bool, bool)> {
-        let latest = { self.latest.lock().get(id).cloned() };
-        let meta = latest?;
-        let key = (meta.id.clone(), meta.created);
+        // Look up the interned id + created from the latest map
+        let (interned_id, created) = {
+            let latest = self.latest.lock();
+            let &created = latest.get(id)?;
+            // Clone the Arc<str> — just a refcount bump
+            let key = latest.get_key_value(id)?.0.clone();
+            (key, created)
+        };
         let mut map = self.by_meta.lock();
-        let entry = map.get_mut(&key)?;
+        let entry = map.get_mut(&(interned_id, created))?;
         let expired = self.is_expired(entry.loaded_at);
         let invalid = self.is_invalid(&entry.key);
         entry.last_access = self.next_access();
@@ -169,9 +177,14 @@ impl SimpleKeyCache {
     }
 
     fn get_meta_if_fresh(&self, meta: &KeyMeta) -> Option<(Arc<CryptoKey>, bool)> {
-        let key = (meta.id.clone(), meta.created);
         let mut map = self.by_meta.lock();
-        let entry = map.get_mut(&key)?;
+        // Try to find an existing interned key to avoid allocation.
+        // Scan is O(n) but n is tiny (typically 1-2 entries) and avoids String clone.
+        let cache_key = map
+            .keys()
+            .find(|(id, c)| id.as_ref() == meta.id && *c == meta.created)?;
+        let cache_key = cache_key.clone(); // Arc<str> clone = refcount bump
+        let entry = map.get_mut(&cache_key)?;
         let mut expired = self.is_expired(entry.loaded_at);
         if entry.key.revoked() {
             expired = false;
@@ -198,6 +211,7 @@ impl SimpleKeyCache {
     }
 
     fn insert_meta(&self, meta: &KeyMeta, key: Arc<CryptoKey>) {
+        let interned_id: Arc<str> = Arc::from(meta.id.as_str());
         let mut map = self.by_meta.lock();
         let entry = CacheEntry {
             key,
@@ -206,15 +220,15 @@ impl SimpleKeyCache {
             freq: 1,
             segment: Segment::Probationary,
         };
-        map.insert((meta.id.clone(), meta.created), entry);
+        map.insert((interned_id.clone(), meta.created), entry);
         {
             let mut latest = self.latest.lock();
-            if let Some(existing) = latest.get(&meta.id) {
-                if existing.created < meta.created {
-                    latest.insert(meta.id.clone(), meta.clone());
+            if let Some(existing) = latest.get(&interned_id) {
+                if *existing < meta.created {
+                    latest.insert(interned_id, meta.created);
                 }
             } else {
-                latest.insert(meta.id.clone(), meta.clone());
+                latest.insert(interned_id, meta.created);
             }
         }
         self.evict_if_needed(&mut map);
