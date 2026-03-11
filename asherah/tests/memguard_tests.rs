@@ -243,9 +243,9 @@ fn enclave_seal_and_open_roundtrip() {
     let enclave = lb.seal().unwrap();
     assert_eq!(enclave.size(), 8);
     assert_eq!(enclave.plaintext_len(), 8);
-    let mut opened = enclave.open().unwrap();
+    let opened = enclave.open().unwrap();
     assert_eq!(opened.as_slice(), &[1, 2, 3, 4, 5, 6, 7, 8]);
-    opened.destroy().unwrap();
+    memguard::pool_release(opened);
 }
 
 // ──────────────────────────── Coffer ────────────────────────────
@@ -253,20 +253,20 @@ fn enclave_seal_and_open_roundtrip() {
 #[test]
 fn coffer_view_returns_32_byte_key() {
     let coffer = memguard::Coffer::new().unwrap();
-    let mut key = coffer.view().unwrap();
+    let key = coffer.view().unwrap();
     assert_eq!(key.size(), 32);
-    key.destroy().unwrap();
+    memguard::pool_release(key);
     coffer.destroy().unwrap();
 }
 
 #[test]
 fn coffer_view_consistent() {
     let coffer = memguard::Coffer::new().unwrap();
-    let mut k1 = coffer.view().unwrap();
-    let mut k2 = coffer.view().unwrap();
+    let k1 = coffer.view().unwrap();
+    let k2 = coffer.view().unwrap();
     assert_eq!(k1.as_slice(), k2.as_slice());
-    k1.destroy().unwrap();
-    k2.destroy().unwrap();
+    memguard::pool_release(k1);
+    memguard::pool_release(k2);
     coffer.destroy().unwrap();
 }
 
