@@ -1,5 +1,6 @@
 use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
+use anyhow::Context;
 use postgres::Client;
 
 #[derive(Clone)]
@@ -93,7 +94,10 @@ impl PostgresMetastore {
     }
 
     fn client(&self) -> anyhow::Result<Client> {
-        let mut cli = connect_client(&self.url)?;
+        let mut cli = connect_client(&self.url).map_err(|e| {
+            log::error!("Postgres connection failed: {e:#}");
+            e
+        })?;
         Self::apply_replica_read_consistency(&mut cli)?;
         Ok(cli)
     }
@@ -120,34 +124,48 @@ impl PostgresMetastore {
 
 impl Metastore for PostgresMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        log::debug!("postgres load: id={id} created={created}");
         let mut c = self.client()?;
         let created_f = created as f64;
         let rows = c.query(
             "SELECT key_record::text FROM encryption_key WHERE id=$1 AND created=to_timestamp($2)",
             &[&id, &created_f],
-        )?;
+        ).context(format!("Postgres load query failed for id={id} created={created}"))?;
         match rows.into_iter().next() {
             Some(row) => {
                 let txt: String = row.get(0);
-                let ekr: EnvelopeKeyRecord = serde_json::from_str(&txt)?;
+                log::debug!("postgres load hit: id={id} created={created}");
+                let ekr = serde_json::from_str(&txt).context(format!(
+                    "Postgres load: failed to parse key_record JSON for id={id}"
+                ))?;
                 Ok(Some(ekr))
             }
-            None => Ok(None),
+            None => {
+                log::debug!("postgres load miss: id={id} created={created}");
+                Ok(None)
+            }
         }
     }
     fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        log::debug!("postgres load_latest: id={id}");
         let mut c = self.client()?;
         let rows = c.query(
             "SELECT key_record::text FROM encryption_key WHERE id=$1 ORDER BY created DESC LIMIT 1",
             &[&id],
-        )?;
+        ).context(format!("Postgres load_latest query failed for id={id}"))?;
         match rows.into_iter().next() {
             Some(row) => {
                 let txt: String = row.get(0);
-                let ekr: EnvelopeKeyRecord = serde_json::from_str(&txt)?;
+                log::debug!("postgres load_latest hit: id={id}");
+                let ekr = serde_json::from_str(&txt).context(format!(
+                    "Postgres load_latest: failed to parse key_record JSON for id={id}"
+                ))?;
                 Ok(Some(ekr))
             }
-            None => Ok(None),
+            None => {
+                log::debug!("postgres load_latest miss: id={id}");
+                Ok(None)
+            }
         }
     }
     fn store(
@@ -156,15 +174,22 @@ impl Metastore for PostgresMetastore {
         created: i64,
         ekr: &EnvelopeKeyRecord,
     ) -> Result<bool, anyhow::Error> {
+        log::debug!("postgres store: id={id} created={created}");
         let mut c = self.client()?;
-        let v = serde_json::to_string(ekr)?;
+        let v = serde_json::to_string(ekr).context(format!(
+            "Postgres store: failed to serialize key_record for id={id}"
+        ))?;
         let created_f = created as f64;
-        let v_json: serde_json::Value = serde_json::from_str(&v)?;
+        let v_json: serde_json::Value = serde_json::from_str(&v).context(format!(
+            "Postgres store: failed to re-parse key_record JSON for id={id}"
+        ))?;
         let res = c.execute(
             "INSERT INTO encryption_key(id, created, key_record) VALUES ($1, to_timestamp($2), $3) ON CONFLICT DO NOTHING",
             &[&id, &created_f, &v_json],
-        )?;
-        Ok(res > 0)
+        ).context(format!("Postgres store insert failed for id={id} created={created}"))?;
+        let stored = res > 0;
+        log::debug!("postgres store: id={id} created={created} stored={stored}");
+        Ok(stored)
     }
 }
 
