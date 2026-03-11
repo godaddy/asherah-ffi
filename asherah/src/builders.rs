@@ -382,7 +382,10 @@ pub fn factory_from_env(
             }
         }
         _ => {
-            let hex = std::env::var("STATIC_MASTER_KEY_HEX").unwrap_or_else(|_| "00".repeat(32));
+            // Default matches Go asherah's hardcoded key "thisIsAStaticMasterKeyForTesting"
+            let hex = std::env::var("STATIC_MASTER_KEY_HEX").unwrap_or_else(|_| {
+                "746869734973415374617469634d61737465724b6579466f7254657374696e67".to_string()
+            });
             let mut key = vec![0_u8; hex.len() / 2];
             for i in 0..key.len() {
                 key[i] = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).unwrap_or(0);

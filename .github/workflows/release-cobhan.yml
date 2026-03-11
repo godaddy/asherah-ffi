@@ -77,6 +77,7 @@ jobs:
       - name: Install cross-compile tools (Linux arm64)
         if: matrix.cross == true
         run: |
+          echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/80-retries
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
