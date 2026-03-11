@@ -495,7 +495,10 @@ pub unsafe extern "C" fn Encrypt(
     let session = factory.get_session(&partition_id);
     let drr = match session.encrypt(&data) {
         Ok(d) => d,
-        Err(_) => return ERR_ENCRYPT_FAILED,
+        Err(e) => {
+            log::error!("Encrypt failed: {e:#}");
+            return ERR_ENCRYPT_FAILED;
+        }
     };
 
     // Extract components from DataRowRecord
@@ -637,7 +640,10 @@ pub unsafe extern "C" fn Decrypt(
     let session = factory.get_session(&partition_id);
     let plaintext = match session.decrypt(drr) {
         Ok(p) => p,
-        Err(_) => return ERR_DECRYPT_FAILED,
+        Err(e) => {
+            log::error!("Decrypt failed: {e:#}");
+            return ERR_DECRYPT_FAILED;
+        }
     };
 
     // Write output
@@ -694,7 +700,10 @@ pub unsafe extern "C" fn EncryptToJson(
     let session = factory.get_session(&partition_id);
     let drr = match session.encrypt(&data) {
         Ok(d) => d,
-        Err(_) => return ERR_ENCRYPT_FAILED,
+        Err(e) => {
+            log::error!("EncryptToJson failed: {e:#}");
+            return ERR_ENCRYPT_FAILED;
+        }
     };
 
     // Serialize to JSON and write to output buffer
@@ -751,7 +760,10 @@ pub unsafe extern "C" fn DecryptFromJson(
     let session = factory.get_session(&partition_id);
     let plaintext = match session.decrypt(drr) {
         Ok(p) => p,
-        Err(_) => return ERR_DECRYPT_FAILED,
+        Err(e) => {
+            log::error!("DecryptFromJson failed: {e:#}");
+            return ERR_DECRYPT_FAILED;
+        }
     };
 
     // Write output

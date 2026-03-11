@@ -1,5 +1,6 @@
 use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
+use anyhow::Context;
 #[cfg(feature = "sqlite")]
 use parking_lot::Mutex;
 #[cfg(feature = "sqlite")]
@@ -34,34 +35,45 @@ impl SqliteMetastore {
 #[cfg(feature = "sqlite")]
 impl Metastore for SqliteMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        log::debug!("sqlite load: id={id} created={created}");
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare("SELECT key_record FROM encryption_key WHERE id=?1 AND created = datetime(?2, 'unixepoch')")?;
-        let mut rows = stmt.query(params![id, created])?;
+        let mut stmt = conn.prepare("SELECT key_record FROM encryption_key WHERE id=?1 AND created = datetime(?2, 'unixepoch')")
+            .context(format!("SQLite load prepare failed for id={id}"))?;
+        let mut rows = stmt.query(params![id, created]).context(format!(
+            "SQLite load query failed for id={id} created={created}"
+        ))?;
         if let Some(row) = rows.next()? {
             let txt: String = row.get(0)?;
-            let ekr: EnvelopeKeyRecord = serde_json::from_str(&txt)?;
-            if std::env::var("ASHERAH_INTEROP_DEBUG").is_ok() {
-                log::debug!("sqlite load hit id={} created={}", id, created);
-            }
+            let ekr: EnvelopeKeyRecord = serde_json::from_str(&txt).context(format!(
+                "SQLite load: failed to parse key_record JSON for id={id}"
+            ))?;
+            log::debug!("sqlite load hit: id={id} created={created}");
             Ok(Some(ekr))
         } else {
-            if std::env::var("ASHERAH_INTEROP_DEBUG").is_ok() {
-                log::debug!("sqlite load miss id={} created={}", id, created);
-            }
+            log::debug!("sqlite load miss: id={id} created={created}");
             Ok(None)
         }
     }
     fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        log::debug!("sqlite load_latest: id={id}");
         let conn = self.conn.lock();
-        let mut stmt = conn.prepare(
-            "SELECT key_record FROM encryption_key WHERE id=?1 ORDER BY created DESC LIMIT 1",
-        )?;
-        let mut rows = stmt.query(params![id])?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT key_record FROM encryption_key WHERE id=?1 ORDER BY created DESC LIMIT 1",
+            )
+            .context(format!("SQLite load_latest prepare failed for id={id}"))?;
+        let mut rows = stmt
+            .query(params![id])
+            .context(format!("SQLite load_latest query failed for id={id}"))?;
         if let Some(row) = rows.next()? {
             let txt: String = row.get(0)?;
-            let ekr: EnvelopeKeyRecord = serde_json::from_str(&txt)?;
+            let ekr: EnvelopeKeyRecord = serde_json::from_str(&txt).context(format!(
+                "SQLite load_latest: failed to parse key_record JSON for id={id}"
+            ))?;
+            log::debug!("sqlite load_latest hit: id={id}");
             Ok(Some(ekr))
         } else {
+            log::debug!("sqlite load_latest miss: id={id}");
             Ok(None)
         }
     }
@@ -71,16 +83,18 @@ impl Metastore for SqliteMetastore {
         created: i64,
         ekr: &EnvelopeKeyRecord,
     ) -> Result<bool, anyhow::Error> {
-        let rec = serde_json::to_string(ekr)?;
+        log::debug!("sqlite store: id={id} created={created}");
+        let rec = serde_json::to_string(ekr).context(format!(
+            "SQLite store: failed to serialize key_record for id={id}"
+        ))?;
         let conn = self.conn.lock();
         let res = conn.execute(
             "INSERT OR IGNORE INTO encryption_key(id, created, key_record) VALUES (?1, datetime(?2, 'unixepoch'), ?3)",
             params![id, created, rec],
-        )?;
-        if std::env::var("ASHERAH_INTEROP_DEBUG").is_ok() {
-            log::debug!("sqlite store id={} created={} res={}", id, created, res);
-        }
-        Ok(res > 0)
+        ).context(format!("SQLite store insert failed for id={id} created={created}"))?;
+        let stored = res > 0;
+        log::debug!("sqlite store: id={id} created={created} stored={stored}");
+        Ok(stored)
     }
     fn region_suffix(&self) -> Option<String> {
         None

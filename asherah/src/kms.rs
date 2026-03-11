@@ -23,9 +23,18 @@ impl<A: AEAD + Send + Sync + 'static> StaticKMS<A> {
 
 impl<A: AEAD + Send + Sync + 'static> KeyManagementService for StaticKMS<A> {
     fn encrypt_key(&self, _ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        self.aead.encrypt(key_bytes, &self.master_key)
+        self.aead.encrypt(key_bytes, &self.master_key).map_err(|e| {
+            log::error!("StaticKMS encrypt_key failed: {e:#}");
+            e
+        })
     }
     fn decrypt_key(&self, _ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        self.aead.decrypt(blob, &self.master_key)
+        self.aead.decrypt(blob, &self.master_key).map_err(|e| {
+            log::error!(
+                "StaticKMS decrypt_key failed (blob_len={}): {e:#}",
+                blob.len()
+            );
+            e
+        })
     }
 }

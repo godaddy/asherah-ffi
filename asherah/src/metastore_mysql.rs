@@ -1,5 +1,6 @@
 use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
+use anyhow::Context;
 use mysql::prelude::Queryable;
 use mysql::{Opts, OptsBuilder, Pool, PooledConn, SslOpts};
 
@@ -61,33 +62,48 @@ impl MySqlMetastore {
     }
 
     fn conn(&self) -> anyhow::Result<PooledConn> {
-        Ok(self.pool.get_conn()?)
+        self.pool.get_conn().map_err(|e| {
+            log::error!("MySQL connection pool error: {e:#}");
+            anyhow::anyhow!("MySQL connection failed: {e}")
+        })
     }
 }
 
 impl Metastore for MySqlMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        log::debug!("mysql load: id={id} created={created}");
         let mut conn = self.conn()?;
         let row: Option<(String,)> = conn.exec_first(
             "SELECT JSON_EXTRACT(key_record, '$') FROM encryption_key WHERE id=? AND created=FROM_UNIXTIME(?)",
             (id, created),
-        )?;
+        ).context(format!("MySQL load query failed for id={id} created={created}"))?;
         if let Some((json_str,)) = row {
-            Ok(Some(serde_json::from_str(&json_str)?))
+            log::debug!("mysql load hit: id={id} created={created}");
+            let ekr = serde_json::from_str(&json_str).context(format!(
+                "MySQL load: failed to parse key_record JSON for id={id}"
+            ))?;
+            Ok(Some(ekr))
         } else {
+            log::debug!("mysql load miss: id={id} created={created}");
             Ok(None)
         }
     }
 
     fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        log::debug!("mysql load_latest: id={id}");
         let mut conn = self.conn()?;
         let row: Option<(String,)> = conn.exec_first(
             "SELECT JSON_EXTRACT(key_record, '$') FROM encryption_key WHERE id=? ORDER BY created DESC LIMIT 1",
             (id,),
-        )?;
+        ).context(format!("MySQL load_latest query failed for id={id}"))?;
         if let Some((json_str,)) = row {
-            Ok(Some(serde_json::from_str(&json_str)?))
+            log::debug!("mysql load_latest hit: id={id}");
+            let ekr = serde_json::from_str(&json_str).context(format!(
+                "MySQL load_latest: failed to parse key_record JSON for id={id}"
+            ))?;
+            Ok(Some(ekr))
         } else {
+            log::debug!("mysql load_latest miss: id={id}");
             Ok(None)
         }
     }
@@ -98,12 +114,17 @@ impl Metastore for MySqlMetastore {
         created: i64,
         ekr: &EnvelopeKeyRecord,
     ) -> Result<bool, anyhow::Error> {
-        let rec = serde_json::to_string(ekr)?;
+        log::debug!("mysql store: id={id} created={created}");
+        let rec = serde_json::to_string(ekr).context(format!(
+            "MySQL store: failed to serialize key_record for id={id}"
+        ))?;
         let mut conn = self.conn()?;
         conn.exec_drop(
             "INSERT IGNORE INTO encryption_key(id, created, key_record) VALUES(?, FROM_UNIXTIME(?), CAST(? AS JSON))",
             (id, created, rec),
-        )?;
-        Ok(conn.affected_rows() > 0)
+        ).context(format!("MySQL store insert failed for id={id} created={created}"))?;
+        let stored = conn.affected_rows() > 0;
+        log::debug!("mysql store: id={id} created={created} stored={stored}");
+        Ok(stored)
     }
 }

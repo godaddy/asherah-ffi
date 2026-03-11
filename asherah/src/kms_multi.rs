@@ -32,23 +32,47 @@ impl MultiKms {
 
 impl KeyManagementService for MultiKms {
     fn encrypt_key(&self, ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        self.backends[self.preferred].encrypt_key(ctx, key_bytes)
+        self.backends[self.preferred]
+            .encrypt_key(ctx, key_bytes)
+            .map_err(|e| {
+                log::error!(
+                    "MultiKms encrypt_key failed on preferred backend {}: {e:#}",
+                    self.preferred
+                );
+                e
+            })
     }
 
     fn decrypt_key(&self, ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+        let mut errors: Vec<String> = Vec::new();
         // Try preferred first, then fallbacks
-        if let Ok(pt) = self.backends[self.preferred].decrypt_key(ctx, blob) {
-            return Ok(pt);
+        match self.backends[self.preferred].decrypt_key(ctx, blob) {
+            Ok(pt) => return Ok(pt),
+            Err(e) => {
+                log::warn!(
+                    "MultiKms decrypt_key: preferred backend {} failed: {e:#}",
+                    self.preferred
+                );
+                errors.push(format!("backend[{}]: {e}", self.preferred));
+            }
         }
         for (i, kms) in self.backends.iter().enumerate() {
             if i == self.preferred {
                 continue;
             }
-            if let Ok(pt) = kms.decrypt_key(ctx, blob) {
-                return Ok(pt);
+            match kms.decrypt_key(ctx, blob) {
+                Ok(pt) => return Ok(pt),
+                Err(e) => {
+                    log::warn!("MultiKms decrypt_key: backend {} failed: {e:#}", i);
+                    errors.push(format!("backend[{i}]: {e}"));
+                }
             }
         }
-        Err(anyhow::anyhow!("all KMS backends failed to decrypt"))
+        let detail = errors.join("; ");
+        log::error!("MultiKms decrypt_key: all backends failed: {detail}");
+        Err(anyhow::anyhow!(
+            "all KMS backends failed to decrypt: {detail}"
+        ))
     }
 }
 
@@ -136,8 +160,8 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
-            err_msg.contains("all KMS backends failed to decrypt"),
-            "expected 'all KMS backends failed to decrypt', got: {err_msg}"
+            err_msg.contains("all KMS backends failed to decrypt:"),
+            "expected 'all KMS backends failed to decrypt:', got: {err_msg}"
         );
     }
 }

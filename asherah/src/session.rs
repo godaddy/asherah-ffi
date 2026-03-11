@@ -8,6 +8,7 @@ use crate::policy::CryptoPolicy;
 use crate::session_cache::SessionCache;
 use crate::traits::{KeyManagementService, Metastore, Partition, AEAD};
 use crate::types::{EnvelopeKeyRecord, KeyMeta};
+use anyhow::Context;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -99,16 +100,40 @@ impl<
     }
 
     fn load_system_key(&self, meta: KeyMeta) -> anyhow::Result<CryptoKey> {
+        log::debug!("load_system_key: id={} created={}", meta.id, meta.created);
         let ekr = self
             .f
             .metastore
-            .load(&meta.id, meta.created)?
-            .ok_or_else(|| anyhow::anyhow!("system key not found"))?;
+            .load(&meta.id, meta.created)
+            .context(format!(
+                "failed to load system key id={} created={}",
+                meta.id, meta.created
+            ))?
+            .ok_or_else(|| {
+                log::error!(
+                    "system key not found: id={} created={}",
+                    meta.id,
+                    meta.created
+                );
+                anyhow::anyhow!(
+                    "system key not found: id={} created={}",
+                    meta.id,
+                    meta.created
+                )
+            })?;
         self.system_key_from_ekr(&ekr)
+            .context(format!("failed to decrypt system key id={}", meta.id))
     }
 
     fn system_key_from_ekr(&self, ekr: &EnvelopeKeyRecord) -> anyhow::Result<CryptoKey> {
-        let bytes = self.f.kms.decrypt_key(&(), &ekr.encrypted_key)?;
+        let bytes = self
+            .f
+            .kms
+            .decrypt_key(&(), &ekr.encrypted_key)
+            .context(format!(
+                "KMS failed to decrypt system key id={} created={}",
+                ekr.id, ekr.created
+            ))?;
         CryptoKey::new(ekr.created, ekr.revoked.unwrap_or(false), bytes)
     }
 
@@ -119,7 +144,11 @@ impl<
     ) -> anyhow::Result<CryptoKey> {
         if let Some(pk) = &ekr.parent_key_meta {
             if sk.created() != pk.created {
-                // load correct SK and use that for decryption
+                log::debug!(
+                    "IK parent SK mismatch: have created={}, need created={}, loading correct SK",
+                    sk.created(),
+                    pk.created
+                );
                 let sk_loaded = self.get_or_load_system_key(pk.clone())?;
                 let ik_bytes = sk_loaded.with_key_func(|sk_bytes| {
                     self.f.crypto.decrypt(&ekr.encrypted_key, sk_bytes)
@@ -127,8 +156,12 @@ impl<
                 return CryptoKey::new(ekr.created, ekr.revoked.unwrap_or(false), ik_bytes);
             }
         }
-        let ik_bytes =
-            sk.with_key_func(|sk_bytes| self.f.crypto.decrypt(&ekr.encrypted_key, sk_bytes))??;
+        let ik_bytes = sk
+            .with_key_func(|sk_bytes| self.f.crypto.decrypt(&ekr.encrypted_key, sk_bytes))
+            .context(format!(
+                "failed to decrypt intermediate key id={} created={}",
+                ekr.id, ekr.created
+            ))??;
         CryptoKey::new(ekr.created, ekr.revoked.unwrap_or(false), ik_bytes)
     }
 
@@ -159,8 +192,17 @@ impl<
     fn try_store_system_key(&self, sk: &CryptoKey) -> (bool, Option<anyhow::Error>) {
         let enc = match sk.with_key_func(|k| self.f.kms.encrypt_key(&(), k)) {
             Ok(Ok(v)) => v,
-            Ok(Err(e)) => return (false, Some(e)),
-            Err(e) => return (false, Some(anyhow::anyhow!(format!("{:?}", e)))),
+            Ok(Err(e)) => {
+                log::error!("try_store_system_key: KMS encrypt_key failed: {e:#}");
+                return (false, Some(e));
+            }
+            Err(e) => {
+                log::error!("try_store_system_key: key enclave open failed: {e:#}");
+                return (
+                    false,
+                    Some(anyhow::anyhow!("key enclave open failed: {e:#}")),
+                );
+            }
         };
         let ekr = EnvelopeKeyRecord {
             revoked: None,
@@ -170,8 +212,22 @@ impl<
             parent_key_meta: None,
         };
         match self.f.metastore.store(&ekr.id, ekr.created, &ekr) {
-            Ok(s) => (s, None),
-            Err(_) => (false, None),
+            Ok(s) => {
+                if !s {
+                    log::debug!(
+                        "try_store_system_key: store returned false (duplicate) for id={}",
+                        ekr.id
+                    );
+                }
+                (s, None)
+            }
+            Err(e) => {
+                log::warn!(
+                    "try_store_system_key: metastore store failed for id={}: {e:#}",
+                    ekr.id
+                );
+                (false, None)
+            }
         }
     }
 
@@ -183,8 +239,12 @@ impl<
         let ekr = self
             .f
             .metastore
-            .load_latest(id)?
-            .ok_or_else(|| anyhow::anyhow!("latest not found"))?;
+            .load_latest(id)
+            .context(format!("failed to load latest key for id={id}"))?
+            .ok_or_else(|| {
+                log::error!("latest key not found for id={id}");
+                anyhow::anyhow!("latest key not found for id={id}")
+            })?;
         Ok(ekr)
     }
 
@@ -197,11 +257,14 @@ impl<
     // Public API compatible with Go shapes
 
     pub fn encrypt(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
+        let ik_id = self.f.partition.intermediate_key_id();
+        log::debug!("encrypt: loading IK id={ik_id}");
         // Load or create IK
         let ik_ekr = self
             .f
             .metastore
-            .load_latest(&self.f.partition.intermediate_key_id())?;
+            .load_latest(&ik_id)
+            .context(format!("encrypt: failed to load latest IK id={ik_id}"))?;
         let ik = match ik_ekr {
             Some(ekr) if !self.is_envelope_invalid(&ekr) => {
                 // ensure SK validity and decrypt IK
@@ -212,8 +275,11 @@ impl<
                 self.intermediate_key_from_ekr(&sk, &ekr)?
             }
             _ => {
+                log::debug!("encrypt: no valid IK found, creating new key hierarchy");
                 // create path: get or create SK
-                let sk = self.load_latest_or_create_system_key()?;
+                let sk = self
+                    .load_latest_or_create_system_key()
+                    .context("encrypt: failed to load or create system key")?;
                 let ik = generate_key(self.new_key_timestamp())?;
                 // store IK encrypted under SK
                 let enc_ik = ik.with_key_func(|ikb| {
@@ -229,15 +295,24 @@ impl<
                         created: sk.created(),
                     }),
                 };
-                self.f.metastore.store(&ekr.id, ekr.created, &ekr)?;
+                self.f
+                    .metastore
+                    .store(&ekr.id, ekr.created, &ekr)
+                    .context(format!(
+                        "encrypt: failed to store intermediate key id={}",
+                        ekr.id
+                    ))?;
                 ik
             }
         };
         // DRK and encrypt
         let drk = generate_key(now_s())?;
-        let enc_data = drk.with_key_func(|k| self.f.crypto.encrypt(data, k))??;
-        let enc_drk =
-            ik.with_key_func(|ikb| drk.with_key_func(|drkb| self.f.crypto.encrypt(drkb, ikb)))??;
+        let enc_data = drk
+            .with_key_func(|k| self.f.crypto.encrypt(data, k))
+            .context("encrypt: failed to encrypt data with DRK")??;
+        let enc_drk = ik
+            .with_key_func(|ikb| drk.with_key_func(|drkb| self.f.crypto.encrypt(drkb, ikb)))
+            .context("encrypt: failed to encrypt DRK with IK")??;
         Ok(crate::types::DataRowRecord {
             key: Some(EnvelopeKeyRecord {
                 id: String::new(),
@@ -254,19 +329,44 @@ impl<
     }
 
     pub fn decrypt(&self, drr: crate::types::DataRowRecord) -> anyhow::Result<Vec<u8>> {
-        let key = drr.key.ok_or_else(|| anyhow::anyhow!("missing key"))?;
+        let key = drr
+            .key
+            .ok_or_else(|| anyhow::anyhow!("decrypt: DRR missing key envelope"))?;
         let pmeta = key
             .parent_key_meta
-            .ok_or_else(|| anyhow::anyhow!("missing parent key"))?;
+            .ok_or_else(|| anyhow::anyhow!("decrypt: DRR key missing parent_key_meta"))?;
         if !self.f.partition.is_valid_intermediate_key_id(&pmeta.id) {
-            return Err(anyhow::anyhow!("invalid IK id"));
+            return Err(anyhow::anyhow!(
+                "decrypt: invalid IK id={} for partition",
+                pmeta.id
+            ));
         }
+        log::debug!(
+            "decrypt: loading IK id={} created={}",
+            pmeta.id,
+            pmeta.created
+        );
         // load IK
         let ik_ekr = self
             .f
             .metastore
-            .load(&pmeta.id, pmeta.created)?
-            .ok_or_else(|| anyhow::anyhow!("ik not found"))?;
+            .load(&pmeta.id, pmeta.created)
+            .context(format!(
+                "decrypt: failed to load IK id={} created={}",
+                pmeta.id, pmeta.created
+            ))?
+            .ok_or_else(|| {
+                log::error!(
+                    "decrypt: IK not found id={} created={}",
+                    pmeta.id,
+                    pmeta.created
+                );
+                anyhow::anyhow!(
+                    "decrypt: intermediate key not found id={} created={}",
+                    pmeta.id,
+                    pmeta.created
+                )
+            })?;
         let sk = self.load_system_key(KeyMeta {
             id: self.f.partition.system_key_id(),
             created: ik_ekr
@@ -277,8 +377,14 @@ impl<
         })?;
         let ik = self.intermediate_key_from_ekr(&sk, &ik_ekr)?;
         // decrypt DRK then data
-        let mut drk = ik.with_key_func(|ikb| self.f.crypto.decrypt(&key.encrypted_key, ikb))??;
-        let pt = self.f.crypto.decrypt(&drr.data, &drk)?;
+        let mut drk = ik
+            .with_key_func(|ikb| self.f.crypto.decrypt(&key.encrypted_key, ikb))
+            .context("decrypt: failed to decrypt DRK with IK")??;
+        let pt = self
+            .f
+            .crypto
+            .decrypt(&drr.data, &drk)
+            .context("decrypt: failed to decrypt data with DRK")?;
         // wipe DRK bytes after use (practical parity with Go's MemClr)
         drk.fill(0);
         Ok(pt)
@@ -522,16 +628,21 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     }
 
     fn create_intermediate_key(&self) -> anyhow::Result<Arc<CryptoKey>> {
+        let ik_id = self.inner.f.partition.intermediate_key_id();
+        log::debug!("create_intermediate_key: id={ik_id}");
         let sk_meta = KeyMeta {
             id: self.inner.f.partition.system_key_id(),
             created: 0,
         };
-        let sk = self.get_or_load_system_key(sk_meta)?;
+        let sk = self
+            .get_or_load_system_key(sk_meta)
+            .context("create_intermediate_key: failed to get/load system key")?;
         let ik = generate_key(self.inner.new_key_timestamp())?;
-        let enc_ik =
-            ik.with_key_func(|ikb| sk.with_key_func(|skb| self.crypto.encrypt(ikb, skb)))??;
+        let enc_ik = ik
+            .with_key_func(|ikb| sk.with_key_func(|skb| self.crypto.encrypt(ikb, skb)))
+            .context("create_intermediate_key: failed to encrypt IK under SK")??;
         let ekr = EnvelopeKeyRecord {
-            id: self.inner.f.partition.intermediate_key_id(),
+            id: ik_id.clone(),
             created: ik.created(),
             encrypted_key: enc_ik?,
             revoked: None,
@@ -543,15 +654,20 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         let stored = self
             .metastore
             .store(&ekr.id, ekr.created, &ekr)
-            .unwrap_or(false);
+            .unwrap_or_else(|e| {
+                log::warn!(
+                    "create_intermediate_key: store failed for id={ik_id} (will retry load): {e:#}"
+                );
+                false
+            });
         if stored {
             return Ok(Arc::new(ik));
         }
+        log::debug!("create_intermediate_key: store returned false, loading latest for id={ik_id}");
         // Fallback: assume duplicate/newer IK exists; load latest and return that one
-        if let Some(latest) = self
-            .metastore
-            .load_latest(&self.inner.f.partition.intermediate_key_id())?
-        {
+        if let Some(latest) = self.metastore.load_latest(&ik_id).context(format!(
+            "create_intermediate_key: fallback load_latest failed for id={ik_id}"
+        ))? {
             if !self.inner.is_envelope_invalid(&latest) {
                 let sk_meta = latest.parent_key_meta.clone().unwrap_or(KeyMeta {
                     id: self.inner.f.partition.system_key_id(),
@@ -562,8 +678,9 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                 return Ok(Arc::new(ik2));
             }
         }
+        log::error!("create_intermediate_key: failed to store or load IK for id={ik_id}");
         Err(anyhow::anyhow!(
-            "error loading intermediate key from metastore after retry"
+            "failed to create or load intermediate key id={ik_id} after retry"
         ))
     }
 
@@ -587,10 +704,30 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     }
 
     fn load_intermediate_key(&self, meta: KeyMeta) -> anyhow::Result<Arc<CryptoKey>> {
+        log::debug!(
+            "load_intermediate_key: id={} created={}",
+            meta.id,
+            meta.created
+        );
         let ekr = self
             .metastore
-            .load(&meta.id, meta.created)?
-            .ok_or_else(|| anyhow::anyhow!("ik missing"))?;
+            .load(&meta.id, meta.created)
+            .context(format!(
+                "failed to load intermediate key id={} created={}",
+                meta.id, meta.created
+            ))?
+            .ok_or_else(|| {
+                log::error!(
+                    "intermediate key not found: id={} created={}",
+                    meta.id,
+                    meta.created
+                );
+                anyhow::anyhow!(
+                    "intermediate key not found: id={} created={}",
+                    meta.id,
+                    meta.created
+                )
+            })?;
         let sk_meta = ekr.parent_key_meta.clone().unwrap_or(KeyMeta {
             id: self.inner.f.partition.system_key_id(),
             created: 0,
@@ -603,19 +740,27 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     pub fn encrypt(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
         self.ensure_valid_partition()?;
         let start = std::time::Instant::now();
+        let ik_id = self.inner.f.partition.intermediate_key_id();
+        log::debug!("PublicSession::encrypt: loading IK id={ik_id}");
         let mut loader = || self.load_latest_or_create_intermediate_key();
         let ik = self
             .ik_cache
-            .get_or_load_latest(&self.inner.f.partition.intermediate_key_id(), &mut loader)?;
+            .get_or_load_latest(&ik_id, &mut loader)
+            .context("encrypt: failed to get or create intermediate key")?;
         // Fast DRK path: avoid memguard for ephemeral data-row key
         let created = now_s();
         let mut drk = vec![0_u8; 32];
         use rand::TryRngCore;
         rand::rngs::OsRng
             .try_fill_bytes(&mut drk)
-            .map_err(|e| anyhow::anyhow!("OsRng: {e}"))?;
-        let enc_data = self.crypto.encrypt(data, &drk)?;
-        let enc_drk = ik.with_key_func(|ikb| self.crypto.encrypt(&drk, ikb))??;
+            .map_err(|e| anyhow::anyhow!("encrypt: DRK generation failed: {e}"))?;
+        let enc_data = self
+            .crypto
+            .encrypt(data, &drk)
+            .context("encrypt: failed to encrypt data with DRK")?;
+        let enc_drk = ik
+            .with_key_func(|ikb| self.crypto.encrypt(&drk, ikb))
+            .context("encrypt: failed to encrypt DRK with IK")??;
         // wipe drk
         drk.fill(0);
         let result = crate::types::DataRowRecord {
@@ -625,7 +770,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                 encrypted_key: enc_drk,
                 revoked: None,
                 parent_key_meta: Some(KeyMeta {
-                    id: self.inner.f.partition.intermediate_key_id(),
+                    id: ik_id,
                     created: ik.created(),
                 }),
             }),
@@ -640,22 +785,43 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     pub fn decrypt(&self, drr: crate::types::DataRowRecord) -> anyhow::Result<Vec<u8>> {
         self.ensure_valid_partition()?;
         let start = std::time::Instant::now();
-        let key = drr.key.ok_or_else(|| anyhow::anyhow!("missing key"))?;
+        let key = drr
+            .key
+            .ok_or_else(|| anyhow::anyhow!("decrypt: DRR missing key envelope"))?;
         let pmeta = key
             .parent_key_meta
-            .ok_or_else(|| anyhow::anyhow!("missing parent key"))?;
+            .ok_or_else(|| anyhow::anyhow!("decrypt: DRR key missing parent_key_meta"))?;
         if !self
             .inner
             .f
             .partition
             .is_valid_intermediate_key_id(&pmeta.id)
         {
-            return Err(anyhow::anyhow!("invalid IK id"));
+            return Err(anyhow::anyhow!(
+                "decrypt: invalid IK id={} for partition",
+                pmeta.id
+            ));
         }
+        log::debug!(
+            "PublicSession::decrypt: loading IK id={} created={}",
+            pmeta.id,
+            pmeta.created
+        );
         let mut loader = || self.load_intermediate_key(pmeta.clone());
-        let ik = self.ik_cache.get_or_load(&pmeta, &mut loader)?;
-        let mut drk = ik.with_key_func(|ikb| self.crypto.decrypt(&key.encrypted_key, ikb))??;
-        let pt = self.crypto.decrypt(&drr.data, &drk)?;
+        let ik = self
+            .ik_cache
+            .get_or_load(&pmeta, &mut loader)
+            .context(format!(
+                "decrypt: failed to load IK id={} created={}",
+                pmeta.id, pmeta.created
+            ))?;
+        let mut drk = ik
+            .with_key_func(|ikb| self.crypto.decrypt(&key.encrypted_key, ikb))
+            .context("decrypt: failed to decrypt DRK with IK")??;
+        let pt = self
+            .crypto
+            .decrypt(&drr.data, &drk)
+            .context("decrypt: failed to decrypt data with DRK")?;
         drk.fill(0);
         if self.metrics_enabled {
             metrics::record_decrypt(start);
