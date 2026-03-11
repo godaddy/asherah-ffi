@@ -6,6 +6,7 @@ use base64::Engine;
 
 use crate::traits::Metastore;
 use crate::types::{EnvelopeKeyRecord, KeyMeta};
+use anyhow::Context;
 
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
@@ -67,16 +68,26 @@ impl DynamoDbMetastore {
 
 impl Metastore for DynamoDbMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
-        let out = self.rt.block_on(async {
-            self.client
-                .get_item()
-                .table_name(&self.table)
-                .key("Id", AttributeValue::S(id.to_string()))
-                .key("Created", AttributeValue::N(created.to_string()))
-                .consistent_read(true)
-                .send()
-                .await
-        })?;
+        log::debug!(
+            "dynamodb load: table={} id={id} created={created}",
+            self.table
+        );
+        let out = self
+            .rt
+            .block_on(async {
+                self.client
+                    .get_item()
+                    .table_name(&self.table)
+                    .key("Id", AttributeValue::S(id.to_string()))
+                    .key("Created", AttributeValue::N(created.to_string()))
+                    .consistent_read(true)
+                    .send()
+                    .await
+            })
+            .context(format!(
+                "DynamoDB GetItem failed for table={} id={id} created={created}",
+                self.table
+            ))?;
         if let Some(item) = out.item() {
             if let Some(kr) = item.get("KeyRecord") {
                 if let Ok(m) = kr.as_m() {
@@ -131,19 +142,26 @@ impl Metastore for DynamoDbMetastore {
     }
 
     fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        log::debug!("dynamodb load_latest: table={} id={id}", self.table);
         // Query by Id, descending on Created, limit 1
-        let out = self.rt.block_on(async {
-            self.client
-                .query()
-                .table_name(&self.table)
-                .key_condition_expression("Id = :id")
-                .expression_attribute_values(":id", AttributeValue::S(id.to_string()))
-                .scan_index_forward(false)
-                .limit(1)
-                .consistent_read(true)
-                .send()
-                .await
-        })?;
+        let out = self
+            .rt
+            .block_on(async {
+                self.client
+                    .query()
+                    .table_name(&self.table)
+                    .key_condition_expression("Id = :id")
+                    .expression_attribute_values(":id", AttributeValue::S(id.to_string()))
+                    .scan_index_forward(false)
+                    .limit(1)
+                    .consistent_read(true)
+                    .send()
+                    .await
+            })
+            .context(format!(
+                "DynamoDB Query failed for table={} id={id}",
+                self.table
+            ))?;
         let items = out.items();
         if let Some(item) = items.first() {
             if let Some(kr) = item.get("KeyRecord").and_then(|v| v.as_m().ok()) {
@@ -221,6 +239,10 @@ impl Metastore for DynamoDbMetastore {
             );
             key_record.insert("ParentKeyMeta".to_string(), AttributeValue::M(m));
         }
+        log::debug!(
+            "dynamodb store: table={} id={id} created={created}",
+            self.table
+        );
         let out = self.rt.block_on(async {
             self.client
                 .put_item()
@@ -233,15 +255,26 @@ impl Metastore for DynamoDbMetastore {
                 .await
         });
         match out {
-            Ok(_) => Ok(true),
+            Ok(_) => {
+                log::debug!("dynamodb store: success id={id} created={created}");
+                Ok(true)
+            }
             Err(e) => {
                 // ConditionalCheckFailedException => already exists => return false
                 // Use Debug format to capture the full error chain including cause
                 let msg = format!("{e:?}");
                 if msg.contains("ConditionalCheckFailed") {
+                    log::debug!("dynamodb store: duplicate key id={id} created={created}");
                     Ok(false)
                 } else {
-                    Err(anyhow::anyhow!(e))
+                    log::error!(
+                        "dynamodb store failed: table={} id={id} created={created}: {e:#}",
+                        self.table
+                    );
+                    Err(anyhow::anyhow!(
+                        "DynamoDB PutItem failed for table={} id={id}: {e}",
+                        self.table
+                    ))
                 }
             }
         }

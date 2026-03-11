@@ -243,17 +243,27 @@ impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKmsEnvelope<A>
     }
 
     fn decrypt_key(&self, _ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        let env: KekEnvelope = serde_json::from_slice(blob)?;
+        let env: KekEnvelope = serde_json::from_slice(blob).map_err(|e| {
+            log::error!("AwsKmsEnvelope decrypt_key: invalid envelope JSON: {e}");
+            anyhow::anyhow!("invalid KMS envelope JSON: {e}")
+        })?;
         // Build map region->kek
         let mut map = std::collections::HashMap::new();
         for k in &env.keks {
             map.insert(k.region.as_str(), k);
         }
+        let mut errors: Vec<String> = Vec::new();
         // Try preferred first, then others
         for (i, c) in self.clients.iter().enumerate() {
             let reg_kek = match map.get(c.region.as_str()) {
                 Some(k) => *k,
-                None => continue,
+                None => {
+                    log::debug!(
+                        "AwsKmsEnvelope decrypt_key: no KEK for region={}, skipping",
+                        c.region
+                    );
+                    continue;
+                }
             };
             let fut = async {
                 c.client
@@ -273,20 +283,48 @@ impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKmsEnvelope<A>
             };
             let out = match out {
                 Ok(v) => v,
-                Err(_) => {
+                Err(e) => {
+                    log::warn!(
+                        "AwsKmsEnvelope decrypt_key: KMS Decrypt failed for region={} arn={}: {e:#}",
+                        c.region,
+                        c.key_arn
+                    );
+                    errors.push(format!("region {}: {e}", c.region));
                     if i == self.preferred { /* try fallbacks */ }
                     continue;
                 }
             };
             let dk = match out.plaintext() {
                 Some(p) => p.as_ref().to_vec(),
-                None => continue,
+                None => {
+                    log::warn!(
+                        "AwsKmsEnvelope decrypt_key: KMS returned no plaintext for region={}",
+                        c.region
+                    );
+                    errors.push(format!("region {}: no plaintext returned", c.region));
+                    continue;
+                }
             };
-            if let Ok(key) = self.aead.decrypt(&env.encrypted_key, &dk) {
-                return Ok(key);
+            match self.aead.decrypt(&env.encrypted_key, &dk) {
+                Ok(key) => return Ok(key),
+                Err(e) => {
+                    log::warn!(
+                        "AwsKmsEnvelope decrypt_key: AEAD decrypt failed for region={}: {e:#}",
+                        c.region
+                    );
+                    errors.push(format!("region {}: AEAD decrypt failed: {e}", c.region));
+                }
             }
         }
-        Err(anyhow::anyhow!("all KMS backends failed to decrypt"))
+        let detail = if errors.is_empty() {
+            "no matching regions found".to_string()
+        } else {
+            errors.join("; ")
+        };
+        log::error!("AwsKmsEnvelope decrypt_key: all backends failed: {detail}");
+        Err(anyhow::anyhow!(
+            "all KMS backends failed to decrypt: {detail}"
+        ))
     }
 }
 
@@ -370,8 +408,9 @@ mod tests {
         };
         let err = kms.decrypt_key(&(), &blob).unwrap_err();
         assert!(
-            err.to_string().contains("all KMS backends failed"),
-            "expected 'all KMS backends failed', got: {}",
+            err.to_string()
+                .contains("all KMS backends failed to decrypt:"),
+            "expected 'all KMS backends failed to decrypt:', got: {}",
             err
         );
     }
