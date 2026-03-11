@@ -267,6 +267,7 @@ mod os {
                 "<memcall> could not acquire lock on {ptr:p}, limit reached?"
             )));
         }
+
         Ok(())
     }
     #[cfg(not(windows))]
@@ -291,6 +292,7 @@ mod os {
                 "<memcall> could not acquire lock on {ptr:p}, limit reached?"
             )));
         }
+
         Ok(())
     }
     #[cfg(windows)]
@@ -302,6 +304,7 @@ mod os {
                 "<memcall> could not free lock on {ptr:p}"
             )));
         }
+
         Ok(())
     }
     #[cfg(not(windows))]
@@ -318,6 +321,7 @@ mod os {
                 "<memcall> could not free lock on {ptr:p}"
             )));
         }
+
         Ok(())
     }
     #[cfg(windows)]
