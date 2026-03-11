@@ -6,7 +6,7 @@ use blake2::{Blake2b512, Digest};
 use once_cell::sync::Lazy;
 use parking_lot::{Condvar, Mutex};
 use rand::rngs::OsRng;
-use rand::RngCore;
+use rand::TryRngCore;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -35,7 +35,7 @@ fn round_to_page_size(len: usize) -> usize {
 }
 
 pub fn scramble_bytes(buf: &mut [u8]) {
-    OsRng.fill_bytes(buf);
+    OsRng.try_fill_bytes(buf).expect("OsRng");
 }
 pub fn wipe_bytes(buf: &mut [u8]) {
     for b in buf {
