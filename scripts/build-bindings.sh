@@ -291,7 +291,7 @@ fi
 
 if should_build dotnet || should_build all; then
   echo "[build-bindings] Packing .NET library"
-  dotnet restore "$ROOT_DIR/asherah-dotnet/AsherahDotNet.sln"
+  dotnet restore "$ROOT_DIR/asherah-dotnet/AsherahDotNet.slnx"
   dotnet pack "$ROOT_DIR/asherah-dotnet/AsherahDotNet/AsherahDotNet.csproj" \
     -c Release \
     -p:ContinuousIntegrationBuild=true \

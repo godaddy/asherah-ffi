@@ -94,6 +94,62 @@ public class RoundTripTests
         Assert.False(Asherah.GetSetupStatus());
     }
 
+    [Fact]
+    public void AsherahClient_ImplementsIAsherah()
+    {
+        IAsherah client = new AsherahClient();
+
+        var config = AsherahConfig.CreateBuilder()
+            .WithServiceName("svc")
+            .WithProductId("prod")
+            .WithMetastore("memory")
+            .WithKms("static")
+            .WithEnableSessionCaching(true)
+            .Build();
+
+        client.Setup(config);
+        try
+        {
+            Assert.True(client.GetSetupStatus());
+
+            const string partition = "iface-test";
+            const string plaintext = "interface payload";
+            var ciphertext = client.EncryptString(partition, plaintext);
+            var recovered = client.DecryptString(partition, ciphertext);
+            Assert.Equal(plaintext, recovered);
+        }
+        finally
+        {
+            client.Shutdown();
+        }
+
+        Assert.False(client.GetSetupStatus());
+    }
+
+    [Fact]
+    public void AsherahFactory_ImplementsIAsherahFactory()
+    {
+        IAsherahFactory factory = Asherah.FactoryFromEnv();
+        try
+        {
+            IAsherahSession session = factory.GetSession("iface-factory-test");
+            try
+            {
+                var ciphertext = session.EncryptString("factory interface payload");
+                var recovered = session.DecryptString(ciphertext);
+                Assert.Equal("factory interface payload", recovered);
+            }
+            finally
+            {
+                session.Dispose();
+            }
+        }
+        finally
+        {
+            factory.Dispose();
+        }
+    }
+
     private static string LocateRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
