@@ -24,7 +24,7 @@ impl Default for CryptoPolicy {
             expire_key_after_s: 60 * 60 * 24 * 90,
             cache_system_keys: true,
             cache_intermediate_keys: true,
-            shared_intermediate_key_cache: false,
+            shared_intermediate_key_cache: true,
             intermediate_key_cache_max_size: 1000,
             intermediate_key_cache_eviction_policy: "simple".to_string(),
             system_key_cache_max_size: 1000,
