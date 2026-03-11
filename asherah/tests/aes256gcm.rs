@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use asherah as ael;
 use asherah::AEAD;
-use rand::RngCore;
+use rand::TryRngCore;
 
 #[test]
 fn test_aes_cipher_factory_sizes() {
@@ -16,7 +16,7 @@ fn test_aes_cipher_factory_sizes() {
 fn test_encrypt_decrypt_roundtrip() {
     let c = Arc::new(ael::aead::AES256GCM::new());
     let mut key = vec![0_u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut key);
+    rand::rngs::OsRng.try_fill_bytes(&mut key).unwrap();
     let pt = b"some secret string".to_vec();
     let ct = c.encrypt(&pt, &key).unwrap();
     let out = c.decrypt(&ct, &key).unwrap();
@@ -35,7 +35,7 @@ fn test_encrypt_too_large_payload_is_error() {
 fn test_encrypt_decrypt_output_size() {
     let c = ael::aead::AES256GCM::new();
     let mut key = vec![0_u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut key);
+    rand::rngs::OsRng.try_fill_bytes(&mut key).unwrap();
     for i in 1..256 {
         let payload = vec![0_u8; i];
         let ct = c.encrypt(&payload, &key).unwrap();

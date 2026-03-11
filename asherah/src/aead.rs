@@ -1,5 +1,5 @@
 use crate::traits::AEAD as AeadTrait;
-use rand::RngCore;
+use rand::TryRngCore;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 
 #[derive(Clone, Debug)]
@@ -44,7 +44,9 @@ impl AeadTrait for AES256GCM {
             UnboundKey::new(&AES_256_GCM, key).map_err(|_| anyhow::anyhow!("invalid key"))?;
         let key = LessSafeKey::new(unbound);
         let mut nonce = [0_u8; GCM_NONCE_SIZE];
-        rand::rngs::OsRng.fill_bytes(&mut nonce);
+        rand::rngs::OsRng
+            .try_fill_bytes(&mut nonce)
+            .map_err(|e| anyhow::anyhow!("OsRng: {e}"))?;
         let nonce_obj = Nonce::assume_unique_for_key(nonce);
         let nonce_bytes = *nonce_obj.as_ref();
         let mut in_out = Vec::with_capacity(data.len() + Self::TAG_SIZE);
