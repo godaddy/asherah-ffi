@@ -15,7 +15,8 @@
     "build": "napi build",
     "build:release": "napi build --release",
     "prepublishOnly": "napi prepublish -t npm",
-    "test": "node test/roundtrip.js"
+    "test": "node test/roundtrip.js",
+    "test:bun": "bun test/roundtrip.js"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0"

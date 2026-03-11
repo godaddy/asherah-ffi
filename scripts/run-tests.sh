@@ -105,7 +105,7 @@ echo "[tests] node addon"
 ensure_bun
 if command -v bun >/dev/null 2>&1; then
   echo "[tests] node addon (bun)"
-  (cd asherah-node && bun run build && bun run test)
+  (cd asherah-node && bun test/roundtrip.js)
 else
   echo "[tests] bun not found, skipping bun test"
 fi
