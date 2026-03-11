@@ -129,7 +129,7 @@ if should_run node; then
   npm test
   ensure_bun
   if command -v bun >/dev/null 2>&1; then
-    bun run test
+    bun test/roundtrip.js
   else
     echo "[binding-tests] bun not found, skipping bun test"
   fi
