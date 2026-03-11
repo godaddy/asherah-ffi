@@ -9,11 +9,17 @@ pub struct CryptoKey {
 
 impl CryptoKey {
     pub fn new(created: i64, revoked: bool, mut bytes: Vec<u8>) -> anyhow::Result<Self> {
-        let mut buf = Buffer::new(bytes.len()).map_err(|e| anyhow::anyhow!(format!("{:?}", e)))?;
+        let mut buf = Buffer::new(bytes.len()).map_err(|e| {
+            anyhow::anyhow!(
+                "failed to allocate secure buffer ({} bytes): {:?}",
+                bytes.len(),
+                e
+            )
+        })?;
         buf.bytes().copy_from_slice(&bytes);
         wipe_bytes(&mut bytes);
-        let enclave =
-            Enclave::new_from(&mut buf).map_err(|e| anyhow::anyhow!(format!("{:?}", e)))?;
+        let enclave = Enclave::new_from(&mut buf)
+            .map_err(|e| anyhow::anyhow!("failed to seal key into enclave: {:?}", e))?;
         Ok(Self {
             created,
             revoked,
@@ -30,7 +36,7 @@ impl CryptoKey {
         let buf = self
             .secret
             .open()
-            .map_err(|e| anyhow::anyhow!(format!("{:?}", e)))?;
+            .map_err(|e| anyhow::anyhow!("failed to open key enclave: {:?}", e))?;
         let result = f(buf.as_slice());
         crate::memguard::pool_release(buf);
         Ok(result)

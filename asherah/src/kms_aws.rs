@@ -62,6 +62,7 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
 
 impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKms<A> {
     fn encrypt_key(&self, _ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+        log::debug!("AwsKms encrypt_key: key_id={}", self.key_id);
         let fut = async {
             self.client
                 .encrypt()
@@ -71,20 +72,37 @@ impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKms<A> {
                 .await
         };
         let resp = match &self.rt {
-            Some(rt) => rt.block_on(fut)?,
+            Some(rt) => rt.block_on(fut).map_err(|e| {
+                log::error!(
+                    "AwsKms encrypt_key failed: key_id={}, error={e:#}",
+                    self.key_id
+                );
+                anyhow::anyhow!("KMS Encrypt call failed for key {}: {e}", self.key_id)
+            })?,
             None => tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current()
                     .block_on(fut)
-                    .map_err(|e| anyhow::anyhow!(e))
+                    .map_err(|e| {
+                        log::error!(
+                            "AwsKms encrypt_key failed: key_id={}, error={e:#}",
+                            self.key_id
+                        );
+                        anyhow::anyhow!("KMS Encrypt call failed for key {}: {e}", self.key_id)
+                    })
             })?,
         };
-        let ct = resp
-            .ciphertext_blob()
-            .ok_or_else(|| anyhow::anyhow!("missing ciphertext_blob"))?;
+        let ct = resp.ciphertext_blob().ok_or_else(|| {
+            anyhow::anyhow!("KMS Encrypt returned no ciphertext for key {}", self.key_id)
+        })?;
         Ok(ct.as_ref().to_vec())
     }
 
     fn decrypt_key(&self, _ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+        log::debug!(
+            "AwsKms decrypt_key: key_id={}, blob_len={}",
+            self.key_id,
+            blob.len()
+        );
         let fut = async {
             self.client
                 .decrypt()
@@ -94,16 +112,28 @@ impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKms<A> {
                 .await
         };
         let resp = match &self.rt {
-            Some(rt) => rt.block_on(fut)?,
+            Some(rt) => rt.block_on(fut).map_err(|e| {
+                log::error!(
+                    "AwsKms decrypt_key failed: key_id={}, error={e:#}",
+                    self.key_id
+                );
+                anyhow::anyhow!("KMS Decrypt call failed for key {}: {e}", self.key_id)
+            })?,
             None => tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current()
                     .block_on(fut)
-                    .map_err(|e| anyhow::anyhow!(e))
+                    .map_err(|e| {
+                        log::error!(
+                            "AwsKms decrypt_key failed: key_id={}, error={e:#}",
+                            self.key_id
+                        );
+                        anyhow::anyhow!("KMS Decrypt call failed for key {}: {e}", self.key_id)
+                    })
             })?,
         };
-        let pt = resp
-            .plaintext()
-            .ok_or_else(|| anyhow::anyhow!("missing plaintext"))?;
+        let pt = resp.plaintext().ok_or_else(|| {
+            anyhow::anyhow!("KMS Decrypt returned no plaintext for key {}", self.key_id)
+        })?;
         Ok(pt.as_ref().to_vec())
     }
 }
