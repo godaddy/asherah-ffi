@@ -1,14 +1,14 @@
 #![allow(non_snake_case)]
 #![allow(unsafe_code)]
 
-use std::ptr;
-
 use anyhow::Context;
 use asherah as ael;
 use asherah_config as config;
+use jni::errors::ThrowRuntimeExAndDefault;
 use jni::objects::{JByteArray, JClass, JString};
-use jni::sys::{jbyteArray, jlong};
-use jni::JNIEnv;
+use jni::strings::JNIString;
+use jni::sys::jlong;
+use jni::EnvUnowned;
 use serde_json::{self, Value};
 
 type Factory = ael::session::PublicFactory<
@@ -26,75 +26,70 @@ unsafe fn from_handle<'handle, T>(handle: jlong) -> Option<&'handle T> {
     (handle as *const T).as_ref()
 }
 
+/// Throw a RuntimeException with the given message and return `Error::JavaException`.
+fn throw_err(env: &mut jni::Env<'_>, msg: impl std::fmt::Display) -> jni::errors::Error {
+    drop(env.throw_new(
+        JNIString::from("java/lang/RuntimeException"),
+        JNIString::from(msg.to_string()),
+    ));
+    jni::errors::Error::JavaException
+}
+
+#[allow(deprecated)]
+fn get_jstring(env: &mut jni::Env<'_>, s: &JString<'_>) -> jni::errors::Result<String> {
+    let chars = env.get_string(s)?;
+    Ok(chars.into())
+}
+
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_factoryFromEnv(
-    mut env: JNIEnv<'_>,
+    mut env: EnvUnowned<'_>,
     _class: JClass<'_>,
 ) -> jlong {
-    match ael::builders::factory_from_env() {
-        Ok(factory) => Box::into_raw(Box::new(factory)) as jlong,
-        Err(e) => {
-            let _err = env.throw_new(
-                "java/lang/RuntimeException",
-                format!("factory_from_env failed: {e}"),
-            );
-            0
-        }
-    }
+    env.with_env(|env| -> jni::errors::Result<jlong> {
+        let factory = ael::builders::factory_from_env()
+            .map_err(|e| throw_err(env, format_args!("factory_from_env failed: {e}")))?;
+        Ok(Box::into_raw(Box::new(factory)) as jlong)
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_factoryFromJson(
-    mut env: JNIEnv<'_>,
+    mut env: EnvUnowned<'_>,
     _class: JClass<'_>,
     config_json: JString<'_>,
 ) -> jlong {
-    let cfg_str: String = match env.get_string(&config_json) {
-        Ok(s) => s.into(),
-        Err(e) => {
-            let _err = env.throw_new(
-                "java/lang/RuntimeException",
-                format!("invalid config JSON: {e}"),
-            );
-            return 0;
-        }
-    };
-
-    match config::ConfigOptions::from_json(&cfg_str)
-        .and_then(|cfg| config::factory_from_config(&cfg))
-    {
-        Ok((factory, _applied)) => Box::into_raw(Box::new(factory)) as jlong,
-        Err(e) => {
-            let _err = env.throw_new(
-                "java/lang/RuntimeException",
-                format!("factory_from_json failed: {e}"),
-            );
-            0
-        }
-    }
+    env.with_env(|env| -> jni::errors::Result<jlong> {
+        let cfg_str = get_jstring(env, &config_json)?;
+        let (factory, _applied) = config::ConfigOptions::from_json(&cfg_str)
+            .and_then(|cfg| config::factory_from_config(&cfg))
+            .map_err(|e| throw_err(env, format_args!("factory_from_json failed: {e}")))?;
+        Ok(Box::into_raw(Box::new(factory)) as jlong)
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_closeFactory(
-    mut env: JNIEnv<'_>,
+    mut env: EnvUnowned<'_>,
     _class: JClass<'_>,
     factory_handle: jlong,
 ) {
-    let Some(factory) = (unsafe { from_handle::<Factory>(factory_handle) }) else {
-        let _err = env.throw_new("java/lang/RuntimeException", "factory handle is null");
-        return;
-    };
-    if let Err(e) = factory.close() {
-        let _err = env.throw_new(
-            "java/lang/RuntimeException",
-            format!("factory close error: {e}"),
-        );
-    }
+    env.with_env(|env| -> jni::errors::Result<()> {
+        let factory = unsafe { from_handle::<Factory>(factory_handle) }
+            .ok_or_else(|| throw_err(env, "factory handle is null"))?;
+        factory
+            .close()
+            .map_err(|e| throw_err(env, format_args!("factory close error: {e}")))?;
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>();
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_freeFactory(
-    _env: JNIEnv<'_>,
+    _env: EnvUnowned<'_>,
     _class: JClass<'_>,
     factory_handle: jlong,
 ) {
@@ -127,74 +122,55 @@ fn apply_env_json(payload: &str) -> anyhow::Result<()> {
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_setEnv(
-    mut env: JNIEnv<'_>,
+    mut env: EnvUnowned<'_>,
     _class: JClass<'_>,
     env_json: JString<'_>,
 ) {
-    let payload: String = match env.get_string(&env_json) {
-        Ok(s) => s.into(),
-        Err(e) => {
-            let _err = env.throw_new(
-                "java/lang/RuntimeException",
-                format!("invalid environment JSON: {e}"),
-            );
-            return;
-        }
-    };
-
-    if let Err(e) = apply_env_json(&payload) {
-        let _err = env.throw_new("java/lang/RuntimeException", format!("setEnv error: {e}"));
-    }
+    env.with_env(|env| -> jni::errors::Result<()> {
+        let payload = get_jstring(env, &env_json)?;
+        apply_env_json(&payload).map_err(|e| throw_err(env, format_args!("setEnv error: {e}")))?;
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>();
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_getSession(
-    mut env: JNIEnv<'_>,
+    mut env: EnvUnowned<'_>,
     _class: JClass<'_>,
     factory_handle: jlong,
     partition_id: JString<'_>,
 ) -> jlong {
-    let Some(factory) = (unsafe { from_handle::<Factory>(factory_handle) }) else {
-        let _err = env.throw_new("java/lang/RuntimeException", "factory handle is null");
-        return 0;
-    };
-
-    let partition: String = match env.get_string(&partition_id) {
-        Ok(s) => s.into(),
-        Err(e) => {
-            let _err = env.throw_new(
-                "java/lang/RuntimeException",
-                format!("invalid partition id: {e}"),
-            );
-            return 0;
-        }
-    };
-
-    let session = factory.get_session(&partition);
-    Box::into_raw(Box::new(session)) as jlong
+    env.with_env(|env| -> jni::errors::Result<jlong> {
+        let factory = unsafe { from_handle::<Factory>(factory_handle) }
+            .ok_or_else(|| throw_err(env, "factory handle is null"))?;
+        let partition = get_jstring(env, &partition_id)?;
+        let session = factory.get_session(&partition);
+        Ok(Box::into_raw(Box::new(session)) as jlong)
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_closeSession(
-    mut env: JNIEnv<'_>,
+    mut env: EnvUnowned<'_>,
     _class: JClass<'_>,
     session_handle: jlong,
 ) {
-    let Some(session) = (unsafe { from_handle::<Session>(session_handle) }) else {
-        let _err = env.throw_new("java/lang/RuntimeException", "session handle is null");
-        return;
-    };
-    if let Err(e) = session.close() {
-        let _err = env.throw_new(
-            "java/lang/RuntimeException",
-            format!("session close error: {e}"),
-        );
-    }
+    env.with_env(|env| -> jni::errors::Result<()> {
+        let session = unsafe { from_handle::<Session>(session_handle) }
+            .ok_or_else(|| throw_err(env, "session handle is null"))?;
+        session
+            .close()
+            .map_err(|e| throw_err(env, format_args!("session close error: {e}")))?;
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>();
 }
 
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_freeSession(
-    _env: JNIEnv<'_>,
+    _env: EnvUnowned<'_>,
     _class: JClass<'_>,
     session_handle: jlong,
 ) {
@@ -204,102 +180,45 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_freeSession(
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_encrypt(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
+pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_encrypt<'caller>(
+    mut env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
     session_handle: jlong,
-    plaintext: JByteArray<'_>,
-) -> jbyteArray {
-    let Some(session) = (unsafe { from_handle::<Session>(session_handle) }) else {
-        let _err = env.throw_new("java/lang/RuntimeException", "session handle is null");
-        return ptr::null_mut();
-    };
-
-    let data = match env.convert_byte_array(plaintext) {
-        Ok(d) => d,
-        Err(e) => {
-            let _err = env.throw_new(
-                "java/lang/RuntimeException",
-                format!("failed to read plaintext: {e}"),
-            );
-            return ptr::null_mut();
-        }
-    };
-
-    let ciphertext = match session.encrypt(&data) {
-        Ok(drr) => match serde_json::to_vec(&drr) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                let _err =
-                    env.throw_new("java/lang/RuntimeException", format!("encrypt error: {e}"));
-                return ptr::null_mut();
-            }
-        },
-        Err(e) => {
-            let _err = env.throw_new("java/lang/RuntimeException", format!("encrypt error: {e}"));
-            return ptr::null_mut();
-        }
-    };
-
-    match env.byte_array_from_slice(&ciphertext) {
-        Ok(arr) => arr.into_raw(),
-        Err(e) => {
-            let _err = env.throw_new(
-                "java/lang/RuntimeException",
-                format!("failed to create byte array: {e}"),
-            );
-            ptr::null_mut()
-        }
-    }
+    plaintext: JByteArray<'caller>,
+) -> JByteArray<'caller> {
+    env.with_env(|env| -> jni::errors::Result<JByteArray<'caller>> {
+        let session = unsafe { from_handle::<Session>(session_handle) }
+            .ok_or_else(|| throw_err(env, "session handle is null"))?;
+        let data = env.convert_byte_array(&plaintext)?;
+        let drr = session
+            .encrypt(&data)
+            .map_err(|e| throw_err(env, format_args!("encrypt error: {e}")))?;
+        let ciphertext = serde_json::to_vec(&drr)
+            .map_err(|e| throw_err(env, format_args!("encrypt serialization error: {e}")))?;
+        let arr = env.byte_array_from_slice(&ciphertext)?;
+        Ok(arr)
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decrypt(
-    mut env: JNIEnv<'_>,
-    _class: JClass<'_>,
+pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decrypt<'caller>(
+    mut env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
     session_handle: jlong,
-    ciphertext: JByteArray<'_>,
-) -> jbyteArray {
-    let Some(session) = (unsafe { from_handle::<Session>(session_handle) }) else {
-        let _err = env.throw_new("java/lang/RuntimeException", "session handle is null");
-        return ptr::null_mut();
-    };
-
-    let data = match env.convert_byte_array(ciphertext) {
-        Ok(d) => d,
-        Err(e) => {
-            let _err = env.throw_new(
-                "java/lang/RuntimeException",
-                format!("failed to read ciphertext: {e}"),
-            );
-            return ptr::null_mut();
-        }
-    };
-
-    let result = || -> anyhow::Result<Vec<u8>> {
-        let drr: ael::types::DataRowRecord =
-            serde_json::from_slice(&data).context("invalid DataRowRecord JSON")?;
-        session
+    ciphertext: JByteArray<'caller>,
+) -> JByteArray<'caller> {
+    env.with_env(|env| -> jni::errors::Result<JByteArray<'caller>> {
+        let session = unsafe { from_handle::<Session>(session_handle) }
+            .ok_or_else(|| throw_err(env, "session handle is null"))?;
+        let data = env.convert_byte_array(&ciphertext)?;
+        let drr: ael::types::DataRowRecord = serde_json::from_slice(&data)
+            .map_err(|e| throw_err(env, format_args!("invalid DataRowRecord JSON: {e}")))?;
+        let plaintext = session
             .decrypt(drr)
-            .map_err(|e| anyhow::anyhow!("decrypt error: {e}"))
-    }();
-
-    let plaintext = match result {
-        Ok(pt) => pt,
-        Err(e) => {
-            let _err = env.throw_new("java/lang/RuntimeException", format!("{e}"));
-            return ptr::null_mut();
-        }
-    };
-
-    match env.byte_array_from_slice(&plaintext) {
-        Ok(arr) => arr.into_raw(),
-        Err(e) => {
-            let _err = env.throw_new(
-                "java/lang/RuntimeException",
-                format!("failed to create byte array: {e}"),
-            );
-            ptr::null_mut()
-        }
-    }
+            .map_err(|e| throw_err(env, format_args!("decrypt error: {e}")))?;
+        let arr = env.byte_array_from_slice(&plaintext)?;
+        Ok(arr)
+    })
+    .resolve::<ThrowRuntimeExAndDefault>()
 }
