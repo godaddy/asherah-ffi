@@ -1,0 +1,57 @@
+[package]
+name = "asherah-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+asherah = { path = "../asherah" }
+asherah-cobhan = { path = "../asherah-cobhan" }
+asherah-config = { path = "../asherah-config" }
+serde_json = "1.0"
+
+[lints.rust]
+unsafe_code = "allow"
+
+[lints.clippy]
+unwrap_used = "allow"
+exit = "allow"
+
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "fuzz_data_row_record"
+path = "fuzz_targets/data_row_record.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_partition_key_ids"
+path = "fuzz_targets/partition_key_ids.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_mysql_dsn"
+path = "fuzz_targets/mysql_dsn.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_cobhan_buffer"
+path = "fuzz_targets/cobhan_buffer.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_encrypt_decrypt"
+path = "fuzz_targets/encrypt_decrypt.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_config_json"
+path = "fuzz_targets/config_json.rs"
+doc = false

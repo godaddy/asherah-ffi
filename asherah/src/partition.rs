@@ -44,7 +44,7 @@ impl Partition for DefaultPartition {
         if self.suffix.is_some() {
             id == self.intermediate_key_id()
                 || id.starts_with(&format!(
-                    "_IK_{}_{}_{}",
+                    "_IK_{}_{}_{}_",
                     self.id, self.service, self.product
                 ))
         } else {
@@ -109,6 +109,8 @@ mod tests {
         assert!(p.is_valid_intermediate_key_id("_IK_u_s_p_r2"));
         // Wrong partition id
         assert!(!p.is_valid_intermediate_key_id("_IK_other_s_p_r1"));
+        // Must not accept non-suffixed IK (missing trailing delimiter)
+        assert!(!p.is_valid_intermediate_key_id("_IK_u_s_p"));
     }
 
     #[test]

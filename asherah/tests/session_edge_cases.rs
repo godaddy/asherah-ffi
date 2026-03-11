@@ -333,8 +333,8 @@ fn is_valid_ik_id_empty_suffix() {
     assert!(p.is_valid_intermediate_key_id("_IK_u_s_p_"));
     // Prefix match: starts with _IK_u_s_p
     assert!(p.is_valid_intermediate_key_id("_IK_u_s_p_anything"));
-    // The base without suffix also prefix-matches
-    assert!(p.is_valid_intermediate_key_id("_IK_u_s_p"));
+    // The base without trailing delimiter does NOT match (fix for cross-partition bypass)
+    assert!(!p.is_valid_intermediate_key_id("_IK_u_s_p"));
     // Wrong id does not match
     assert!(!p.is_valid_intermediate_key_id("_IK_x_s_p_"));
 }
