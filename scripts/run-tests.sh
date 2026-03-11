@@ -52,20 +52,24 @@ if command -v git >/dev/null 2>&1; then
   git config --global --add safe.directory "$ROOT_DIR" 2>/dev/null || true
 fi
 
-echo "[tests] cargo fmt --check"
-if command -v rustup >/dev/null 2>&1; then
-  rustup component add rustfmt >/dev/null
-fi
-cargo fmt --all -- --check
+if [ "${SKIP_RUST_CHECKS:-0}" != "1" ]; then
+  echo "[tests] cargo fmt --check"
+  if command -v rustup >/dev/null 2>&1; then
+    rustup component add rustfmt >/dev/null
+  fi
+  cargo fmt --all -- --check
 
-echo "[tests] cargo clippy"
-if command -v rustup >/dev/null 2>&1; then
-  rustup component add clippy >/dev/null
-fi
-cargo clippy --all-targets --all-features -- -D warnings
+  echo "[tests] cargo clippy"
+  if command -v rustup >/dev/null 2>&1; then
+    rustup component add clippy >/dev/null
+  fi
+  cargo clippy --all-targets --all-features -- -D warnings
 
-echo "[tests] cargo test"
-cargo test --workspace --exclude asherah-node
+  echo "[tests] cargo test"
+  cargo test --workspace --exclude asherah-node
+else
+  echo "[tests] skipping fmt/clippy/test (covered by lint and integration-tests jobs)"
+fi
 
 echo "[tests] build FFI debug artifact"
 cargo build -p asherah-ffi

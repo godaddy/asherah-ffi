@@ -53,6 +53,10 @@ if [ -n "${BINDING_TESTS_BINDING:-}" ]; then
   RUN_ENVS+=(-e "BINDING_TESTS_BINDING=$BINDING_TESTS_BINDING")
 fi
 
+if [ "${SKIP_RUST_CHECKS:-0}" = "1" ]; then
+  RUN_ENVS+=(-e "SKIP_RUST_CHECKS=1")
+fi
+
 if [ -n "${DOCKER_PLATFORM:-}" ]; then
   if [ "$USE_PREBUILT_IMAGE" = "1" ]; then
     docker run --rm \
