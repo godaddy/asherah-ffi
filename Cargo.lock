@@ -108,6 +108,7 @@ dependencies = [
  "rand_chacha",
  "ring",
  "rusqlite",
+ "scc",
  "serde",
  "serde_bytes",
  "serde_json",
