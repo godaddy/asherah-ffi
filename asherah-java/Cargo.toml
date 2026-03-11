@@ -16,7 +16,7 @@ name = "asherah_java"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-jni = { version = "0.21", default-features = false, features = ["invocation"] }
+jni = { version = "0.22", default-features = false, features = ["invocation"] }
 asherah = { path = "../asherah", features = ["sqlite"] }
 asherah-config = { path = "../asherah-config" }
 anyhow = "1.0"

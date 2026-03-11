@@ -1,4 +1,3 @@
-#![allow(non_local_definitions)]
 #![allow(unsafe_code)]
 #![allow(unused_qualifications)]
 
@@ -38,7 +37,7 @@ fn json_parse_err(err: impl std::fmt::Display) -> PyErr {
 }
 
 #[pyfunction]
-fn setup(config_obj: &PyAny) -> PyResult<()> {
+fn setup(config_obj: &Bound<'_, PyAny>) -> PyResult<()> {
     let py = config_obj.py();
     let json_module = py.import("json")?;
     let json_config: String = json_module
@@ -72,10 +71,10 @@ fn get_setup_status() -> PyResult<bool> {
 }
 
 #[pyfunction]
-fn setenv(env_obj: &PyAny) -> PyResult<()> {
+fn setenv(env_obj: &Bound<'_, PyAny>) -> PyResult<()> {
     let py = env_obj.py();
-    let value = match env_obj.extract::<&str>() {
-        Ok(s) => serde_json::from_str::<serde_json::Value>(s)
+    let value = match env_obj.extract::<String>() {
+        Ok(s) => serde_json::from_str::<serde_json::Value>(&s)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))?,
         Err(_) => {
             let json_module = py.import("json")?;
@@ -135,7 +134,7 @@ fn decrypt_bytes<'py>(
     py: Python<'py>,
     partition_id: &str,
     data_row_record: &str,
-) -> PyResult<&'py PyBytes> {
+) -> PyResult<Bound<'py, PyBytes>> {
     with_manager(|mgr| {
         let bytes = mgr
             .with_session(partition_id, |session| {
@@ -150,7 +149,7 @@ fn decrypt_bytes<'py>(
 
 #[pyfunction]
 fn decrypt_string(partition_id: &str, data_row_record: &str) -> PyResult<String> {
-    Python::with_gil(|py| {
+    Python::attach(|py| {
         let bytes = decrypt_bytes(py, partition_id, data_row_record)?;
         String::from_utf8(bytes.as_bytes().to_vec())
             .map_err(|e| PyRuntimeError::new_err(format!("utf8 error: {e}")))
@@ -250,9 +249,9 @@ impl PySessionFactory {
 
     fn __exit__(
         &self,
-        _ty: Option<&PyAny>,
-        _value: Option<&PyAny>,
-        _tb: Option<&PyAny>,
+        _ty: Option<&Bound<'_, PyAny>>,
+        _value: Option<&Bound<'_, PyAny>>,
+        _tb: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<()> {
         self.close()
     }
@@ -279,7 +278,7 @@ impl PySession {
         &self,
         py: Python<'py>,
         data_row_record: &str,
-    ) -> PyResult<&'py PyBytes> {
+    ) -> PyResult<Bound<'py, PyBytes>> {
         let pt = self.decrypt_raw(data_row_record)?;
         Ok(PyBytes::new(py, &pt))
     }
@@ -300,9 +299,9 @@ impl PySession {
 
     fn __exit__(
         &self,
-        _ty: Option<&PyAny>,
-        _value: Option<&PyAny>,
-        _tb: Option<&PyAny>,
+        _ty: Option<&Bound<'_, PyAny>>,
+        _value: Option<&Bound<'_, PyAny>>,
+        _tb: Option<&Bound<'_, PyAny>>,
     ) -> PyResult<()> {
         self.close()
     }
@@ -319,9 +318,9 @@ struct PyMetricsSink {
 }
 
 impl PyMetricsSink {
-    fn emit(&self, builder: impl FnOnce(Python<'_>) -> PyResult<PyObject>) {
+    fn emit(&self, builder: impl FnOnce(Python<'_>) -> PyResult<Py<PyAny>>) {
         let cb = Arc::clone(&self.callback);
-        Python::with_gil(|py| match builder(py) {
+        Python::attach(|py| match builder(py) {
             Ok(obj) => {
                 if let Err(err) = cb.call1(py, (obj,)) {
                     err.print(py);
@@ -338,7 +337,7 @@ impl MetricsSink for PyMetricsSink {
             let dict = PyDict::new(py);
             dict.set_item("type", "encrypt")?;
             dict.set_item("duration_ns", duration.as_nanos() as u64)?;
-            Ok(dict.into())
+            Ok(dict.into_any().unbind())
         });
     }
 
@@ -347,7 +346,7 @@ impl MetricsSink for PyMetricsSink {
             let dict = PyDict::new(py);
             dict.set_item("type", "decrypt")?;
             dict.set_item("duration_ns", duration.as_nanos() as u64)?;
-            Ok(dict.into())
+            Ok(dict.into_any().unbind())
         });
     }
 
@@ -356,7 +355,7 @@ impl MetricsSink for PyMetricsSink {
             let dict = PyDict::new(py);
             dict.set_item("type", "store")?;
             dict.set_item("duration_ns", duration.as_nanos() as u64)?;
-            Ok(dict.into())
+            Ok(dict.into_any().unbind())
         });
     }
 
@@ -365,7 +364,7 @@ impl MetricsSink for PyMetricsSink {
             let dict = PyDict::new(py);
             dict.set_item("type", "load")?;
             dict.set_item("duration_ns", duration.as_nanos() as u64)?;
-            Ok(dict.into())
+            Ok(dict.into_any().unbind())
         });
     }
 
@@ -375,7 +374,7 @@ impl MetricsSink for PyMetricsSink {
             let dict = PyDict::new(py);
             dict.set_item("type", "cache_hit")?;
             dict.set_item("name", &name)?;
-            Ok(dict.into())
+            Ok(dict.into_any().unbind())
         });
     }
 
@@ -385,7 +384,7 @@ impl MetricsSink for PyMetricsSink {
             let dict = PyDict::new(py);
             dict.set_item("type", "cache_miss")?;
             dict.set_item("name", &name)?;
-            Ok(dict.into())
+            Ok(dict.into_any().unbind())
         });
     }
 }
@@ -400,15 +399,15 @@ impl LogSink for PyLogSink {
         let message = record.args().to_string();
         let target = record.target().to_string();
         let cb = Arc::clone(&self.callback);
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let dict = PyDict::new(py);
-            if dict.set_item("level", level).is_err()
-                || dict.set_item("message", message).is_err()
-                || dict.set_item("target", target).is_err()
+            if dict.set_item("level", &level).is_err()
+                || dict.set_item("message", &message).is_err()
+                || dict.set_item("target", &target).is_err()
             {
                 return;
             }
-            if let Err(err) = cb.call1(py, (dict,)) {
+            if let Err(err) = cb.call1(py, (&dict,)) {
                 err.print(py);
             }
         });
@@ -416,9 +415,9 @@ impl LogSink for PyLogSink {
 }
 
 #[pyfunction]
-fn set_metrics_hook(py: Python<'_>, callback: Option<&PyAny>) -> PyResult<()> {
+fn set_metrics_hook(callback: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
     if let Some(cb) = callback {
-        let obj: Py<PyAny> = cb.into_py(py);
+        let obj: Py<PyAny> = cb.clone().unbind();
         let arc = Arc::new(obj);
         metrics::set_sink(PyMetricsSink {
             callback: Arc::clone(&arc),
@@ -432,10 +431,10 @@ fn set_metrics_hook(py: Python<'_>, callback: Option<&PyAny>) -> PyResult<()> {
 }
 
 #[pyfunction]
-fn set_log_hook(py: Python<'_>, callback: Option<&PyAny>) -> PyResult<()> {
+fn set_log_hook(callback: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
     ensure_logger().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
     if let Some(cb) = callback {
-        let obj: Py<PyAny> = cb.into_py(py);
+        let obj: Py<PyAny> = cb.clone().unbind();
         let arc = Arc::new(obj);
         set_log_sink(
             "python",
@@ -457,7 +456,7 @@ fn version() -> &'static str {
 }
 
 #[pymodule]
-fn asherah_py(py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn asherah_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(setup, m)?)?;
     m.add_function(wrap_pyfunction!(shutdown, m)?)?;
     m.add_function(wrap_pyfunction!(get_setup_status, m)?)?;
@@ -471,8 +470,10 @@ fn asherah_py(py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_metrics_hook, m)?)?;
     m.add_function(wrap_pyfunction!(set_log_hook, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
+    let py = m.py();
+    let dict = m.dict();
     py.run(
-        r#"
+        cr#"
 import asyncio as _asyncio
 
 async def setup_async(config):
@@ -500,7 +501,7 @@ async def decrypt_string_async(partition_id, data_row_record):
     return await loop.run_in_executor(None, decrypt_string, partition_id, data_row_record)
 "#,
         None,
-        Some(m.dict()),
+        Some(&dict),
     )?;
     Ok(())
 }
