@@ -322,5 +322,5 @@ fn memguard_decrypt_wrong_key_fails() {
 
 #[test]
 fn memguard_overhead_constant() {
-    assert_eq!(memguard::OVERHEAD, 40); // 24 nonce + 16 tag
+    assert_eq!(memguard::OVERHEAD, 28); // 12 nonce + 16 tag
 }

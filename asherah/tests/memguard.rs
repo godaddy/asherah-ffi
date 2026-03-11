@@ -216,7 +216,7 @@ fn decrypt_buffer_too_small() {
 #[test]
 fn decrypt_truncated_ciphertext() {
     let key = [0_u8; 32];
-    // Ciphertext shorter than OVERHEAD (24 nonce + 16 tag = 40)
+    // Ciphertext shorter than OVERHEAD (12 nonce + 16 tag = 28)
     let short_ct = vec![0_u8; memguard::OVERHEAD - 1];
     let mut output = vec![0_u8; 64];
     let result = memguard::decrypt(&short_ct, &key, &mut output);
@@ -263,8 +263,8 @@ fn decrypt_wrong_key_fails() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn overhead_is_40() {
-    assert_eq!(memguard::OVERHEAD, 40);
+fn overhead_is_28() {
+    assert_eq!(memguard::OVERHEAD, 28); // 12 nonce + 16 tag
 }
 
 // ---------------------------------------------------------------------------
