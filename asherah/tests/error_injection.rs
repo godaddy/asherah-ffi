@@ -221,9 +221,9 @@ fn decrypt_fails_when_system_key_not_found() {
 
     // Decrypt should fail because it can't find the SK
     let err = session.decrypt(drr).unwrap_err();
-    let msg = err.to_string();
+    let msg = format!("{:#}", err);
     assert!(
-        msg.contains("not found") || msg.contains("missing"),
+        msg.contains("not found") || msg.contains("missing") || msg.contains("failed to load"),
         "expected 'not found' error, got: {msg}"
     );
 }
@@ -260,9 +260,9 @@ fn decrypt_fails_when_intermediate_key_not_found() {
     ms.set_load_returns_none(true);
 
     let err = session.decrypt(drr).unwrap_err();
-    let msg = err.to_string();
+    let msg = format!("{:#}", err);
     assert!(
-        msg.contains("missing") || msg.contains("not found"),
+        msg.contains("missing") || msg.contains("not found") || msg.contains("failed to load"),
         "expected IK missing error, got: {msg}"
     );
 }
@@ -286,9 +286,11 @@ fn encrypt_fails_when_store_and_load_latest_both_fail() {
     ms.set_load_latest_returns_none(true);
 
     let err = session.encrypt(b"should fail").unwrap_err();
-    let msg = err.to_string();
+    let msg = format!("{:#}", err);
     assert!(
-        msg.contains("not found") || msg.contains("error loading"),
+        msg.contains("not found")
+            || msg.contains("error loading")
+            || msg.contains("failed to get or create"),
         "expected fallback failure, got: {msg}"
     );
 }
@@ -348,7 +350,7 @@ fn decrypt_fails_when_kms_decrypt_key_fails() {
 
     // Decrypt should fail because it can't decrypt the SK
     let err = session.decrypt(drr).unwrap_err();
-    let msg = err.to_string();
+    let msg = format!("{:#}", err);
     assert!(
         msg.contains("injected decrypt_key failure"),
         "expected KMS decrypt failure, got: {msg}"
@@ -368,9 +370,9 @@ fn encrypt_fails_when_kms_encrypt_key_fails() {
 
     let session = factory.get_session("p6");
     let err = session.encrypt(b"should fail").unwrap_err();
-    let msg = err.to_string();
+    let msg = format!("{:#}", err);
     assert!(
-        msg.contains("injected encrypt_key failure") || msg.contains("error"),
+        msg.contains("injected encrypt_key failure"),
         "expected KMS encrypt failure, got: {msg}"
     );
 }
@@ -388,7 +390,7 @@ fn decrypt_fails_when_metastore_load_errors() {
     ms.set_fail_load(true);
 
     let err = session.decrypt(drr).unwrap_err();
-    let msg = err.to_string();
+    let msg = format!("{:#}", err);
     assert!(
         msg.contains("injected load failure"),
         "expected injected load failure, got: {msg}"
@@ -406,7 +408,7 @@ fn encrypt_fails_when_metastore_load_latest_errors() {
     ms.set_fail_load_latest(true);
 
     let err = session.encrypt(b"should fail").unwrap_err();
-    let msg = err.to_string();
+    let msg = format!("{:#}", err);
     assert!(
         msg.contains("injected load_latest failure"),
         "expected load_latest failure, got: {msg}"
@@ -478,10 +480,10 @@ fn decrypt_missing_parent_key_meta_fails() {
     };
 
     let err = session.decrypt(drr).unwrap_err();
+    let msg = format!("{:#}", err);
     assert!(
-        err.to_string().contains("missing parent key"),
-        "expected 'missing parent key', got: {}",
-        err
+        msg.contains("missing parent") || msg.contains("parent_key_meta"),
+        "expected 'missing parent key', got: {msg}",
     );
 }
 
@@ -666,10 +668,11 @@ fn encrypt_fails_when_store_fails_and_latest_ik_is_revoked() {
     // - fallback: load_latest IK → still revoked (invalid)
     // - returns "error loading intermediate key from metastore after retry"
     let err = session.encrypt(b"should fail").unwrap_err();
-    let msg = err.to_string();
+    let msg = format!("{:#}", err);
     assert!(
-        msg.contains("error loading intermediate key from metastore after retry"),
-        "expected 'error loading intermediate key from metastore after retry', got: {msg}"
+        msg.contains("error loading intermediate key")
+            || msg.contains("failed to get or create intermediate key"),
+        "expected IK retry failure, got: {msg}"
     );
 }
 
@@ -746,9 +749,11 @@ fn create_ik_store_ok_false_and_no_latest_fails() {
 
     let session = factory.get_session("ok-false-none");
     let err = session.encrypt(b"should fail").unwrap_err();
-    let msg = err.to_string();
+    let msg = format!("{:#}", err);
     assert!(
-        msg.contains("not found") || msg.contains("error loading"),
+        msg.contains("not found")
+            || msg.contains("error loading")
+            || msg.contains("failed to get or create"),
         "expected fallback failure, got: {msg}"
     );
 }

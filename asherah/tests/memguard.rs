@@ -664,22 +664,20 @@ fn purge_does_not_panic() {
 }
 
 // ---------------------------------------------------------------------------
-// Coffer basic view roundtrip
+// Coffer basic view roundtrip (via unified slab)
 // ---------------------------------------------------------------------------
 
 #[test]
 fn coffer_view_returns_32_byte_key() {
-    let coffer = memguard::Coffer::new().unwrap();
-    let key = coffer.view().unwrap();
+    let key = memguard::coffer_view().unwrap();
     assert_eq!(key.size(), 32);
 
     // Key should be deterministic within same coffer (before rekey)
-    let key2 = coffer.view().unwrap();
+    let key2 = memguard::coffer_view().unwrap();
     assert_eq!(key.as_slice(), key2.as_slice());
 
     memguard::pool_release(key);
     memguard::pool_release(key2);
-    coffer.destroy().unwrap();
 }
 
 // ---------------------------------------------------------------------------
