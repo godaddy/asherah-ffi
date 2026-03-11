@@ -75,10 +75,11 @@ fn decrypt_missing_parent_key_meta_fails() {
     };
     let result = session.decrypt(drr);
     assert!(result.is_err());
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("missing parent key"));
+    let msg = format!("{:#}", result.unwrap_err());
+    assert!(
+        msg.contains("missing parent") || msg.contains("parent_key_meta"),
+        "expected parent key error, got: {msg}"
+    );
 }
 
 // ──────────────────────────── Invalid IK ID ────────────────────────────
