@@ -747,21 +747,22 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             .ik_cache
             .get_or_load_latest(&ik_id, &mut loader)
             .context("encrypt: failed to get or create intermediate key")?;
-        // Fast DRK path: avoid memguard for ephemeral data-row key
         let created = now_s();
-        let mut drk = vec![0_u8; 32];
-        use rand::TryRngCore;
-        rand::rngs::OsRng
-            .try_fill_bytes(&mut drk)
-            .map_err(|e| anyhow::anyhow!("encrypt: DRK generation failed: {e}"))?;
-        let enc_data = self
-            .crypto
-            .encrypt(data, &drk)
+        // Stack-allocated DRK filled from thread-local ChaCha20Rng (no syscall)
+        let mut drk = [0_u8; 32];
+        crate::aead::fast_random_bytes(&mut drk);
+        // Create DRK LessSafeKey once, use for both data + DRK encryption
+        let drk_lsk = crate::aead::make_lsk(&drk).context("encrypt: failed to create DRK key")?;
+        let enc_data = crate::aead::encrypt_with_lsk(data, &drk_lsk)
             .context("encrypt: failed to encrypt data with DRK")?;
-        let enc_drk = ik
-            .with_key_func(|ikb| self.crypto.encrypt(&drk, ikb))
-            .context("encrypt: failed to encrypt DRK with IK")??;
-        // wipe drk
+        // Encrypt DRK under IK: use cached LessSafeKey if available (no Enclave::open)
+        let enc_drk = if let Some(ik_lsk) = ik.less_safe_key() {
+            crate::aead::encrypt_with_lsk(&drk, ik_lsk)
+                .context("encrypt: failed to encrypt DRK with IK")?
+        } else {
+            ik.with_key_func(|ikb| self.crypto.encrypt(&drk, ikb))
+                .context("encrypt: failed to encrypt DRK with IK")??
+        };
         drk.fill(0);
         let result = crate::types::DataRowRecord {
             key: Some(EnvelopeKeyRecord {
@@ -815,12 +816,17 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                 "decrypt: failed to load IK id={} created={}",
                 pmeta.id, pmeta.created
             ))?;
-        let mut drk = ik
-            .with_key_func(|ikb| self.crypto.decrypt(&key.encrypted_key, ikb))
-            .context("decrypt: failed to decrypt DRK with IK")??;
-        let pt = self
-            .crypto
-            .decrypt(&drr.data, &drk)
+        // Decrypt DRK under IK: use cached LessSafeKey if available (no Enclave::open)
+        let mut drk = if let Some(ik_lsk) = ik.less_safe_key() {
+            crate::aead::decrypt_with_lsk(&key.encrypted_key, ik_lsk)
+                .context("decrypt: failed to decrypt DRK with IK")?
+        } else {
+            ik.with_key_func(|ikb| self.crypto.decrypt(&key.encrypted_key, ikb))
+                .context("decrypt: failed to decrypt DRK with IK")??
+        };
+        // Create DRK LessSafeKey once for data decryption
+        let drk_lsk = crate::aead::make_lsk(&drk).context("decrypt: failed to create DRK key")?;
+        let pt = crate::aead::decrypt_with_lsk(&drr.data, &drk_lsk)
             .context("decrypt: failed to decrypt data with DRK")?;
         drk.fill(0);
         if self.metrics_enabled {
