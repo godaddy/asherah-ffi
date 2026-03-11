@@ -193,7 +193,7 @@ fi
 
 if should_run dotnet; then
   echo "[binding-tests] .NET"
-  dotnet test "$ROOT_DIR/asherah-dotnet/AsherahDotNet.sln" --nologo
+  dotnet test "$ROOT_DIR/asherah-dotnet/AsherahDotNet.slnx" --nologo
 fi
 
 if should_run java; then

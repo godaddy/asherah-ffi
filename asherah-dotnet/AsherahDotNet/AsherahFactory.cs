@@ -2,7 +2,7 @@ using System;
 
 namespace GoDaddy.Asherah;
 
-public sealed class AsherahFactory : IDisposable
+public sealed class AsherahFactory : IAsherahFactory
 {
     private SafeFactoryHandle _handle;
     private bool _disposed;
@@ -28,6 +28,8 @@ public sealed class AsherahFactory : IDisposable
         }
         return new AsherahSession(new SafeSessionHandle(sessionPtr));
     }
+
+    IAsherahSession IAsherahFactory.GetSession(string partitionId) => GetSession(partitionId);
 
     public void Dispose()
     {

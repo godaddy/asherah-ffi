@@ -123,7 +123,7 @@ cargo build -p asherah-java
 (cd asherah-java/java && CARGO_TARGET_DIR="$CARGO_TARGET_DIR" mvn -B -Dnative.build.skip=true test)
 
 echo "[tests] dotnet bindings"
-dotnet test asherah-dotnet/AsherahDotNet.sln --nologo
+dotnet test asherah-dotnet/AsherahDotNet.slnx --nologo
 
 echo "[tests] complete"
 

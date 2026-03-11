@@ -4,7 +4,7 @@ using System.Text;
 
 namespace GoDaddy.Asherah;
 
-public sealed class AsherahSession : IDisposable
+public sealed class AsherahSession : IAsherahSession
 {
     private SafeSessionHandle _handle;
     private bool _disposed;
