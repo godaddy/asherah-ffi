@@ -306,12 +306,12 @@ pub struct Enclave {
 }
 impl Enclave {
     pub fn new_from(buf: &mut Buffer) -> Result<Self, Error> {
-        let mut key = get_or_create_key().view()?;
+        let mut key = coffer_view()?;
         let data_len = buf.size();
         let id = ENCLAVE_ID.fetch_add(1, Ordering::Relaxed);
         // Populate hot cache before we destroy the plaintext
         if data_len == SLOT_SIZE {
-            hot_cache_insert_plaintext(id, buf.as_slice());
+            cache_insert(id, buf.as_slice());
         }
         let ct = encrypt(buf.as_slice(), key.bytes())?;
         buf.melt()?;
@@ -327,19 +327,19 @@ impl Enclave {
     pub fn open(&self) -> Result<PoolSlot, Error> {
         // Fast path: check hot cache (no crypto needed)
         if self.data_len == SLOT_SIZE {
-            if let Some(slot) = hot_cache_get(self.id) {
+            if let Some(slot) = cache_get(self.id) {
                 return Ok(slot);
             }
         }
-        // Slow path: XSalsa20 unseal
+        // Slow path: AES-256-GCM unseal
         let mut out = pool_acquire(self.data_len)?;
-        let mut key = get_or_create_key().view()?;
+        let mut key = coffer_view()?;
         let n = decrypt(&self.ciphertext, key.bytes(), out.bytes())?;
         debug_assert_eq!(n, out.size());
         pool_release(key);
         // Promote to hot cache for next time
         if self.data_len == SLOT_SIZE {
-            hot_cache_insert_plaintext(self.id, out.as_slice());
+            cache_insert(self.id, out.as_slice());
         }
         Ok(out)
     }
@@ -351,54 +351,221 @@ impl Enclave {
     }
 }
 
-// -- Slab pool for mlock robustness --
-// Subdivides mlock'd pages into 32-byte slots so one page serves many keys.
-// Guard pages on each slab page protect the entire region from memory scanning.
-// Free list gives O(1) acquire/release. When mlock is exhausted, callers block.
+// -- Unified secure slab --
+// A single mlock'd page subdivided into 32-byte slots.
+//
+// Layout:
+//   Slot 0: Coffer left half  (permanent, key XOR hash(right))
+//   Slot 1: Coffer right half (permanent, random)
+//   Slots 2..N: shared between hot key cache and transient operations
+//
+// The Coffer stores the XSalsa20 master key used to encrypt/decrypt Enclaves.
+// Hot cache entries hold recently-decrypted keys (LRU-evicted).
+// Transient slots are acquired briefly during crypto operations, then released.
+// When no free slots remain, the LRU cache entry is evicted to make room.
 const SLOT_SIZE: usize = 32; // AES-256 key size
+const COFFER_LEFT: usize = 0;
+const COFFER_RIGHT: usize = 1;
+const FIRST_SHARED_SLOT: usize = 2;
 
-struct FreeSlot {
-    ptr: *mut u8,
+struct SecureSlab {
+    #[allow(dead_code)]
+    _page: Buffer,
+    base: *mut u8,
+    slot_count: usize,
+
+    // Free list of shared slot indices (LIFO for cache locality)
+    free: Vec<usize>,
+
+    // Hot key cache: maps enclave_id → slot index
+    cache_map: HashMap<u64, usize>,
+    cache_slot_to_id: Vec<u64>, // slot_idx → enclave_id (0 = not cached)
+    cache_lru: VecDeque<usize>, // front = least recently used
 }
 
-// SAFETY: ptr points into mlock'd mmap memory that is never freed.
-unsafe impl Send for FreeSlot {}
+// SAFETY: base points into mlock'd mmap memory owned by _page.
+unsafe impl Send for SecureSlab {}
 
-struct SlabPool {
-    #[allow(dead_code)] // own the mmaps — must not be dropped
-    pages: Vec<Buffer>,
-    free: Vec<FreeSlot>,
-    outstanding: usize,
-}
+impl SecureSlab {
+    fn new() -> Result<Self, Error> {
+        Lazy::force(&INIT);
+        let ps = *PAGE_SIZE;
+        let mut page = Buffer::new(ps)?;
+        let base = page.bytes().as_mut_ptr();
+        wipe_bytes(page.bytes());
+        let slot_count = ps / SLOT_SIZE;
 
-static POOL: Lazy<Mutex<SlabPool>> = Lazy::new(|| {
-    Mutex::new(SlabPool {
-        pages: Vec::new(),
-        free: Vec::new(),
-        outstanding: 0,
-    })
-});
-static POOL_CONDVAR: Lazy<Condvar> = Lazy::new(Condvar::new);
+        // Initialize Coffer: slots 0 (left) and 1 (right)
+        let left = unsafe { std::slice::from_raw_parts_mut(base, SLOT_SIZE) };
+        scramble_bytes(left);
+        let right = unsafe { std::slice::from_raw_parts_mut(base.add(SLOT_SIZE), SLOT_SIZE) };
+        scramble_bytes(right);
+        let hr = hash(right);
+        let left = unsafe { std::slice::from_raw_parts_mut(base, SLOT_SIZE) };
+        for (slot, hash_byte) in left.iter_mut().zip(hr.iter()) {
+            *slot ^= hash_byte;
+        }
 
-/// Allocate a new slab page (mmap+mlock outside lock), then push slots.
-fn grow_pool_unlocked() -> Result<(), Error> {
-    let ps = *PAGE_SIZE;
-    let mut buffer = Buffer::new(ps)?;
-    let base = buffer.bytes().as_mut_ptr();
-    wipe_bytes(buffer.bytes());
-    let slot_count = ps / SLOT_SIZE;
-    let mut pool = POOL.lock();
-    pool.pages.push(buffer);
-    pool.free.reserve(slot_count);
-    for i in 0..slot_count {
-        let ptr = unsafe { base.add(i * SLOT_SIZE) };
-        pool.free.push(FreeSlot { ptr });
+        // All remaining slots start on the free list
+        let shared_count = slot_count - FIRST_SHARED_SLOT;
+        let mut free = Vec::with_capacity(shared_count);
+        for i in FIRST_SHARED_SLOT..slot_count {
+            free.push(i);
+        }
+
+        Ok(Self {
+            _page: page,
+            base,
+            slot_count,
+            free,
+            cache_map: HashMap::with_capacity(shared_count),
+            cache_slot_to_id: vec![0_u64; slot_count],
+            cache_lru: VecDeque::with_capacity(shared_count),
+        })
     }
-    Ok(())
+
+    fn slot_ptr(&self, idx: usize) -> *mut u8 {
+        debug_assert!(idx < self.slot_count);
+        unsafe { self.base.add(idx * SLOT_SIZE) }
+    }
+
+    fn slot_slice_mut(&mut self, idx: usize) -> &mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.slot_ptr(idx), SLOT_SIZE) }
+    }
+
+    fn ptr_to_idx(&self, ptr: *mut u8) -> usize {
+        let offset = ptr as usize - self.base as usize;
+        offset / SLOT_SIZE
+    }
+
+    /// Acquire a shared slot. Tries free list first, then evicts from cache.
+    /// `exclude` prevents evicting a specific cache slot (used when the caller
+    /// holds a reference to that slot).
+    fn acquire_slot(&mut self, exclude: Option<usize>) -> Option<usize> {
+        // Try free list (O(1))
+        if let Some(idx) = self.free.pop() {
+            return Some(idx);
+        }
+        // Evict from hot cache LRU
+        for i in 0..self.cache_lru.len() {
+            let evict_idx = self.cache_lru[i];
+            if Some(evict_idx) == exclude {
+                continue;
+            }
+            self.cache_lru.remove(i);
+            let evict_id = self.cache_slot_to_id[evict_idx];
+            self.cache_map.remove(&evict_id);
+            self.cache_slot_to_id[evict_idx] = 0;
+            wipe_bytes(self.slot_slice_mut(evict_idx));
+            return Some(evict_idx);
+        }
+        None
+    }
+
+    /// Reconstruct the Coffer master key into a transient slot.
+    fn coffer_view(&mut self) -> Option<PoolSlot> {
+        let out_idx = self.acquire_slot(None)?;
+        // Use raw pointers to avoid borrow conflicts on non-overlapping slots
+        let right_ptr = self.slot_ptr(COFFER_RIGHT);
+        let right = unsafe { std::slice::from_raw_parts(right_ptr, SLOT_SIZE) };
+        let hr = hash(right);
+        let left_ptr = self.slot_ptr(COFFER_LEFT);
+        let out_ptr = self.slot_ptr(out_idx);
+        let left = unsafe { std::slice::from_raw_parts(left_ptr, SLOT_SIZE) };
+        let out = unsafe { std::slice::from_raw_parts_mut(out_ptr, SLOT_SIZE) };
+        for (dst, (hash_byte, left_byte)) in out.iter_mut().zip(hr.iter().zip(left.iter())) {
+            *dst = hash_byte ^ left_byte;
+        }
+        Some(PoolSlot {
+            ptr: out_ptr,
+            len: SLOT_SIZE,
+            origin: SlotOrigin::Slab,
+        })
+    }
+
+    /// Re-initialize Coffer with a new random key (for purge/rekey).
+    fn rekey_coffer(&mut self) {
+        let left = self.slot_slice_mut(COFFER_LEFT);
+        scramble_bytes(left);
+        let right = self.slot_slice_mut(COFFER_RIGHT);
+        scramble_bytes(right);
+        let hr = hash(right);
+        let left = self.slot_slice_mut(COFFER_LEFT);
+        for (slot, hash_byte) in left.iter_mut().zip(hr.iter()) {
+            *slot ^= hash_byte;
+        }
+    }
+
+    /// Wipe Coffer key material (for shutdown).
+    fn wipe_coffer(&mut self) {
+        wipe_bytes(self.slot_slice_mut(COFFER_LEFT));
+        wipe_bytes(self.slot_slice_mut(COFFER_RIGHT));
+    }
+
+    /// Look up a cached key by enclave_id. On hit, copies into a transient slot.
+    fn cache_get(&mut self, enclave_id: u64) -> Option<PoolSlot> {
+        let &src_idx = self.cache_map.get(&enclave_id)?;
+        // Touch LRU: move to back (most recent)
+        if let Some(pos) = self.cache_lru.iter().position(|&s| s == src_idx) {
+            self.cache_lru.remove(pos);
+        }
+        self.cache_lru.push_back(src_idx);
+        // Acquire a transient slot (don't evict the one we just found)
+        let out_idx = self.acquire_slot(Some(src_idx))?;
+        // Use raw pointers to avoid borrow conflicts on non-overlapping slots
+        let src_ptr = self.slot_ptr(src_idx);
+        let dst_ptr = self.slot_ptr(out_idx);
+        unsafe {
+            std::ptr::copy_nonoverlapping(src_ptr, dst_ptr, SLOT_SIZE);
+        }
+        Some(PoolSlot {
+            ptr: self.slot_ptr(out_idx),
+            len: SLOT_SIZE,
+            origin: SlotOrigin::Slab,
+        })
+    }
+
+    /// Insert plaintext into the hot cache for the given enclave_id.
+    fn cache_insert(&mut self, enclave_id: u64, plaintext: &[u8]) {
+        debug_assert_eq!(plaintext.len(), SLOT_SIZE);
+        if self.cache_map.contains_key(&enclave_id) {
+            return;
+        }
+        let slot_idx = match self.acquire_slot(None) {
+            Some(idx) => idx,
+            None => return, // all slots held transiently, skip caching
+        };
+        self.slot_slice_mut(slot_idx).copy_from_slice(plaintext);
+        self.cache_map.insert(enclave_id, slot_idx);
+        self.cache_slot_to_id[slot_idx] = enclave_id;
+        self.cache_lru.push_back(slot_idx);
+    }
+
+    /// Clear all hot cache entries, returning slots to the free list.
+    fn clear_cache(&mut self) {
+        let indices: Vec<usize> = self.cache_map.values().copied().collect();
+        for idx in indices {
+            wipe_bytes(self.slot_slice_mut(idx));
+            self.cache_slot_to_id[idx] = 0;
+            self.free.push(idx);
+        }
+        self.cache_map.clear();
+        self.cache_lru.clear();
+    }
+
+    /// Release a slot back to the free list.
+    fn release_slot(&mut self, idx: usize) {
+        debug_assert!(idx >= FIRST_SHARED_SLOT && idx < self.slot_count);
+        wipe_bytes(self.slot_slice_mut(idx));
+        self.free.push(idx);
+    }
 }
 
-/// A handle to a 32-byte slot in a slab page or a standalone Buffer.
-/// Provides `bytes()` / `as_slice()` like Buffer.
+static SLAB: Lazy<Mutex<SecureSlab>> =
+    Lazy::new(|| Mutex::new(SecureSlab::new().expect("secure slab initialization")));
+static SLAB_CV: Lazy<Condvar> = Lazy::new(Condvar::new);
+
+/// A handle to a 32-byte slot in the secure slab or a standalone Buffer.
 #[allow(missing_debug_implementations)]
 pub struct PoolSlot {
     ptr: *mut u8,
@@ -411,7 +578,7 @@ enum SlotOrigin {
     Standalone(Buffer),
 }
 
-// SAFETY: Slab-backed slots point into mlock'd mmap regions that outlive
+// SAFETY: Slab-backed slots point into the mlock'd slab page which outlives
 // the slot. Standalone slots own their Buffer. Neither is aliased.
 unsafe impl Send for PoolSlot {}
 
@@ -429,6 +596,7 @@ impl PoolSlot {
 
 pub fn pool_acquire(size: usize) -> Result<PoolSlot, Error> {
     if size != SLOT_SIZE {
+        // Non-standard sizes get a standalone mlock'd buffer
         let buf = Buffer::new(size)?;
         let ptr = buf.data_ptr();
         let len = buf.data_len;
@@ -438,61 +606,34 @@ pub fn pool_acquire(size: usize) -> Result<PoolSlot, Error> {
             origin: SlotOrigin::Standalone(buf),
         });
     }
-    // 1. Try free list (O(1) pop)
-    {
-        let mut pool = POOL.lock();
-        if let Some(slot) = pool.free.pop() {
-            pool.outstanding += 1;
+    let mut slab = SLAB.lock();
+    if let Some(idx) = slab.acquire_slot(None) {
+        return Ok(PoolSlot {
+            ptr: slab.slot_ptr(idx),
+            len: SLOT_SIZE,
+            origin: SlotOrigin::Slab,
+        });
+    }
+    // All slots held transiently — wait for one to be released
+    loop {
+        SLAB_CV.wait(&mut slab);
+        if let Some(idx) = slab.acquire_slot(None) {
             return Ok(PoolSlot {
-                ptr: slot.ptr,
+                ptr: slab.slot_ptr(idx),
                 len: SLOT_SIZE,
                 origin: SlotOrigin::Slab,
             });
         }
     }
-    // 2. Try allocating a new slab page — unlocked so mmap/mlock don't block others
-    match grow_pool_unlocked() {
-        Ok(()) => {
-            let mut pool = POOL.lock();
-            let slot = pool.free.pop().expect("just grew pool");
-            pool.outstanding += 1;
-            Ok(PoolSlot {
-                ptr: slot.ptr,
-                len: SLOT_SIZE,
-                origin: SlotOrigin::Slab,
-            })
-        }
-        Err(alloc_err) => {
-            // 3. mlock exhausted — block until a slot is freed
-            let mut pool = POOL.lock();
-            if pool.outstanding == 0 && pool.free.is_empty() {
-                return Err(alloc_err);
-            }
-            while pool.free.is_empty() {
-                POOL_CONDVAR.wait(&mut pool);
-            }
-            let slot = pool
-                .free
-                .pop()
-                .expect("condvar signaled but free list empty");
-            pool.outstanding += 1;
-            Ok(PoolSlot {
-                ptr: slot.ptr,
-                len: SLOT_SIZE,
-                origin: SlotOrigin::Slab,
-            })
-        }
-    }
 }
 
-pub fn pool_release(mut slot: PoolSlot) {
+pub fn pool_release(slot: PoolSlot) {
     match slot.origin {
         SlotOrigin::Slab => {
-            wipe_bytes(slot.bytes());
-            let mut pool = POOL.lock();
-            pool.free.push(FreeSlot { ptr: slot.ptr });
-            pool.outstanding = pool.outstanding.saturating_sub(1);
-            POOL_CONDVAR.notify_one();
+            let mut slab = SLAB.lock();
+            let idx = slab.ptr_to_idx(slot.ptr);
+            slab.release_slot(idx);
+            SLAB_CV.notify_one();
         }
         SlotOrigin::Standalone(mut buf) => {
             drop(buf.destroy());
@@ -500,161 +641,30 @@ pub fn pool_release(mut slot: PoolSlot) {
     }
 }
 
-// -- Hot key cache --
-// One mlock'd slab page of decrypted keys, LRU-evicted.
-// Avoids XSalsa20 unseal for frequently-used keys.
-struct HotKeyCache {
-    #[allow(dead_code)] // owns the mmap — must not be dropped
-    page: Buffer,
-    base_ptr: *mut u8,
-    slot_count: usize,
-    index: HashMap<u64, usize>, // enclave_id -> slot_idx
-    slot_to_id: Vec<u64>,       // slot_idx -> enclave_id (0 = empty)
-    lru: VecDeque<usize>,       // slot indices, front = least recent
-}
-
-// SAFETY: base_ptr points into mlock'd mmap memory owned by `page`.
-unsafe impl Send for HotKeyCache {}
-
-impl HotKeyCache {
-    fn new() -> Result<Self, Error> {
-        let ps = *PAGE_SIZE;
-        let mut page = Buffer::new(ps)?;
-        let base_ptr = page.bytes().as_mut_ptr();
-        wipe_bytes(page.bytes());
-        let slot_count = ps / SLOT_SIZE;
-        Ok(Self {
-            page,
-            base_ptr,
-            slot_count,
-            index: HashMap::with_capacity(slot_count),
-            slot_to_id: vec![0; slot_count],
-            lru: VecDeque::with_capacity(slot_count),
-        })
-    }
-
-    fn get(&mut self, enclave_id: u64) -> Option<*const u8> {
-        let &slot_idx = self.index.get(&enclave_id)?;
-        // Touch LRU: move to back (most recent)
-        if let Some(pos) = self.lru.iter().position(|&s| s == slot_idx) {
-            self.lru.remove(pos);
+/// Reconstruct the Coffer master key into a transient pool slot.
+pub fn coffer_view() -> Result<PoolSlot, Error> {
+    let mut slab = SLAB.lock();
+    loop {
+        if let Some(slot) = slab.coffer_view() {
+            return Ok(slot);
         }
-        self.lru.push_back(slot_idx);
-        let ptr = unsafe { self.base_ptr.add(slot_idx * SLOT_SIZE) };
-        Some(ptr as *const u8)
-    }
-
-    fn insert(&mut self, enclave_id: u64, plaintext: &[u8]) {
-        debug_assert_eq!(plaintext.len(), SLOT_SIZE);
-        // Already cached?
-        if self.index.contains_key(&enclave_id) {
-            return;
-        }
-        let slot_idx = if self.index.len() < self.slot_count {
-            // Free slot available
-            self.index.len()
-        } else {
-            // Evict LRU
-            let evict_idx = self.lru.pop_front().expect("LRU non-empty when full");
-            let evict_id = self.slot_to_id[evict_idx];
-            self.index.remove(&evict_id);
-            // Wipe evicted slot
-            let evict_ptr = unsafe { self.base_ptr.add(evict_idx * SLOT_SIZE) };
-            let evict_slice = unsafe { std::slice::from_raw_parts_mut(evict_ptr, SLOT_SIZE) };
-            wipe_bytes(evict_slice);
-            evict_idx
-        };
-        // Write plaintext into slot
-        let ptr = unsafe { self.base_ptr.add(slot_idx * SLOT_SIZE) };
-        let dst = unsafe { std::slice::from_raw_parts_mut(ptr, SLOT_SIZE) };
-        dst.copy_from_slice(plaintext);
-        self.index.insert(enclave_id, slot_idx);
-        self.slot_to_id[slot_idx] = enclave_id;
-        self.lru.push_back(slot_idx);
+        SLAB_CV.wait(&mut slab);
     }
 }
 
-static HOT_CACHE: Lazy<Mutex<Option<HotKeyCache>>> = Lazy::new(|| Mutex::new(None));
-
-fn hot_cache_get(enclave_id: u64) -> Option<PoolSlot> {
-    let mut guard = HOT_CACHE.lock();
-    let cache = guard.as_mut()?;
-    let src_ptr = cache.get(enclave_id)?;
-    // Copy from hot cache into a pool slot (so caller has an owned buffer)
-    let mut slot = pool_acquire(SLOT_SIZE).ok()?;
-    let src = unsafe { std::slice::from_raw_parts(src_ptr, SLOT_SIZE) };
-    slot.bytes().copy_from_slice(src);
-    Some(slot)
+/// Look up a cached decrypted key. Returns None on cache miss.
+fn cache_get(enclave_id: u64) -> Option<PoolSlot> {
+    SLAB.lock().cache_get(enclave_id)
 }
 
-fn hot_cache_insert_plaintext(enclave_id: u64, plaintext: &[u8]) {
-    if plaintext.len() != SLOT_SIZE {
-        return;
+/// Insert a decrypted key into the hot cache.
+fn cache_insert(enclave_id: u64, plaintext: &[u8]) {
+    if plaintext.len() == SLOT_SIZE {
+        SLAB.lock().cache_insert(enclave_id, plaintext);
     }
-    let mut guard = HOT_CACHE.lock();
-    let cache = guard.get_or_insert_with(|| HotKeyCache::new().expect("hot cache page allocation"));
-    cache.insert(enclave_id, plaintext);
 }
 
 use std::sync::{Arc, Weak};
-#[derive(Debug)]
-struct CofferInner {
-    left: Buffer,
-    right: Buffer,
-}
-impl CofferInner {
-    fn init(&mut self) -> Result<(), Error> {
-        scramble_bytes(self.left.bytes());
-        scramble_bytes(self.right.bytes());
-        let hr = hash(self.right.as_slice());
-        for (slot, hash_byte) in self.left.bytes().iter_mut().zip(hr.iter()) {
-            *slot ^= hash_byte;
-        }
-        Ok(())
-    }
-    fn view(&mut self) -> Result<PoolSlot, Error> {
-        let mut b = pool_acquire(32)?;
-        let h = hash(self.right.as_slice());
-        for (dst, (hash_byte, left_byte)) in
-            b.bytes().iter_mut().zip(h.iter().zip(self.left.as_slice()))
-        {
-            *dst = hash_byte ^ left_byte;
-        }
-        Ok(b)
-    }
-}
-#[derive(Debug)]
-pub struct Coffer(Arc<Mutex<CofferInner>>);
-impl Coffer {
-    pub fn new() -> Result<Self, Error> {
-        let mut inner = CofferInner {
-            left: Buffer::new(32)?,
-            right: Buffer::new(32)?,
-        };
-        inner.init()?;
-        Ok(Coffer(Arc::new(Mutex::new(inner))))
-    }
-    pub fn view(&self) -> Result<PoolSlot, Error> {
-        self.0.lock().view()
-    }
-    pub fn destroy(&self) -> Result<(), Error> {
-        let mut g = self.0.lock();
-        let _left = g.left.destroy();
-        let _right = g.right.destroy();
-        Ok(())
-    }
-}
-
-static KEY: Lazy<Mutex<Option<Arc<Coffer>>>> = Lazy::new(|| Mutex::new(None));
-fn get_or_create_key() -> Arc<Coffer> {
-    let mut k = KEY.lock();
-    if let Some(c) = &*k {
-        return c.clone();
-    }
-    let c = Arc::new(Coffer::new().expect("init coffer"));
-    *k = Some(c.clone());
-    c
-}
 
 static REGISTRY: Lazy<Mutex<Vec<Weak<Mutex<Buffer>>>>> = Lazy::new(|| Mutex::new(Vec::new()));
 fn registry_add(w: Weak<Mutex<Buffer>>) {
@@ -765,8 +775,9 @@ impl LockedBuffer {
 
 pub fn purge() -> Result<(), Error> {
     {
-        let mut k = KEY.lock();
-        *k = Some(Arc::new(Coffer::new()?));
+        let mut slab = SLAB.lock();
+        slab.clear_cache();
+        slab.rekey_coffer();
     }
     let snapshot = registry_flush();
     let mut op_err: Option<String> = None;
@@ -796,8 +807,10 @@ pub fn purge() -> Result<(), Error> {
 }
 #[allow(clippy::exit)]
 pub fn safe_exit(code: i32) -> ! {
-    if let Some(c) = KEY.lock().as_ref() {
-        let _destroyed = c.destroy();
+    {
+        let mut slab = SLAB.lock();
+        slab.wipe_coffer();
+        slab.clear_cache();
     }
     let snapshot = registry_copy();
     for arc in snapshot {

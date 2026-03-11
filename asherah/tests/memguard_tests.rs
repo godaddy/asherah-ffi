@@ -248,26 +248,22 @@ fn enclave_seal_and_open_roundtrip() {
     memguard::pool_release(opened);
 }
 
-// ──────────────────────────── Coffer ────────────────────────────
+// ──────────────────────────── Coffer (via unified slab) ────────────────────────────
 
 #[test]
 fn coffer_view_returns_32_byte_key() {
-    let coffer = memguard::Coffer::new().unwrap();
-    let key = coffer.view().unwrap();
+    let key = memguard::coffer_view().unwrap();
     assert_eq!(key.size(), 32);
     memguard::pool_release(key);
-    coffer.destroy().unwrap();
 }
 
 #[test]
 fn coffer_view_consistent() {
-    let coffer = memguard::Coffer::new().unwrap();
-    let k1 = coffer.view().unwrap();
-    let k2 = coffer.view().unwrap();
+    let k1 = memguard::coffer_view().unwrap();
+    let k2 = memguard::coffer_view().unwrap();
     assert_eq!(k1.as_slice(), k2.as_slice());
     memguard::pool_release(k1);
     memguard::pool_release(k2);
-    coffer.destroy().unwrap();
 }
 
 // ──────────────────────────── memguard encrypt/decrypt ────────────────────────────
