@@ -63,6 +63,7 @@ features = ["rt-multi-thread", "macros"]
 [dependencies.mysql]
 version = "27"
 optional = true
+features = ["native-tls"]
 
 [dependencies.postgres]
 version = "0.19"
