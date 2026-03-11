@@ -100,11 +100,8 @@ fn decrypt_ciphertext_exactly_minimum_size() {
     let ct = vec![0_u8; 28];
     let result = aead.decrypt(&ct, &key);
     assert!(result.is_err());
-    // Should fail with authentication error, NOT "ciphertext too short"
-    assert!(result
-        .unwrap_err()
-        .to_string()
-        .contains("authentication failed"));
+    // Should fail with decrypt error, NOT "ciphertext too short"
+    assert!(result.unwrap_err().to_string().contains("decrypt error"));
 }
 
 // ──────────────────────────── Tampered ciphertext ────────────────────────────
