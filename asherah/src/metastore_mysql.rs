@@ -3,6 +3,42 @@ use crate::types::EnvelopeKeyRecord;
 use anyhow::Context;
 use mysql::prelude::Queryable;
 use mysql::{Opts, OptsBuilder, Pool, PooledConn, SslOpts};
+use std::fmt::Write;
+
+/// Convert Unix epoch seconds to a "YYYY-MM-DD HH:MM:SS" UTC datetime string.
+///
+/// This matches the Go go-sql-driver/mysql behavior: `time.Unix(epoch, 0)` is
+/// formatted in UTC (the driver's default `Loc=time.UTC`) and sent as a plain
+/// datetime string without timezone info. MySQL then interprets this string in
+/// the session's `@@time_zone`.
+///
+/// Using `FROM_UNIXTIME(epoch)` is technically more correct (timezone-safe),
+/// but it produces different results than Go when `@@time_zone` isn't UTC,
+/// breaking cross-language interoperability.
+fn epoch_to_utc_datetime(epoch: i64) -> String {
+    // Seconds within the day
+    let day_secs = epoch.rem_euclid(86400);
+    let hour = day_secs / 3600;
+    let min = (day_secs % 3600) / 60;
+    let sec = day_secs % 60;
+
+    // Days since Unix epoch (1970-01-01)
+    let z = epoch.div_euclid(86400) + 719_468;
+    // Howard Hinnant's civil_from_days algorithm
+    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
+    let doe = (z - era * 146_097) as u32;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = (yoe as i64) + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if m <= 2 { y + 1 } else { y };
+
+    let mut buf = String::with_capacity(19);
+    let _ = write!(buf, "{y:04}-{m:02}-{d:02} {hour:02}:{min:02}:{sec:02}");
+    buf
+}
 
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
@@ -73,10 +109,15 @@ impl Metastore for MySqlMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         log::debug!("mysql load: id={id} created={created}");
         let mut conn = self.conn()?;
-        let row: Option<(String,)> = conn.exec_first(
-            "SELECT JSON_EXTRACT(key_record, '$') FROM encryption_key WHERE id=? AND created=FROM_UNIXTIME(?)",
-            (id, created),
-        ).context(format!("MySQL load query failed for id={id} created={created}"))?;
+        let ts = epoch_to_utc_datetime(created);
+        let row: Option<(String,)> = conn
+            .exec_first(
+                "SELECT JSON_EXTRACT(key_record, '$') FROM encryption_key WHERE id=? AND created=?",
+                (id, &ts),
+            )
+            .context(format!(
+                "MySQL load query failed for id={id} created={created}"
+            ))?;
         if let Some((json_str,)) = row {
             log::debug!("mysql load hit: id={id} created={created}");
             let ekr = serde_json::from_str(&json_str).context(format!(
@@ -119,12 +160,53 @@ impl Metastore for MySqlMetastore {
             "MySQL store: failed to serialize key_record for id={id}"
         ))?;
         let mut conn = self.conn()?;
+        let ts = epoch_to_utc_datetime(created);
         conn.exec_drop(
-            "INSERT IGNORE INTO encryption_key(id, created, key_record) VALUES(?, FROM_UNIXTIME(?), CAST(? AS JSON))",
-            (id, created, rec),
+            "INSERT IGNORE INTO encryption_key(id, created, key_record) VALUES(?, ?, CAST(? AS JSON))",
+            (id, &ts, rec),
         ).context(format!("MySQL store insert failed for id={id} created={created}"))?;
         let stored = conn.affected_rows() > 0;
         log::debug!("mysql store: id={id} created={created} stored={stored}");
         Ok(stored)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn epoch_zero() {
+        assert_eq!(epoch_to_utc_datetime(0), "1970-01-01 00:00:00");
+    }
+
+    #[test]
+    fn epoch_known_date() {
+        // 2024-01-15 13:30:00 UTC = 1705325400
+        assert_eq!(epoch_to_utc_datetime(1_705_325_400), "2024-01-15 13:30:00");
+    }
+
+    #[test]
+    fn epoch_recent() {
+        // 2026-03-12 12:58:00 UTC = 1773320280
+        assert_eq!(epoch_to_utc_datetime(1_773_320_280), "2026-03-12 12:58:00");
+    }
+
+    #[test]
+    fn epoch_leap_year() {
+        // 2024-02-29 12:00:00 UTC = 1709208000
+        assert_eq!(epoch_to_utc_datetime(1_709_208_000), "2024-02-29 12:00:00");
+    }
+
+    #[test]
+    fn epoch_end_of_day() {
+        // 2023-12-31 23:59:59 UTC = 1704067199
+        assert_eq!(epoch_to_utc_datetime(1_704_067_199), "2023-12-31 23:59:59");
+    }
+
+    #[test]
+    fn epoch_y2k() {
+        // 2000-01-01 00:00:00 UTC = 946684800
+        assert_eq!(epoch_to_utc_datetime(946_684_800), "2000-01-01 00:00:00");
     }
 }
