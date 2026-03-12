@@ -544,6 +544,8 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                     }
                 }
             };
+            let cached_ik_id = inner.f.partition.intermediate_key_id();
+            let cached_ik_prefix = inner.f.partition.ik_validation_prefix();
             PublicSession {
                 inner,
                 metastore: self.metastore.clone(),
@@ -553,6 +555,8 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                 ik_cache,
                 metrics_enabled: self.metrics_enabled,
                 invalid_partition,
+                cached_ik_id,
+                cached_ik_prefix,
             }
         };
         if let Some(cache) = &self.session_cache {
@@ -585,6 +589,10 @@ pub struct PublicSession<A: AEAD + Clone, K: KeyManagementService + Clone, M: Me
     ik_cache: Arc<dyn KeyCacher>,
     metrics_enabled: bool,
     invalid_partition: bool,
+    /// Pre-computed intermediate key id (avoids format! allocation per encrypt)
+    cached_ik_id: String,
+    /// Pre-computed IK id prefix for suffix validation (avoids format! allocation per decrypt)
+    cached_ik_prefix: Option<String>,
 }
 
 #[allow(clippy::same_name_method)]
@@ -603,6 +611,8 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             ik_cache: self.ik_cache.clone(),
             metrics_enabled: self.metrics_enabled,
             invalid_partition: self.invalid_partition,
+            cached_ik_id: self.cached_ik_id.clone(),
+            cached_ik_prefix: self.cached_ik_prefix.clone(),
         }
     }
 
@@ -740,12 +750,14 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     pub fn encrypt(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
         self.ensure_valid_partition()?;
         let start = std::time::Instant::now();
-        let ik_id = self.inner.f.partition.intermediate_key_id();
-        log::debug!("PublicSession::encrypt: loading IK id={ik_id}");
+        log::debug!(
+            "PublicSession::encrypt: loading IK id={}",
+            self.cached_ik_id
+        );
         let mut loader = || self.load_latest_or_create_intermediate_key();
         let ik = self
             .ik_cache
-            .get_or_load_latest(&ik_id, &mut loader)
+            .get_or_load_latest(&self.cached_ik_id, &mut loader)
             .context("encrypt: failed to get or create intermediate key")?;
         let created = now_s();
         // Stack-allocated DRK filled from thread-local ChaCha20Rng (no syscall)
@@ -771,7 +783,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                 encrypted_key: enc_drk,
                 revoked: None,
                 parent_key_meta: Some(KeyMeta {
-                    id: ik_id,
+                    id: self.cached_ik_id.clone(),
                     created: ik.created(),
                 }),
             }),
@@ -792,12 +804,12 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         let pmeta = key
             .parent_key_meta
             .ok_or_else(|| anyhow::anyhow!("decrypt: DRR key missing parent_key_meta"))?;
-        if !self
-            .inner
-            .f
-            .partition
-            .is_valid_intermediate_key_id(&pmeta.id)
-        {
+        let valid_ik = pmeta.id == self.cached_ik_id
+            || self
+                .cached_ik_prefix
+                .as_ref()
+                .is_some_and(|p| pmeta.id.starts_with(p));
+        if !valid_ik {
             return Err(anyhow::anyhow!(
                 "decrypt: invalid IK id={} for partition",
                 pmeta.id
@@ -812,10 +824,12 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         let ik = self
             .ik_cache
             .get_or_load(&pmeta, &mut loader)
-            .context(format!(
-                "decrypt: failed to load IK id={} created={}",
-                pmeta.id, pmeta.created
-            ))?;
+            .with_context(|| {
+                format!(
+                    "decrypt: failed to load IK id={} created={}",
+                    pmeta.id, pmeta.created
+                )
+            })?;
         // Decrypt DRK under IK: use cached LessSafeKey if available (no Enclave::open)
         let mut drk = if let Some(ik_lsk) = ik.less_safe_key() {
             crate::aead::decrypt_with_lsk(&key.encrypted_key, ik_lsk)
