@@ -29,7 +29,6 @@ jobs:
         run: |
           npm install
           npm run build:release
-          npm run prepublishOnly
       - name: Run roundtrip test
         working-directory: asherah-node
         run: npm test

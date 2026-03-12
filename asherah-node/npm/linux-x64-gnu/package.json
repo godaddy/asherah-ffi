@@ -1,0 +1,16 @@
+{
+  "name": "asherah-linux-x64-gnu",
+  "version": "0.0.0",
+  "os": ["linux"],
+  "cpu": ["x64"],
+  "main": "index.linux-x64-gnu.node",
+  "files": ["index.linux-x64-gnu.node"],
+  "description": "Asherah envelope encryption - Linux x64 (glibc) native binding",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

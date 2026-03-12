@@ -22,18 +22,25 @@ function getPlatform() {
 }
 
 const platform = getPlatform();
+const packageName = `asherah-${platform}`;
 
-// Try to load the native module
+// Try to load the native module:
+// 1. Installed platform package (optionalDependency) — normal npm install
+// 2. Bundled in platform subdirectory — development / CI builds
+// 3. Legacy single-binary fallback
+let native = null;
+let lastErr = null;
+
 const attempts = [
-  // Platform-specific directory (for universal package)
+  // Platform package installed as optionalDependency (e.g., asherah-darwin-arm64)
+  packageName,
+  // Bundled in platform subdirectory (development builds)
   path.join(__dirname, platform, `index.${platform}.node`),
-  // Fallback to old single-binary location
+  // Fallback to old single-binary locations
   path.join(__dirname, 'asherah.node'),
   path.join(__dirname, '..', 'index.node'),
 ];
 
-let native = null;
-let lastErr = null;
 for (const candidate of attempts) {
   try {
     native = require(candidate);
@@ -53,7 +60,10 @@ for (const candidate of attempts) {
 
 if (!native) {
   const detail = lastErr ? `: ${lastErr.message || String(lastErr)}` : '';
-  throw new Error(`Failed to load Asherah native addon for ${platform}${detail}`);
+  throw new Error(
+    `Failed to load Asherah native addon for ${platform}. ` +
+    `Ensure the platform package '${packageName}' is installed${detail}`
+  );
 }
 
 // --- Canonical godaddy/asherah-node compatibility layer ---

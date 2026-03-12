@@ -1,0 +1,16 @@
+{
+  "name": "asherah-darwin-x64",
+  "version": "0.0.0",
+  "os": ["darwin"],
+  "cpu": ["x64"],
+  "main": "index.darwin-x64.node",
+  "files": ["index.darwin-x64.node"],
+  "description": "Asherah envelope encryption - macOS x64 native binding",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
