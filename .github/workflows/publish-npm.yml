@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to publish (e.g., v1.0.0)'
+        description: 'Tag/ref to build from (default: current branch)'
         required: false
         type: string
       dry_run:
@@ -110,6 +110,8 @@ jobs:
   publish:
     needs: build-bindings
     runs-on: ubuntu-latest
+    permissions:
+      actions: write
 
     steps:
       - uses: actions/checkout@v4
@@ -132,6 +134,20 @@ jobs:
         run: |
           ls -R artifacts/
 
+      - name: Set beta version
+        working-directory: asherah-node
+        run: |
+          BETA="${{ vars.NPM_BETA_VERSION }}"
+          if [ -z "$BETA" ]; then
+            echo "::error::Repository variable NPM_BETA_VERSION is not set"
+            exit 1
+          fi
+          VERSION="4.0.0-beta.${BETA}"
+          echo "Publishing version: ${VERSION}"
+          npm version "$VERSION" --no-git-tag-version
+          echo "NPM_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "NPM_BETA=${BETA}" >> "$GITHUB_ENV"
+
       - name: Move bindings and publish
         working-directory: asherah-node
         run: |
@@ -151,11 +167,20 @@ jobs:
           npm run prepublishOnly
           npm pack
           tar -tzf *.tgz | grep "\.node"
-          echo "Dry run complete. Package created but not published."
+          echo "Dry run complete. Would publish version ${NPM_VERSION}."
 
       - name: Publish to npm
         if: ${{ github.event.inputs.dry_run != 'true' }}
         working-directory: asherah-node
-        run: npm publish --access public
+        run: npm publish --access public --tag beta
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Increment beta version
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NEXT=$(( NPM_BETA + 1 ))
+          gh variable set NPM_BETA_VERSION --body "$NEXT"
+          echo "Bumped NPM_BETA_VERSION from ${NPM_BETA} to ${NEXT}"
