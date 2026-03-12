@@ -14,7 +14,6 @@
   "scripts": {
     "build": "napi build",
     "build:release": "napi build --release",
-    "prepublishOnly": "napi prepublish -t npm",
     "test": "node test/roundtrip.js",
     "test:bun": "bun test/roundtrip.js"
   },
@@ -23,11 +22,5 @@
   },
   "engines": {
     "node": ">= 18"
-  },
-  "optionalDependencies": {
-    "asherah-win32-x64-msvc": "4.0.0",
-    "asherah-darwin-x64": "4.0.0",
-    "asherah-linux-x64-gnu": "4.0.0",
-    "asherah-linux-arm64-gnu": "4.0.0"
   }
 }
