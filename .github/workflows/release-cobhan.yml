@@ -49,6 +49,12 @@ jobs:
             artifact_name: libasherah_cobhan.dylib
             asset_name: libasherah-arm64.dylib
             arch: arm64
+          # Windows x86_64 (arm64 runs via emulation)
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: asherah_cobhan.dll
+            asset_name: libasherah-x64.dll
+            arch: x64
 
     runs-on: ${{ matrix.os }}
 
@@ -103,11 +109,13 @@ jobs:
           fi
 
       - name: Prepare artifact
+        shell: bash
         run: |
           mkdir -p artifacts
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} artifacts/${{ matrix.asset_name }}
 
       - name: Generate header file
+        shell: bash
         run: |
           cat > artifacts/libasherah-${{ matrix.arch }}.h << 'EOF'
           /* libasherah - C ABI for Asherah encryption library
@@ -245,7 +253,7 @@ jobs:
       - name: Generate SHA256SUMS
         run: |
           cd artifacts
-          sha256sum libasherah-*.so libasherah-*.dylib 2>/dev/null > SHA256SUMS || true
+          sha256sum libasherah-*.so libasherah-*.dylib libasherah-*.dll 2>/dev/null > SHA256SUMS || true
           cat SHA256SUMS
 
       - name: Create combined tarball
@@ -262,6 +270,7 @@ jobs:
             artifacts/libasherah-arm64.so
             artifacts/libasherah-x64.dylib
             artifacts/libasherah-arm64.dylib
+            artifacts/libasherah-x64.dll
             artifacts/libasherah-x64.h
             artifacts/libasherah-arm64.h
             artifacts/SHA256SUMS
@@ -297,6 +306,9 @@ jobs:
           echo ""
           echo "macOS arm64 (Apple Silicon):"
           echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-arm64.dylib"
+          echo ""
+          echo "Windows x86_64 (arm64 via emulation):"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-x64.dll"
           echo ""
           echo "Checksums:"
           echo "  https://github.com/${REPO}/releases/download/${TAG}/SHA256SUMS"
