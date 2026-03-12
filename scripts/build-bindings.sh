@@ -291,11 +291,18 @@ fi
 
 if should_build dotnet || should_build all; then
   echo "[build-bindings] Packing .NET library"
-  dotnet pack "$ROOT_DIR/asherah-dotnet/AsherahDotNet/AsherahDotNet.csproj" \
-    -c Release \
-    -p:ContinuousIntegrationBuild=true \
-    -p:RuntimeIdentifiers="$DOTNET_RID" \
-    -o "$OUT_DIR/dotnet"
+  _csproj="$ROOT_DIR/asherah-dotnet/AsherahDotNet/AsherahDotNet.csproj"
+  # Use 'dotnet msbuild' instead of 'dotnet pack' to work around .NET 10 SDK
+  # injecting the csproj twice via a response file (MSB1008).
+  dotnet msbuild "$_csproj" /t:Restore \
+    /p:Configuration=Release \
+    /p:RuntimeIdentifiers="$DOTNET_RID"
+  dotnet msbuild "$_csproj" /t:Pack \
+    /p:Configuration=Release \
+    /p:ContinuousIntegrationBuild=true \
+    /p:RuntimeIdentifiers="$DOTNET_RID" \
+    /p:PackageOutputPath="$OUT_DIR/dotnet" \
+    /p:_IsPacking=true
 fi
 
 if should_build java || should_build all; then
