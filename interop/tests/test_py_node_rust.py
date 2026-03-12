@@ -316,6 +316,72 @@ def test_cross_language_round_trip(build_artifacts):
     assert rust_cli("decrypt", partition, ruby_json) == plaintext
 
 
+def test_cross_language_unicode(build_artifacts):
+    """Unicode payloads must survive encrypt in one language and decrypt in another."""
+    partition = "unicode-interop"
+    payloads = [
+        "你好世界こんにちは세계".encode(),
+        "🦀🔐🎉💾🌍".encode(),
+        "Hello 世界 مرحبا Привет 🌍".encode(),
+        "e\u0301 n\u0303 a\u0308".encode(),
+        "\U0001F468\u200D\U0001F469\u200D\U0001F467\u200D\U0001F466".encode(),
+    ]
+
+    for payload in payloads:
+        # Python encrypt -> Node + Rust + Ruby decrypt
+        py_json = python_encrypt(partition, payload)
+        assert node_cli("decrypt", partition, py_json.encode()) == payload, (
+            f"Node failed to decrypt Python-encrypted unicode: {payload!r}"
+        )
+        assert rust_cli("decrypt", partition, py_json.encode()) == payload, (
+            f"Rust failed to decrypt Python-encrypted unicode: {payload!r}"
+        )
+        assert ruby_cli("decrypt", partition, py_json.encode()) == payload, (
+            f"Ruby failed to decrypt Python-encrypted unicode: {payload!r}"
+        )
+
+        # Node encrypt -> Python + Rust + Ruby decrypt
+        node_json = node_cli("encrypt", partition, payload)
+        assert python_decrypt(partition, node_json.decode()) == payload
+        assert rust_cli("decrypt", partition, node_json) == payload
+        assert ruby_cli("decrypt", partition, node_json) == payload
+
+
+def test_cross_language_binary(build_artifacts):
+    """Binary payloads with all 256 byte values must survive cross-language roundtrip."""
+    partition = "binary-interop"
+    payload = bytes(range(256))
+
+    # Python encrypt -> Node + Rust + Ruby decrypt
+    py_json = python_encrypt(partition, payload)
+    assert node_cli("decrypt", partition, py_json.encode()) == payload
+    assert rust_cli("decrypt", partition, py_json.encode()) == payload
+    assert ruby_cli("decrypt", partition, py_json.encode()) == payload
+
+    # Node encrypt -> Python + Rust + Ruby decrypt
+    node_json = node_cli("encrypt", partition, payload)
+    assert python_decrypt(partition, node_json.decode()) == payload
+    assert rust_cli("decrypt", partition, node_json) == payload
+    assert ruby_cli("decrypt", partition, node_json) == payload
+
+    # Rust encrypt -> Python + Node + Ruby decrypt
+    rust_json = rust_cli("encrypt", partition, payload)
+    assert python_decrypt(partition, rust_json.decode()) == payload
+    assert node_cli("decrypt", partition, rust_json) == payload
+    assert ruby_cli("decrypt", partition, rust_json) == payload
+
+
+def test_cross_language_empty(build_artifacts):
+    """Empty payloads must survive cross-language roundtrip."""
+    partition = "empty-interop"
+    payload = b""
+
+    py_json = python_encrypt(partition, payload)
+    assert node_cli("decrypt", partition, py_json.encode()) == payload
+    assert rust_cli("decrypt", partition, py_json.encode()) == payload
+    assert ruby_cli("decrypt", partition, py_json.encode()) == payload
+
+
 def test_node_legacy_compatibility(build_artifacts):
     partition = "compat"
     payload = b"legacy compatibility payload"

@@ -219,7 +219,11 @@ pub unsafe extern "C" fn asherah_encrypt_to_json(
         return -1;
     }
     let s = &*session;
-    let bytes = std::slice::from_raw_parts(data, len);
+    let bytes = if data.is_null() {
+        &[]
+    } else {
+        std::slice::from_raw_parts(data, len)
+    };
     match s.inner.encrypt(bytes) {
         Ok(drr) => {
             let v = drr.to_json_fast().into_bytes();
@@ -250,7 +254,11 @@ pub unsafe extern "C" fn asherah_decrypt_from_json(
         return -1;
     }
     let s = &*session;
-    let bytes = std::slice::from_raw_parts(json, len);
+    let bytes = if json.is_null() {
+        &[]
+    } else {
+        std::slice::from_raw_parts(json, len)
+    };
     match serde_json::from_slice::<ael::types::DataRowRecord>(bytes) {
         Ok(drr) => match s.inner.decrypt(drr) {
             Ok(pt) => take_vec_into_buffer(pt, out),
