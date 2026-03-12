@@ -19,6 +19,30 @@ use asherah_config::ConfigOptions;
 use serde::Deserialize;
 
 // ============================================================================
+// Stderr Log Sink (matches Go asherah-cobhan logging behavior)
+// ============================================================================
+
+/// Stderr log sink matching Go asherah-cobhan's logging:
+/// - Error messages always go to stderr
+/// - Debug/info/warn messages only when verbose=true
+struct StderrLogSink {
+    verbose: bool,
+}
+
+impl asherah::logging::LogSink for StderrLogSink {
+    fn log(&self, record: &log::Record<'_>) {
+        // Go cobhan: ErrorLog is always on, DebugLog only when verbose
+        let should_log = match record.level() {
+            log::Level::Error => true,
+            _ => self.verbose,
+        };
+        if should_log {
+            eprintln!("asherah-cobhan: [{}] {}", record.level(), record.args());
+        }
+    }
+}
+
+// ============================================================================
 // Type Aliases
 // ============================================================================
 
@@ -359,6 +383,13 @@ pub unsafe extern "C" fn SetupJson(config_json: *const c_char) -> i32 {
         return ERR_NULL_PTR;
     }
 
+    // Install error-only stderr sink immediately so setup errors are visible
+    let _ = asherah::logging::ensure_logger();
+    asherah::logging::set_sink(
+        "stderr",
+        Some(std::sync::Arc::new(StderrLogSink { verbose: false })),
+    );
+
     let mut guard = match FACTORY.write() {
         Ok(g) => g,
         Err(_) => return ERR_PANIC,
@@ -392,6 +423,13 @@ pub unsafe extern "C" fn SetupJson(config_json: *const c_char) -> i32 {
     // Apply configuration and create factory
     match asherah_config::factory_from_config(&config) {
         Ok((factory, applied)) => {
+            // Upgrade to verbose sink if Verbose=true (debug+error to stderr)
+            if applied.verbose {
+                asherah::logging::set_sink(
+                    "stderr",
+                    Some(std::sync::Arc::new(StderrLogSink { verbose: true })),
+                );
+            }
             set_canaries_enabled(applied.enable_canaries);
             *guard = Some(factory);
             ERR_NONE
