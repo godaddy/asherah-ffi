@@ -221,13 +221,10 @@ pub unsafe extern "C" fn asherah_encrypt_to_json(
     let s = &*session;
     let bytes = std::slice::from_raw_parts(data, len);
     match s.inner.encrypt(bytes) {
-        Ok(drr) => match serde_json::to_vec(&drr) {
-            Ok(v) => take_vec_into_buffer(v, out),
-            Err(e) => {
-                set_error(format!("{e}"));
-                -1
-            }
-        },
+        Ok(drr) => {
+            let v = drr.to_json_fast().into_bytes();
+            take_vec_into_buffer(v, out)
+        }
         Err(e) => {
             set_error(format!("{e}"));
             -1

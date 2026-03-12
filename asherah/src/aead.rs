@@ -1,6 +1,8 @@
 use crate::traits::AEAD as AeadTrait;
-use rand::TryRngCore;
+use rand::RngCore;
+use rand_chacha::ChaCha20Rng;
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
+use std::cell::RefCell;
 
 #[derive(Clone, Debug)]
 pub struct AES256GCM;
@@ -32,6 +34,24 @@ impl Default for AES256GCM {
 
 const GCM_NONCE_SIZE: usize = 12;
 
+// Thread-local ChaCha20Rng seeded from OsRng (avoids getrandom syscall per call)
+thread_local! {
+    static FAST_RNG: RefCell<ChaCha20Rng> = RefCell::new({
+        use rand::SeedableRng;
+        ChaCha20Rng::from_os_rng()
+    });
+}
+
+/// Use the thread-local fast CSPRNG.
+pub fn fast_rng<R>(f: impl FnOnce(&mut ChaCha20Rng) -> R) -> R {
+    FAST_RNG.with(|cell| f(&mut cell.borrow_mut()))
+}
+
+/// Fill a buffer with random bytes using the thread-local CSPRNG.
+pub fn fast_random_bytes(buf: &mut [u8]) {
+    fast_rng(|rng| rng.fill_bytes(buf));
+}
+
 impl AeadTrait for AES256GCM {
     fn encrypt(&self, data: &[u8], key: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
         if key.len() != 32 {
@@ -46,19 +66,8 @@ impl AeadTrait for AES256GCM {
                 key.len()
             )
         })?;
-        let key = LessSafeKey::new(unbound);
-        let mut nonce = [0_u8; GCM_NONCE_SIZE];
-        rand::rngs::OsRng
-            .try_fill_bytes(&mut nonce)
-            .map_err(|e| anyhow::anyhow!("AES-256-GCM encrypt: nonce generation failed: {e}"))?;
-        let nonce_obj = Nonce::assume_unique_for_key(nonce);
-        let nonce_bytes = *nonce_obj.as_ref();
-        let mut in_out = Vec::with_capacity(data.len() + Self::TAG_SIZE);
-        in_out.extend_from_slice(data);
-        key.seal_in_place_append_tag(nonce_obj, Aad::empty(), &mut in_out)
-            .map_err(|_| anyhow::anyhow!("AES-256-GCM seal failed (data_len={})", data.len()))?;
-        in_out.extend_from_slice(&nonce_bytes);
-        Ok(in_out)
+        let lsk = LessSafeKey::new(unbound);
+        encrypt_with_lsk(data, &lsk)
     }
 
     fn decrypt(&self, data: &[u8], key: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
@@ -74,38 +83,57 @@ impl AeadTrait for AES256GCM {
                 key.len()
             )
         })?;
-        let key = LessSafeKey::new(unbound);
-        let nonce_pos = data.len() - GCM_NONCE_SIZE;
-        let (ct_with_tag, nonce_bytes) = data.split_at(nonce_pos);
-        if ct_with_tag.len() < Self::TAG_SIZE {
-            return Err(anyhow::anyhow!(
-                "AES-256-GCM decrypt: ciphertext missing tag (ct_len={})",
-                ct_with_tag.len()
-            ));
-        }
-        if ct_with_tag.len() - Self::TAG_SIZE > Self::MAX_DATA_SIZE {
-            return Err(anyhow::anyhow!(
-                "AES-256-GCM decrypt: ciphertext exceeds limit (ct_len={})",
-                ct_with_tag.len()
-            ));
-        }
-        let nonce = Nonce::try_assume_unique_for_key(nonce_bytes).map_err(|_| {
+        let lsk = LessSafeKey::new(unbound);
+        decrypt_with_lsk(data, &lsk)
+    }
+}
+
+/// Encrypt using a pre-expanded LessSafeKey (skips key schedule).
+pub fn encrypt_with_lsk(data: &[u8], key: &LessSafeKey) -> Result<Vec<u8>, anyhow::Error> {
+    let mut nonce = [0_u8; GCM_NONCE_SIZE];
+    fast_random_bytes(&mut nonce);
+    let nonce_obj = Nonce::assume_unique_for_key(nonce);
+    let nonce_bytes = *nonce_obj.as_ref();
+    let mut in_out = Vec::with_capacity(data.len() + AES256GCM::TAG_SIZE + GCM_NONCE_SIZE);
+    in_out.extend_from_slice(data);
+    key.seal_in_place_append_tag(nonce_obj, Aad::empty(), &mut in_out)
+        .map_err(|_| anyhow::anyhow!("AES-256-GCM seal failed (data_len={})", data.len()))?;
+    in_out.extend_from_slice(&nonce_bytes);
+    Ok(in_out)
+}
+
+/// Decrypt using a pre-expanded LessSafeKey (skips key schedule).
+pub fn decrypt_with_lsk(data: &[u8], key: &LessSafeKey) -> Result<Vec<u8>, anyhow::Error> {
+    if data.len() < GCM_NONCE_SIZE + AES256GCM::TAG_SIZE {
+        return Err(anyhow::anyhow!("ciphertext too short"));
+    }
+    let nonce_pos = data.len() - GCM_NONCE_SIZE;
+    let (ct_with_tag, nonce_bytes) = data.split_at(nonce_pos);
+    let nonce = Nonce::try_assume_unique_for_key(nonce_bytes).map_err(|_| {
+        anyhow::anyhow!(
+            "AES-256-GCM decrypt: invalid nonce (len={})",
+            nonce_bytes.len()
+        )
+    })?;
+    let mut in_out = ct_with_tag.to_vec();
+    let pt = key
+        .open_in_place(nonce, Aad::empty(), &mut in_out)
+        .map_err(|_| {
             anyhow::anyhow!(
-                "AES-256-GCM decrypt: invalid nonce (len={})",
-                nonce_bytes.len()
+                "AES-256-GCM decrypt: authentication failed (ct_len={})",
+                data.len()
             )
         })?;
-        let mut in_out = ct_with_tag.to_vec();
-        let pt = key
-            .open_in_place(nonce, Aad::empty(), &mut in_out)
-            .map_err(|_| {
-                anyhow::anyhow!(
-                    "AES-256-GCM decrypt: authentication failed (ct_len={})",
-                    data.len()
-                )
-            })?;
-        Ok(pt.to_vec())
-    }
+    let n = pt.len();
+    in_out.truncate(n);
+    Ok(in_out)
+}
+
+/// Make a LessSafeKey from raw 32-byte key material.
+pub fn make_lsk(key: &[u8]) -> Result<LessSafeKey, anyhow::Error> {
+    let unbound = UnboundKey::new(&AES_256_GCM, key)
+        .map_err(|_| anyhow::anyhow!("invalid AES-256-GCM key"))?;
+    Ok(LessSafeKey::new(unbound))
 }
 
 // Helper for deriving a fixed-size pseudo-key from arbitrary bytes (dev placeholder)
