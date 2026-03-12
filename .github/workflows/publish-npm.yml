@@ -179,7 +179,7 @@ jobs:
       - name: Increment beta version
         if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           NEXT=$(( NPM_BETA + 1 ))
           if gh variable set NPM_BETA_VERSION --body "$NEXT" 2>/dev/null; then
