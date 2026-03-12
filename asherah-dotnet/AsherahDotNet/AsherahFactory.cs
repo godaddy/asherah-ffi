@@ -1,8 +1,9 @@
 using System;
+using System.Text;
 
 namespace GoDaddy.Asherah;
 
-public sealed class AsherahFactory : IDisposable
+public sealed class AsherahFactory : IAsherahFactory
 {
     private SafeFactoryHandle _handle;
     private bool _disposed;
@@ -12,7 +13,7 @@ public sealed class AsherahFactory : IDisposable
         _handle = handle;
     }
 
-    public AsherahSession GetSession(string partitionId)
+    public unsafe AsherahSession GetSession(string partitionId)
     {
         if (partitionId is null)
         {
@@ -20,14 +21,24 @@ public sealed class AsherahFactory : IDisposable
         }
         EnsureNotDisposed();
 
-        using var partition = new Utf8String(partitionId);
-        var sessionPtr = NativeMethods.asherah_factory_get_session(_handle.DangerousGetHandle(), partition.Pointer);
+        var maxBytes = Encoding.UTF8.GetMaxByteCount(partitionId.Length) + 1; // +1 for null terminator
+        Span<byte> buf = maxBytes <= 256 ? stackalloc byte[maxBytes] : new byte[maxBytes];
+        var written = Encoding.UTF8.GetBytes(partitionId.AsSpan(), buf);
+        buf[written] = 0; // null-terminate
+
+        IntPtr sessionPtr;
+        fixed (byte* ptr = buf)
+        {
+            sessionPtr = NativeMethods.asherah_factory_get_session(_handle.DangerousGetHandle(), ptr);
+        }
         if (sessionPtr == IntPtr.Zero)
         {
             throw NativeError.Create("Failed to get session");
         }
         return new AsherahSession(new SafeSessionHandle(sessionPtr));
     }
+
+    IAsherahSession IAsherahFactory.GetSession(string partitionId) => GetSession(partitionId);
 
     public void Dispose()
     {

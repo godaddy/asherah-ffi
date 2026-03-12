@@ -37,6 +37,15 @@ internal static class NativeMethods
     internal static extern int asherah_decrypt_from_json(IntPtr session, byte[] json, UIntPtr length, ref AsherahBuffer buffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern unsafe int asherah_encrypt_to_json(IntPtr session, byte* data, UIntPtr length, ref AsherahBuffer buffer);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern unsafe int asherah_decrypt_from_json(IntPtr session, byte* json, UIntPtr length, ref AsherahBuffer buffer);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern unsafe IntPtr asherah_factory_get_session(IntPtr factory, byte* partitionId);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     internal static extern void asherah_buffer_free(ref AsherahBuffer buffer);
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
