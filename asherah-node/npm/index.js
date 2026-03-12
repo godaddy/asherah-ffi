@@ -35,6 +35,7 @@ function getPlatform() {
   }
   if (type === 'win32') {
     if (arch === 'x64') return 'win32-x64-msvc';
+    if (arch === 'arm64') return 'win32-arm64-msvc';
   }
 
   throw new Error(`Unsupported platform: ${type}-${arch}`);
@@ -51,6 +52,7 @@ const PLATFORM_PACKAGES = {
   'linux-x64-musl': 'asherah-linux-x64-musl',
   'linux-arm64-musl': 'asherah-linux-arm64-musl',
   'win32-x64-msvc': 'asherah-windows-x64',
+  'win32-arm64-msvc': 'asherah-windows-arm64',
 };
 const packageName = PLATFORM_PACKAGES[platform] || `asherah-${platform}`;
 
