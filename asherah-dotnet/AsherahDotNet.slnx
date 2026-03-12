@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="AsherahDotNet/AsherahDotNet.csproj" />
+  <Project Path="tests/AsherahDotNet.Tests/AsherahDotNet.Tests.csproj" />
+</Solution>

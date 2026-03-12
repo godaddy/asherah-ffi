@@ -13,7 +13,7 @@ Build & test
 - Python bindings: `python3 -m pytest asherah-py/tests`
 - Node addon: `cd asherah-node && npm install && npm test`
 - Java bindings: `cargo build -p asherah-java && cd asherah-java/java && mvn test`
-- .NET bindings: `cargo build -p asherah-ffi && dotnet test asherah-dotnet/AsherahDotNet.sln`
+- .NET bindings: `cargo build -p asherah-ffi && dotnet test asherah-dotnet/AsherahDotNet.slnx`
 - Ruby bindings: `ruby -Iasherah-ruby/lib -Iasherah-ruby/test asherah-ruby/test/round_trip_test.rb`
 - Go bindings: `cd asherah-go && go test ./...` (requires `ASHERAH_GO_NATIVE` pointing to the native library path)
 - Full matrix via Docker: `./scripts/test-in-docker.sh` (requires Docker engine)
@@ -32,7 +32,7 @@ Docker-based test harness
 - Managed wrapper lives under `asherah-dotnet/`
 - Ensure the native Asherah library is on the search path (`ASHERAH_DOTNET_NATIVE=/path/to/target/debug`), then:
   - `dotnet add package` is not required—projects already reference the wrapper
-  - Run tests via `dotnet test asherah-dotnet/AsherahDotNet.sln`
+  - Run tests via `dotnet test asherah-dotnet/AsherahDotNet.slnx`
 - The wrapper loads the native `asherah_ffi` library using `ASHERAH_DOTNET_NATIVE`, `AppContext` data, or OS search paths.
 
 See `asherah/README.md` for full details.

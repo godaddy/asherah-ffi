@@ -4,7 +4,7 @@ using System.Text;
 
 namespace GoDaddy.Asherah;
 
-public sealed class AsherahSession : IDisposable
+public sealed class AsherahSession : IAsherahSession
 {
     private SafeSessionHandle _handle;
     private bool _disposed;
@@ -14,7 +14,7 @@ public sealed class AsherahSession : IDisposable
         _handle = handle;
     }
 
-    public byte[] EncryptBytes(byte[] plaintext)
+    public unsafe byte[] EncryptBytes(byte[] plaintext)
     {
         if (plaintext is null)
         {
@@ -23,7 +23,11 @@ public sealed class AsherahSession : IDisposable
         EnsureNotDisposed();
 
         var buffer = default(AsherahBuffer);
-        var status = NativeMethods.asherah_encrypt_to_json(_handle.DangerousGetHandle(), plaintext, new UIntPtr((ulong)plaintext.LongLength), ref buffer);
+        int status;
+        fixed (byte* ptr = plaintext)
+        {
+            status = NativeMethods.asherah_encrypt_to_json(_handle.DangerousGetHandle(), ptr, new UIntPtr((ulong)plaintext.LongLength), ref buffer);
+        }
         if (status != 0)
         {
             throw NativeError.Create("encrypt_to_json");
@@ -31,7 +35,7 @@ public sealed class AsherahSession : IDisposable
 
         try
         {
-            return ExtractAndFree(ref buffer);
+            return Extract(ref buffer);
         }
         finally
         {
@@ -49,7 +53,7 @@ public sealed class AsherahSession : IDisposable
         return Encoding.UTF8.GetString(EncryptBytes(bytes));
     }
 
-    public byte[] DecryptBytes(byte[] ciphertextJson)
+    public unsafe byte[] DecryptBytes(byte[] ciphertextJson)
     {
         if (ciphertextJson is null)
         {
@@ -58,7 +62,11 @@ public sealed class AsherahSession : IDisposable
         EnsureNotDisposed();
 
         var buffer = default(AsherahBuffer);
-        var status = NativeMethods.asherah_decrypt_from_json(_handle.DangerousGetHandle(), ciphertextJson, new UIntPtr((ulong)ciphertextJson.LongLength), ref buffer);
+        int status;
+        fixed (byte* ptr = ciphertextJson)
+        {
+            status = NativeMethods.asherah_decrypt_from_json(_handle.DangerousGetHandle(), ptr, new UIntPtr((ulong)ciphertextJson.LongLength), ref buffer);
+        }
         if (status != 0)
         {
             throw NativeError.Create("decrypt_from_json");
@@ -66,7 +74,7 @@ public sealed class AsherahSession : IDisposable
 
         try
         {
-            return ExtractAndFree(ref buffer);
+            return Extract(ref buffer);
         }
         finally
         {
@@ -103,7 +111,7 @@ public sealed class AsherahSession : IDisposable
         }
     }
 
-    private static byte[] ExtractAndFree(ref AsherahBuffer buffer)
+    private static byte[] Extract(ref AsherahBuffer buffer)
     {
         if (buffer.data == IntPtr.Zero || buffer.len == UIntPtr.Zero)
         {
