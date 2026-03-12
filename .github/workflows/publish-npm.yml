@@ -70,11 +70,11 @@ jobs:
     runs-on: ${{ matrix.settings.host }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
 
@@ -84,7 +84,7 @@ jobs:
           targets: ${{ matrix.settings.target }}
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry/index/
@@ -100,7 +100,7 @@ jobs:
         run: ${{ matrix.settings.build }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bindings-${{ matrix.settings.target }}
           path: asherah-node/*.node
@@ -114,17 +114,17 @@ jobs:
       actions: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           pattern: bindings-*
@@ -179,8 +179,11 @@ jobs:
       - name: Increment beta version
         if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           NEXT=$(( NPM_BETA + 1 ))
-          gh variable set NPM_BETA_VERSION --body "$NEXT"
-          echo "Bumped NPM_BETA_VERSION from ${NPM_BETA} to ${NEXT}"
+          if gh variable set NPM_BETA_VERSION --body "$NEXT" 2>/dev/null; then
+            echo "Bumped NPM_BETA_VERSION from ${NPM_BETA} to ${NEXT}"
+          else
+            echo "::warning::Auto-increment failed (GITHUB_TOKEN lacks variable write access). Manually set NPM_BETA_VERSION to ${NEXT} in Settings > Secrets and variables > Actions > Variables."
+          fi
