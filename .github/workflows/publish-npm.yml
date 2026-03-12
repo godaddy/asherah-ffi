@@ -20,14 +20,14 @@ jobs:
     strategy:
       matrix:
         settings:
-          - host: ubuntu-latest
+          - host: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             build: |
               set -e
               npm ci
               npm run build -- --target x86_64-unknown-linux-gnu
               strip -x *.node
-          - host: ubuntu-latest
+          - host: ubuntu-22.04
             target: aarch64-unknown-linux-gnu
             build: |
               set -e
