@@ -79,6 +79,12 @@ jobs:
             build: |
               npm ci
               npm run build -- --target x86_64-pc-windows-msvc
+          - host: windows-latest
+            target: aarch64-pc-windows-msvc
+            build: |
+              rustup target add aarch64-pc-windows-msvc
+              npm ci
+              npm run build -- --target aarch64-pc-windows-msvc
 
     runs-on: ${{ matrix.settings.host }}
 
@@ -185,6 +191,7 @@ jobs:
             [x86_64-apple-darwin]=darwin-x64
             [aarch64-apple-darwin]=darwin-arm64
             [x86_64-pc-windows-msvc]=win32-x64-msvc
+            [aarch64-pc-windows-msvc]=win32-arm64-msvc
           )
 
           for triple in "${!TRIPLE_MAP[@]}"; do
