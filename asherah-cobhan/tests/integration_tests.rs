@@ -67,6 +67,13 @@ fn test_full_encryption_workflow() {
     test_buffer_edge_cases_impl();
     test_decrypt_invalid_json_impl();
 
+    test_1mb_data_encryption();
+    test_concurrent_encrypt_decrypt();
+    test_unicode_partition_ids();
+    test_all_byte_values_roundtrip();
+    test_combining_characters();
+    test_json_special_chars_in_data();
+
     // Shutdown and re-initialize lifecycle test
     test_shutdown_and_reinitialize_impl();
 }
@@ -911,6 +918,325 @@ fn test_empty_partition_id() {
         assert_eq!(
             result, ERR_ENCRYPT_FAILED,
             "EncryptToJson with empty partition should fail"
+        );
+    }
+}
+
+// ============================================================================
+// 1MB Data Test
+// ============================================================================
+
+fn test_1mb_data_encryption() {
+    let size = 1024 * 1024; // 1MB
+    let plaintext: Vec<u8> = (0..size).map(|i| (i % 256) as u8).collect();
+
+    let partition_buf = create_string_buffer("1mb-test");
+    let data_buf = create_input_buffer(&plaintext);
+
+    let estimate = EstimateBuffer(size, 8);
+    let mut json_output = create_output_buffer(estimate);
+
+    unsafe {
+        let result = EncryptToJson(
+            partition_buf.as_ptr().cast::<c_char>(),
+            data_buf.as_ptr().cast::<c_char>(),
+            json_output.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(result, ERR_NONE, "1MB encryption should succeed");
+    }
+
+    let mut decrypted_output = create_output_buffer(size + 100);
+
+    unsafe {
+        let result = DecryptFromJson(
+            partition_buf.as_ptr().cast::<c_char>(),
+            json_output.as_ptr().cast::<c_char>(),
+            decrypted_output.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(result, ERR_NONE, "1MB decryption should succeed");
+    }
+
+    let decrypted_data = get_buffer_data(&decrypted_output);
+    assert_eq!(decrypted_data.len(), plaintext.len(), "1MB length mismatch");
+    assert_eq!(decrypted_data, plaintext, "1MB data should round-trip");
+}
+
+// ============================================================================
+// Concurrent Encrypt/Decrypt Test
+// ============================================================================
+
+fn test_concurrent_encrypt_decrypt() {
+    use std::sync::Arc;
+    use std::thread;
+
+    let num_threads = 8;
+    let ops_per_thread = 20;
+    let barrier = Arc::new(std::sync::Barrier::new(num_threads));
+    let mut handles = Vec::new();
+
+    for t in 0..num_threads {
+        let barrier = Arc::clone(&barrier);
+        handles.push(thread::spawn(move || {
+            barrier.wait();
+            for i in 0..ops_per_thread {
+                let partition_id = format!("concurrent-{t}");
+                let plaintext = format!("thread-{t}-iter-{i}");
+                let plaintext_bytes = plaintext.as_bytes();
+
+                let partition_buf = create_string_buffer(&partition_id);
+                let data_buf = create_input_buffer(plaintext_bytes);
+                let estimate =
+                    EstimateBuffer(plaintext_bytes.len() as i32, partition_id.len() as i32);
+                let mut json_output = create_output_buffer(estimate);
+
+                unsafe {
+                    let result = EncryptToJson(
+                        partition_buf.as_ptr().cast::<c_char>(),
+                        data_buf.as_ptr().cast::<c_char>(),
+                        json_output.as_mut_ptr().cast::<c_char>(),
+                    );
+                    assert_eq!(
+                        result, ERR_NONE,
+                        "Concurrent encrypt failed: thread={t} iter={i}"
+                    );
+                }
+
+                let mut decrypted_output = create_output_buffer(plaintext_bytes.len() as i32 + 100);
+
+                unsafe {
+                    let result = DecryptFromJson(
+                        partition_buf.as_ptr().cast::<c_char>(),
+                        json_output.as_ptr().cast::<c_char>(),
+                        decrypted_output.as_mut_ptr().cast::<c_char>(),
+                    );
+                    assert_eq!(
+                        result, ERR_NONE,
+                        "Concurrent decrypt failed: thread={t} iter={i}"
+                    );
+                }
+
+                let decrypted_data = get_buffer_data(&decrypted_output);
+                assert_eq!(
+                    decrypted_data, plaintext_bytes,
+                    "Concurrent roundtrip mismatch: thread={t} iter={i}"
+                );
+            }
+        }));
+    }
+
+    for h in handles {
+        h.join().expect("thread panicked");
+    }
+}
+
+// ============================================================================
+// Unicode Partition ID Test
+// ============================================================================
+
+fn test_unicode_partition_ids() {
+    let partitions = [
+        "user-日本語",
+        "tenant-émoji-🦀",
+        "مستخدم-عربي",
+        "user-Ω-∞-★",
+    ];
+
+    for partition_id in partitions {
+        let plaintext = b"data for unicode partition";
+
+        let partition_buf = create_string_buffer(partition_id);
+        let data_buf = create_input_buffer(plaintext);
+        let estimate = EstimateBuffer(plaintext.len() as i32, partition_id.len() as i32);
+        let mut json_output = create_output_buffer(estimate);
+
+        unsafe {
+            let result = EncryptToJson(
+                partition_buf.as_ptr().cast::<c_char>(),
+                data_buf.as_ptr().cast::<c_char>(),
+                json_output.as_mut_ptr().cast::<c_char>(),
+            );
+            assert_eq!(
+                result, ERR_NONE,
+                "Encrypt should succeed for unicode partition: {partition_id}"
+            );
+        }
+
+        let mut decrypted_output = create_output_buffer(plaintext.len() as i32 + 100);
+
+        unsafe {
+            let result = DecryptFromJson(
+                partition_buf.as_ptr().cast::<c_char>(),
+                json_output.as_ptr().cast::<c_char>(),
+                decrypted_output.as_mut_ptr().cast::<c_char>(),
+            );
+            assert_eq!(
+                result, ERR_NONE,
+                "Decrypt should succeed for unicode partition: {partition_id}"
+            );
+        }
+
+        let decrypted_data = get_buffer_data(&decrypted_output);
+        assert_eq!(
+            decrypted_data, plaintext,
+            "Roundtrip should work for unicode partition: {partition_id}"
+        );
+    }
+}
+
+// ============================================================================
+// All Byte Values Roundtrip (repeated pattern to 1KB)
+// ============================================================================
+
+fn test_all_byte_values_roundtrip() {
+    // 4 copies of 0x00..0xFF to test that null bytes and all values survive
+    let plaintext: Vec<u8> = (0..4).flat_map(|_| 0u8..=255).collect();
+    assert_eq!(plaintext.len(), 1024);
+
+    let partition_buf = create_string_buffer("all-bytes");
+    let data_buf = create_input_buffer(&plaintext);
+    let estimate = EstimateBuffer(plaintext.len() as i32, 9);
+    let mut json_output = create_output_buffer(estimate);
+
+    unsafe {
+        let result = EncryptToJson(
+            partition_buf.as_ptr().cast::<c_char>(),
+            data_buf.as_ptr().cast::<c_char>(),
+            json_output.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(result, ERR_NONE, "All-bytes encryption should succeed");
+    }
+
+    let mut decrypted_output = create_output_buffer(plaintext.len() as i32 + 100);
+
+    unsafe {
+        let result = DecryptFromJson(
+            partition_buf.as_ptr().cast::<c_char>(),
+            json_output.as_ptr().cast::<c_char>(),
+            decrypted_output.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(result, ERR_NONE, "All-bytes decryption should succeed");
+    }
+
+    let decrypted_data = get_buffer_data(&decrypted_output);
+    assert_eq!(
+        decrypted_data, plaintext,
+        "All byte values should round-trip correctly"
+    );
+}
+
+// ============================================================================
+// Combining Characters / Multi-byte Sequences
+// ============================================================================
+
+fn test_combining_characters() {
+    let test_strings = [
+        "e\u{0301}",                        // é as e + combining acute accent
+        "n\u{0303}",                        // ñ as n + combining tilde
+        "a\u{0308}",                        // ä as a + combining diaeresis
+        "\u{1F1FA}\u{1F1F8}",               // 🇺🇸 flag (regional indicator pair)
+        "\u{200B}zero-width",               // zero-width space
+        "\u{FEFF}BOM text",                 // byte order mark
+        "👨\u{200D}👩\u{200D}👧\u{200D}👦", // family emoji (ZWJ sequence)
+    ];
+
+    for plaintext in test_strings {
+        let plaintext_bytes = plaintext.as_bytes();
+
+        let partition_buf = create_string_buffer("combining-test");
+        let data_buf = create_input_buffer(plaintext_bytes);
+        let estimate = EstimateBuffer(plaintext_bytes.len() as i32, 14);
+        let mut json_output = create_output_buffer(estimate);
+
+        unsafe {
+            let result = EncryptToJson(
+                partition_buf.as_ptr().cast::<c_char>(),
+                data_buf.as_ptr().cast::<c_char>(),
+                json_output.as_mut_ptr().cast::<c_char>(),
+            );
+            assert_eq!(
+                result, ERR_NONE,
+                "Combining char encryption should succeed for: {:?}",
+                plaintext
+            );
+        }
+
+        let mut decrypted_output = create_output_buffer(plaintext_bytes.len() as i32 + 100);
+
+        unsafe {
+            let result = DecryptFromJson(
+                partition_buf.as_ptr().cast::<c_char>(),
+                json_output.as_ptr().cast::<c_char>(),
+                decrypted_output.as_mut_ptr().cast::<c_char>(),
+            );
+            assert_eq!(
+                result, ERR_NONE,
+                "Combining char decryption should succeed for: {:?}",
+                plaintext
+            );
+        }
+
+        let decrypted_str = get_buffer_string(&decrypted_output);
+        assert_eq!(
+            decrypted_str, plaintext,
+            "Combining characters should round-trip correctly"
+        );
+    }
+}
+
+// ============================================================================
+// JSON-special characters in data
+// ============================================================================
+
+fn test_json_special_chars_in_data() {
+    // Data that could break JSON serialization if not properly handled
+    let test_payloads: &[&[u8]] = &[
+        b"{\"key\": \"value\"}",
+        b"[1, 2, 3]",
+        b"null",
+        b"\"quoted string\"",
+        b"back\\slash",
+        b"line\nfeed\ttab\rreturn",
+        b"\x00\x01\x02\x1f", // JSON control chars
+    ];
+
+    for plaintext in test_payloads {
+        let partition_buf = create_string_buffer("json-special");
+        let data_buf = create_input_buffer(plaintext);
+        let estimate = EstimateBuffer(plaintext.len() as i32, 12);
+        let mut json_output = create_output_buffer(estimate);
+
+        unsafe {
+            let result = EncryptToJson(
+                partition_buf.as_ptr().cast::<c_char>(),
+                data_buf.as_ptr().cast::<c_char>(),
+                json_output.as_mut_ptr().cast::<c_char>(),
+            );
+            assert_eq!(
+                result, ERR_NONE,
+                "JSON-special encryption should succeed for: {:?}",
+                plaintext
+            );
+        }
+
+        let mut decrypted_output = create_output_buffer(plaintext.len() as i32 + 100);
+
+        unsafe {
+            let result = DecryptFromJson(
+                partition_buf.as_ptr().cast::<c_char>(),
+                json_output.as_ptr().cast::<c_char>(),
+                decrypted_output.as_mut_ptr().cast::<c_char>(),
+            );
+            assert_eq!(
+                result, ERR_NONE,
+                "JSON-special decryption should succeed for: {:?}",
+                plaintext
+            );
+        }
+
+        let decrypted_data = get_buffer_data(&decrypted_output);
+        assert_eq!(
+            decrypted_data, *plaintext,
+            "JSON-special data should round-trip correctly"
         );
     }
 }

@@ -1,6 +1,8 @@
 package com.godaddy.asherah.jni;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -55,6 +57,128 @@ class AsherahIntegrationTest {
     } finally {
       Asherah.shutdown();
     }
+  }
+
+  // --- FFI Boundary Tests ---
+
+  private void withSetup(Runnable body) {
+    final AsherahConfig config =
+        AsherahConfig.builder()
+            .serviceName("ffi-test")
+            .productId("prod")
+            .metastore("memory")
+            .kms("static")
+            .enableSessionCaching(Boolean.FALSE)
+            .build();
+    Asherah.setup(config);
+    try {
+      body.run();
+    } finally {
+      Asherah.shutdown();
+    }
+  }
+
+  @Test
+  void unicodeCjkRoundTrip() {
+    withSetup(() -> {
+      String text = "你好世界こんにちは세계";
+      String ct = Asherah.encryptString("java-unicode", text);
+      byte[] decrypted = Asherah.decrypt("java-unicode", ct.getBytes(StandardCharsets.UTF_8));
+      assertEquals(text, new String(decrypted, StandardCharsets.UTF_8));
+    });
+  }
+
+  @Test
+  void unicodeEmojiRoundTrip() {
+    withSetup(() -> {
+      String text = "🦀🔐🎉💾🌍";
+      String ct = Asherah.encryptString("java-unicode", text);
+      byte[] decrypted = Asherah.decrypt("java-unicode", ct.getBytes(StandardCharsets.UTF_8));
+      assertEquals(text, new String(decrypted, StandardCharsets.UTF_8));
+    });
+  }
+
+  @Test
+  void unicodeMixedScriptsRoundTrip() {
+    withSetup(() -> {
+      String text = "Hello 世界 مرحبا Привет 🌍";
+      String ct = Asherah.encryptString("java-unicode", text);
+      byte[] decrypted = Asherah.decrypt("java-unicode", ct.getBytes(StandardCharsets.UTF_8));
+      assertEquals(text, new String(decrypted, StandardCharsets.UTF_8));
+    });
+  }
+
+  @Test
+  void unicodeCombiningCharactersRoundTrip() {
+    withSetup(() -> {
+      String text = "e\u0301 n\u0303 a\u0308";
+      String ct = Asherah.encryptString("java-unicode", text);
+      byte[] decrypted = Asherah.decrypt("java-unicode", ct.getBytes(StandardCharsets.UTF_8));
+      assertEquals(text, new String(decrypted, StandardCharsets.UTF_8));
+    });
+  }
+
+  @Test
+  void unicodeZwjSequenceRoundTrip() {
+    withSetup(() -> {
+      String text = "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67\u200D\uD83D\uDC66";
+      String ct = Asherah.encryptString("java-unicode", text);
+      byte[] decrypted = Asherah.decrypt("java-unicode", ct.getBytes(StandardCharsets.UTF_8));
+      assertEquals(text, new String(decrypted, StandardCharsets.UTF_8));
+    });
+  }
+
+  @Test
+  void binaryAllByteValuesRoundTrip() {
+    try (AsherahFactory factory = Asherah.factoryFromEnv();
+        AsherahSession session = factory.getSession("java-binary")) {
+      byte[] payload = new byte[256];
+      for (int i = 0; i < 256; i++) payload[i] = (byte) i;
+      String json = session.encryptToJson(payload);
+      byte[] decrypted = session.decryptFromJson(json);
+      assertArrayEquals(payload, decrypted);
+    }
+  }
+
+  @Test
+  void emptyPayloadRoundTrip() {
+    try (AsherahFactory factory = Asherah.factoryFromEnv();
+        AsherahSession session = factory.getSession("java-empty")) {
+      byte[] payload = new byte[0];
+      String json = session.encryptToJson(payload);
+      byte[] decrypted = session.decryptFromJson(json);
+      assertArrayEquals(payload, decrypted);
+    }
+  }
+
+  @Test
+  void largePayload1MbRoundTrip() {
+    try (AsherahFactory factory = Asherah.factoryFromEnv();
+        AsherahSession session = factory.getSession("java-large")) {
+      byte[] payload = new byte[1024 * 1024];
+      for (int i = 0; i < payload.length; i++) payload[i] = (byte) (i % 256);
+      String json = session.encryptToJson(payload);
+      byte[] decrypted = session.decryptFromJson(json);
+      assertEquals(payload.length, decrypted.length);
+      assertArrayEquals(payload, decrypted);
+    }
+  }
+
+  @Test
+  void decryptInvalidJsonThrows() {
+    withSetup(() -> {
+      assertThrows(Exception.class, () ->
+          Asherah.decrypt("java-error", "not valid json".getBytes(StandardCharsets.UTF_8)));
+    });
+  }
+
+  @Test
+  void decryptWrongPartitionThrows() {
+    withSetup(() -> {
+      String ct = Asherah.encryptString("partition-a", "secret");
+      assertThrows(Exception.class, () ->
+          Asherah.decrypt("partition-b", ct.getBytes(StandardCharsets.UTF_8)));
+    });
   }
 
   private static String repeat(String value, int count) {
