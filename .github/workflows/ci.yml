@@ -205,8 +205,9 @@ jobs:
           path: target/
       - name: Build Python binding (x86_64) - manylinux
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
           export PATH="$CARGO_HOME/bin:$PATH"
+          rustup toolchain install 1.88.0 --profile minimal --component rustfmt
           curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           mv sccache-*/sccache /usr/local/bin/
           chmod +x /usr/local/bin/sccache
@@ -740,8 +741,9 @@ jobs:
           TARGET_ARCH: aarch64
           CARGO_LOG: cargo::core::compiler::fingerprint=info
         run: |
+          rustup toolchain install 1.88.0 --profile minimal --component rustfmt
+          rustup default 1.88.0
           rustup target add aarch64-unknown-linux-gnu
-          rustup default 1.86.0
           rm -rf artifacts/aarch64/python || true
           mkdir -p artifacts/aarch64/python
           maturin build --release --target aarch64-unknown-linux-gnu --manifest-path asherah-py/Cargo.toml --skip-auditwheel --out artifacts/aarch64/python 2>&1 | tee /tmp/maturin-build.log
