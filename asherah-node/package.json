@@ -20,7 +20,8 @@
       "aarch64-unknown-linux-gnu",
       "x86_64-unknown-linux-musl",
       "aarch64-unknown-linux-musl",
-      "x86_64-pc-windows-msvc"
+      "x86_64-pc-windows-msvc",
+      "aarch64-pc-windows-msvc"
     ]
   },
   "scripts": {
@@ -42,6 +43,7 @@
     "asherah-linux-arm64-gnu": "4.0.0-beta.1",
     "asherah-linux-x64-musl": "4.0.0-beta.1",
     "asherah-linux-arm64-musl": "4.0.0-beta.1",
-    "asherah-windows-x64": "4.0.0-beta.1"
+    "asherah-windows-x64": "4.0.0-beta.1",
+    "asherah-windows-arm64": "4.0.0-beta.1"
   }
 }
