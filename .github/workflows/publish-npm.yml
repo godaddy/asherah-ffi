@@ -61,6 +61,19 @@ jobs:
               npm ci
               npm run build -- --target aarch64-apple-darwin
               strip -x *.node
+          - host: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            build: |
+              set -e
+              npm ci
+              npm run build -- --target x86_64-unknown-linux-musl -x
+              strip -x *.node
+          - host: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            build: |
+              set -e
+              npm ci
+              npm run build -- --target aarch64-unknown-linux-musl -x
           - host: windows-latest
             target: x86_64-pc-windows-msvc
             build: |
@@ -82,6 +95,16 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.settings.target }}
+
+      - name: Install Zig (musl builds)
+        if: contains(matrix.settings.target, 'musl')
+        uses: mlugg/setup-zig@v2
+
+      - name: Install cargo-zigbuild (musl builds)
+        if: contains(matrix.settings.target, 'musl')
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild
 
       - name: Cache cargo
         uses: actions/cache@v5
@@ -157,6 +180,8 @@ jobs:
           declare -A TRIPLE_MAP=(
             [x86_64-unknown-linux-gnu]=linux-x64-gnu
             [aarch64-unknown-linux-gnu]=linux-arm64-gnu
+            [x86_64-unknown-linux-musl]=linux-x64-musl
+            [aarch64-unknown-linux-musl]=linux-arm64-musl
             [x86_64-apple-darwin]=darwin-x64
             [aarch64-apple-darwin]=darwin-arm64
             [x86_64-pc-windows-msvc]=win32-x64-msvc

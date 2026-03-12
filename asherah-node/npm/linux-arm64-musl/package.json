@@ -1,0 +1,22 @@
+{
+  "name": "asherah-linux-arm64-musl",
+  "version": "0.0.0",
+  "os": [
+    "linux"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "main": "index.linux-arm64-musl.node",
+  "files": [
+    "index.linux-arm64-musl.node"
+  ],
+  "description": "Asherah envelope encryption - Linux ARM64 (musl/Alpine) native binding",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
