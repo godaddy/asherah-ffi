@@ -1,6 +1,6 @@
 #![allow(unsafe_code)]
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use libloading::Library;
 use once_cell::sync::Lazy;
 use rand::{rngs::StdRng, RngCore, SeedableRng};
@@ -286,14 +286,12 @@ fn bench_encrypt(c: &mut Criterion) {
     let mut group = c.benchmark_group("encrypt");
     group.bench_function(BenchmarkId::new("rust", data.len()), |b| {
         b.iter(|| {
-            let ciphertext = rust_ctx.encrypt(&data);
-            drop(ciphertext);
+            black_box(rust_ctx.encrypt(black_box(&data)));
         })
     });
     group.bench_function(BenchmarkId::new("go", data.len()), |b| {
         b.iter(|| {
-            let ciphertext = go_ctx.encrypt(&data);
-            drop(ciphertext);
+            black_box(go_ctx.encrypt(black_box(&data)));
         })
     });
     group.finish();
@@ -315,12 +313,12 @@ fn bench_decrypt(c: &mut Criterion) {
     let mut group = c.benchmark_group("decrypt");
     group.bench_function(BenchmarkId::new("rust", rust_cipher.len()), |b| {
         b.iter(|| {
-            rust_ctx.decrypt(&rust_cipher);
+            rust_ctx.decrypt(black_box(&rust_cipher));
         })
     });
     group.bench_function(BenchmarkId::new("go", go_cipher.len()), |b| {
         b.iter(|| {
-            go_ctx.decrypt(&go_cipher);
+            go_ctx.decrypt(black_box(&go_cipher));
         })
     });
     group.finish();
