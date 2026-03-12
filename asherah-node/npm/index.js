@@ -22,7 +22,16 @@ function getPlatform() {
 }
 
 const platform = getPlatform();
-const packageName = `asherah-${platform}`;
+
+// Map platform to npm package name (win32 needed a different name to avoid npm spam filter)
+const PLATFORM_PACKAGES = {
+  'darwin-arm64': 'asherah-darwin-arm64',
+  'darwin-x64': 'asherah-darwin-x64',
+  'linux-x64-gnu': 'asherah-linux-x64-gnu',
+  'linux-arm64-gnu': 'asherah-linux-arm64-gnu',
+  'win32-x64-msvc': 'asherah-windows-x64',
+};
+const packageName = PLATFORM_PACKAGES[platform] || `asherah-${platform}`;
 
 // Try to load the native module:
 // 1. Installed platform package (optionalDependency) — normal npm install
