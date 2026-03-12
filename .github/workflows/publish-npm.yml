@@ -147,7 +147,7 @@ jobs:
           echo "NPM_VERSION=${VERSION}" >> "$GITHUB_ENV"
           echo "NPM_BETA=${BETA}" >> "$GITHUB_ENV"
 
-      - name: Place bindings in platform directories
+      - name: Place bindings and set platform versions
         working-directory: asherah-node
         shell: bash
         run: |
@@ -178,16 +178,65 @@ jobs:
           echo "Bindings placed:"
           ls -lh npm/*/index.*.node
 
+          # Update version in all platform package.json files and main optionalDependencies
+          for dir in npm/*/; do
+            if [ -f "$dir/package.json" ]; then
+              node -e "
+                const fs = require('fs');
+                const pkg = JSON.parse(fs.readFileSync('$dir/package.json', 'utf8'));
+                pkg.version = '${NPM_VERSION}';
+                fs.writeFileSync('$dir/package.json', JSON.stringify(pkg, null, 2) + '\n');
+              "
+              echo "Set $dir → ${NPM_VERSION}"
+            fi
+          done
+
+          # Update optionalDependencies versions in main package.json
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            if (pkg.optionalDependencies) {
+              for (const dep of Object.keys(pkg.optionalDependencies)) {
+                pkg.optionalDependencies[dep] = '${NPM_VERSION}';
+              }
+            }
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Publish platform packages
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        working-directory: asherah-node
+        shell: bash
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          for dir in npm/*/; do
+            if [ -f "$dir/package.json" ] && ls "$dir"/*.node 1>/dev/null 2>&1; then
+              echo "Publishing $(node -p "require('./$dir/package.json').name")@${NPM_VERSION}..."
+              (cd "$dir" && npm publish --access public --tag beta)
+            fi
+          done
+
       - name: Publish to npm (dry run)
         if: ${{ github.event.inputs.dry_run == 'true' }}
         working-directory: asherah-node
+        shell: bash
         run: |
+          echo "=== Platform packages ==="
+          for dir in npm/*/; do
+            if [ -f "$dir/package.json" ] && ls "$dir"/*.node 1>/dev/null 2>&1; then
+              echo "Would publish: $(node -p "require('./$dir/package.json').name")@${NPM_VERSION}"
+              (cd "$dir" && npm pack && tar -tzf *.tgz)
+            fi
+          done
+          echo ""
+          echo "=== Main package ==="
           npm pack
           echo "Contents:"
-          tar -tzf *.tgz | grep "\.node"
+          tar -tzf *.tgz
           echo "Dry run complete. Would publish version ${NPM_VERSION}."
 
-      - name: Publish to npm
+      - name: Publish main package
         if: ${{ github.event.inputs.dry_run != 'true' }}
         working-directory: asherah-node
         run: npm publish --access public --tag beta
