@@ -182,5 +182,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           NEXT=$(( NPM_BETA + 1 ))
-          gh variable set NPM_BETA_VERSION --body "$NEXT"
-          echo "Bumped NPM_BETA_VERSION from ${NPM_BETA} to ${NEXT}"
+          if gh variable set NPM_BETA_VERSION --body "$NEXT" 2>/dev/null; then
+            echo "Bumped NPM_BETA_VERSION from ${NPM_BETA} to ${NEXT}"
+          else
+            echo "::warning::Auto-increment failed (GITHUB_TOKEN lacks variable write access). Manually set NPM_BETA_VERSION to ${NEXT} in Settings > Secrets and variables > Actions > Variables."
+          fi
