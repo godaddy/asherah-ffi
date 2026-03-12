@@ -1,9 +1,7 @@
 use crate::internal::crypto_key::is_key_expired;
 use crate::internal::CryptoKey;
 use crate::types::KeyMeta;
-use parking_lot::Mutex;
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -29,23 +27,19 @@ impl CachePolicy {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Segment {
-    Probationary,
-    Protected,
-}
+const SEG_PROBATIONARY: u8 = 0;
+const SEG_PROTECTED: u8 = 1;
 
-#[derive(Debug)]
 struct CacheEntry {
     key: Arc<CryptoKey>,
     loaded_at: Instant,
-    last_access: u64,
-    freq: u64,
-    segment: Segment,
+    last_access: AtomicU64,
+    freq: AtomicU64,
+    segment: AtomicU8,
 }
 
-type MetaCacheInner = HashMap<(String, i64), CacheEntry>;
-type LatestMetaInner = HashMap<String, KeyMeta>;
+// Use Arc<str> keys to avoid String clones on cache lookups.
+type CacheKey = (Arc<str>, i64);
 
 pub trait KeyCacher: Send + Sync {
     fn get_or_load_latest(
@@ -83,16 +77,25 @@ impl KeyCacher for NeverCache {
     }
 }
 
-#[derive(Debug)]
 pub struct SimpleKeyCache {
-    by_meta: Mutex<MetaCacheInner>,
-    latest: Mutex<LatestMetaInner>,
+    by_meta: scc::HashMap<CacheKey, CacheEntry>,
+    latest: scc::HashMap<Arc<str>, i64>,
     ttl: Duration,
     max: usize,
     policy: CachePolicy,
     expire_after_s: i64,
     access_ctr: AtomicU64,
     decay_ctr: AtomicU64,
+}
+
+impl std::fmt::Debug for SimpleKeyCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SimpleKeyCache")
+            .field("ttl", &self.ttl)
+            .field("max", &self.max)
+            .field("policy", &self.policy)
+            .finish()
+    }
 }
 
 impl SimpleKeyCache {
@@ -107,8 +110,8 @@ impl SimpleKeyCache {
         expire_after_s: i64,
     ) -> Self {
         Self {
-            by_meta: Mutex::new(HashMap::new()),
-            latest: Mutex::new(HashMap::new()),
+            by_meta: scc::HashMap::new(),
+            latest: scc::HashMap::new(),
             ttl: if ttl_s <= 0 {
                 Duration::from_secs(0)
             } else {
@@ -148,43 +151,51 @@ impl SimpleKeyCache {
     }
 
     fn get_latest_if_fresh(&self, id: &str) -> Option<(Arc<CryptoKey>, bool, bool)> {
-        let latest = { self.latest.lock().get(id).cloned() };
-        let meta = latest?;
-        let key = (meta.id.clone(), meta.created);
-        let mut map = self.by_meta.lock();
-        let entry = map.get_mut(&key)?;
-        let expired = self.is_expired(entry.loaded_at);
-        let invalid = self.is_invalid(&entry.key);
-        entry.last_access = self.next_access();
-        entry.freq = entry.freq.saturating_add(1);
-        let promote = self.policy == CachePolicy::Slru && entry.segment == Segment::Probationary;
+        // read() takes a shared lock on the bucket, not exclusive
+        let (interned_id, created) = self.latest.read(id, |k, &v| (k.clone(), v))?;
+
+        let result = self.by_meta.read(&(interned_id, created), |_, entry| {
+            let expired = self.is_expired(entry.loaded_at);
+            let invalid = self.is_invalid(&entry.key);
+            entry
+                .last_access
+                .store(self.next_access(), Ordering::Relaxed);
+            entry.freq.fetch_add(1, Ordering::Relaxed);
+            let seg = entry.segment.load(Ordering::Relaxed);
+            let promote = self.policy == CachePolicy::Slru && seg == SEG_PROBATIONARY;
+            if promote {
+                entry.segment.store(SEG_PROTECTED, Ordering::Relaxed);
+            }
+            (entry.key.clone(), expired, invalid, promote)
+        })?;
+        let (key_ref, expired, invalid, promote) = result;
         if promote {
-            entry.segment = Segment::Protected;
-        }
-        let key_ref = entry.key.clone();
-        if promote {
-            self.slru_rebalance(&mut map);
+            self.slru_rebalance();
         }
         Some((key_ref, expired, invalid))
     }
 
     fn get_meta_if_fresh(&self, meta: &KeyMeta) -> Option<(Arc<CryptoKey>, bool)> {
-        let key = (meta.id.clone(), meta.created);
-        let mut map = self.by_meta.lock();
-        let entry = map.get_mut(&key)?;
-        let mut expired = self.is_expired(entry.loaded_at);
-        if entry.key.revoked() {
-            expired = false;
-        }
-        entry.last_access = self.next_access();
-        entry.freq = entry.freq.saturating_add(1);
-        let promote = self.policy == CachePolicy::Slru && entry.segment == Segment::Probationary;
+        let cache_key = (Arc::<str>::from(meta.id.as_str()), meta.created);
+        let result = self.by_meta.read(&cache_key, |_, entry| {
+            let mut expired = self.is_expired(entry.loaded_at);
+            if entry.key.revoked() {
+                expired = false;
+            }
+            entry
+                .last_access
+                .store(self.next_access(), Ordering::Relaxed);
+            entry.freq.fetch_add(1, Ordering::Relaxed);
+            let seg = entry.segment.load(Ordering::Relaxed);
+            let promote = self.policy == CachePolicy::Slru && seg == SEG_PROBATIONARY;
+            if promote {
+                entry.segment.store(SEG_PROTECTED, Ordering::Relaxed);
+            }
+            (entry.key.clone(), expired, promote)
+        })?;
+        let (key_ref, expired, promote) = result;
         if promote {
-            entry.segment = Segment::Protected;
-        }
-        let key_ref = entry.key.clone();
-        if promote {
-            self.slru_rebalance(&mut map);
+            self.slru_rebalance();
         }
         Some((key_ref, expired))
     }
@@ -198,115 +209,165 @@ impl SimpleKeyCache {
     }
 
     fn insert_meta(&self, meta: &KeyMeta, key: Arc<CryptoKey>) {
-        let mut map = self.by_meta.lock();
+        let interned_id: Arc<str> = Arc::from(meta.id.as_str());
         let entry = CacheEntry {
             key,
             loaded_at: Instant::now(),
-            last_access: self.next_access(),
-            freq: 1,
-            segment: Segment::Probationary,
+            last_access: AtomicU64::new(self.next_access()),
+            freq: AtomicU64::new(1),
+            segment: AtomicU8::new(SEG_PROBATIONARY),
         };
-        map.insert((meta.id.clone(), meta.created), entry);
-        {
-            let mut latest = self.latest.lock();
-            if let Some(existing) = latest.get(&meta.id) {
-                if existing.created < meta.created {
-                    latest.insert(meta.id.clone(), meta.clone());
-                }
-            } else {
-                latest.insert(meta.id.clone(), meta.clone());
-            }
+        drop(
+            self.by_meta
+                .insert((interned_id.clone(), meta.created), entry),
+        );
+        // Update latest pointer
+        let should_update = self
+            .latest
+            .read(&interned_id, |_, &existing| existing < meta.created)
+            .unwrap_or(true);
+        if should_update {
+            let _ = self.latest.upsert(interned_id, meta.created);
         }
-        self.evict_if_needed(&mut map);
+        self.evict_if_needed();
     }
 
-    fn evict_if_needed(&self, map: &mut MetaCacheInner) {
+    fn evict_if_needed(&self) {
         if self.policy == CachePolicy::Simple || self.max == 0 {
             return;
         }
-        while map.len() > self.max {
-            self.evict_one(map);
+        while self.by_meta.len() > self.max {
+            self.evict_one();
         }
     }
 
-    fn evict_one(&self, map: &mut MetaCacheInner) {
+    fn evict_one(&self) {
         match self.policy {
             CachePolicy::Lru => {
-                if let Some((k, _)) = map
-                    .iter()
-                    .min_by_key(|(_, v)| v.last_access)
-                    .map(|(k, v)| (k.clone(), v.last_access))
-                {
-                    map.remove(&k);
+                let mut victim: Option<(CacheKey, u64)> = None;
+                self.by_meta.scan(|k, v| {
+                    let access = v.last_access.load(Ordering::Relaxed);
+                    let dominated = match &victim {
+                        None => true,
+                        Some((_, min_access)) => access < *min_access,
+                    };
+                    if dominated {
+                        victim = Some((k.clone(), access));
+                    }
+                });
+                if let Some((k, _)) = victim {
+                    self.by_meta.remove(&k);
                 }
             }
             CachePolicy::Lfu => {
-                if let Some((k, _)) = map
-                    .iter()
-                    .min_by_key(|(_, v)| (v.freq, v.last_access))
-                    .map(|(k, v)| (k.clone(), v.freq))
-                {
-                    map.remove(&k);
+                let mut victim: Option<(CacheKey, (u64, u64))> = None;
+                self.by_meta.scan(|k, v| {
+                    let score = (
+                        v.freq.load(Ordering::Relaxed),
+                        v.last_access.load(Ordering::Relaxed),
+                    );
+                    let dominated = match &victim {
+                        None => true,
+                        Some((_, min_score)) => score < *min_score,
+                    };
+                    if dominated {
+                        victim = Some((k.clone(), score));
+                    }
+                });
+                if let Some((k, _)) = victim {
+                    self.by_meta.remove(&k);
                 }
             }
             CachePolicy::TinyLfu => {
-                self.decay_if_needed(map);
-                if let Some((k, _)) = map
-                    .iter()
-                    .min_by_key(|(_, v)| (v.freq, v.last_access))
-                    .map(|(k, v)| (k.clone(), v.freq))
-                {
-                    map.remove(&k);
+                self.decay_if_needed();
+                let mut victim: Option<(CacheKey, (u64, u64))> = None;
+                self.by_meta.scan(|k, v| {
+                    let score = (
+                        v.freq.load(Ordering::Relaxed),
+                        v.last_access.load(Ordering::Relaxed),
+                    );
+                    let dominated = match &victim {
+                        None => true,
+                        Some((_, min_score)) => score < *min_score,
+                    };
+                    if dominated {
+                        victim = Some((k.clone(), score));
+                    }
+                });
+                if let Some((k, _)) = victim {
+                    self.by_meta.remove(&k);
                 }
             }
             CachePolicy::Slru => {
-                self.slru_rebalance(map);
-                if let Some((k, _)) = map
-                    .iter()
-                    .filter(|(_, v)| v.segment == Segment::Probationary)
-                    .min_by_key(|(_, v)| v.last_access)
-                    .map(|(k, v)| (k.clone(), v.last_access))
-                {
-                    map.remove(&k);
+                self.slru_rebalance();
+                let mut victim: Option<(CacheKey, u64)> = None;
+                self.by_meta.scan(|k, v| {
+                    if v.segment.load(Ordering::Relaxed) == SEG_PROBATIONARY {
+                        let access = v.last_access.load(Ordering::Relaxed);
+                        let dominated = match &victim {
+                            None => true,
+                            Some((_, min_access)) => access < *min_access,
+                        };
+                        if dominated {
+                            victim = Some((k.clone(), access));
+                        }
+                    }
+                });
+                if let Some((k, _)) = victim {
+                    self.by_meta.remove(&k);
                     return;
                 }
-                if let Some((k, _)) = map
-                    .iter()
-                    .filter(|(_, v)| v.segment == Segment::Protected)
-                    .min_by_key(|(_, v)| v.last_access)
-                    .map(|(k, v)| (k.clone(), v.last_access))
-                {
-                    map.remove(&k);
+                let mut victim: Option<(CacheKey, u64)> = None;
+                self.by_meta.scan(|k, v| {
+                    if v.segment.load(Ordering::Relaxed) == SEG_PROTECTED {
+                        let access = v.last_access.load(Ordering::Relaxed);
+                        let dominated = match &victim {
+                            None => true,
+                            Some((_, min_access)) => access < *min_access,
+                        };
+                        if dominated {
+                            victim = Some((k.clone(), access));
+                        }
+                    }
+                });
+                if let Some((k, _)) = victim {
+                    self.by_meta.remove(&k);
                 }
             }
             CachePolicy::Simple => {}
         }
     }
 
-    fn slru_rebalance(&self, map: &mut MetaCacheInner) {
+    fn slru_rebalance(&self) {
         if self.max == 0 {
             return;
         }
         let protected_cap = std::cmp::max(1, self.max / 2);
-        let protected_count = map
-            .values()
-            .filter(|v| v.segment == Segment::Protected)
-            .count();
-        if protected_count > protected_cap {
-            if let Some((k, _)) = map
-                .iter()
-                .filter(|(_, v)| v.segment == Segment::Protected)
-                .min_by_key(|(_, v)| v.last_access)
-                .map(|(k, v)| (k.clone(), v.last_access))
-            {
-                if let Some(e) = map.get_mut(&k) {
-                    e.segment = Segment::Probationary;
+        let mut protected_count = 0_usize;
+        let mut victim: Option<(CacheKey, u64)> = None;
+        self.by_meta.scan(|k, v| {
+            if v.segment.load(Ordering::Relaxed) == SEG_PROTECTED {
+                protected_count += 1;
+                let access = v.last_access.load(Ordering::Relaxed);
+                let dominated = match &victim {
+                    None => true,
+                    Some((_, min_access)) => access < *min_access,
+                };
+                if dominated {
+                    victim = Some((k.clone(), access));
                 }
+            }
+        });
+        if protected_count > protected_cap {
+            if let Some((k, _)) = victim {
+                self.by_meta.read(&k, |_, v| {
+                    v.segment.store(SEG_PROBATIONARY, Ordering::Relaxed);
+                });
             }
         }
     }
 
-    fn decay_if_needed(&self, map: &mut MetaCacheInner) {
+    fn decay_if_needed(&self) {
         if self.max == 0 {
             return;
         }
@@ -314,9 +375,10 @@ impl SimpleKeyCache {
         let n = self.decay_ctr.fetch_add(1, Ordering::Relaxed) + 1;
         #[allow(clippy::manual_is_multiple_of)]
         if n % threshold == 0 {
-            for v in map.values_mut() {
-                v.freq = std::cmp::max(1, v.freq / 2);
-            }
+            self.by_meta.scan(|_, v| {
+                let old = v.freq.load(Ordering::Relaxed);
+                v.freq.store(std::cmp::max(1, old / 2), Ordering::Relaxed);
+            });
         }
     }
 }

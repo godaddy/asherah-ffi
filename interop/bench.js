@@ -1,5 +1,5 @@
 /*
- Benchmarks comparing published asherah (npm) vs local asherah-node (napi-rs)
+ Benchmarks comparing published asherah (npm, Go FFI) vs local asherah-node (napi-rs, Rust)
 
  Usage:
    npm run setup-local
@@ -43,40 +43,79 @@ const cfgOld = {
   EnableSessionCaching: false,
 };
 
-function benchPair(lib, pid, payloads) {
+function benchOp(lib, pid, payload, iterations) {
+  // Warmup
+  const warmup = Math.min(500, Math.floor(iterations / 4));
+  for (let i = 0; i < warmup; i++) {
+    const drr = lib.encrypt(pid, payload);
+    lib.decrypt(pid, drr);
+  }
+
+  // Benchmark encrypt
   const startEnc = process.hrtime.bigint();
-  const drrs = payloads.map((p) => lib.encrypt(pid, p));
-  const endEnc = process.hrtime.bigint();
+  let lastDrr;
+  for (let i = 0; i < iterations; i++) {
+    lastDrr = lib.encrypt(pid, payload);
+  }
+  const encNs = Number(process.hrtime.bigint() - startEnc);
+
+  // Benchmark decrypt
   const startDec = process.hrtime.bigint();
-  const outs = drrs.map((d) => lib.decrypt(pid, d));
-  const endDec = process.hrtime.bigint();
+  for (let i = 0; i < iterations; i++) {
+    lib.decrypt(pid, lastDrr);
+  }
+  const decNs = Number(process.hrtime.bigint() - startDec);
+
   return {
-    encNs: Number(endEnc - startEnc),
-    decNs: Number(endDec - startDec),
-    outs,
+    encUs: encNs / 1000 / iterations,
+    decUs: decNs / 1000 / iterations,
   };
 }
 
-function kb(n) { return Buffer.alloc(n, 7); }
+function pad(s, n) { return s.length >= n ? s : ' '.repeat(n - s.length) + s; }
 
 function main() {
   oldAsherah.setup(cfgOld);
   newAsherah.setup(cfgNew);
+
   const pid = 'bench';
-  const N = 2000;
-  const sizes = [64, 1024, 8*1024];
+  const iterations = 5000;
+  const sizes = [64, 1024, 8192];
+
+  console.log('=== Node.js Binding Benchmark ===');
+  console.log(`    iterations: ${iterations}, warmup: ${Math.min(500, Math.floor(iterations / 4))}\n`);
+
+  const results = [];
   for (const size of sizes) {
-    const payloads = Array.from({ length: N }, () => kb(size));
-    const oldR = benchPair(oldAsherah, pid, payloads);
-    const newR = benchPair(newAsherah, pid, payloads);
-    const encOldMs = oldR.encNs / 1e6, decOldMs = oldR.decNs / 1e6;
-    const encNewMs = newR.encNs / 1e6, decNewMs = newR.decNs / 1e6;
-    console.log(`size=${size}B N=${N}`);
-    console.log(`  old  encrypt: ${(encOldMs).toFixed(1)} ms (${(N/(encOldMs/1000)).toFixed(0)}/s)`);
-    console.log(`  old  decrypt: ${(decOldMs).toFixed(1)} ms (${(N/(decOldMs/1000)).toFixed(0)}/s)`);
-    console.log(`  new  encrypt: ${(encNewMs).toFixed(1)} ms (${(N/(encNewMs/1000)).toFixed(0)}/s)`);
-    console.log(`  new  decrypt: ${(decNewMs).toFixed(1)} ms (${(N/(decNewMs/1000)).toFixed(0)}/s)`);
+    const payload = Buffer.alloc(size, 0x07);
+    const oldR = benchOp(oldAsherah, pid, payload, iterations);
+    const newR = benchOp(newAsherah, pid, payload, iterations);
+    results.push({ size, oldR, newR });
   }
+
+  // Header
+  console.log(
+    pad('Size', 7) + '  ' +
+    pad('Go encrypt', 12) + '  ' + pad('Rust encrypt', 12) + '  ' + pad('Speedup', 8) + '  ' +
+    pad('Go decrypt', 12) + '  ' + pad('Rust decrypt', 12) + '  ' + pad('Speedup', 8)
+  );
+  console.log('-'.repeat(83));
+
+  for (const { size, oldR, newR } of results) {
+    const encSpeedup = oldR.encUs / newR.encUs;
+    const decSpeedup = oldR.decUs / newR.decUs;
+    console.log(
+      pad(size + 'B', 7) + '  ' +
+      pad(oldR.encUs.toFixed(2) + ' µs', 12) + '  ' + pad(newR.encUs.toFixed(2) + ' µs', 12) + '  ' +
+      pad(encSpeedup.toFixed(1) + 'x', 8) + '  ' +
+      pad(oldR.decUs.toFixed(2) + ' µs', 12) + '  ' + pad(newR.decUs.toFixed(2) + ' µs', 12) + '  ' +
+      pad(decSpeedup.toFixed(1) + 'x', 8)
+    );
+  }
+
+  console.log('\nGo = canonical godaddy/asherah-node (Go FFI via cobhan)');
+  console.log('Rust = asherah-node napi-rs (Rust native)\n');
+
   oldAsherah.shutdown();
   newAsherah.shutdown();
 }

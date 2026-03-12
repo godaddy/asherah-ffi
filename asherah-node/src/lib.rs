@@ -226,8 +226,7 @@ pub fn encrypt(partition_id: String, data: Buffer) -> Result<String> {
         r
     })?;
     let t_json0 = Instant::now();
-    let out =
-        serde_json::to_string(&drr).map_err(|e| Error::from_reason(format!("json error: {e}")))?;
+    let out = drr.to_json_fast();
     debug_log(&format!(
         "encrypt total={} us json={} us",
         t0.elapsed().as_micros(),

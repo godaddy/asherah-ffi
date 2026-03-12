@@ -25,6 +25,19 @@ impl DefaultPartition {
             suffix: Some(suffix),
         }
     }
+
+    /// Returns the prefix used to validate IK ids when the partition has a suffix.
+    /// Returns `None` when there is no suffix (exact match only).
+    pub fn ik_validation_prefix(&self) -> Option<String> {
+        if self.suffix.is_some() {
+            Some(format!(
+                "_IK_{}_{}_{}_",
+                self.id, self.service, self.product
+            ))
+        } else {
+            None
+        }
+    }
 }
 
 impl Partition for DefaultPartition {
