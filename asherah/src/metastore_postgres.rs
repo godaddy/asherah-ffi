@@ -2,35 +2,6 @@ use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
 use anyhow::Context;
 use postgres::Client;
-use std::fmt::Write;
-
-/// Convert Unix epoch seconds to a "YYYY-MM-DD HH:MM:SS" UTC datetime string.
-///
-/// This matches Go's lib/pq behavior: `time.Unix(epoch, 0)` is formatted in UTC
-/// and sent as a timezone-naive string. Using `to_timestamp(epoch)` returns
-/// `TIMESTAMPTZ` which requires a session-timezone-dependent cast to `TIMESTAMP`,
-/// breaking cross-language interoperability when `timezone` isn't UTC.
-fn epoch_to_utc_datetime(epoch: i64) -> String {
-    let day_secs = epoch.rem_euclid(86400);
-    let hour = day_secs / 3600;
-    let min = (day_secs % 3600) / 60;
-    let sec = day_secs % 60;
-
-    let z = epoch.div_euclid(86400) + 719_468;
-    let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
-    let doe = (z - era * 146_097) as u32;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
-    let y = (yoe as i64) + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-
-    let mut buf = String::with_capacity(19);
-    let _ = write!(buf, "{y:04}-{m:02}-{d:02} {hour:02}:{min:02}:{sec:02}");
-    buf
-}
 
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
@@ -155,15 +126,11 @@ impl Metastore for PostgresMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         log::debug!("postgres load: id={id} created={created}");
         let mut c = self.client()?;
-        let ts = epoch_to_utc_datetime(created);
-        let rows = c
-            .query(
-                "SELECT key_record::text FROM encryption_key WHERE id=$1 AND created=$2::TIMESTAMP",
-                &[&id, &ts],
-            )
-            .context(format!(
-                "Postgres load query failed for id={id} created={created}"
-            ))?;
+        let created_f = created as f64;
+        let rows = c.query(
+            "SELECT key_record::text FROM encryption_key WHERE id=$1 AND created=to_timestamp($2)",
+            &[&id, &created_f],
+        ).context(format!("Postgres load query failed for id={id} created={created}"))?;
         match rows.into_iter().next() {
             Some(row) => {
                 let txt: String = row.get(0);
@@ -212,13 +179,13 @@ impl Metastore for PostgresMetastore {
         let v = serde_json::to_string(ekr).context(format!(
             "Postgres store: failed to serialize key_record for id={id}"
         ))?;
-        let ts = epoch_to_utc_datetime(created);
+        let created_f = created as f64;
         let v_json: serde_json::Value = serde_json::from_str(&v).context(format!(
             "Postgres store: failed to re-parse key_record JSON for id={id}"
         ))?;
         let res = c.execute(
-            "INSERT INTO encryption_key(id, created, key_record) VALUES ($1, $2::TIMESTAMP, $3) ON CONFLICT DO NOTHING",
-            &[&id, &ts, &v_json],
+            "INSERT INTO encryption_key(id, created, key_record) VALUES ($1, to_timestamp($2), $3) ON CONFLICT DO NOTHING",
+            &[&id, &created_f, &v_json],
         ).context(format!("Postgres store insert failed for id={id} created={created}"))?;
         let stored = res > 0;
         log::debug!("postgres store: id={id} created={created} stored={stored}");
