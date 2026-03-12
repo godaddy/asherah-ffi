@@ -150,6 +150,149 @@ public class RoundTripTests
         }
     }
 
+    // --- FFI Boundary Tests ---
+
+    private AsherahConfig CreateBoundaryConfig()
+    {
+        return AsherahConfig.CreateBuilder()
+            .WithServiceName("ffi-test")
+            .WithProductId("prod")
+            .WithMetastore("memory")
+            .WithKms("static")
+            .WithEnableSessionCaching(false)
+            .Build();
+    }
+
+    [Fact]
+    public void Unicode_CJK_RoundTrip()
+    {
+        Asherah.Setup(CreateBoundaryConfig());
+        try
+        {
+            const string text = "你好世界こんにちは세계";
+            var ct = Asherah.EncryptString("dotnet-unicode", text);
+            Assert.Equal(text, Asherah.DecryptString("dotnet-unicode", ct));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public void Unicode_Emoji_RoundTrip()
+    {
+        Asherah.Setup(CreateBoundaryConfig());
+        try
+        {
+            const string text = "🦀🔐🎉💾🌍";
+            var ct = Asherah.EncryptString("dotnet-unicode", text);
+            Assert.Equal(text, Asherah.DecryptString("dotnet-unicode", ct));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public void Unicode_MixedScripts_RoundTrip()
+    {
+        Asherah.Setup(CreateBoundaryConfig());
+        try
+        {
+            const string text = "Hello 世界 مرحبا Привет 🌍";
+            var ct = Asherah.EncryptString("dotnet-unicode", text);
+            Assert.Equal(text, Asherah.DecryptString("dotnet-unicode", ct));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public void Unicode_CombiningCharacters_RoundTrip()
+    {
+        Asherah.Setup(CreateBoundaryConfig());
+        try
+        {
+            var text = "e\u0301 n\u0303 a\u0308";
+            var ct = Asherah.EncryptString("dotnet-unicode", text);
+            Assert.Equal(text, Asherah.DecryptString("dotnet-unicode", ct));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public void Unicode_ZwjSequence_RoundTrip()
+    {
+        Asherah.Setup(CreateBoundaryConfig());
+        try
+        {
+            var text = "\U0001F468\u200D\U0001F469\u200D\U0001F467\u200D\U0001F466";
+            var ct = Asherah.EncryptString("dotnet-unicode", text);
+            Assert.Equal(text, Asherah.DecryptString("dotnet-unicode", ct));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public void Binary_AllByteValues_RoundTrip()
+    {
+        using var factory = Asherah.FactoryFromEnv();
+        using var session = factory.GetSession("dotnet-binary");
+
+        var payload = new byte[256];
+        for (int i = 0; i < 256; i++) payload[i] = (byte)i;
+
+        var ct = session.EncryptBytes(payload);
+        var recovered = session.DecryptBytes(ct);
+        Assert.Equal(payload, recovered);
+    }
+
+    [Fact]
+    public void Empty_Payload_RoundTrip()
+    {
+        using var factory = Asherah.FactoryFromEnv();
+        using var session = factory.GetSession("dotnet-empty");
+
+        var ct = session.EncryptBytes(Array.Empty<byte>());
+        var recovered = session.DecryptBytes(ct);
+        Assert.Empty(recovered);
+    }
+
+    [Fact]
+    public void Large_1MB_Payload_RoundTrip()
+    {
+        using var factory = Asherah.FactoryFromEnv();
+        using var session = factory.GetSession("dotnet-large");
+
+        var payload = new byte[1024 * 1024];
+        for (int i = 0; i < payload.Length; i++) payload[i] = (byte)(i % 256);
+
+        var ct = session.EncryptBytes(payload);
+        var recovered = session.DecryptBytes(ct);
+        Assert.Equal(payload.Length, recovered.Length);
+        Assert.Equal(payload, recovered);
+    }
+
+    [Fact]
+    public void Decrypt_InvalidJson_Throws()
+    {
+        Asherah.Setup(CreateBoundaryConfig());
+        try
+        {
+            Assert.ThrowsAny<Exception>(() =>
+                Asherah.DecryptString("dotnet-error", "not valid json"));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public void Decrypt_WrongPartition_Throws()
+    {
+        Asherah.Setup(CreateBoundaryConfig());
+        try
+        {
+            var ct = Asherah.EncryptString("partition-a", "secret");
+            Assert.ThrowsAny<Exception>(() =>
+                Asherah.DecryptString("partition-b", ct));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
     private static string LocateRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
