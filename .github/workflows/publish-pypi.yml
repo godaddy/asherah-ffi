@@ -70,15 +70,15 @@ jobs:
             echo "::error::Repository variable PYPI_BETA_VERSION is not set"
             exit 1
           fi
-          VERSION="0.4.0b${BETA}"
+          VERSION="0.5.0b${BETA}"
           echo "Publishing version: ${VERSION}"
           echo "PYPI_VERSION=${VERSION}" >> "$GITHUB_ENV"
           echo "PYPI_BETA=${BETA}" >> "$GITHUB_ENV"
-          # Update pyproject.toml version (PEP 440: 0.4.0bN)
+          # Update pyproject.toml version (PEP 440: 0.5.0bN)
           sed -i.bak 's/^version = ".*"/version = "'"${VERSION}"'"/' asherah-py/pyproject.toml
           rm -f asherah-py/pyproject.toml.bak
-          # Update Cargo.toml version (semver: 0.4.0-beta.N)
-          sed -i.bak 's/^version = ".*"/version = "0.4.0-beta.'"${BETA}"'"/' asherah-py/Cargo.toml
+          # Update Cargo.toml version (semver: 0.5.0-beta.N)
+          sed -i.bak 's/^version = ".*"/version = "0.5.0-beta.'"${BETA}"'"/' asherah-py/Cargo.toml
           rm -f asherah-py/Cargo.toml.bak
 
       - name: Build wheel
@@ -113,9 +113,9 @@ jobs:
             echo "::error::Repository variable PYPI_BETA_VERSION is not set"
             exit 1
           fi
-          VERSION="0.4.0b${BETA}"
+          VERSION="0.5.0b${BETA}"
           sed -i 's/^version = ".*"/version = "'"${VERSION}"'"/' asherah-py/pyproject.toml
-          sed -i 's/^version = ".*"/version = "0.4.0-beta.'"${BETA}"'"/' asherah-py/Cargo.toml
+          sed -i 's/^version = ".*"/version = "0.5.0-beta.'"${BETA}"'"/' asherah-py/Cargo.toml
 
       - name: Build sdist
         uses: PyO3/maturin-action@v1
