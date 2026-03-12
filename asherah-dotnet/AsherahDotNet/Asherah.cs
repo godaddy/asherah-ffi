@@ -1,16 +1,18 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace GoDaddy.Asherah;
 
 public static class Asherah
 {
-    private static readonly object SyncRoot = new();
-    private static AsherahFactory? _sharedFactory;
-    private static readonly Dictionary<string, AsherahSession> SessionCache = new();
-    private static bool _sessionCachingEnabled = true;
+    private static readonly object SetupLock = new();
+    private static volatile AsherahFactory? _sharedFactory;
+    private static readonly ConcurrentDictionary<string, AsherahSession> SessionCache = new();
+    private static volatile bool _sessionCachingEnabled = true;
 
     public static AsherahFactory FactoryFromEnv()
     {
@@ -39,7 +41,7 @@ public static class Asherah
     public static void Setup(AsherahConfig config)
     {
         var factory = FactoryFromConfig(config);
-        lock (SyncRoot)
+        lock (SetupLock)
         {
             if (_sharedFactory is not null)
             {
@@ -57,7 +59,7 @@ public static class Asherah
 
     public static void Shutdown()
     {
-        lock (SyncRoot)
+        lock (SetupLock)
         {
             if (_sharedFactory is null)
             {
@@ -84,13 +86,7 @@ public static class Asherah
 
     public static Task ShutdownAsync() => Task.Run(Shutdown);
 
-    public static bool GetSetupStatus()
-    {
-        lock (SyncRoot)
-        {
-            return _sharedFactory is not null;
-        }
-    }
+    public static bool GetSetupStatus() => _sharedFactory is not null;
 
     public static void SetEnv(IDictionary<string, string?> env)
     {
@@ -105,17 +101,14 @@ public static class Asherah
     {
         ArgumentNullException.ThrowIfNull(partitionId);
         ArgumentNullException.ThrowIfNull(plaintext);
-        lock (SyncRoot)
+        var session = AcquireSession(partitionId);
+        try
         {
-            var session = AcquireSession(partitionId);
-            try
-            {
-                return session.EncryptBytes(plaintext);
-            }
-            finally
-            {
-                ReleaseSession(partitionId, session);
-            }
+            return session.EncryptBytes(plaintext);
+        }
+        finally
+        {
+            ReleaseSession(partitionId, session);
         }
     }
 
@@ -135,17 +128,14 @@ public static class Asherah
     {
         ArgumentNullException.ThrowIfNull(partitionId);
         ArgumentNullException.ThrowIfNull(dataRowRecordJson);
-        lock (SyncRoot)
+        var session = AcquireSession(partitionId);
+        try
         {
-            var session = AcquireSession(partitionId);
-            try
-            {
-                return session.DecryptBytes(dataRowRecordJson);
-            }
-            finally
-            {
-                ReleaseSession(partitionId, session);
-            }
+            return session.DecryptBytes(dataRowRecordJson);
+        }
+        finally
+        {
+            ReleaseSession(partitionId, session);
         }
     }
 
@@ -169,12 +159,7 @@ public static class Asherah
         EnsureConfigured();
         if (_sessionCachingEnabled)
         {
-            if (!SessionCache.TryGetValue(partitionId, out var session))
-            {
-                session = SharedFactory().GetSession(partitionId);
-                SessionCache[partitionId] = session;
-            }
-            return session;
+            return SessionCache.GetOrAdd(partitionId, static (pid, factory) => factory.GetSession(pid), SharedFactory());
         }
 
         return SharedFactory().GetSession(partitionId);
