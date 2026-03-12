@@ -247,7 +247,7 @@ jobs:
           for dir in npm/*/; do
             if [ -f "$dir/package.json" ] && ls "$dir"/*.node 1>/dev/null 2>&1; then
               echo "Publishing $(node -p "require('./$dir/package.json').name")@${NPM_VERSION}..."
-              (cd "$dir" && npm publish --access public --tag beta)
+              (cd "$dir" && npm publish --access public)
             fi
           done
 
