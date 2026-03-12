@@ -112,7 +112,7 @@ def build_artifacts():
     )
     target_dir = Path(env.get("CARGO_TARGET_DIR", ROOT / "target"))
     wheel_dir = target_dir / "wheels"
-    wheels = sorted(wheel_dir.glob("asherah_py-*.whl"))
+    wheels = sorted(wheel_dir.glob("asherah*.whl"))
     if not wheels:
         raise RuntimeError("maturin did not produce a wheel")
     wheel_path = wheels[-1]
