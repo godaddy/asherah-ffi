@@ -3,7 +3,7 @@ requires = ["maturin>=1.4,<2"]
 build-backend = "maturin"
 
 [project]
-name = "asherah-py"
+name = "asherah"
 version = "0.1.0"
 description = "Python bindings for Go-compatible Asherah envelope encryption"
 readme = "README.md"
@@ -21,8 +21,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/godaddy/asherah"
-Repository = "https://github.com/godaddy/asherah"
+Homepage = "https://github.com/godaddy/asherah-ffi"
+Repository = "https://github.com/godaddy/asherah-ffi"
 
 [tool.maturin]
 bindings = "pyo3"
