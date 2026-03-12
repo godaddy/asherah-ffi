@@ -1,6 +1,24 @@
 const path = require('path');
 const os = require('os');
 
+// Detect musl libc (Alpine Linux, etc.)
+function isMusl() {
+  if (os.platform() !== 'linux') return false;
+  try {
+    // Node 18+: process.report.getReport() exposes glibc version
+    const report = process.report.getReport();
+    const header = typeof report === 'string' ? JSON.parse(report).header : report.header;
+    return !header.glibcVersionRuntime;
+  } catch {
+    // Fallback: check for musl dynamic linker
+    try {
+      return require('fs').readdirSync('/lib').some(f => f.startsWith('ld-musl-'));
+    } catch {
+      return false;
+    }
+  }
+}
+
 // Determine current platform
 function getPlatform() {
   const type = os.platform();
@@ -11,18 +29,32 @@ function getPlatform() {
     if (arch === 'arm64') return 'darwin-arm64';
   }
   if (type === 'linux') {
-    if (arch === 'x64') return 'linux-x64-gnu';
-    if (arch === 'arm64') return 'linux-arm64-gnu';
+    const libc = isMusl() ? 'musl' : 'gnu';
+    if (arch === 'x64') return `linux-x64-${libc}`;
+    if (arch === 'arm64') return `linux-arm64-${libc}`;
   }
   if (type === 'win32') {
     if (arch === 'x64') return 'win32-x64-msvc';
+    if (arch === 'arm64') return 'win32-arm64-msvc';
   }
 
   throw new Error(`Unsupported platform: ${type}-${arch}`);
 }
 
 const platform = getPlatform();
-const packageName = `asherah-${platform}`;
+
+// Map platform to npm package name (win32 needed a different name to avoid npm spam filter)
+const PLATFORM_PACKAGES = {
+  'darwin-arm64': 'asherah-darwin-arm64',
+  'darwin-x64': 'asherah-darwin-x64',
+  'linux-x64-gnu': 'asherah-linux-x64-gnu',
+  'linux-arm64-gnu': 'asherah-linux-arm64-gnu',
+  'linux-x64-musl': 'asherah-linux-x64-musl',
+  'linux-arm64-musl': 'asherah-linux-arm64-musl',
+  'win32-x64-msvc': 'asherah-windows-x64',
+  'win32-arm64-msvc': 'asherah-windows-arm64',
+};
+const packageName = PLATFORM_PACKAGES[platform] || `asherah-${platform}`;
 
 // Try to load the native module:
 // 1. Installed platform package (optionalDependency) — normal npm install

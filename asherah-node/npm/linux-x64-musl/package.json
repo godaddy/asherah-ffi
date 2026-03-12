@@ -1,5 +1,5 @@
 {
-  "name": "asherah-linux-x64-gnu",
+  "name": "asherah-linux-x64-musl",
   "version": "0.0.0",
   "os": [
     "linux"
@@ -7,11 +7,11 @@
   "cpu": [
     "x64"
   ],
-  "main": "index.linux-x64-gnu.node",
+  "main": "index.linux-x64-musl.node",
   "files": [
-    "index.linux-x64-gnu.node"
+    "index.linux-x64-musl.node"
   ],
-  "description": "Asherah envelope encryption - Linux x64 (glibc) native binding",
+  "description": "Asherah envelope encryption - Linux x64 (musl/Alpine) native binding",
   "license": "Apache-2.0",
   "engines": {
     "node": ">= 18"

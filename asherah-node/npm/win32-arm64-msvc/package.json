@@ -1,17 +1,17 @@
 {
-  "name": "asherah-windows-x64",
+  "name": "asherah-windows-arm64",
   "version": "0.0.0",
   "os": [
     "win32"
   ],
   "cpu": [
-    "x64"
+    "arm64"
   ],
-  "main": "index.win32-x64-msvc.node",
+  "main": "index.win32-arm64-msvc.node",
   "files": [
-    "index.win32-x64-msvc.node"
+    "index.win32-arm64-msvc.node"
   ],
-  "description": "Asherah envelope encryption - Windows x64 native binding",
+  "description": "Asherah envelope encryption - Windows ARM64 native binding",
   "license": "Apache-2.0",
   "engines": {
     "node": ">= 18"
