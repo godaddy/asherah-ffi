@@ -49,12 +49,18 @@ jobs:
             artifact_name: libasherah_cobhan.dylib
             asset_name: libasherah-arm64.dylib
             arch: arm64
-          # Windows x86_64 (arm64 runs via emulation)
+          # Windows x86_64
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact_name: asherah_cobhan.dll
             asset_name: libasherah-x64.dll
             arch: x64
+          # Windows arm64
+          - os: windows-latest
+            target: aarch64-pc-windows-msvc
+            artifact_name: asherah_cobhan.dll
+            asset_name: libasherah-arm64.dll
+            arch: arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -271,6 +277,7 @@ jobs:
             artifacts/libasherah-x64.dylib
             artifacts/libasherah-arm64.dylib
             artifacts/libasherah-x64.dll
+            artifacts/libasherah-arm64.dll
             artifacts/libasherah-x64.h
             artifacts/libasherah-arm64.h
             artifacts/SHA256SUMS
@@ -307,8 +314,11 @@ jobs:
           echo "macOS arm64 (Apple Silicon):"
           echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-arm64.dylib"
           echo ""
-          echo "Windows x86_64 (arm64 via emulation):"
+          echo "Windows x86_64:"
           echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-x64.dll"
+          echo ""
+          echo "Windows arm64:"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-arm64.dll"
           echo ""
           echo "Checksums:"
           echo "  https://github.com/${REPO}/releases/download/${TAG}/SHA256SUMS"
