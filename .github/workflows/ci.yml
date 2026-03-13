@@ -108,7 +108,7 @@ jobs:
             build-${{ runner.os }}-x86_64-rlib-
       - name: Install sccache
         run: |
-          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           sudo mv sccache-*/sccache /usr/local/bin/
           sudo chmod +x /usr/local/bin/sccache
       - name: Build FFI rlib (x86_64)
@@ -154,7 +154,7 @@ jobs:
           path: target/
       - name: Install sccache
         run: |
-          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           sudo mv sccache-*/sccache /usr/local/bin/
           sudo chmod +x /usr/local/bin/sccache
       - uses: actions/setup-node@v6
@@ -208,7 +208,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
           export PATH="$CARGO_HOME/bin:$PATH"
           rustup toolchain install 1.88.0 --profile minimal --component rustfmt
-          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           mv sccache-*/sccache /usr/local/bin/
           chmod +x /usr/local/bin/sccache
           python3.11 -m pip install maturin==1.9.4
@@ -252,7 +252,7 @@ jobs:
           path: target/
       - name: Install sccache
         run: |
-          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           sudo mv sccache-*/sccache /usr/local/bin/
           sudo chmod +x /usr/local/bin/sccache
       - name: Build Java binding (x86_64)
@@ -298,7 +298,7 @@ jobs:
           path: target/
       - name: Install sccache
         run: |
-          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           sudo mv sccache-*/sccache /usr/local/bin/
           sudo chmod +x /usr/local/bin/sccache
       - uses: actions/setup-dotnet@v5
@@ -370,7 +370,7 @@ jobs:
           path: target/
       - name: Install sccache
         run: |
-          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           sudo mv sccache-*/sccache /usr/local/bin/
           sudo chmod +x /usr/local/bin/sccache
       - name: Build asherah-cobhan (x86_64)
@@ -603,7 +603,7 @@ jobs:
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
           apt-get update
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu curl
-          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           mv sccache-*/sccache /usr/local/bin/
           chmod +x /usr/local/bin/sccache
       - name: Build FFI rlib (arm64)
@@ -667,7 +667,7 @@ jobs:
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu curl
           curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
           apt-get install -y nodejs
-          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           mv sccache-*/sccache /usr/local/bin/
           chmod +x /usr/local/bin/sccache
       - name: Build Node.js binding (arm64)
@@ -728,7 +728,7 @@ jobs:
           apt-get update
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu python3 python3-pip python3-venv curl
           pip3 install maturin==1.9.4
-          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           mv sccache-*/sccache /usr/local/bin/
           chmod +x /usr/local/bin/sccache
       - name: Build Python binding (arm64)
@@ -791,7 +791,7 @@ jobs:
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
           apt-get update
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu maven curl
-          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           mv sccache-*/sccache /usr/local/bin/
           chmod +x /usr/local/bin/sccache
       - name: Build Java binding (arm64)
@@ -854,7 +854,7 @@ jobs:
           ./dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet
           ./dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet
           ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet
-          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           mv sccache-*/sccache /usr/local/bin/
           chmod +x /usr/local/bin/sccache
       - name: Build .NET binding (arm64)
@@ -933,7 +933,7 @@ jobs:
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
           apt-get update
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu curl
-          curl -L https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
+          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           mv sccache-*/sccache /usr/local/bin/
           chmod +x /usr/local/bin/sccache
       - name: Build asherah-cobhan (arm64)
