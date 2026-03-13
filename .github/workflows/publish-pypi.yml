@@ -125,6 +125,18 @@ jobs:
             --manifest-path asherah-py/Cargo.toml
             --out dist/
 
+      - name: Remove non-abi3 wheels
+        shell: bash
+        run: |
+          # generate-import-lib causes maturin to also build for free-threaded
+          # Python interpreters on the runner. Only keep the abi3 wheel.
+          for f in dist/*.whl; do
+            case "$f" in
+              *abi3*) echo "keep: $f" ;;
+              *) echo "remove: $f"; rm -f "$f" ;;
+            esac
+          done
+
       - name: Upload wheel
         uses: actions/upload-artifact@v7
         with:
@@ -185,20 +197,40 @@ jobs:
           name: sdist
           path: dist/
 
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install twine
+        run: pip install twine
+
       - name: List packages
         run: ls -lh dist/
 
       - name: Publish to PyPI
         if: ${{ github.event.inputs.dry_run != 'true' }}
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: dist/
-          password: ${{ secrets.PYPI_TOKEN }}
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          twine check dist/*
+          for attempt in 1 2 3; do
+            echo "Upload attempt ${attempt}..."
+            if twine upload --verbose dist/*; then
+              echo "Upload succeeded"
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Upload failed after 3 attempts"
+              exit 1
+            fi
+            echo "Upload failed, retrying in 15s..."
+            sleep 15
+          done
 
       - name: Dry run
         if: ${{ github.event.inputs.dry_run == 'true' }}
         run: |
-          pip install twine
           twine check dist/*
           echo ""
           echo "Dry run complete. Would publish:"
