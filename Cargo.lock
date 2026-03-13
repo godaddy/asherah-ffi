@@ -102,6 +102,7 @@ dependencies = [
  "once_cell",
  "openssl",
  "parking_lot",
+ "percent-encoding",
  "postgres",
  "postgres-native-tls",
  "rand",

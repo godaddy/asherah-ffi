@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
+
 use crate::traits::Metastore;
 
 type MetastoreEnvResult = (Arc<dyn Metastore>, String, String, Option<String>);
@@ -25,22 +27,23 @@ pub enum DbKind {
 /// The `tls` value is preserved separately via the `MYSQL_TLS_MODE` env var
 /// (set by asherah-config).
 pub fn convert_go_mysql_dsn(dsn: &str) -> String {
-    // Split off query string
-    let (base, query) = match dsn.split_once('?') {
-        Some((b, q)) => (b, Some(q)),
-        None => (dsn, None),
+    // Split userinfo from the rest at the last '@'.
+    // Must happen BEFORE splitting on '?' because passwords can contain '?' and '@'.
+    let (userinfo, rest) = match dsn.rsplit_once('@') {
+        Some((u, r)) => (u, r),
+        None => ("", dsn),
     };
 
-    // Split userinfo from the rest at the last '@'
-    let (userinfo, rest) = match base.rsplit_once('@') {
-        Some((u, r)) => (u, r),
-        None => ("", base),
+    // Split off query string from the non-userinfo part only
+    let (rest_base, query) = match rest.split_once('?') {
+        Some((b, q)) => (b, Some(q)),
+        None => (rest, None),
     };
 
     // Extract host:port from tcp(host:port) or tcp(host)
-    let (host_port, db_part) = if let Some(after_tcp) = rest
+    let (host_port, db_part) = if let Some(after_tcp) = rest_base
         .strip_prefix("tcp(")
-        .or_else(|| rest.strip_prefix("tcp ("))
+        .or_else(|| rest_base.strip_prefix("tcp ("))
     {
         match after_tcp.split_once(')') {
             Some((addr, remainder)) => {
@@ -60,7 +63,7 @@ pub fn convert_go_mysql_dsn(dsn: &str) -> String {
         }
     } else {
         // No tcp(...) — might be just host/db or /db
-        match rest.split_once('/') {
+        match rest_base.split_once('/') {
             Some((host, db)) => {
                 let hp = if host.is_empty() {
                     "localhost:3306".to_string()
@@ -71,7 +74,7 @@ pub fn convert_go_mysql_dsn(dsn: &str) -> String {
                 };
                 (hp, db.to_string())
             }
-            None => (rest.to_string(), String::new()),
+            None => (rest_base.to_string(), String::new()),
         }
     };
 
@@ -118,7 +121,17 @@ pub fn convert_go_mysql_dsn(dsn: &str) -> String {
     if userinfo.is_empty() {
         format!("mysql://{host_port}/{db_part}{qs}")
     } else {
-        format!("mysql://{userinfo}@{host_port}/{db_part}{qs}")
+        // Percent-encode username and password for the URL.
+        // Go DSN format uses raw special characters in passwords, but
+        // the mysql:// URL scheme requires them to be percent-encoded.
+        let encoded_userinfo = if let Some((user, pass)) = userinfo.split_once(':') {
+            let enc_user = percent_encode(user.as_bytes(), NON_ALPHANUMERIC);
+            let enc_pass = percent_encode(pass.as_bytes(), NON_ALPHANUMERIC);
+            format!("{enc_user}:{enc_pass}")
+        } else {
+            percent_encode(userinfo.as_bytes(), NON_ALPHANUMERIC).to_string()
+        };
+        format!("mysql://{encoded_userinfo}@{host_port}/{db_part}{qs}")
     }
 }
 
@@ -446,6 +459,18 @@ mod tests {
         let dsn = "mysql://root:pass@tcp(localhost:3306)/testdb?tls=skip-verify";
         match classify_connection_string(dsn) {
             DbKind::Mysql(url) => assert_eq!(url, "mysql://root:pass@localhost:3306/testdb"),
+            other => panic!("expected Mysql, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_convert_go_mysql_dsn_special_chars_in_password() {
+        // Passwords with %, @, ?, &, : etc. must be percent-encoded in the URL
+        let dsn = "admin:p@ss%ml61!&?=x@tcp(db:3306)/mydb?tls=skip-verify";
+        match classify_connection_string(dsn) {
+            DbKind::Mysql(url) => {
+                assert_eq!(url, "mysql://admin:p%40ss%25ml61%21%26%3F%3Dx@db:3306/mydb");
+            }
             other => panic!("expected Mysql, got {other:?}"),
         }
     }
