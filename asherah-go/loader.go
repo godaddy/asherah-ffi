@@ -114,6 +114,17 @@ func candidateLibraryPaths() []string {
         }
     }
 
+    // Check user cache directory (populated by install-native command).
+    if cacheDir, err := os.UserCacheDir(); err == nil {
+        cacheLibDir := filepath.Join(cacheDir, "asherah-go")
+        for _, name := range names {
+            candidate := filepath.Join(cacheLibDir, name)
+            if fileExists(candidate) {
+                paths = append(paths, candidate)
+            }
+        }
+    }
+
     // Allow library names without path for system-installed copies.
     paths = append(paths, names...)
 

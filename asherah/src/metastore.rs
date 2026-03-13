@@ -61,18 +61,18 @@ impl Metastore for InMemoryMetastore {
     ) -> Result<bool, anyhow::Error> {
         let interned: Arc<str> = Arc::from(id);
         let key = (interned.clone(), created);
+        // Update the latest pointer BEFORE inserting into by_key. This ensures
+        // that when a concurrent insert returns Err (duplicate), the winning
+        // thread's latest pointer is already visible to load_latest.
+        let should_update = self
+            .latest
+            .read(&interned, |_, &existing| existing < created)
+            .unwrap_or(true);
+        if should_update {
+            let _ = self.latest.upsert(interned, created);
+        }
         match self.by_key.insert(key, ekr.clone()) {
-            Ok(_) => {
-                // Update latest pointer if this is newer
-                let should_update = self
-                    .latest
-                    .read(&interned, |_, &existing| existing < created)
-                    .unwrap_or(true);
-                if should_update {
-                    let _ = self.latest.upsert(interned, created);
-                }
-                Ok(true)
-            }
+            Ok(_) => Ok(true),
             Err(_) => Ok(false), // Key already exists
         }
     }
