@@ -230,7 +230,7 @@ func verifyChecksum(checksumURL, assetName, localFile string) error {
 	return nil
 }
 
-func fatalf(format string, args ...any) {
+func fatalf(format string, args ...interface{}) {
 	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
 	os.Exit(1)
 }
