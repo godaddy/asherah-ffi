@@ -230,8 +230,12 @@ fn normalize_sqlite_path(conn: &str) -> String {
 }
 
 /// Extract Go `go-sql-driver/mysql` `tls` parameter value from a connection string.
+/// Splits at the last `@` first so that `?` characters in passwords are not
+/// mistaken for the query-string separator.
 fn extract_go_mysql_tls(conn: &str) -> Option<String> {
-    let query = conn.split_once('?').map(|(_, q)| q)?;
+    // Look for query params only in the part after the last '@' (i.e. not in userinfo)
+    let after_userinfo = conn.rsplit_once('@').map(|(_, r)| r).unwrap_or(conn);
+    let query = after_userinfo.split_once('?').map(|(_, q)| q)?;
     for param in query.split('&') {
         if let Some(("tls", value)) = param.split_once('=') {
             return Some(value.to_string());
