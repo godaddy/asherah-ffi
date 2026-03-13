@@ -1,19 +1,41 @@
-# asherah-node
+# asherah
 
-`asherah-node` packages the Asherah AppEncryption runtime as a Node.js native
-addon using `napi-rs`. The crate builds a `cdylib` that is published to npm via
-the accompanying workflow.
+Node.js bindings for the Asherah envelope encryption and key rotation library.
+
+Prebuilt native binaries are published to npm for Linux (x64/arm64, glibc and
+musl), macOS (x64/arm64), and Windows (x64/arm64). The correct binary is
+selected automatically at install time.
 
 ## Features
 
-- Provides synchronous and asynchronous session helpers mirroring the Go SDK.
-- Shares configuration parsing through the `asherah-config` crate.
-- Leverages the same Rust core (`asherah`) used by other language bindings.
+- Synchronous and asynchronous encrypt/decrypt APIs
+- Compatible with Go, Python, Ruby, Java, and .NET Asherah implementations
+- SQLite, MySQL, PostgreSQL, and DynamoDB metastore support
+- AWS KMS and static key management
 
-## Building
+## Installation
 
-Use `npm install` in `asherah-node/` to compile the addon locally. CI builds
-and publishes prebuilt binaries for supported targets.
+```bash
+npm install asherah
+```
+
+## Quick start
+
+```js
+const asherah = require('asherah');
+
+asherah.setup({
+  kms: 'static',
+  metastore: 'memory',
+  serviceName: 'myservice',
+  productId: 'myproduct',
+});
+
+const encrypted = asherah.encrypt('partition', Buffer.from('hello world'));
+const decrypted = asherah.decrypt('partition', encrypted);
+
+asherah.shutdown();
+```
 
 ## License
 
