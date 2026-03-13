@@ -16,7 +16,36 @@ on:
         default: false
 
 jobs:
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      beta: ${{ steps.resolve.outputs.beta }}
+    steps:
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Find next available version
+        id: resolve
+        run: |
+          BETA="${{ vars.PYPI_BETA_VERSION }}"
+          if [ -z "$BETA" ]; then
+            echo "::error::Repository variable PYPI_BETA_VERSION is not set"
+            exit 1
+          fi
+          # Advance past any already-published versions
+          while pip index versions asherah 2>/dev/null | grep -q "0.5.0b${BETA}"; do
+            echo "asherah==0.5.0b${BETA} already exists on PyPI, trying next..."
+            BETA=$(( BETA + 1 ))
+          done
+          VERSION="0.5.0b${BETA}"
+          echo "Will publish version: ${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "beta=${BETA}" >> "$GITHUB_OUTPUT"
+
   build-wheels:
+    needs: resolve-version
     strategy:
       matrix:
         include:
@@ -65,21 +94,16 @@ jobs:
 
       - name: Set version
         shell: bash
+        env:
+          PYPI_VERSION: ${{ needs.resolve-version.outputs.version }}
+          PYPI_BETA: ${{ needs.resolve-version.outputs.beta }}
         run: |
-          BETA="${{ vars.PYPI_BETA_VERSION }}"
-          if [ -z "$BETA" ]; then
-            echo "::error::Repository variable PYPI_BETA_VERSION is not set"
-            exit 1
-          fi
-          VERSION="0.5.0b${BETA}"
-          echo "Publishing version: ${VERSION}"
-          echo "PYPI_VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "PYPI_BETA=${BETA}" >> "$GITHUB_ENV"
+          echo "Publishing version: ${PYPI_VERSION}"
           # Update pyproject.toml version (PEP 440: 0.5.0bN)
-          sed -i.bak 's/^version = ".*"/version = "'"${VERSION}"'"/' asherah-py/pyproject.toml
+          sed -i.bak 's/^version = ".*"/version = "'"${PYPI_VERSION}"'"/' asherah-py/pyproject.toml
           rm -f asherah-py/pyproject.toml.bak
           # Update Cargo.toml version (semver: 0.5.0-beta.N)
-          sed -i.bak 's/^version = ".*"/version = "0.5.0-beta.'"${BETA}"'"/' asherah-py/Cargo.toml
+          sed -i.bak 's/^version = ".*"/version = "0.5.0-beta.'"${PYPI_BETA}"'"/' asherah-py/Cargo.toml
           rm -f asherah-py/Cargo.toml.bak
 
       - name: Build wheel
@@ -110,6 +134,7 @@ jobs:
           retention-days: 1
 
   build-sdist:
+    needs: resolve-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -117,15 +142,12 @@ jobs:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Set version
+        env:
+          PYPI_VERSION: ${{ needs.resolve-version.outputs.version }}
+          PYPI_BETA: ${{ needs.resolve-version.outputs.beta }}
         run: |
-          BETA="${{ vars.PYPI_BETA_VERSION }}"
-          if [ -z "$BETA" ]; then
-            echo "::error::Repository variable PYPI_BETA_VERSION is not set"
-            exit 1
-          fi
-          VERSION="0.5.0b${BETA}"
-          sed -i 's/^version = ".*"/version = "'"${VERSION}"'"/' asherah-py/pyproject.toml
-          sed -i 's/^version = ".*"/version = "0.5.0-beta.'"${BETA}"'"/' asherah-py/Cargo.toml
+          sed -i 's/^version = ".*"/version = "'"${PYPI_VERSION}"'"/' asherah-py/pyproject.toml
+          sed -i 's/^version = ".*"/version = "0.5.0-beta.'"${PYPI_BETA}"'"/' asherah-py/Cargo.toml
 
       - name: Build sdist
         uses: PyO3/maturin-action@v1
@@ -142,7 +164,7 @@ jobs:
           retention-days: 1
 
   publish:
-    needs: [build-wheels, build-sdist]
+    needs: [resolve-version, build-wheels, build-sdist]
     runs-on: ubuntu-latest
     permissions:
       actions: write
@@ -182,15 +204,12 @@ jobs:
           echo "Dry run complete. Would publish:"
           ls -lh dist/
 
-      - name: Increment beta version
+      - name: Update beta version variable
         if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
-          BETA="${{ vars.PYPI_BETA_VERSION }}"
+          BETA="${{ needs.resolve-version.outputs.beta }}"
           NEXT=$(( BETA + 1 ))
-          if gh variable set PYPI_BETA_VERSION --body "$NEXT" 2>/dev/null; then
-            echo "Bumped PYPI_BETA_VERSION from ${BETA} to ${NEXT}"
-          else
-            echo "::warning::Auto-increment failed. Manually set PYPI_BETA_VERSION to ${NEXT}."
-          fi
+          gh variable set PYPI_BETA_VERSION --body "$NEXT"
+          echo "Set PYPI_BETA_VERSION to ${NEXT}"
