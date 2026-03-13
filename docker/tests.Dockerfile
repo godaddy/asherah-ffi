@@ -18,7 +18,11 @@ RUN echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries \
     lld \
     golang \
     ruby-full \
+    libffi-dev \
     patchelf
+
+# Ruby FFI gem (native extension requires libffi-dev)
+RUN gem install ffi --no-document
 
 RUN curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
     && chmod +x /tmp/dotnet-install.sh \
