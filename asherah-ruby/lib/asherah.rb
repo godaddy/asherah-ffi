@@ -1,5 +1,6 @@
+# frozen_string_literal: true
+
 require "json"
-require "thread"
 
 require_relative "asherah/error"
 require_relative "asherah/native"
@@ -21,7 +22,7 @@ module Asherah
       normalized = normalize_config(config)
       json = JSON.generate(normalized)
 
-      pointer = Native.factory_from_config(json)
+      pointer = Native.asherah_factory_new_with_config(json)
       factory = SessionFactory.new(pointer)
 
       @mutex.synchronize do
@@ -100,11 +101,8 @@ module Asherah
     end
 
     def encrypt(partition_id, payload)
-      data = String(payload).dup.force_encoding(Encoding::BINARY)
-      with_session(partition_id) do |session|
-        log(:debug, "encrypt partition=#{partition_id} bytes=#{data.bytesize}")
-        session.encrypt_bytes(data)
-      end
+      session = resolve_session(partition_id)
+      session.encrypt_bytes(payload)
     end
 
     def encrypt_string(partition_id, text)
@@ -112,11 +110,8 @@ module Asherah
     end
 
     def decrypt(partition_id, data_row_record)
-      json = String(data_row_record).dup.force_encoding(Encoding::UTF_8)
-      with_session(partition_id) do |session|
-        log(:debug, "decrypt partition=#{partition_id} bytes=#{json.bytesize}")
-        session.decrypt_bytes(json)
-      end
+      session = resolve_session(partition_id)
+      session.decrypt_bytes(data_row_record)
     end
 
     def decrypt_string(partition_id, data_row_record)
@@ -194,32 +189,13 @@ module Asherah
       end
     end
 
-    def log(level, message)
-      hook = @log_hook
-      if hook
-        hook.call(level, "asherah-ruby: #{message}")
-      elsif @verbose
-        warn "[asherah-ruby] #{message}"
-      end
-    end
-
-    def with_session(partition_id)
+    def resolve_session(partition_id)
       raise ArgumentError, "partition_id cannot be empty" if String(partition_id).empty?
 
+      # Brief mutex hold for hash lookup only — FFI call happens outside
       @mutex.synchronize do
         raise Error, "Asherah not configured; call setup()" unless @factory
-
-        if @session_cache_enabled
-          session = (@sessions[partition_id] ||= @factory.get_session(partition_id))
-          yield session
-        else
-          session = @factory.get_session(partition_id)
-          begin
-            yield session
-          ensure
-            session.close unless session.closed?
-          end
-        end
+        @sessions[partition_id] ||= @factory.get_session(partition_id)
       end
     end
   end
