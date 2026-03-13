@@ -164,7 +164,7 @@ jobs:
         run: |
           ls -R artifacts/
 
-      - name: Set beta version
+      - name: Resolve next available version
         working-directory: asherah-node
         run: |
           BETA="${{ vars.NPM_BETA_VERSION }}"
@@ -172,6 +172,11 @@ jobs:
             echo "::error::Repository variable NPM_BETA_VERSION is not set"
             exit 1
           fi
+          # Find the next version that isn't already published
+          while npm view "asherah@4.0.0-beta.${BETA}" version 2>/dev/null; do
+            echo "asherah@4.0.0-beta.${BETA} already exists, trying next..."
+            BETA=$(( BETA + 1 ))
+          done
           VERSION="4.0.0-beta.${BETA}"
           echo "Publishing version: ${VERSION}"
           npm version "$VERSION" --no-git-tag-version
@@ -277,14 +282,11 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Increment beta version
+      - name: Update beta version variable
         if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           NEXT=$(( NPM_BETA + 1 ))
-          if gh variable set NPM_BETA_VERSION --body "$NEXT" 2>/dev/null; then
-            echo "Bumped NPM_BETA_VERSION from ${NPM_BETA} to ${NEXT}"
-          else
-            echo "::warning::Auto-increment failed (GITHUB_TOKEN lacks variable write access). Manually set NPM_BETA_VERSION to ${NEXT} in Settings > Secrets and variables > Actions > Variables."
-          fi
+          gh variable set NPM_BETA_VERSION --body "$NEXT"
+          echo "Set NPM_BETA_VERSION to ${NEXT}"

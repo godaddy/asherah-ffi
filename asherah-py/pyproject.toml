@@ -5,7 +5,7 @@ build-backend = "maturin"
 [project]
 name = "asherah"
 version = "0.1.0"
-description = "Python bindings for Go-compatible Asherah envelope encryption"
+description = "Python bindings for Asherah envelope encryption"
 readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "Apache-2.0" }
