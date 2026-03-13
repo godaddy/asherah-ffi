@@ -1,19 +1,37 @@
-# asherah-py
+# asherah
 
-`asherah-py` provides Python bindings for the Asherah AppEncryption runtime via
-`pyo3`. The crate builds a Python extension module that is distributed with
-`maturin` alongside the Python package in this repository.
+Python bindings for the Asherah envelope encryption and key rotation library.
 
-## Highlights
+Prebuilt wheels are published to PyPI for Linux (x64/arm64, glibc and musl),
+macOS (universal2), and Windows (x64/arm64). Python 3.8+ is supported via
+stable ABI wheels.
 
-- Mirrors the Go and Node APIs for session lifecycle, caching, and encryption.
-- Uses `asherah-config` for consistent structured configuration parsing.
-- Ships abi3 wheels targeting Python 3.8+.
+## Features
 
-## Building
+- Session-based encrypt/decrypt API
+- Compatible with Go, Node.js, Ruby, Java, and .NET Asherah implementations
+- SQLite, MySQL, PostgreSQL, and DynamoDB metastore support
+- AWS KMS and static key management
 
-Install `maturin` and run `maturin develop` or use the provided `Makefile` in
-`asherah-py/` to produce distributable wheels.
+## Installation
+
+```bash
+pip install asherah
+```
+
+## Quick start
+
+```python
+import asherah_py as asherah
+
+factory = asherah.SessionFactory()
+session = factory.get_session("partition")
+
+encrypted = session.encrypt_bytes(b"hello world")
+decrypted = session.decrypt_bytes(encrypted)
+
+factory.close()
+```
 
 ## License
 
