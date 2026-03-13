@@ -87,6 +87,15 @@ jobs:
         with:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux || 'auto' }}
+          rust-toolchain: "1.88.0"
+          before-script-linux: |
+            # aws-lc-sys requires cmake; install it if missing
+            if command -v yum &>/dev/null; then
+              yum install -y cmake3 perl-IPC-Cmd || yum install -y cmake perl-IPC-Cmd || true
+              ln -sf cmake3 /usr/local/bin/cmake 2>/dev/null || true
+            elif command -v apk &>/dev/null; then
+              apk add --no-cache cmake make perl
+            fi
           args: >-
             --release
             --manifest-path asherah-py/Cargo.toml
