@@ -23,7 +23,11 @@ pub struct AwsKmsEnvelope<A: AEAD + Send + Sync + 'static> {
 
 #[derive(serde::Serialize, serde::Deserialize)]
 struct KekEnvelope {
-    #[serde(rename = "encryptedKey")]
+    #[serde(
+        rename = "encryptedKey",
+        serialize_with = "crate::types::serde_base64::serialize",
+        deserialize_with = "crate::types::serde_base64::deserialize"
+    )]
     encrypted_key: Vec<u8>,
     #[serde(rename = "kmsKeks")]
     keks: Vec<RegionalKek>,
@@ -35,7 +39,11 @@ struct RegionalKek {
     region: String,
     #[serde(rename = "arn")]
     arn: String,
-    #[serde(rename = "encryptedKek")]
+    #[serde(
+        rename = "encryptedKek",
+        serialize_with = "crate::types::serde_base64::serialize",
+        deserialize_with = "crate::types::serde_base64::deserialize"
+    )]
     encrypted_kek: Vec<u8>,
 }
 
@@ -350,6 +358,15 @@ mod tests {
         assert!(j.contains("\"region\""));
         assert!(j.contains("\"arn\""));
         assert!(j.contains("\"encryptedKek\""));
+        // Byte fields must be base64 strings, not JSON arrays
+        assert!(
+            j.contains("\"encryptedKey\":\""),
+            "encryptedKey should be a base64 string, got: {j}"
+        );
+        assert!(
+            j.contains("\"encryptedKek\":\""),
+            "encryptedKek should be a base64 string, got: {j}"
+        );
         // Roundtrip
         let back: KekEnvelope = serde_json::from_str(&j)?;
         assert_eq!(back.encrypted_key, vec![1, 2, 3]);
@@ -358,6 +375,30 @@ mod tests {
         assert_eq!(back.keks[0].arn, "arn:aws:kms:...");
         assert_eq!(back.keks[0].encrypted_kek, vec![9, 8, 7]);
         Ok(())
+    }
+
+    #[test]
+    fn test_deserialize_go_produced_kms_envelope() {
+        // Go asherah produces base64-encoded byte fields in KMS envelope JSON.
+        // This test ensures Rust can deserialize that format.
+        let go_json = r#"{
+            "encryptedKey": "AQIDBAU=",
+            "kmsKeks": [{
+                "region": "us-west-2",
+                "arn": "arn:aws:kms:us-west-2:111122223333:key/example",
+                "encryptedKek": "CQgHBgU="
+            }]
+        }"#;
+        let env: KekEnvelope =
+            serde_json::from_str(go_json).expect("should deserialize Go-produced KMS envelope");
+        assert_eq!(env.encrypted_key, vec![1, 2, 3, 4, 5]);
+        assert_eq!(env.keks.len(), 1);
+        assert_eq!(env.keks[0].region, "us-west-2");
+        assert_eq!(
+            env.keks[0].arn,
+            "arn:aws:kms:us-west-2:111122223333:key/example"
+        );
+        assert_eq!(env.keks[0].encrypted_kek, vec![9, 8, 7, 6, 5]);
     }
 
     #[test]
