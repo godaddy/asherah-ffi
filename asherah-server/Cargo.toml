@@ -1,0 +1,45 @@
+[package]
+name = "asherah-server"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "gRPC sidecar server for Asherah envelope encryption"
+publish = false
+
+[lib]
+name = "asherah_server"
+path = "src/lib.rs"
+
+[[bin]]
+name = "asherah-server"
+path = "src/main.rs"
+
+[dependencies]
+asherah = { path = "../asherah" }
+asherah-config = { path = "../asherah-config" }
+tonic = "0.12"
+prost = "0.13"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+clap = { version = "4", features = ["derive", "env"] }
+serde_json = "1"
+anyhow = "1"
+log = "0.4"
+env_logger = "0.11"
+
+[build-dependencies]
+tonic-build = "0.12"
+
+[dev-dependencies]
+tower = "0.4"
+hyper-util = "0.1"
+serial_test = "3"
+
+[features]
+default = ["mysql", "postgres", "dynamodb"]
+mysql = ["asherah/mysql"]
+postgres = ["asherah/postgres"]
+dynamodb = ["asherah/dynamodb"]
+
+[lints]
+workspace = true
