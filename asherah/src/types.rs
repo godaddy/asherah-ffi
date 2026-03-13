@@ -51,7 +51,7 @@ pub struct DataRowRecord {
     pub data: Vec<u8>,
 }
 
-mod serde_base64 {
+pub(crate) mod serde_base64 {
     use base64::Engine;
     use serde::{de::Error, Deserialize, Deserializer, Serializer};
 
