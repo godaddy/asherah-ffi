@@ -14,6 +14,7 @@ members = [
   "asherah-py",
   "asherah-java",
   "asherah-config",
+  "asherah-server",
 ]
 resolver = "2"
 
