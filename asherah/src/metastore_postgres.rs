@@ -2,11 +2,66 @@ use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
 use anyhow::Context;
 use postgres::Client;
+use std::sync::{Arc, Mutex};
+
+/// Default max open connections, matching our MySQL default.
+const DEFAULT_MAX_OPEN: usize = 10;
+
+/// Default max idle connections, matching Go's database/sql MaxIdleConns default.
+const DEFAULT_MAX_IDLE: usize = 2;
+
+struct PoolInner {
+    conns: Vec<Client>,
+    checked_out: usize,
+}
+
+struct PgPool {
+    url: String,
+    replica_consistency: Option<String>,
+    inner: Mutex<PoolInner>,
+    max_idle: usize,
+    max_open: usize,
+}
+
+/// A connection checked out from the pool. Returns to the pool on drop.
+struct PgPooledClient {
+    pool: Arc<PgPool>,
+    client: Option<Client>,
+}
+
+impl Drop for PgPooledClient {
+    fn drop(&mut self) {
+        if let Some(client) = self.client.take() {
+            let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
+            inner.checked_out -= 1;
+            if !client.is_closed() && inner.conns.len() < self.pool.max_idle {
+                inner.conns.push(client);
+            }
+        }
+    }
+}
+
+impl std::ops::Deref for PgPooledClient {
+    type Target = Client;
+    fn deref(&self) -> &Client {
+        self.client
+            .as_ref()
+            .expect("PgPooledClient accessed after drop")
+    }
+}
+
+impl std::ops::DerefMut for PgPooledClient {
+    fn deref_mut(&mut self) -> &mut Client {
+        self.client
+            .as_mut()
+            .expect("PgPooledClient accessed after drop")
+    }
+}
 
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
 pub struct PostgresMetastore {
-    url: String,
+    pool: Arc<PgPool>,
 }
 
 /// Extract the `sslmode` value from a Postgres connection string.
@@ -75,50 +130,88 @@ fn connect_client(url: &str) -> anyhow::Result<Client> {
 
 impl PostgresMetastore {
     pub fn connect(url: &str) -> anyhow::Result<Self> {
-        // Validate REPLICA_READ_CONSISTENCY early (before any connection)
-        if let Ok(consistency) = std::env::var("REPLICA_READ_CONSISTENCY") {
-            match consistency.as_str() {
-                "eventual" | "global" | "session" => {}
+        let replica_consistency = match std::env::var("REPLICA_READ_CONSISTENCY") {
+            Ok(c) => match c.as_str() {
+                "eventual" | "global" | "session" => Some(c),
                 _ => {
                     anyhow::bail!(
                         "invalid REPLICA_READ_CONSISTENCY value: '{}' (expected eventual, global, or session)",
-                        consistency
+                        c
                     );
                 }
-            }
-        }
+            },
+            Err(_) => None,
+        };
+
+        let max_open = std::env::var("ASHERAH_POOL_SIZE")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(DEFAULT_MAX_OPEN);
+        let max_idle = DEFAULT_MAX_IDLE.min(max_open);
 
         Ok(Self {
-            url: url.to_string(),
+            pool: Arc::new(PgPool {
+                url: url.to_string(),
+                replica_consistency,
+                inner: Mutex::new(PoolInner {
+                    conns: Vec::with_capacity(max_idle),
+                    checked_out: 0,
+                }),
+                max_idle,
+                max_open,
+            }),
         })
     }
 
-    fn client(&self) -> anyhow::Result<Client> {
-        let mut cli = connect_client(&self.url).map_err(|e| {
+    fn client(&self) -> anyhow::Result<PgPooledClient> {
+        // Try to reuse an idle connection from the pool
+        {
+            let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
+            while let Some(client) = inner.conns.pop() {
+                if !client.is_closed() {
+                    inner.checked_out += 1;
+                    return Ok(PgPooledClient {
+                        pool: Arc::clone(&self.pool),
+                        client: Some(client),
+                    });
+                }
+            }
+
+            // No idle connection available — check if we can open a new one
+            let total = inner.checked_out + inner.conns.len();
+            if total >= self.pool.max_open {
+                anyhow::bail!(
+                    "Postgres connection pool exhausted (max_open={})",
+                    self.pool.max_open
+                );
+            }
+            inner.checked_out += 1;
+        }
+
+        // Create a new connection (outside the lock)
+        let client = connect_client(&self.pool.url).map_err(|e| {
+            // Decrement checked_out since we failed to create the connection
+            let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
+            inner.checked_out -= 1;
             log::error!("Postgres connection failed: {e:#}");
             e
         })?;
-        Self::apply_replica_read_consistency(&mut cli)?;
-        Ok(cli)
-    }
 
-    fn apply_replica_read_consistency(cli: &mut Client) -> anyhow::Result<()> {
-        if let Ok(consistency) = std::env::var("REPLICA_READ_CONSISTENCY") {
-            match consistency.as_str() {
-                "eventual" | "global" | "session" => {
-                    cli.batch_execute(&format!(
-                        "SET apg_write_forward.consistency_mode = '{consistency}'"
-                    ))?;
-                }
-                _ => {
-                    anyhow::bail!(
-                        "invalid REPLICA_READ_CONSISTENCY value: '{}' (expected eventual, global, or session)",
-                        consistency
-                    );
-                }
+        // Apply replica read consistency on new connections
+        let mut pooled = PgPooledClient {
+            pool: Arc::clone(&self.pool),
+            client: Some(client),
+        };
+        if let Some(ref consistency) = self.pool.replica_consistency {
+            if let Err(e) = pooled.batch_execute(&format!(
+                "SET apg_write_forward.consistency_mode = '{consistency}'"
+            )) {
+                // pooled will be dropped, which decrements checked_out
+                return Err(e.into());
             }
         }
-        Ok(())
+
+        Ok(pooled)
     }
 }
 
