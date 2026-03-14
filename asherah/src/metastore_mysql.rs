@@ -2,7 +2,7 @@ use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
 use anyhow::Context;
 use mysql::prelude::Queryable;
-use mysql::{Opts, OptsBuilder, Pool, PooledConn, SslOpts};
+use mysql::{Opts, OptsBuilder, Pool, PoolConstraints, PoolOpts, PooledConn, SslOpts};
 use std::fmt::Write;
 
 /// Convert Unix epoch seconds to a "YYYY-MM-DD HH:MM:SS" UTC datetime string.
@@ -49,6 +49,14 @@ pub struct MySqlMetastore {
 impl MySqlMetastore {
     pub fn connect(url: &str) -> anyhow::Result<Self> {
         let opts: Opts = url.try_into()?;
+
+        // Only override MySQL default pool (min=10, max=100) with saner defaults
+        // (min=0, max=10). If the user explicitly set pool_min/pool_max in their
+        // connection URL, those will differ from defaults and we respect them.
+        let constraints = opts.get_pool_opts().constraints();
+        let need_pool_defaults = constraints.min() == PoolConstraints::DEFAULT.min()
+            && constraints.max() == PoolConstraints::DEFAULT.max();
+
         let mut builder = OptsBuilder::from_opts(opts);
 
         // Apply TLS configuration from MYSQL_TLS_MODE env var.
@@ -91,6 +99,18 @@ impl MySqlMetastore {
                     );
                 }
             }
+        }
+
+        if need_pool_defaults {
+            // Match Go database/sql defaults: no pre-created connections (min=0),
+            // capped at a reasonable max (default 10, configurable via ASHERAH_POOL_SIZE).
+            let max_pool = std::env::var("ASHERAH_POOL_SIZE")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(10);
+            builder = builder.pool_opts(PoolOpts::default().with_constraints(
+                PoolConstraints::new(0, max_pool.max(1)).expect("valid: min=0 <= max>=1"),
+            ));
         }
 
         let pool = Pool::new(builder)?;
