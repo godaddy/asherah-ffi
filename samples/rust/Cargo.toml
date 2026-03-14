@@ -1,0 +1,11 @@
+[package]
+name = "asherah-sample"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+asherah = { path = "../../asherah" }
+asherah-config = { path = "../../asherah-config" }
+anyhow = "1"
+serde_json = "1"

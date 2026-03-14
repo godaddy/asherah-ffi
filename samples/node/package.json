@@ -1,0 +1,9 @@
+{
+  "name": "asherah-sample",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "asherah": "next"
+  }
+}
