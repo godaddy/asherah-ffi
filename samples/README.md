@@ -43,6 +43,29 @@ maturin develop --manifest-path asherah-py/Cargo.toml
 python samples/python/sample.py
 ```
 
+## C# / .NET
+
+Uses a project reference to the `AsherahDotNet` project in this repo. The native
+library must be built first:
+
+```sh
+cargo build --release -p asherah-ffi
+ASHERAH_DOTNET_NATIVE=target/release dotnet run --project samples/dotnet
+```
+
+## Java
+
+Uses the `asherah-java` binding in this repo. Build the native library and the
+Java jar, then compile and run:
+
+```sh
+cargo build -p asherah-java
+mvn -B -f asherah-java/java/pom.xml -Dnative.build.skip=true package -DskipTests
+javac -cp asherah-java/java/target/asherah-java-0.1.0-SNAPSHOT.jar samples/java/Sample.java
+java -Dasherah.java.nativeLibraryPath=target/debug \
+     -cp asherah-java/java/target/asherah-java-0.1.0-SNAPSHOT.jar:samples/java Sample
+```
+
 ## Ruby
 
 Requires the `ffi` gem and the `libasherah_ffi` native library. Build the native
