@@ -1121,11 +1121,15 @@ async fn postgres_decrypt_tampered_drr_fails() {
 /// MySQL metastore: connecting to a bad URL should return an error, not panic.
 #[tokio::test]
 async fn mysql_bad_connection_returns_error() {
-    // No container needed — we're testing that a bad URL fails gracefully
+    use asherah::traits::Metastore;
+    // No container needed — we're testing that a bad URL fails gracefully.
+    // With min=0 pool, connect() succeeds (lazy); error surfaces on first use.
     tokio::task::spawn_blocking(|| {
-        let result =
-            asherah::metastore_mysql::MySqlMetastore::connect("mysql://root@127.0.0.1:1/nonexist");
-        assert!(result.is_err(), "connecting to bad MySQL URL should fail");
+        let store =
+            asherah::metastore_mysql::MySqlMetastore::connect("mysql://root@127.0.0.1:1/nonexist")
+                .expect("connect() should succeed (lazy pool with min=0)");
+        let result = store.load("test", 0);
+        assert!(result.is_err(), "load on bad MySQL URL should fail");
     })
     .await
     .unwrap();
