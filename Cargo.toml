@@ -16,6 +16,7 @@ members = [
   "asherah-config",
   "asherah-server",
 ]
+exclude = ["samples/rust"]
 resolver = "2"
 
 [lints]
