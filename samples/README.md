@@ -16,11 +16,11 @@ cargo run --manifest-path samples/rust/Cargo.toml
 
 ## Go
 
-Uses the `github.com/godaddy/asherah-go` module. The native library must be
-available — either build it from this repo or install a prebuilt binary:
+Uses a path reference to the `asherah-go` binding in this repo. The native
+library must be built first:
 
 ```sh
-go run github.com/godaddy/asherah-go/cmd/install-native@latest
+cargo build --release -p asherah-ffi
 cd samples/go && go run .
 ```
 
