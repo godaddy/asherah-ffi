@@ -1,0 +1,63 @@
+name: Publish to GitHub Packages (NuGet)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 0.1.0-beta.1)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Dry run (build but do not publish)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - name: Set version
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          echo "Publishing version: ${VERSION}"
+          echo "NUGET_VERSION=${VERSION}" >> "$GITHUB_ENV"
+
+      - name: Pack
+        working-directory: asherah-dotnet/AsherahDotNet
+        run: |
+          dotnet pack -c Release \
+            /p:Version="${NUGET_VERSION}" \
+            /p:PackageOutputPath="$GITHUB_WORKSPACE/dist"
+
+      - name: List packages
+        run: ls -lh dist/
+
+      - name: Publish to GitHub Packages
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          dotnet nuget push dist/*.nupkg \
+            --source "https://nuget.pkg.github.com/godaddy/index.json" \
+            --api-key "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Dry run
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        run: |
+          echo "Dry run complete. Would publish:"
+          ls -lh dist/
+          echo ""
+          echo "Package contents:"
+          for pkg in dist/*.nupkg; do
+            unzip -l "$pkg"
+          done

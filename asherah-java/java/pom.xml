@@ -5,9 +5,31 @@
 
   <groupId>com.godaddy.asherah</groupId>
   <artifactId>asherah-java</artifactId>
-  <version>0.1.0-SNAPSHOT</version>
+  <version>0.1.0</version>
   <name>asherah-java</name>
+  <description>Asherah application-layer encryption for Java, powered by the native Rust implementation.</description>
+  <url>https://github.com/godaddy/asherah-ffi</url>
   <packaging>jar</packaging>
+
+  <licenses>
+    <license>
+      <name>Apache-2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0</url>
+    </license>
+  </licenses>
+
+  <scm>
+    <url>https://github.com/godaddy/asherah-ffi</url>
+    <connection>scm:git:https://github.com/godaddy/asherah-ffi.git</connection>
+  </scm>
+
+  <distributionManagement>
+    <repository>
+      <id>github</id>
+      <name>GitHub Packages</name>
+      <url>https://maven.pkg.github.com/godaddy/asherah-ffi</url>
+    </repository>
+  </distributionManagement>
 
   <properties>
     <maven.compiler.release>11</maven.compiler.release>
