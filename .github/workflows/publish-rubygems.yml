@@ -1,6 +1,8 @@
 name: Publish to GitHub Packages (RubyGems)
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       version:
@@ -29,7 +31,12 @@ jobs:
       - name: Set version and build gem
         working-directory: asherah-ruby
         run: |
-          VERSION="${{ github.event.inputs.version }}"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
           echo "Publishing version: ${VERSION}"
 
           # Update version constant
@@ -45,7 +52,7 @@ jobs:
           ls -lh *.gem
 
       - name: Publish to GitHub Packages
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+        if: ${{ github.event_name == 'release' || github.event.inputs.dry_run != 'true' }}
         working-directory: asherah-ruby
         env:
           GEM_HOST_API_KEY: "Bearer ${{ secrets.GITHUB_TOKEN }}"
@@ -53,7 +60,7 @@ jobs:
           gem push --host https://rubygems.pkg.github.com/godaddy *.gem
 
       - name: Dry run
-        if: ${{ github.event.inputs.dry_run == 'true' }}
+        if: ${{ github.event_name != 'release' && github.event.inputs.dry_run == 'true' }}
         working-directory: asherah-ruby
         run: |
           echo "Dry run complete. Would publish:"
