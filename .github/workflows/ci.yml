@@ -37,35 +37,36 @@ jobs:
       - name: Clippy
         run: cargo clippy --all-targets --all-features -- -D warnings
 
-  tests:
+  rust-tests:
     runs-on: ubuntu-latest
-    needs: lint
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
+      SCCACHE_CACHE_SIZE: 2G
     steps:
       - uses: actions/checkout@v6
       - name: Restore workspace caches
         uses: actions/cache@v5
         with:
           path: |
-            .cache/cargo
-            .cache/rustup
-            .cache/pip
-            .cache/npm
-            .cache/maven
-            .cache/dotnet
-            .cache/bun
-          key: tests-${{ runner.os }}-amd64-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
+            ~/.cargo/registry
+            ~/.cargo/git
+            .cache/sccache
+          key: rust-tests-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            tests-${{ runner.os }}-amd64-
-      - name: Verify Docker availability
-        run: docker version
-      - name: Run full language test matrix
-        env:
-          SKIP_RUST_CHECKS: "1"
-        run: ./scripts/test-in-docker.sh
+            rust-tests-${{ runner.os }}-
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: sccache@0.8.1
+      - name: Install protoc
+        run: sudo apt-get install -y protobuf-compiler
+      - name: Run Rust tests
+        run: cargo test --workspace --exclude asherah-node
 
   integration-tests:
     runs-on: ubuntu-latest
-    needs: lint
     steps:
       - uses: actions/checkout@v6
       - name: Cache cargo registry
@@ -85,8 +86,7 @@ jobs:
         run: cargo test -p asherah --features mysql,postgres,dynamodb --test integration_containers -- --test-threads=1
 
   build-rlib-x86_64:
-    runs-on: ubuntu-latest
-    needs: lint
+    runs-on: ubuntu-22.04
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -106,25 +106,36 @@ jobs:
           key: build-${{ runner.os }}-x86_64-rlib-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             build-${{ runner.os }}-x86_64-rlib-
-      - name: Install sccache
-        run: |
-          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
-          sudo mv sccache-*/sccache /usr/local/bin/
-          sudo chmod +x /usr/local/bin/sccache
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: sccache@0.8.1
       - name: Build FFI rlib (x86_64)
         env:
           TARGET_ARCH: x86_64
           BINDING_COMPONENTS: ffi
         run: ./scripts/build-bindings.sh
+      - name: Create rlib tarball
+        run: |
+          TAR_ARGS=()
+          for p in \
+            target/x86_64-unknown-linux-gnu/release \
+            target/x86_64-unknown-linux-gnu/x86_64-unknown-linux-gnu/release \
+          ; do
+            [ -d "$p" ] && TAR_ARGS+=("$p")
+          done
+          for f in target/release/libasherah_ffi*; do
+            [ -e "$f" ] && TAR_ARGS+=("$f")
+          done
+          tar czf /tmp/x86_64-rlib.tar.gz "${TAR_ARGS[@]}"
       - name: Upload x86_64 rlib artifacts
         uses: actions/upload-artifact@v7
         with:
           name: x86_64-rlib-artifacts
           retention-days: 1
-          path: target/
+          path: /tmp/x86_64-rlib.tar.gz
 
   build-node-x86_64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
@@ -151,12 +162,12 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: x86_64-rlib-artifacts
-          path: target/
-      - name: Install sccache
-        run: |
-          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
-          sudo mv sccache-*/sccache /usr/local/bin/
-          sudo chmod +x /usr/local/bin/sccache
+          path: /tmp
+      - name: Extract rlib artifacts
+        run: tar xzf /tmp/x86_64-rlib.tar.gz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: sccache@0.8.1
       - uses: actions/setup-node@v6
         with:
           node-version: 20
@@ -174,7 +185,7 @@ jobs:
           path: artifacts/x86_64
 
   build-python-x86_64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     container: quay.io/pypa/manylinux_2_28_x86_64
     env:
@@ -202,7 +213,9 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: x86_64-rlib-artifacts
-          path: target/
+          path: /tmp
+      - name: Extract rlib artifacts
+        run: tar xzf /tmp/x86_64-rlib.tar.gz
       - name: Build Python binding (x86_64) - manylinux
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
@@ -223,7 +236,7 @@ jobs:
           path: artifacts/x86_64
 
   build-java-x86_64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
@@ -249,12 +262,12 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: x86_64-rlib-artifacts
-          path: target/
-      - name: Install sccache
-        run: |
-          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
-          sudo mv sccache-*/sccache /usr/local/bin/
-          sudo chmod +x /usr/local/bin/sccache
+          path: /tmp
+      - name: Extract rlib artifacts
+        run: tar xzf /tmp/x86_64-rlib.tar.gz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: sccache@0.8.1
       - name: Build Java binding (x86_64)
         env:
           TARGET_ARCH: x86_64
@@ -269,7 +282,7 @@ jobs:
           path: artifacts/x86_64
 
   build-dotnet-x86_64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
@@ -295,12 +308,12 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: x86_64-rlib-artifacts
-          path: target/
-      - name: Install sccache
-        run: |
-          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
-          sudo mv sccache-*/sccache /usr/local/bin/
-          sudo chmod +x /usr/local/bin/sccache
+          path: /tmp
+      - name: Extract rlib artifacts
+        run: tar xzf /tmp/x86_64-rlib.tar.gz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: sccache@0.8.1
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: |
@@ -320,7 +333,7 @@ jobs:
           path: artifacts/x86_64
 
   build-ffi-x86_64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     steps:
       - uses: actions/checkout@v6
@@ -328,7 +341,9 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: x86_64-rlib-artifacts
-          path: target/
+          path: /tmp
+      - name: Extract rlib artifacts
+        run: tar xzf /tmp/x86_64-rlib.tar.gz
       - name: Package FFI artifacts (x86_64)
         run: |
           mkdir -p artifacts/x86_64/ffi artifacts/x86_64/ruby
@@ -342,7 +357,7 @@ jobs:
           path: artifacts/x86_64
 
   build-cobhan-x86_64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
@@ -367,12 +382,12 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: x86_64-rlib-artifacts
-          path: target/
-      - name: Install sccache
-        run: |
-          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
-          sudo mv sccache-*/sccache /usr/local/bin/
-          sudo chmod +x /usr/local/bin/sccache
+          path: /tmp
+      - name: Extract rlib artifacts
+        run: tar xzf /tmp/x86_64-rlib.tar.gz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: sccache@0.8.1
       - name: Build asherah-cobhan (x86_64)
         env:
           TARGET_ARCH: x86_64
@@ -387,6 +402,7 @@ jobs:
           path: artifacts/x86_64
 
   package-x86_64:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [build-ffi-x86_64, build-cobhan-x86_64, build-node-x86_64, build-python-x86_64, build-dotnet-x86_64, build-java-x86_64]
     steps:
@@ -409,7 +425,6 @@ jobs:
 
   arm64-test-image:
     runs-on: ubuntu-latest
-    needs: lint
     env:
       CACHE_MAX_AGE_DAYS: 7
     outputs:
@@ -470,10 +485,59 @@ jobs:
           retention-days: 1
           path: /tmp/asherah-tests-arm64.tar
 
+  binding-tests-x86_64:
+    runs-on: ubuntu-22.04
+    needs:
+      - build-ffi-x86_64
+      - build-node-x86_64
+      - build-python-x86_64
+      - build-java-x86_64
+      - build-dotnet-x86_64
+    strategy:
+      fail-fast: true
+      matrix:
+        binding: [ffi, python, node, dotnet, java]
+    steps:
+      - uses: actions/checkout@v6
+      - name: Download x86_64 binding artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: bindings-linux-x86_64-part-${{ matrix.binding }}
+          path: artifacts/x86_64
+      - name: Download x86_64 core FFI artifact
+        if: matrix.binding != 'python' && matrix.binding != 'ffi'
+        uses: actions/download-artifact@v8
+        with:
+          name: bindings-linux-x86_64-part-ffi
+          path: artifacts/x86_64
+      - uses: actions/setup-node@v6
+        if: matrix.binding == 'node'
+        with:
+          node-version: 20
+      - uses: actions/setup-dotnet@v5
+        if: matrix.binding == 'dotnet'
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - name: Install Ruby FFI gem
+        if: matrix.binding == 'ffi'
+        run: sudo gem install ffi --no-document
+      - name: Run ${{ matrix.binding }} binding tests (x86_64)
+        env:
+          BINDING_ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/x86_64
+          BINDING_TESTS_FAST_ONLY: "1"
+          BINDING_TESTS_BINDING: ${{ matrix.binding }}
+        run: ./scripts/run-binding-tests.sh
+
   tests-arm64:
     runs-on: ubuntu-latest
     needs:
-      - package-arm64
+      - build-ffi-arm64
+      - build-node-arm64
+      - build-python-arm64
+      - build-java-arm64
+      - build-dotnet-arm64
       - arm64-test-image
     strategy:
       fail-fast: true
@@ -576,7 +640,6 @@ jobs:
 
   build-rlib-arm64:
     runs-on: ubuntu-latest
-    needs: lint
     container: rust:1.86-bullseye
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
@@ -622,12 +685,26 @@ jobs:
           cargo build --release -p asherah-config --target aarch64-unknown-linux-gnu
           # Build FFI cdylib for other bindings
           ./scripts/build-bindings.sh
+      - name: Create rlib tarball
+        shell: bash
+        run: |
+          TAR_ARGS=()
+          for p in \
+            target/aarch64-unknown-linux-gnu/release \
+            target/aarch64-unknown-linux-gnu/aarch64-unknown-linux-gnu/release \
+          ; do
+            [ -d "$p" ] && TAR_ARGS+=("$p")
+          done
+          for f in target/release/libasherah_ffi*; do
+            [ -e "$f" ] && TAR_ARGS+=("$f")
+          done
+          tar czf /tmp/arm64-rlib.tar.gz "${TAR_ARGS[@]}"
       - name: Upload arm64 rlib artifacts
         uses: actions/upload-artifact@v7
         with:
           name: arm64-rlib-artifacts
           retention-days: 1
-          path: target/
+          path: /tmp/arm64-rlib.tar.gz
 
   build-node-arm64:
     runs-on: ubuntu-latest
@@ -659,7 +736,9 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: arm64-rlib-artifacts
-          path: target/
+          path: /tmp
+      - name: Extract rlib artifacts
+        run: tar xzf /tmp/arm64-rlib.tar.gz
       - name: Install cross-compile toolchain, Node.js, and sccache
         run: |
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
@@ -721,7 +800,9 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: arm64-rlib-artifacts
-          path: target/
+          path: /tmp
+      - name: Extract rlib artifacts
+        run: tar xzf /tmp/arm64-rlib.tar.gz
       - name: Install cross-compile toolchain, Python, and sccache
         run: |
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
@@ -785,7 +866,9 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: arm64-rlib-artifacts
-          path: target/
+          path: /tmp
+      - name: Extract rlib artifacts
+        run: tar xzf /tmp/arm64-rlib.tar.gz
       - name: Install cross-compile toolchain, Maven, and sccache
         run: |
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
@@ -843,7 +926,9 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: arm64-rlib-artifacts
-          path: target/
+          path: /tmp
+      - name: Extract rlib artifacts
+        run: tar xzf /tmp/arm64-rlib.tar.gz
       - name: Install cross-compile toolchain, .NET, and sccache
         run: |
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
@@ -886,7 +971,9 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: arm64-rlib-artifacts
-          path: target/
+          path: /tmp
+      - name: Extract rlib artifacts
+        run: tar xzf /tmp/arm64-rlib.tar.gz
       - name: Package FFI artifacts (arm64)
         run: |
           mkdir -p artifacts/aarch64/ffi artifacts/aarch64/ruby
@@ -927,7 +1014,9 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           name: arm64-rlib-artifacts
-          path: target/
+          path: /tmp
+      - name: Extract rlib artifacts
+        run: tar xzf /tmp/arm64-rlib.tar.gz
       - name: Install cross-compile toolchain and sccache
         run: |
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
@@ -958,6 +1047,7 @@ jobs:
           path: artifacts/aarch64
 
   package-arm64:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [build-ffi-arm64, build-cobhan-arm64, build-node-arm64, build-python-arm64, build-dotnet-arm64, build-java-arm64]
     steps:
