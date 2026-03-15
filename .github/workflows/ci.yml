@@ -485,91 +485,20 @@ jobs:
           retention-days: 1
           path: /tmp/asherah-tests-arm64.tar
 
-  x86_64-test-image:
-    runs-on: ubuntu-latest
-    env:
-      CACHE_MAX_AGE_DAYS: 7
-    outputs:
-      cache-hit: ${{ steps.check-cache.outputs.cache-hit }}
-    steps:
-      - uses: actions/checkout@v6
-      - name: Calculate cache key
-        id: cache-key
-        run: |
-          DOCKERFILE_HASH=$(sha256sum docker/tests.Dockerfile | cut -d' ' -f1 | head -c 8)
-          WEEK_NUM=$(( $(date +%s) / 86400 / ${{ env.CACHE_MAX_AGE_DAYS }} ))
-          CACHE_KEY="x86_64-test-image-${DOCKERFILE_HASH}-week-${WEEK_NUM}"
-          echo "cache-key=${CACHE_KEY}" >> $GITHUB_OUTPUT
-          echo "Cache key: ${CACHE_KEY}"
-      - name: Check for cached image
-        id: check-cache
-        uses: actions/cache@v5
-        with:
-          path: /tmp/asherah-tests-x86_64.tar
-          key: ${{ steps.cache-key.outputs.cache-key }}
-          lookup-only: true
-      - name: Set up Docker Buildx
-        if: steps.check-cache.outputs.cache-hit != 'true'
-        uses: docker/setup-buildx-action@v4
-      - name: Build x86_64 test image
-        if: steps.check-cache.outputs.cache-hit != 'true'
-        run: |
-          docker buildx build \
-            --file docker/tests.Dockerfile \
-            --platform linux/amd64 \
-            --tag asherah-tests:x86_64 \
-            --cache-from type=gha,scope=tests-x86_64-image \
-            --cache-to type=gha,mode=max,scope=tests-x86_64-image \
-            --output type=docker,dest=/tmp/asherah-tests-x86_64.tar \
-            .
-      - name: Restore cached image
-        if: steps.check-cache.outputs.cache-hit == 'true'
-        uses: actions/cache/restore@v5
-        with:
-          path: /tmp/asherah-tests-x86_64.tar
-          key: ${{ steps.cache-key.outputs.cache-key }}
-      - name: Save image to cache
-        if: steps.check-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v5
-        with:
-          path: /tmp/asherah-tests-x86_64.tar
-          key: ${{ steps.cache-key.outputs.cache-key }}
-      - name: Upload x86_64 test image
-        uses: actions/upload-artifact@v7
-        with:
-          name: x86_64-tests-image
-          retention-days: 1
-          path: /tmp/asherah-tests-x86_64.tar
-
   binding-tests-x86_64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs:
       - build-ffi-x86_64
       - build-node-x86_64
       - build-python-x86_64
       - build-java-x86_64
       - build-dotnet-x86_64
-      - x86_64-test-image
     strategy:
       fail-fast: true
       matrix:
         binding: [ffi, python, node, dotnet, java]
     steps:
       - uses: actions/checkout@v6
-      - name: Restore workspace caches
-        uses: actions/cache@v5
-        with:
-          path: |
-            .cache/cargo
-            .cache/rustup
-            .cache/pip
-            .cache/npm
-            .cache/maven
-            .cache/dotnet
-          key: tests-${{ runner.os }}-x86_64-${{ matrix.binding }}-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
-          restore-keys: |
-            tests-${{ runner.os }}-x86_64-${{ matrix.binding }}-
-            tests-${{ runner.os }}-x86_64-
       - name: Download x86_64 binding artifact
         uses: actions/download-artifact@v8
         with:
@@ -581,28 +510,25 @@ jobs:
         with:
           name: bindings-linux-x86_64-part-ffi
           path: artifacts/x86_64
-      - name: Download x86_64 test image
-        uses: actions/download-artifact@v8
+      - uses: actions/setup-node@v6
+        if: matrix.binding == 'node'
         with:
-          name: x86_64-tests-image
-          path: artifacts
-      - name: Verify Docker availability
-        run: docker version
-      - name: Load x86_64 test image
-        run: docker load --input artifacts/asherah-tests-x86_64.tar
-      - name: Debug - List artifacts structure
-        run: |
-          echo "=== Artifacts directory structure ==="
-          find artifacts/x86_64 -type f | head -50 || true
+          node-version: 20
+      - uses: actions/setup-dotnet@v5
+        if: matrix.binding == 'dotnet'
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+      - name: Install Ruby FFI gem
+        if: matrix.binding == 'ffi'
+        run: sudo gem install ffi --no-document
       - name: Run ${{ matrix.binding }} binding tests (x86_64)
         env:
-          BINDING_TESTS_ONLY: "1"
           BINDING_ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/x86_64
           BINDING_TESTS_FAST_ONLY: "1"
           BINDING_TESTS_BINDING: ${{ matrix.binding }}
-          USE_PREBUILT_TEST_IMAGE: "1"
-          TESTS_IMAGE_TAG: asherah-tests:x86_64
-        run: ./scripts/test-in-docker.sh
+        run: ./scripts/run-binding-tests.sh
 
   tests-arm64:
     runs-on: ubuntu-latest
