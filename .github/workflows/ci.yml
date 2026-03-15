@@ -60,6 +60,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: sccache@0.8.1
+      - name: Install protoc
+        run: sudo apt-get install -y protobuf-compiler
       - name: Run Rust tests
         run: cargo test --workspace --exclude asherah-node
 
@@ -84,7 +86,7 @@ jobs:
         run: cargo test -p asherah --features mysql,postgres,dynamodb --test integration_containers -- --test-threads=1
 
   build-rlib-x86_64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -133,7 +135,7 @@ jobs:
           path: /tmp/x86_64-rlib.tar.gz
 
   build-node-x86_64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
@@ -183,7 +185,7 @@ jobs:
           path: artifacts/x86_64
 
   build-python-x86_64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     container: quay.io/pypa/manylinux_2_28_x86_64
     env:
@@ -234,7 +236,7 @@ jobs:
           path: artifacts/x86_64
 
   build-java-x86_64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
@@ -280,7 +282,7 @@ jobs:
           path: artifacts/x86_64
 
   build-dotnet-x86_64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
@@ -331,7 +333,7 @@ jobs:
           path: artifacts/x86_64
 
   build-ffi-x86_64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     steps:
       - uses: actions/checkout@v6
@@ -355,7 +357,7 @@ jobs:
           path: artifacts/x86_64
 
   build-cobhan-x86_64:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
@@ -758,6 +760,7 @@ jobs:
           # Build FFI cdylib for other bindings
           ./scripts/build-bindings.sh
       - name: Create rlib tarball
+        shell: bash
         run: |
           TAR_ARGS=()
           for p in \
