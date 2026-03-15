@@ -1,6 +1,8 @@
 name: Publish to GitHub Packages (NuGet)
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       version:
@@ -30,7 +32,12 @@ jobs:
 
       - name: Set version
         run: |
-          VERSION="${{ github.event.inputs.version }}"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
           echo "Publishing version: ${VERSION}"
           echo "NUGET_VERSION=${VERSION}" >> "$GITHUB_ENV"
 
@@ -45,14 +52,14 @@ jobs:
         run: ls -lh dist/
 
       - name: Publish to GitHub Packages
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+        if: ${{ github.event_name == 'release' || github.event.inputs.dry_run != 'true' }}
         run: |
           dotnet nuget push dist/*.nupkg \
             --source "https://nuget.pkg.github.com/godaddy/index.json" \
             --api-key "${{ secrets.GITHUB_TOKEN }}"
 
       - name: Dry run
-        if: ${{ github.event.inputs.dry_run == 'true' }}
+        if: ${{ github.event_name != 'release' && github.event.inputs.dry_run == 'true' }}
         run: |
           echo "Dry run complete. Would publish:"
           ls -lh dist/

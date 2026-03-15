@@ -1,6 +1,8 @@
 name: Publish to GitHub Packages (Maven)
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       version:
@@ -32,7 +34,12 @@ jobs:
 
       - name: Set version
         run: |
-          VERSION="${{ github.event.inputs.version }}"
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+            VERSION="${VERSION#v}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
           echo "Publishing version: ${VERSION}"
           mvn -B -f asherah-java/java/pom.xml versions:set -DnewVersion="${VERSION}"
           echo "MAVEN_VERSION=${VERSION}" >> "$GITHUB_ENV"
@@ -48,7 +55,7 @@ jobs:
         run: ls -lh asherah-java/java/target/*.jar
 
       - name: Deploy to GitHub Packages
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+        if: ${{ github.event_name == 'release' || github.event.inputs.dry_run != 'true' }}
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -59,7 +66,7 @@ jobs:
             deploy
 
       - name: Dry run
-        if: ${{ github.event.inputs.dry_run == 'true' }}
+        if: ${{ github.event_name != 'release' && github.event.inputs.dry_run == 'true' }}
         run: |
           echo "Dry run complete. Would publish:"
           ls -lh asherah-java/java/target/*.jar
