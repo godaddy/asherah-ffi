@@ -102,14 +102,15 @@ impl MySqlMetastore {
         }
 
         if need_pool_defaults {
-            // Match Go database/sql defaults: no pre-created connections (min=0),
-            // capped at a reasonable max (default 10, configurable via ASHERAH_POOL_SIZE).
+            // min=1 validates the connection at setup (fail-fast on bad URL/credentials)
+            // and keeps one warm connection ready. Max defaults to 10, configurable via
+            // ASHERAH_POOL_SIZE.
             let max_pool = std::env::var("ASHERAH_POOL_SIZE")
                 .ok()
                 .and_then(|v| v.parse::<usize>().ok())
                 .unwrap_or(10);
             builder = builder.pool_opts(PoolOpts::default().with_constraints(
-                PoolConstraints::new(0, max_pool.max(1)).expect("valid: min=0 <= max>=1"),
+                PoolConstraints::new(1, max_pool.max(1)).expect("valid: min=1 <= max>=1"),
             ));
         }
 
