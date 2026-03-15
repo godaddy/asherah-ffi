@@ -1,0 +1,63 @@
+name: Publish to GitHub Packages (RubyGems)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (e.g. 0.1.0.beta.1)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Dry run (build but do not publish)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Set version and build gem
+        working-directory: asherah-ruby
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          echo "Publishing version: ${VERSION}"
+
+          # Update version constant
+          cat > lib/asherah/version.rb <<RUBY
+          # frozen_string_literal: true
+
+          module Asherah
+            VERSION = "${VERSION}"
+          end
+          RUBY
+
+          gem build asherah.gemspec
+          ls -lh *.gem
+
+      - name: Publish to GitHub Packages
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        working-directory: asherah-ruby
+        env:
+          GEM_HOST_API_KEY: "Bearer ${{ secrets.GITHUB_TOKEN }}"
+        run: |
+          gem push --host https://rubygems.pkg.github.com/godaddy *.gem
+
+      - name: Dry run
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        working-directory: asherah-ruby
+        run: |
+          echo "Dry run complete. Would publish:"
+          ls -lh *.gem
+          echo ""
+          echo "Gem contents:"
+          gem specification *.gem
