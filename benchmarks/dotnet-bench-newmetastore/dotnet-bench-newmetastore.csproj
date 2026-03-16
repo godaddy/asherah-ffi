@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
     <ProjectReference Include="/tmp/asherah-newmetastore/csharp/AppEncryption/AppEncryption/AppEncryption.csproj" />
     <ProjectReference Include="/tmp/asherah-newmetastore/csharp/AppEncryption/Crypto/Crypto.csproj" />
