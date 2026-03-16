@@ -49,6 +49,11 @@ public class NewMetastoreBenchmark
         _payload = new byte[PayloadSize];
         Random.Shared.NextBytes(_payload);
         _ciphertext = _session.Encrypt(_payload);
+
+        // Verify round-trip correctness before benchmarking
+        var decrypted = _session.Decrypt(_ciphertext);
+        if (!decrypted.AsSpan().SequenceEqual(_payload))
+            throw new Exception($"Round-trip verification failed for {PayloadSize}B");
     }
 
     [GlobalCleanup]

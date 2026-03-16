@@ -79,6 +79,14 @@ public class AsherahBenchmark
         Random.Shared.NextBytes(_payload);
         _canonicalCiphertext = _canonicalSession.Encrypt(_payload);
         _ffiCiphertext = GoDaddy.Asherah.Asherah.Encrypt(PartitionId, _payload);
+
+        // Verify round-trip correctness before benchmarking
+        var canonicalDecrypted = _canonicalSession.Decrypt(_canonicalCiphertext);
+        if (!canonicalDecrypted.AsSpan().SequenceEqual(_payload))
+            throw new Exception($"Canonical C# round-trip verification failed for {PayloadSize}B");
+        var ffiDecrypted = GoDaddy.Asherah.Asherah.Decrypt(PartitionId, _ffiCiphertext);
+        if (!ffiDecrypted.AsSpan().SequenceEqual(_payload))
+            throw new Exception($"Rust FFI round-trip verification failed for {PayloadSize}B");
     }
 
     [GlobalCleanup]
