@@ -68,6 +68,12 @@ fi
 RESULTS_DIR=$(mktemp -d)
 trap 'rm -rf "$RESULTS_DIR"' EXIT
 
+# Unset CC if set to bare 'gcc' — it breaks Rust's ring/openssl-sys builds on macOS
+# where the system 'gcc' is actually clang and may not behave as expected.
+if [ "${CC:-}" = "gcc" ]; then
+    unset CC
+fi
+
 log() { echo ">>> $1" >&2; }
 skip() { echo "    SKIP: $1" >&2; }
 
@@ -108,12 +114,19 @@ export STATIC_MASTER_KEY_HEX="${STATIC_MASTER_KEY_HEX:-$(printf '22%.0s' {1..32}
 # Build
 ########################################################################
 
-if [ "$HAVE_RUST" = 1 ]; then
-    log "Building Rust FFI library..."
-    cargo build --release -p asherah-ffi --manifest-path "$ROOT_DIR/Cargo.toml" -q 2>&1
+FFI_LIB_DIR="$ROOT_DIR/target/release"
+FFI_LIB_EXISTS=0
+if [ -f "$FFI_LIB_DIR/libasherah_ffi.dylib" ] || [ -f "$FFI_LIB_DIR/libasherah_ffi.so" ]; then
+    FFI_LIB_EXISTS=1
 fi
 
-FFI_LIB_DIR="$ROOT_DIR/target/release"
+if [ "$HAVE_RUST" = 1 ] && [ "$FFI_LIB_EXISTS" = 0 ]; then
+    log "Building Rust FFI library..."
+    cargo build --release -p asherah-ffi --manifest-path "$ROOT_DIR/Cargo.toml" -q 2>&1
+    FFI_LIB_EXISTS=1
+elif [ "$FFI_LIB_EXISTS" = 1 ]; then
+    log "Using existing Rust FFI library in $FFI_LIB_DIR"
+fi
 export ASHERAH_DOTNET_NATIVE="$FFI_LIB_DIR"
 export ASHERAH_RUBY_NATIVE="$FFI_LIB_DIR"
 export ASHERAH_GO_NATIVE="$FFI_LIB_DIR"
@@ -146,7 +159,7 @@ fi
 # .NET FFI + Canonical (BenchmarkDotNet)
 ########################################################################
 
-if [ "$HAVE_DOTNET" = 1 ] && [ "$HAVE_RUST" = 1 ]; then
+if [ "$HAVE_DOTNET" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
     log "Running .NET benchmark (BenchmarkDotNet)..."
     dotnet run --project "$BENCH_DIR/dotnet-bench" -c Release > "$RESULTS_DIR/bdn.log" 2>&1
     python3 -c "
@@ -183,7 +196,7 @@ fi
 # Java FFI (JMH)
 ########################################################################
 
-if [ "$HAVE_JAVA" = 1 ] && [ "$HAVE_RUST" = 1 ]; then
+if [ "$HAVE_JAVA" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
     log "Building Java FFI benchmark (JMH)..."
     # Build the asherah-java JAR and install to local Maven repo
     mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package -q 2>&1
@@ -242,7 +255,7 @@ fi
 # Go FFI (testing.B)
 ########################################################################
 
-if [ "$HAVE_GO" = 1 ] && [ "$HAVE_RUST" = 1 ]; then
+if [ "$HAVE_GO" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
     GO_WIP_MOVED=0
     if [ -f "$ROOT_DIR/asherah-go/ffi.go" ]; then
         mkdir -p /tmp/asherah-go-wip
