@@ -1,112 +1,113 @@
 using System;
-using System.Diagnostics;
-using System.Text;
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Columns;
+using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Jobs;
+using BenchmarkDotNet.Running;
 using GoDaddy.Asherah.AppEncryption;
 using GoDaddy.Asherah.AppEncryption.Kms;
-using GoDaddy.Asherah.AppEncryption.Persistence;
 using GoDaddy.Asherah.Crypto;
-using Newtonsoft.Json.Linq;
 
-const string StaticMasterKey = "thisIsAStaticMasterKeyForTesting";
-const string ServiceName = "bench-service";
-const string ProductId = "bench-product";
-const string PartitionId = "bench-partition";
+BenchmarkRunner.Run<AsherahBenchmark>(
+    DefaultConfig.Instance
+        .AddColumn(StatisticColumn.Median)
+        .WithOptions(ConfigOptions.DisableOptimizationsValidator));
 
-int[] payloadSizes = [64, 1024, 8192];
-int warmupIterations = 500;
-int benchIterations = 5000;
-
-// ── Setup both implementations ──────────────────────────────────────
-
-var factory = SessionFactory
-    .NewBuilder(ProductId, ServiceName)
-    .WithInMemoryMetastore()
-    .WithNeverExpiredCryptoPolicy()
-    .WithStaticKeyManagementService(StaticMasterKey)
-    .Build();
-
-var config = GoDaddy.Asherah.AsherahConfig.CreateBuilder()
-    .WithServiceName(ServiceName)
-    .WithProductId(ProductId)
-    .WithMetastore("memory")
-    .WithKms("static")
-    .WithEnableSessionCaching(true)
-    .Build();
-
-Environment.SetEnvironmentVariable("STATIC_MASTER_KEY_HEX",
-    "2222222222222222222222222222222222222222222222222222222222222222");
-
-GoDaddy.Asherah.Asherah.Setup(config);
-
-// ── Collect results in a single pass ────────────────────────────────
-
-var results = new List<(int size, double canonEnc, double canonDec, double rustEnc, double rustDec)>();
-
-foreach (var size in payloadSizes)
+[MemoryDiagnoser]
+[SimpleJob(RuntimeMoniker.Net80, warmupCount: 3, iterationCount: 10)]
+[GroupBenchmarksBy(BenchmarkDotNet.Configs.BenchmarkLogicalGroupRule.ByCategory)]
+[CategoriesColumn]
+public class AsherahBenchmark
 {
-    var payload = new byte[size];
-    Random.Shared.NextBytes(payload);
+    private const string StaticMasterKey = "thisIsAStaticMasterKeyForTesting";
+    private const string ServiceName = "bench-service";
+    private const string ProductId = "bench-product";
+    private const string PartitionId = "bench-partition";
 
-    // ─── Canonical ───
-    using var session = factory.GetSessionBytes(PartitionId);
-    for (int i = 0; i < warmupIterations; i++)
+    private SessionFactory _canonicalFactory = null!;
+    private Session<byte[], byte[]> _canonicalSession = null!;
+    private byte[] _payload = null!;
+    private byte[] _canonicalCiphertext = null!;
+    private byte[] _ffiCiphertext = null!;
+
+    [Params(64, 1024, 8192)]
+    public int PayloadSize { get; set; }
+
+    [GlobalSetup]
+    public void Setup()
     {
-        var e = session.Encrypt(payload);
-        session.Decrypt(e);
+        // Canonical C# (NuGet v0.2.10)
+        _canonicalFactory = SessionFactory
+            .NewBuilder(ProductId, ServiceName)
+            .WithInMemoryMetastore()
+            .WithNeverExpiredCryptoPolicy()
+            .WithStaticKeyManagementService(StaticMasterKey)
+            .Build();
+        _canonicalSession = _canonicalFactory.GetSessionBytes(PartitionId);
+
+        // Rust FFI binding — resolve native library path for BenchmarkDotNet subprocess
+        var nativePath = Environment.GetEnvironmentVariable("ASHERAH_DOTNET_NATIVE");
+        if (!string.IsNullOrEmpty(nativePath) && !Path.IsPathRooted(nativePath))
+        {
+            foreach (var candidate in new[]
+            {
+                Path.GetFullPath(nativePath),
+                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", nativePath),
+            })
+            {
+                if (Directory.Exists(candidate))
+                {
+                    Environment.SetEnvironmentVariable("ASHERAH_DOTNET_NATIVE", candidate);
+                    break;
+                }
+            }
+        }
+
+        Environment.SetEnvironmentVariable("STATIC_MASTER_KEY_HEX",
+            "2222222222222222222222222222222222222222222222222222222222222222");
+        var config = GoDaddy.Asherah.AsherahConfig.CreateBuilder()
+            .WithServiceName(ServiceName)
+            .WithProductId(ProductId)
+            .WithMetastore("memory")
+            .WithKms("static")
+            .WithEnableSessionCaching(true)
+            .Build();
+        GoDaddy.Asherah.Asherah.Setup(config);
+
+        // Generate payload and pre-encrypt for decrypt benchmarks
+        _payload = new byte[PayloadSize];
+        Random.Shared.NextBytes(_payload);
+        _canonicalCiphertext = _canonicalSession.Encrypt(_payload);
+        _ffiCiphertext = GoDaddy.Asherah.Asherah.Encrypt(PartitionId, _payload);
+
+        // Verify round-trip correctness before benchmarking
+        var canonicalDecrypted = _canonicalSession.Decrypt(_canonicalCiphertext);
+        if (!canonicalDecrypted.AsSpan().SequenceEqual(_payload))
+            throw new Exception($"Canonical C# round-trip verification failed for {PayloadSize}B");
+        var ffiDecrypted = GoDaddy.Asherah.Asherah.Decrypt(PartitionId, _ffiCiphertext);
+        if (!ffiDecrypted.AsSpan().SequenceEqual(_payload))
+            throw new Exception($"Rust FFI round-trip verification failed for {PayloadSize}B");
     }
 
-    var sw = Stopwatch.StartNew();
-    byte[] canonicalEnc = null!;
-    for (int i = 0; i < benchIterations; i++)
-        canonicalEnc = session.Encrypt(payload);
-    sw.Stop();
-    double canonEncUs = sw.Elapsed.TotalMicroseconds / benchIterations;
-
-    sw.Restart();
-    for (int i = 0; i < benchIterations; i++)
-        session.Decrypt(canonicalEnc);
-    sw.Stop();
-    double canonDecUs = sw.Elapsed.TotalMicroseconds / benchIterations;
-
-    // ─── Rust FFI ───
-    for (int i = 0; i < warmupIterations; i++)
+    [GlobalCleanup]
+    public void Cleanup()
     {
-        var e = GoDaddy.Asherah.Asherah.Encrypt(PartitionId, payload);
-        GoDaddy.Asherah.Asherah.Decrypt(PartitionId, e);
+        _canonicalSession?.Dispose();
+        _canonicalFactory?.Dispose();
+        GoDaddy.Asherah.Asherah.Shutdown();
     }
 
-    sw.Restart();
-    byte[] rustEnc = null!;
-    for (int i = 0; i < benchIterations; i++)
-        rustEnc = GoDaddy.Asherah.Asherah.Encrypt(PartitionId, payload);
-    sw.Stop();
-    double rustEncUs = sw.Elapsed.TotalMicroseconds / benchIterations;
+    // BenchmarkDotNet consumes the return value, preventing DCE.
 
-    sw.Restart();
-    for (int i = 0; i < benchIterations; i++)
-        GoDaddy.Asherah.Asherah.Decrypt(PartitionId, rustEnc);
-    sw.Stop();
-    double rustDecUs = sw.Elapsed.TotalMicroseconds / benchIterations;
+    [Benchmark(Description = "Canonical C# v0.2.10"), BenchmarkCategory("Encrypt")]
+    public byte[] CanonicalEncrypt() => _canonicalSession.Encrypt(_payload);
 
-    results.Add((size, canonEncUs, canonDecUs, rustEncUs, rustDecUs));
+    [Benchmark(Description = "Rust FFI"), BenchmarkCategory("Encrypt")]
+    public byte[] RustFfiEncrypt() => GoDaddy.Asherah.Asherah.Encrypt(PartitionId, _payload);
+
+    [Benchmark(Description = "Canonical C# v0.2.10"), BenchmarkCategory("Decrypt")]
+    public byte[] CanonicalDecrypt() => _canonicalSession.Decrypt(_canonicalCiphertext);
+
+    [Benchmark(Description = "Rust FFI"), BenchmarkCategory("Decrypt")]
+    public byte[] RustFfiDecrypt() => GoDaddy.Asherah.Asherah.Decrypt(PartitionId, _ffiCiphertext);
 }
-
-factory.Dispose();
-GoDaddy.Asherah.Asherah.Shutdown();
-
-// ── Display results ─────────────────────────────────────────────────
-
-Console.WriteLine("=== .NET Benchmark: Canonical C# (NuGet v0.2.10) vs Rust FFI Binding ===\n");
-
-Console.WriteLine($"  {"Size",6} | {"Canonical Enc",14} | {"Rust FFI Enc",14} | {"Speedup",8} | {"Canonical Dec",14} | {"Rust FFI Dec",14} | {"Speedup",8}");
-Console.WriteLine($"  {new string('-', 6)} | {new string('-', 14)} | {new string('-', 14)} | {new string('-', 8)} | {new string('-', 14)} | {new string('-', 14)} | {new string('-', 8)}");
-
-foreach (var (size, canonEnc, canonDec, rustEnc, rustDec) in results)
-{
-    double encSpeedup = canonEnc / rustEnc;
-    double decSpeedup = canonDec / rustDec;
-    Console.WriteLine($"  {size,5}B | {canonEnc,11:F2} µs | {rustEnc,11:F2} µs | {encSpeedup,6:F1}x  | {canonDec,11:F2} µs | {rustDec,11:F2} µs | {decSpeedup,6:F1}x");
-}
-
-Console.WriteLine();
-Console.WriteLine($"  Warmup: {warmupIterations} iterations, Benchmark: {benchIterations} iterations per operation");

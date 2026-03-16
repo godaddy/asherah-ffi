@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Set ASHERAH_NEWMETASTORE_SRC to the cloned chief-micco/asherah checkout -->
+    <AsherahNewMetastoreSrc Condition="'$(AsherahNewMetastoreSrc)' == ''">$(MSBuildThisFileDirectory)asherah-upstream</AsherahNewMetastoreSrc>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
+    <ProjectReference Include="$(AsherahNewMetastoreSrc)/csharp/AppEncryption/AppEncryption/AppEncryption.csproj" />
+    <ProjectReference Include="$(AsherahNewMetastoreSrc)/csharp/AppEncryption/Crypto/Crypto.csproj" />
+    <ProjectReference Include="$(AsherahNewMetastoreSrc)/csharp/AppEncryption/AppEncryption.PlugIns.Testing/AppEncryption.PlugIns.Testing.csproj" />
+  </ItemGroup>
+</Project>
