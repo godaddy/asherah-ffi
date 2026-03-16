@@ -280,20 +280,23 @@ fn prepare_contexts() -> (RustContext, GoContext) {
 fn bench_encrypt(c: &mut Criterion) {
     let (rust_ctx, go_ctx) = prepare_contexts();
     let mut rng = StdRng::seed_from_u64(12345);
-    let mut data = vec![0u8; 4096];
-    rng.fill_bytes(&mut data);
+    let sizes = [64, 1024, 4096, 8192];
 
-    let mut group = c.benchmark_group("encrypt");
-    group.bench_function(BenchmarkId::new("rust", data.len()), |b| {
-        b.iter(|| {
-            black_box(rust_ctx.encrypt(black_box(&data)));
-        })
-    });
-    group.bench_function(BenchmarkId::new("go", data.len()), |b| {
-        b.iter(|| {
-            black_box(go_ctx.encrypt(black_box(&data)));
-        })
-    });
+    let mut group = c.benchmark_group("ffi_encrypt");
+    for size in sizes {
+        let mut data = vec![0u8; size];
+        rng.fill_bytes(&mut data);
+        group.bench_function(BenchmarkId::new("rust_ffi", size), |b| {
+            b.iter(|| {
+                black_box(rust_ctx.encrypt(black_box(&data)));
+            })
+        });
+        group.bench_function(BenchmarkId::new("go_ffi", size), |b| {
+            b.iter(|| {
+                black_box(go_ctx.encrypt(black_box(&data)));
+            })
+        });
+    }
     group.finish();
 
     // Leak contexts to keep factories alive for decrypt bench preparation
@@ -304,23 +307,26 @@ fn bench_encrypt(c: &mut Criterion) {
 fn bench_decrypt(c: &mut Criterion) {
     let (rust_ctx, go_ctx) = prepare_contexts();
     let mut rng = StdRng::seed_from_u64(67890);
-    let mut data = vec![0u8; 4096];
-    rng.fill_bytes(&mut data);
+    let sizes = [64, 1024, 4096, 8192];
 
-    let rust_cipher = rust_ctx.encrypt(&data);
-    let go_cipher = go_ctx.encrypt(&data);
+    let mut group = c.benchmark_group("ffi_decrypt");
+    for size in sizes {
+        let mut data = vec![0u8; size];
+        rng.fill_bytes(&mut data);
+        let rust_cipher = rust_ctx.encrypt(&data);
+        let go_cipher = go_ctx.encrypt(&data);
 
-    let mut group = c.benchmark_group("decrypt");
-    group.bench_function(BenchmarkId::new("rust", rust_cipher.len()), |b| {
-        b.iter(|| {
-            rust_ctx.decrypt(black_box(&rust_cipher));
-        })
-    });
-    group.bench_function(BenchmarkId::new("go", go_cipher.len()), |b| {
-        b.iter(|| {
-            go_ctx.decrypt(black_box(&go_cipher));
-        })
-    });
+        group.bench_function(BenchmarkId::new("rust_ffi", rust_cipher.len()), |b| {
+            b.iter(|| {
+                rust_ctx.decrypt(black_box(&rust_cipher));
+            })
+        });
+        group.bench_function(BenchmarkId::new("go_ffi", go_cipher.len()), |b| {
+            b.iter(|| {
+                go_ctx.decrypt(black_box(&go_cipher));
+            })
+        });
+    }
     group.finish();
 }
 
