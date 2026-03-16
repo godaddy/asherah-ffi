@@ -13,12 +13,17 @@ if [ "${1:-}" = "--clean" ]; then
     rm -rf /tmp/asherah-canonical
     rm -rf /tmp/asherah-go-wip
     rm -rf "$BENCH_DIR/dotnet-bench-newmetastore/asherah-upstream"
-    # Build output (covered by .gitignore but clean anyway)
-    for d in "$BENCH_DIR"/*/target "$BENCH_DIR"/*/bin "$BENCH_DIR"/*/obj \
-             "$BENCH_DIR"/*/node_modules "$BENCH_DIR"/asherah-bench/target \
-             "$ROOT_DIR/BenchmarkDotNet.Artifacts"; do
-        rm -rf "$d" 2>/dev/null || true
-    done
+    # Fetched npm packages
+    rm -rf "$BENCH_DIR"/*/node_modules
+    # .NET build output
+    rm -rf "$BENCH_DIR"/dotnet-bench*/obj "$BENCH_DIR"/dotnet-bench*/bin
+    # Java shade output (JARs rebuilt quickly)
+    rm -rf "$BENCH_DIR"/java-bench*/target
+    # BenchmarkDotNet artifacts
+    rm -rf "$ROOT_DIR/BenchmarkDotNet.Artifacts"
+    # NOTE: We intentionally preserve benchmarks/asherah-bench/target (Criterion
+    # Rust build cache) and benchmarks/native-bench/*/target — these take minutes
+    # to rebuild and contain only our own compiled code, not fetched assets.
     echo "Done."
     exit 0
 fi
@@ -68,6 +73,12 @@ fi
 RESULTS_DIR=$(mktemp -d)
 trap 'rm -rf "$RESULTS_DIR"' EXIT
 
+# Unset CC if set to bare 'gcc' — it breaks Rust's ring/openssl-sys builds on macOS
+# where the system 'gcc' is actually clang and may not behave as expected.
+if [ "${CC:-}" = "gcc" ]; then
+    unset CC
+fi
+
 log() { echo ">>> $1" >&2; }
 skip() { echo "    SKIP: $1" >&2; }
 
@@ -108,12 +119,19 @@ export STATIC_MASTER_KEY_HEX="${STATIC_MASTER_KEY_HEX:-$(printf '22%.0s' {1..32}
 # Build
 ########################################################################
 
-if [ "$HAVE_RUST" = 1 ]; then
-    log "Building Rust FFI library..."
-    cargo build --release -p asherah-ffi --manifest-path "$ROOT_DIR/Cargo.toml" -q 2>&1
+FFI_LIB_DIR="$ROOT_DIR/target/release"
+FFI_LIB_EXISTS=0
+if [ -f "$FFI_LIB_DIR/libasherah_ffi.dylib" ] || [ -f "$FFI_LIB_DIR/libasherah_ffi.so" ]; then
+    FFI_LIB_EXISTS=1
 fi
 
-FFI_LIB_DIR="$ROOT_DIR/target/release"
+if [ "$HAVE_RUST" = 1 ] && [ "$FFI_LIB_EXISTS" = 0 ]; then
+    log "Building Rust FFI library..."
+    cargo build --release -p asherah-ffi --manifest-path "$ROOT_DIR/Cargo.toml" -q 2>&1
+    FFI_LIB_EXISTS=1
+elif [ "$FFI_LIB_EXISTS" = 1 ]; then
+    log "Using existing Rust FFI library in $FFI_LIB_DIR"
+fi
 export ASHERAH_DOTNET_NATIVE="$FFI_LIB_DIR"
 export ASHERAH_RUBY_NATIVE="$FFI_LIB_DIR"
 export ASHERAH_GO_NATIVE="$FFI_LIB_DIR"
@@ -146,7 +164,7 @@ fi
 # .NET FFI + Canonical (BenchmarkDotNet)
 ########################################################################
 
-if [ "$HAVE_DOTNET" = 1 ] && [ "$HAVE_RUST" = 1 ]; then
+if [ "$HAVE_DOTNET" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
     log "Running .NET benchmark (BenchmarkDotNet)..."
     dotnet run --project "$BENCH_DIR/dotnet-bench" -c Release > "$RESULTS_DIR/bdn.log" 2>&1
     python3 -c "
@@ -183,14 +201,15 @@ fi
 # Java FFI (JMH)
 ########################################################################
 
-if [ "$HAVE_JAVA" = 1 ] && [ "$HAVE_RUST" = 1 ]; then
+if [ "$HAVE_JAVA" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
     log "Building Java FFI benchmark (JMH)..."
+    # Build the asherah-java JAR and install to local Maven repo
     mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package -q 2>&1
     JAR_FILE=$(ls "$ROOT_DIR"/asherah-java/java/target/asherah-java-*.jar 2>/dev/null | grep -v sources | grep -v javadoc | head -1)
     JAR_VERSION=$(echo "$JAR_FILE" | sed 's/.*asherah-java-\(.*\)\.jar/\1/')
     mvn -B install:install-file -Dfile="$JAR_FILE" \
         -DgroupId=com.godaddy.asherah -DartifactId=asherah-java -Dversion="${JAR_VERSION}" -Dpackaging=jar -q 2>&1
-    mvn -B -f "$BENCH_DIR/java-bench/pom.xml" clean package -q 2>&1
+    mvn -B -U -f "$BENCH_DIR/java-bench/pom.xml" clean package -q -Dasherah.java.version="${JAR_VERSION}" 2>&1
 
     log "Running Java FFI benchmark (JMH)..."
     java -Djava.library.path="$FFI_LIB_DIR" -Dasherah.java.nativeLibraryPath="$FFI_LIB_DIR" \
@@ -241,7 +260,7 @@ fi
 # Go FFI (testing.B)
 ########################################################################
 
-if [ "$HAVE_GO" = 1 ] && [ "$HAVE_RUST" = 1 ]; then
+if [ "$HAVE_GO" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
     GO_WIP_MOVED=0
     if [ -f "$ROOT_DIR/asherah-go/ffi.go" ]; then
         mkdir -p /tmp/asherah-go-wip
@@ -332,7 +351,7 @@ if [ "$HAVE_PYTHON" = 1 ]; then
 import re
 enc, dec = {}, {}
 for line in open('$RESULTS_DIR/python.log'):
-    m = re.match(r'\s+(\d+)B\s+encrypt:\s+(\d+)\s+ns.*decrypt:\s+(\d+)\s+ns', line)
+    m = re.match(r'\s+(\d+)B\s+(\d+)\s+ns\s+\d+\s+ns\s+(\d+)\s+ns', line)
     if m:
         enc[int(m.group(1))] = int(m.group(2))
         dec[int(m.group(1))] = int(m.group(3))
@@ -470,24 +489,37 @@ for fname in sorted(os.listdir(results_dir)):
     rows.append((name, nums))
 
 def fmt(n):
-    if n == 0: return '      -'
-    return f'{n:>7,}'
+    if n == 0: return '       -'
+    return f'{n:>8,}'
+
+N = 26  # name column inner width
+# Data row inner: ' ' + 8 + ' ' + 8 + ' ' + 8 + ' ' = 28 chars
+D = 28  # data column inner width
+
+hdr = '─' * (N + 2)
+dat = '─' * D
+top = f'┌{hdr}┬{dat}┬{dat}┐'
+mid = f'├{hdr}┼{dat}┼{dat}┤'
+bot = f'└{hdr}┴{dat}┴{dat}┘'
+
+def row(name, e64, e1k, e8k, d64, d1k, d8k):
+    return f'│ {name:<{N}} │ {fmt(e64)} {fmt(e1k)} {fmt(e8k)} │ {fmt(d64)} {fmt(d1k)} {fmt(d8k)} │'
 
 print()
-print('┌────────────────────────────┬───────────────────────────────────┬───────────────────────────────────┐')
-print('│                            │       ENCRYPT (ns/op)             │       DECRYPT (ns/op)             │')
-print('│ Implementation             │    64B       1KB       8KB        │    64B       1KB       8KB        │')
-print('├────────────────────────────┼───────────────────────────────────┼───────────────────────────────────┤')
+print(top)
+print(f'│ {\"\":<{N}} │ {\"ENCRYPT (ns/op)\":^{D-2}} │ {\"DECRYPT (ns/op)\":^{D-2}} │')
+print(f'│ {\"Implementation\":<{N}} │ {\"64B\":>8} {\"1KB\":>8} {\"8KB\":>8} │ {\"64B\":>8} {\"1KB\":>8} {\"8KB\":>8} │')
+print(mid)
 
 printed_sep = False
 for name, nums in rows:
     if name.startswith('Canon') and not printed_sep:
-        print('├────────────────────────────┼───────────────────────────────────┼───────────────────────────────────┤')
+        print(mid)
         printed_sep = True
     e64, e1k, e8k, d64, d1k, d8k = nums
-    print(f'│ {name:<26} │ {fmt(e64)}  {fmt(e1k)}  {fmt(e8k)}        │ {fmt(d64)}  {fmt(d1k)}  {fmt(d8k)}        │')
+    print(row(name, e64, e1k, e8k, d64, d1k, d8k))
 
-print('└────────────────────────────┴───────────────────────────────────┴───────────────────────────────────┘')
+print(bot)
 print()
 import platform, subprocess
 cpu = 'unknown'
