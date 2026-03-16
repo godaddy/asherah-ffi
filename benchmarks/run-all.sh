@@ -13,12 +13,17 @@ if [ "${1:-}" = "--clean" ]; then
     rm -rf /tmp/asherah-canonical
     rm -rf /tmp/asherah-go-wip
     rm -rf "$BENCH_DIR/dotnet-bench-newmetastore/asherah-upstream"
-    # Build output (covered by .gitignore but clean anyway)
-    for d in "$BENCH_DIR"/*/target "$BENCH_DIR"/*/bin "$BENCH_DIR"/*/obj \
-             "$BENCH_DIR"/*/node_modules "$BENCH_DIR"/asherah-bench/target \
-             "$ROOT_DIR/BenchmarkDotNet.Artifacts"; do
-        rm -rf "$d" 2>/dev/null || true
-    done
+    # Fetched npm packages
+    rm -rf "$BENCH_DIR"/*/node_modules
+    # .NET build output
+    rm -rf "$BENCH_DIR"/dotnet-bench*/obj "$BENCH_DIR"/dotnet-bench*/bin
+    # Java shade output (JARs rebuilt quickly)
+    rm -rf "$BENCH_DIR"/java-bench*/target
+    # BenchmarkDotNet artifacts
+    rm -rf "$ROOT_DIR/BenchmarkDotNet.Artifacts"
+    # NOTE: We intentionally preserve benchmarks/asherah-bench/target (Criterion
+    # Rust build cache) and benchmarks/native-bench/*/target — these take minutes
+    # to rebuild and contain only our own compiled code, not fetched assets.
     echo "Done."
     exit 0
 fi
