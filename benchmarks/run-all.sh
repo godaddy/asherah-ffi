@@ -185,12 +185,13 @@ fi
 
 if [ "$HAVE_JAVA" = 1 ] && [ "$HAVE_RUST" = 1 ]; then
     log "Building Java FFI benchmark (JMH)..."
+    # Build the asherah-java JAR and install to local Maven repo
     mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package -q 2>&1
     JAR_FILE=$(ls "$ROOT_DIR"/asherah-java/java/target/asherah-java-*.jar 2>/dev/null | grep -v sources | grep -v javadoc | head -1)
     JAR_VERSION=$(echo "$JAR_FILE" | sed 's/.*asherah-java-\(.*\)\.jar/\1/')
     mvn -B install:install-file -Dfile="$JAR_FILE" \
         -DgroupId=com.godaddy.asherah -DartifactId=asherah-java -Dversion="${JAR_VERSION}" -Dpackaging=jar -q 2>&1
-    mvn -B -f "$BENCH_DIR/java-bench/pom.xml" clean package -q 2>&1
+    mvn -B -U -f "$BENCH_DIR/java-bench/pom.xml" clean package -q -Dasherah.java.version="${JAR_VERSION}" 2>&1
 
     log "Running Java FFI benchmark (JMH)..."
     java -Djava.library.path="$FFI_LIB_DIR" -Dasherah.java.nativeLibraryPath="$FFI_LIB_DIR" \
