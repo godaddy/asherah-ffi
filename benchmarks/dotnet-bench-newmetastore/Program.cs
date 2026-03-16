@@ -1,70 +1,68 @@
 using System;
-using System.Diagnostics;
+using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Columns;
+using BenchmarkDotNet.Configs;
+using BenchmarkDotNet.Jobs;
+using BenchmarkDotNet.Running;
 using GoDaddy.Asherah.AppEncryption.Core;
 using GoDaddy.Asherah.AppEncryption.PlugIns.Testing.Kms;
 using GoDaddy.Asherah.AppEncryption.PlugIns.Testing.Metastore;
 using GoDaddy.Asherah.Crypto;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-const string StaticMasterKey = "thisIsAStaticMasterKeyForTesting";
-const string ServiceName = "bench-service";
-const string ProductId = "bench-product";
-const string PartitionId = "bench-partition";
+BenchmarkRunner.Run<NewMetastoreBenchmark>(
+    DefaultConfig.Instance
+        .AddColumn(StatisticColumn.Median)
+        .WithOptions(ConfigOptions.DisableOptimizationsValidator));
 
-int[] payloadSizes = [64, 1024, 8192];
-int warmupIterations = 500;
-int benchIterations = 5000;
-
-var factory = (SessionFactory)SessionFactory
-    .NewBuilder(ProductId, ServiceName)
-    .WithKeyMetastore(new InMemoryKeyMetastore())
-    .WithCryptoPolicy(new NeverExpiredCryptoPolicy())
-    .WithKeyManagementService(new StaticKeyManagementService(StaticMasterKey))
-    .WithLogger(NullLogger.Instance)
-    .Build();
-
-var results = new List<(int size, double encUs, double decUs)>();
-
-foreach (var size in payloadSizes)
+[MemoryDiagnoser]
+[SimpleJob(RuntimeMoniker.Net80, warmupCount: 3, iterationCount: 10)]
+[GroupBenchmarksBy(BenchmarkDotNet.Configs.BenchmarkLogicalGroupRule.ByCategory)]
+[CategoriesColumn]
+public class NewMetastoreBenchmark
 {
-    var payload = new byte[size];
-    Random.Shared.NextBytes(payload);
+    private const string StaticMasterKey = "thisIsAStaticMasterKeyForTesting";
+    private const string ServiceName = "bench-service";
+    private const string ProductId = "bench-product";
+    private const string PartitionId = "bench-partition";
 
-    using var session = factory.GetSession(PartitionId);
-    for (int i = 0; i < warmupIterations; i++)
+    private SessionFactory _factory = null!;
+    private IEncryptionSession _session = null!;
+    private byte[] _payload = null!;
+    private byte[] _ciphertext = null!;
+
+    [Params(64, 1024, 8192)]
+    public int PayloadSize { get; set; }
+
+    [GlobalSetup]
+    public void Setup()
     {
-        var e = session.Encrypt(payload);
-        session.Decrypt(e);
+        _factory = (SessionFactory)SessionFactory
+            .NewBuilder(ProductId, ServiceName)
+            .WithKeyMetastore(new InMemoryKeyMetastore())
+            .WithCryptoPolicy(new NeverExpiredCryptoPolicy())
+            .WithKeyManagementService(new StaticKeyManagementService(StaticMasterKey))
+            .WithLogger(NullLogger.Instance)
+            .Build();
+        _session = _factory.GetSession(PartitionId);
+
+        _payload = new byte[PayloadSize];
+        Random.Shared.NextBytes(_payload);
+        _ciphertext = _session.Encrypt(_payload);
     }
 
-    var sw = Stopwatch.StartNew();
-    byte[] enc = null!;
-    for (int i = 0; i < benchIterations; i++)
-        enc = session.Encrypt(payload);
-    sw.Stop();
-    double encUs = sw.Elapsed.TotalMicroseconds / benchIterations;
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        _session?.Dispose();
+        _factory?.Dispose();
+    }
 
-    sw.Restart();
-    for (int i = 0; i < benchIterations; i++)
-        session.Decrypt(enc);
-    sw.Stop();
-    double decUs = sw.Elapsed.TotalMicroseconds / benchIterations;
+    // BenchmarkDotNet consumes the return value, preventing DCE.
 
-    results.Add((size, encUs, decUs));
+    [Benchmark(Description = "C# new-metastore"), BenchmarkCategory("Encrypt")]
+    public byte[] Encrypt() => _session.Encrypt(_payload);
+
+    [Benchmark(Description = "C# new-metastore"), BenchmarkCategory("Decrypt")]
+    public byte[] Decrypt() => _session.Decrypt(_ciphertext);
 }
-
-factory.Dispose();
-
-Console.WriteLine("=== .NET Benchmark: Canonical C# new-metastore (chief-micco/asherah) ===\n");
-
-Console.WriteLine($"  {"Size",6} | {"Encrypt",14} | {"Decrypt",14}");
-Console.WriteLine($"  {new string('-', 6)} | {new string('-', 14)} | {new string('-', 14)}");
-
-foreach (var (size, encUs, decUs) in results)
-{
-    Console.WriteLine($"  {size,5}B | {encUs,11:F2} µs | {decUs,11:F2} µs");
-}
-
-Console.WriteLine();
-Console.WriteLine($"  Warmup: {warmupIterations} iterations, Benchmark: {benchIterations} iterations per operation");
