@@ -473,22 +473,23 @@ def fmt(n):
     if n == 0: return '       -'
     return f'{n:>8,}'
 
-W = 28  # name column
-C = 8   # number column
+N = 26  # name column inner width
+# Data row inner: ' ' + 8 + ' ' + 8 + ' ' + 8 + ' ' = 28 chars
+D = 28  # data column inner width
 
-hdr_sep = '─' * W
-col_sep = '─' * (C * 3 + 8)
-top    = f'┌{hdr_sep}┬{col_sep}┬{col_sep}┐'
-mid    = f'├{hdr_sep}┼{col_sep}┼{col_sep}┤'
-bot    = f'└{hdr_sep}┴{col_sep}┴{col_sep}┘'
+hdr = '─' * (N + 2)
+dat = '─' * D
+top = f'┌{hdr}┬{dat}┬{dat}┐'
+mid = f'├{hdr}┼{dat}┼{dat}┤'
+bot = f'└{hdr}┴{dat}┴{dat}┘'
 
 def row(name, e64, e1k, e8k, d64, d1k, d8k):
-    return f'│ {name:<{W-2}} │ {fmt(e64)} {fmt(e1k)} {fmt(e8k)} │ {fmt(d64)} {fmt(d1k)} {fmt(d8k)} │'
+    return f'│ {name:<{N}} │ {fmt(e64)} {fmt(e1k)} {fmt(e8k)} │ {fmt(d64)} {fmt(d1k)} {fmt(d8k)} │'
 
 print()
 print(top)
-print(f'│{\"\":>{W}}│{\"ENCRYPT (ns/op)\":^{C*3+8}}│{\"DECRYPT (ns/op)\":^{C*3+8}}│')
-print(f'│ {\"Implementation\":<{W-2}} │  {\"64B\":>{C}}{\"1KB\":>{C+1}}{\"8KB\":>{C+1}} │  {\"64B\":>{C}}{\"1KB\":>{C+1}}{\"8KB\":>{C+1}} │')
+print(f'│ {\"\":<{N}} │ {\"ENCRYPT (ns/op)\":^{D-2}} │ {\"DECRYPT (ns/op)\":^{D-2}} │')
+print(f'│ {\"Implementation\":<{N}} │ {\"64B\":>8} {\"1KB\":>8} {\"8KB\":>8} │ {\"64B\":>8} {\"1KB\":>8} {\"8KB\":>8} │')
 print(mid)
 
 printed_sep = False
