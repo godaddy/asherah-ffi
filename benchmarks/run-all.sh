@@ -470,24 +470,36 @@ for fname in sorted(os.listdir(results_dir)):
     rows.append((name, nums))
 
 def fmt(n):
-    if n == 0: return '      -'
-    return f'{n:>7,}'
+    if n == 0: return '       -'
+    return f'{n:>8,}'
+
+W = 28  # name column
+C = 8   # number column
+
+hdr_sep = '─' * W
+col_sep = '─' * (C * 3 + 8)
+top    = f'┌{hdr_sep}┬{col_sep}┬{col_sep}┐'
+mid    = f'├{hdr_sep}┼{col_sep}┼{col_sep}┤'
+bot    = f'└{hdr_sep}┴{col_sep}┴{col_sep}┘'
+
+def row(name, e64, e1k, e8k, d64, d1k, d8k):
+    return f'│ {name:<{W-2}} │ {fmt(e64)} {fmt(e1k)} {fmt(e8k)} │ {fmt(d64)} {fmt(d1k)} {fmt(d8k)} │'
 
 print()
-print('┌────────────────────────────┬───────────────────────────────────┬───────────────────────────────────┐')
-print('│                            │       ENCRYPT (ns/op)             │       DECRYPT (ns/op)             │')
-print('│ Implementation             │    64B       1KB       8KB        │    64B       1KB       8KB        │')
-print('├────────────────────────────┼───────────────────────────────────┼───────────────────────────────────┤')
+print(top)
+print(f'│{\"\":>{W}}│{\"ENCRYPT (ns/op)\":^{C*3+8}}│{\"DECRYPT (ns/op)\":^{C*3+8}}│')
+print(f'│ {\"Implementation\":<{W-2}} │  {\"64B\":>{C}}{\"1KB\":>{C+1}}{\"8KB\":>{C+1}} │  {\"64B\":>{C}}{\"1KB\":>{C+1}}{\"8KB\":>{C+1}} │')
+print(mid)
 
 printed_sep = False
 for name, nums in rows:
     if name.startswith('Canon') and not printed_sep:
-        print('├────────────────────────────┼───────────────────────────────────┼───────────────────────────────────┤')
+        print(mid)
         printed_sep = True
     e64, e1k, e8k, d64, d1k, d8k = nums
-    print(f'│ {name:<26} │ {fmt(e64)}  {fmt(e1k)}  {fmt(e8k)}        │ {fmt(d64)}  {fmt(d1k)}  {fmt(d8k)}        │')
+    print(row(name, e64, e1k, e8k, d64, d1k, d8k))
 
-print('└────────────────────────────┴───────────────────────────────────┴───────────────────────────────────┘')
+print(bot)
 print()
 import platform, subprocess
 cpu = 'unknown'
