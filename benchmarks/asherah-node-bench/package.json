@@ -9,6 +9,7 @@
     "bench:bun": "bun run bench.js"
   },
   "dependencies": {
-    "asherah-node": "file:../../asherah-node"
+    "asherah-node": "file:../../asherah-node",
+    "tinybench": "^6.0.0"
   }
 }

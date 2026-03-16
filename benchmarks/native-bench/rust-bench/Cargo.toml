@@ -1,0 +1,26 @@
+[package]
+name = "rust-native-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+members = []
+
+[dependencies]
+asherah = { path = "../../../asherah" }
+anyhow = "1.0"
+rand = "0.9"
+serde_json = "1"
+
+[[bin]]
+name = "rust-native-bench"
+path = "main.rs"
+
+[[bin]]
+name = "verify"
+path = "verify.rs"
+
+[[bin]]
+name = "contention-bench"
+path = "contention.rs"

@@ -41,6 +41,17 @@ function main() {
 
   asherah.setup(config);
 
+  // Verify round-trip correctness before benchmarking
+  const verifyCt = asherah.encrypt(partitionId, payload);
+  const verifyPt = asherah.decrypt(partitionId, verifyCt);
+  if (!payload.equals(verifyPt)) {
+    throw new Error('Round-trip verification failed: decrypted payload does not match original');
+  }
+  const verifyStrCt = asherah.encryptString(partitionId, 'verify');
+  if (asherah.decryptString(partitionId, verifyStrCt) !== 'verify') {
+    throw new Error('Round-trip verification failed for string API');
+  }
+
   let lastCipher = '';
   measure('encrypt(bytes)', () => {
     for (let i = 0; i < iterations; i += 1) {
