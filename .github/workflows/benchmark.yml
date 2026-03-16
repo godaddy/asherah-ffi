@@ -1,0 +1,83 @@
+name: Benchmark
+
+on:
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: |
+            8.0.x
+            10.0.x
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+
+      - name: Install Ruby gems
+        run: gem install ffi benchmark-ips kalibera asherah --no-document
+
+      - name: Install Python binding
+        run: |
+          pip install asherah-py
+
+      - name: Install Node.js dependencies
+        run: |
+          cd benchmarks/asherah-node-bench && npm install
+          cd ../node-bench-canonical && npm install
+
+      - name: Build Rust FFI library
+        run: cargo build --release -p asherah-ffi
+
+      - name: Build Java JNI library
+        run: cargo build --release -p asherah-java
+
+      - name: Build Java FFI JAR
+        run: |
+          mvn -B -f asherah-java/java/pom.xml -Dnative.build.skip=true -DskipTests package -q
+          JAR_FILE=$(ls asherah-java/java/target/asherah-java-*.jar | grep -v sources | grep -v javadoc | head -1)
+          JAR_VERSION=$(echo "$JAR_FILE" | sed 's/.*asherah-java-\(.*\)\.jar/\1/')
+          mvn -B install:install-file -Dfile="$JAR_FILE" \
+            -DgroupId=com.godaddy.asherah -DartifactId=asherah-java \
+            -Dversion="${JAR_VERSION}" -Dpackaging=jar -q
+
+      - name: Clone canonical asherah repo
+        run: git clone --depth 1 https://github.com/godaddy/asherah.git /tmp/asherah-canonical
+
+      - name: Build canonical Java
+        run: mvn -B -f /tmp/asherah-canonical/java/app-encryption/pom.xml install -DskipTests -q
+
+      - name: Build Node.js addon
+        run: |
+          cd asherah-node
+          npm install
+          npx @napi-rs/cli build --release --platform linux-x64-gnu --target x86_64-unknown-linux-gnu
+
+      - name: Run benchmarks
+        env:
+          STATIC_MASTER_KEY_HEX: "2222222222222222222222222222222222222222222222222222222222222222"
+          ASHERAH_DOTNET_NATIVE: ${{ github.workspace }}/target/release
+          ASHERAH_RUBY_NATIVE: ${{ github.workspace }}/target/release
+          ASHERAH_GO_NATIVE: ${{ github.workspace }}/target/release
+        run: benchmarks/run-all.sh
