@@ -332,7 +332,7 @@ if [ "$HAVE_PYTHON" = 1 ]; then
 import re
 enc, dec = {}, {}
 for line in open('$RESULTS_DIR/python.log'):
-    m = re.match(r'\s+(\d+)B\s+encrypt:\s+(\d+)\s+ns.*decrypt:\s+(\d+)\s+ns', line)
+    m = re.match(r'\s+(\d+)B\s+(\d+)\s+ns\s+\d+\s+ns\s+(\d+)\s+ns', line)
     if m:
         enc[int(m.group(1))] = int(m.group(2))
         dec[int(m.group(1))] = int(m.group(3))
