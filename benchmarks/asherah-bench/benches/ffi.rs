@@ -162,7 +162,7 @@ impl RustContext {
         }
     }
 
-    fn decrypt(&self, ciphertext: &[u8]) {
+    fn decrypt(&self, ciphertext: &[u8]) -> Vec<u8> {
         unsafe {
             let mut buffer = AsherahBuffer {
                 data: ptr::null_mut(),
@@ -175,9 +175,10 @@ impl RustContext {
                 &mut buffer,
             );
             assert_eq!(result, 0, "Rust decrypt returned error");
-            if buffer.len > 0 {
-                (self.api.buffer_free)(&mut buffer);
-            }
+            let slice = std::slice::from_raw_parts(buffer.data, buffer.len);
+            let vec = slice.to_vec();
+            (self.api.buffer_free)(&mut buffer);
+            vec
         }
     }
 }
@@ -221,7 +222,7 @@ impl GoContext {
         }
     }
 
-    fn decrypt(&self, ciphertext: &[u8]) {
+    fn decrypt(&self, ciphertext: &[u8]) -> Vec<u8> {
         unsafe {
             let mut buffer = AsherahBuffer {
                 data: ptr::null_mut(),
@@ -234,9 +235,10 @@ impl GoContext {
                 &mut buffer,
             );
             assert_eq!(result, 0, "Go decrypt returned error");
-            if buffer.len > 0 {
-                (self.api.buffer_free)(&mut buffer);
-            }
+            let slice = std::slice::from_raw_parts(buffer.data, buffer.len);
+            let vec = slice.to_vec();
+            (self.api.buffer_free)(&mut buffer);
+            vec
         }
     }
 }
@@ -286,6 +288,15 @@ fn bench_encrypt(c: &mut Criterion) {
     for size in sizes {
         let mut data = vec![0u8; size];
         rng.fill_bytes(&mut data);
+
+        // Verify round-trip correctness before benchmarking
+        let rust_ct = rust_ctx.encrypt(&data);
+        let rust_pt = rust_ctx.decrypt(&rust_ct);
+        assert_eq!(rust_pt, data, "Rust FFI round-trip failed for {size}B");
+        let go_ct = go_ctx.encrypt(&data);
+        let go_pt = go_ctx.decrypt(&go_ct);
+        assert_eq!(go_pt, data, "Go FFI round-trip failed for {size}B");
+
         group.bench_function(BenchmarkId::new("rust_ffi", size), |b| {
             b.iter(|| {
                 black_box(rust_ctx.encrypt(black_box(&data)));
@@ -316,14 +327,18 @@ fn bench_decrypt(c: &mut Criterion) {
         let rust_cipher = rust_ctx.encrypt(&data);
         let go_cipher = go_ctx.encrypt(&data);
 
+        // Verify decrypt correctness before benchmarking
+        assert_eq!(rust_ctx.decrypt(&rust_cipher), data, "Rust FFI decrypt failed for {size}B");
+        assert_eq!(go_ctx.decrypt(&go_cipher), data, "Go FFI decrypt failed for {size}B");
+
         group.bench_function(BenchmarkId::new("rust_ffi", rust_cipher.len()), |b| {
             b.iter(|| {
-                rust_ctx.decrypt(black_box(&rust_cipher));
+                black_box(rust_ctx.decrypt(black_box(&rust_cipher)));
             })
         });
         group.bench_function(BenchmarkId::new("go_ffi", go_cipher.len()), |b| {
             b.iter(|| {
-                go_ctx.decrypt(black_box(&go_cipher));
+                black_box(go_ctx.decrypt(black_box(&go_cipher)));
             })
         });
     }

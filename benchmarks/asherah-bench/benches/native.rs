@@ -29,6 +29,12 @@ fn bench_encrypt(c: &mut Criterion) {
     for size in sizes {
         let mut data = vec![0u8; size];
         rng.fill_bytes(&mut data);
+
+        // Verify round-trip correctness before benchmarking
+        let drr = session.encrypt(&data).expect("verify encrypt");
+        let decrypted = session.decrypt(drr).expect("verify decrypt");
+        assert_eq!(decrypted, data, "round-trip verification failed for {size}B");
+
         group.bench_function(BenchmarkId::new("rust_native", size), |b| {
             b.iter(|| {
                 black_box(session.encrypt(black_box(&data)).expect("encrypt"))
@@ -53,6 +59,10 @@ fn bench_decrypt(c: &mut Criterion) {
         let mut data = vec![0u8; size];
         rng.fill_bytes(&mut data);
         let drr = session.encrypt(&data).expect("encrypt for decrypt setup");
+
+        // Verify decrypt correctness before benchmarking
+        let decrypted = session.decrypt(drr.clone()).expect("verify decrypt");
+        assert_eq!(decrypted, data, "decrypt verification failed for {size}B");
 
         group.bench_function(BenchmarkId::new("rust_native", size), |b| {
             b.iter(|| {
@@ -79,6 +89,12 @@ fn bench_decrypt_from_json(c: &mut Criterion) {
         rng.fill_bytes(&mut data);
         let drr = session.encrypt(&data).expect("encrypt for decrypt setup");
         let json = drr.to_json_fast();
+
+        // Verify JSON round-trip correctness before benchmarking
+        let drr_parsed: asherah::types::DataRowRecord =
+            serde_json::from_str(&json).expect("verify json parse");
+        let decrypted = session.decrypt(drr_parsed).expect("verify decrypt from json");
+        assert_eq!(decrypted, data, "JSON decrypt verification failed for {size}B");
 
         group.bench_function(BenchmarkId::new("rust_native", size), |b| {
             b.iter(|| {
