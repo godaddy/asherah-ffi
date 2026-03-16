@@ -1,0 +1,28 @@
+# Build outputs
+target/
+obj/
+bin/
+classes/
+node_modules/
+BenchmarkDotNet.Artifacts/
+
+# Maven shade plugin output
+dependency-reduced-pom.xml
+
+# Go binaries
+go-native-bench
+*.exe
+
+# Tool versions
+.tool-versions
+
+# Java build output
+*.class
+*.jar
+
+# .NET build output
+*.nupkg
+
+# Cloned upstream repos (fetched by run scripts)
+asherah-upstream/
+

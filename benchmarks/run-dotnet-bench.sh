@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
-NEWMETASTORE_DIR="${NEWMETASTORE_DIR:-/tmp/asherah-newmetastore}"
+BENCH_DIR="$ROOT_DIR/benchmarks"
+NEWMETASTORE_DIR="$BENCH_DIR/dotnet-bench-newmetastore/asherah-upstream"
 
 # Ensure native FFI library path is set
 if [ -z "${ASHERAH_DOTNET_NATIVE:-}" ]; then
@@ -38,9 +39,9 @@ fi
 echo ""
 echo "Running canonical v0.2.10 vs Rust FFI benchmark..."
 echo ""
-dotnet run --project "$ROOT_DIR/benchmarks/dotnet-bench" -c Release
+dotnet run --project "$BENCH_DIR/dotnet-bench" -c Release
 
 echo ""
 echo "Running new-metastore benchmark..."
 echo ""
-dotnet run --project "$ROOT_DIR/benchmarks/dotnet-bench-newmetastore" -c Release
+dotnet run --project "$BENCH_DIR/dotnet-bench-newmetastore" -c Release
