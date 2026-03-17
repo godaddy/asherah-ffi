@@ -30,13 +30,9 @@ jobs:
       - name: Resolve version
         id: resolve
         run: |
-          # Determine version from PYPI_VERSION variable, release tag, or beta fallback
+          # PyPI version is independent of the git release tag
           if [ -n "${{ vars.PYPI_VERSION }}" ]; then
             VERSION="${{ vars.PYPI_VERSION }}"
-            IS_STABLE=true
-          elif [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
-            VERSION="${TAG#v}"
             IS_STABLE=true
           else
             BETA="${{ vars.PYPI_BETA_VERSION }}"
