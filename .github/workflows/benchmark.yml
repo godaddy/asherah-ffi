@@ -41,7 +41,8 @@ jobs:
       - name: Build and install Python binding
         run: |
           pip install maturin
-          maturin develop --release --manifest-path asherah-py/Cargo.toml
+          maturin build --release --manifest-path asherah-py/Cargo.toml --out dist/
+          pip install dist/*.whl
 
       - name: Install Node.js dependencies
         run: |
