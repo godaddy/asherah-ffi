@@ -97,7 +97,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.88.0
+        uses: dtolnay/rust-toolchain@1.91.0
         with:
           targets: ${{ matrix.rust_targets || matrix.target }}
 
@@ -123,7 +123,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux || 'auto' }}
-          rust-toolchain: "1.88.0"
+          rust-toolchain: "1.91.0"
           before-script-linux: |
             # aws-lc-sys requires cmake; install it if missing
             if command -v yum &>/dev/null; then
