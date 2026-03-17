@@ -5,46 +5,23 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"sync"
-	"unsafe"
 )
+
+// Global (module-level) API — convenience wrappers around Factory/Session.
 
 var (
 	globalMu       sync.RWMutex
-	globalFactory  uintptr
-	sessionCache   map[string]*session
+	globalFactory  *Factory
+	sessionCache   map[string]*Session
 	sessionCaching bool
 )
 
-type session struct {
-	ptr uintptr
-}
-
-// Setup configures the native Asherah factory using the provided configuration.
+// Setup configures the global Asherah factory using the provided configuration.
 func Setup(cfg Config) error {
-	if err := ensureLoaded(); err != nil {
-		return err
-	}
-
-	if cfg.ServiceName == "" {
-		return errors.New("asherah-go: ServiceName is required")
-	}
-	if cfg.ProductID == "" {
-		return errors.New("asherah-go: ProductID is required")
-	}
-	if cfg.Metastore == "" {
-		return errors.New("asherah-go: Metastore is required")
-	}
-
-	payload, err := cfg.toJSON()
+	factory, err := NewFactory(cfg)
 	if err != nil {
-		return fmt.Errorf("asherah-go: failed to encode config: %w", err)
-	}
-
-	factory := fnFactoryNewWithConfig(string(payload))
-	if factory == 0 {
-		return fmt.Errorf("asherah-go: factory setup failed: %s", lastErrorMessage())
+		return err
 	}
 
 	caching := true
@@ -55,15 +32,15 @@ func Setup(cfg Config) error {
 	globalMu.Lock()
 	defer globalMu.Unlock()
 
-	if globalFactory != 0 {
-		fnFactoryFree(factory)
+	if globalFactory != nil {
+		factory.Close()
 		return errors.New("asherah-go: setup already completed; call Shutdown first")
 	}
 
 	globalFactory = factory
 	sessionCaching = caching
 	if sessionCaching {
-		sessionCache = make(map[string]*session)
+		sessionCache = make(map[string]*Session)
 	} else {
 		sessionCache = nil
 	}
@@ -71,47 +48,43 @@ func Setup(cfg Config) error {
 	return nil
 }
 
-// SetupFromEnv initialises the factory using environment variables.
+// SetupFromEnv initialises the global factory using environment variables.
 func SetupFromEnv() error {
-	if err := ensureLoaded(); err != nil {
+	factory, err := NewFactoryFromEnv()
+	if err != nil {
 		return err
-	}
-
-	factory := fnFactoryNewFromEnv()
-	if factory == 0 {
-		return fmt.Errorf("asherah-go: factory_from_env failed: %s", lastErrorMessage())
 	}
 
 	globalMu.Lock()
 	defer globalMu.Unlock()
 
-	if globalFactory != 0 {
-		fnFactoryFree(factory)
+	if globalFactory != nil {
+		factory.Close()
 		return errors.New("asherah-go: setup already completed; call Shutdown first")
 	}
 
 	globalFactory = factory
 	sessionCaching = true
-	sessionCache = make(map[string]*session)
+	sessionCache = make(map[string]*Session)
 	return nil
 }
 
-// Shutdown releases the native factory and any cached sessions.
+// Shutdown releases the global factory and any cached sessions.
 func Shutdown() {
 	globalMu.Lock()
 	factory := globalFactory
 	cached := sessionCache
-	globalFactory = 0
+	globalFactory = nil
 	sessionCache = nil
 	sessionCaching = false
 	globalMu.Unlock()
 
 	for _, sess := range cached {
-		fnSessionFree(sess.ptr)
+		sess.Close()
 	}
 
-	if factory != 0 {
-		fnFactoryFree(factory)
+	if factory != nil {
+		factory.Close()
 	}
 }
 
@@ -119,10 +92,10 @@ func Shutdown() {
 func GetSetupStatus() bool {
 	globalMu.RLock()
 	defer globalMu.RUnlock()
-	return globalFactory != 0
+	return globalFactory != nil
 }
 
-// Encrypt encrypts the provided plaintext and returns the DataRowRecord JSON payload.
+// Encrypt encrypts the provided plaintext using the global factory.
 func Encrypt(partition string, plaintext []byte) ([]byte, error) {
 	sess, release, err := acquireSession(partition)
 	if err != nil {
@@ -131,19 +104,7 @@ func Encrypt(partition string, plaintext []byte) ([]byte, error) {
 	if release != nil {
 		defer release()
 	}
-
-	var buf asherahBuffer
-	var dataPtr uintptr
-	if len(plaintext) > 0 {
-		dataPtr = uintptr(unsafe.Pointer(&plaintext[0]))
-	}
-	rc := fnEncryptToJSON(sess.ptr, dataPtr, uintptr(len(plaintext)), uintptr(unsafe.Pointer(&buf)))
-	runtime.KeepAlive(plaintext)
-	if rc != 0 {
-		return nil, fmt.Errorf("asherah-go: encrypt failed: %s", lastErrorMessage())
-	}
-	defer freeBuffer(&buf)
-	return readBuffer(&buf), nil
+	return sess.Encrypt(plaintext)
 }
 
 // EncryptString encrypts a UTF-8 string and returns a JSON string.
@@ -155,7 +116,7 @@ func EncryptString(partition string, plaintext string) (string, error) {
 	return string(data), nil
 }
 
-// Decrypt decrypts the provided DataRowRecord JSON payload.
+// Decrypt decrypts the provided DataRowRecord JSON payload using the global factory.
 func Decrypt(partition string, dataRowRecord []byte) ([]byte, error) {
 	sess, release, err := acquireSession(partition)
 	if err != nil {
@@ -164,19 +125,7 @@ func Decrypt(partition string, dataRowRecord []byte) ([]byte, error) {
 	if release != nil {
 		defer release()
 	}
-
-	var buf asherahBuffer
-	var jsonPtr uintptr
-	if len(dataRowRecord) > 0 {
-		jsonPtr = uintptr(unsafe.Pointer(&dataRowRecord[0]))
-	}
-	rc := fnDecryptFromJSON(sess.ptr, jsonPtr, uintptr(len(dataRowRecord)), uintptr(unsafe.Pointer(&buf)))
-	runtime.KeepAlive(dataRowRecord)
-	if rc != 0 {
-		return nil, fmt.Errorf("asherah-go: decrypt failed: %s", lastErrorMessage())
-	}
-	defer freeBuffer(&buf)
-	return readBuffer(&buf), nil
+	return sess.Decrypt(dataRowRecord)
 }
 
 // DecryptString decrypts the provided DataRowRecord JSON payload and returns a UTF-8 string.
@@ -188,7 +137,7 @@ func DecryptString(partition string, dataRowRecord string) (string, error) {
 	return string(data), nil
 }
 
-// SetEnvJSON applies environment variables from a JSON object payload, matching the behaviour of other bindings.
+// SetEnvJSON applies environment variables from a JSON object payload.
 func SetEnvJSON(payload []byte) error {
 	var values map[string]*string
 	if err := json.Unmarshal(payload, &values); err != nil {
@@ -209,7 +158,7 @@ func SetEnvMap(values map[string]*string) {
 	}
 }
 
-func acquireSession(partition string) (*session, func(), error) {
+func acquireSession(partition string) (*Session, func(), error) {
 	if partition == "" {
 		return nil, nil, errors.New("asherah-go: partition ID cannot be empty")
 	}
@@ -219,7 +168,7 @@ func acquireSession(partition string) (*session, func(), error) {
 	caching := sessionCaching
 	globalMu.RUnlock()
 
-	if factory == 0 {
+	if factory == nil {
 		return nil, nil, errors.New("asherah-go: Setup must be called before use")
 	}
 
@@ -232,22 +181,20 @@ func acquireSession(partition string) (*session, func(), error) {
 		globalMu.Unlock()
 	}
 
-	sessionPtr := fnFactoryGetSession(factory, partition)
-	if sessionPtr == 0 {
-		return nil, nil, fmt.Errorf("asherah-go: get_session failed: %s", lastErrorMessage())
+	sess, err := factory.GetSession(partition)
+	if err != nil {
+		return nil, nil, err
 	}
-
-	sess := &session{ptr: sessionPtr}
 
 	if caching {
 		globalMu.Lock()
 		if existing, ok := sessionCache[partition]; ok {
 			globalMu.Unlock()
-			fnSessionFree(sessionPtr)
+			sess.Close()
 			return existing, nil, nil
 		}
 		if sessionCache == nil {
-			sessionCache = make(map[string]*session)
+			sessionCache = make(map[string]*Session)
 		}
 		sessionCache[partition] = sess
 		globalMu.Unlock()
@@ -255,7 +202,7 @@ func acquireSession(partition string) (*session, func(), error) {
 	}
 
 	release := func() {
-		fnSessionFree(sessionPtr)
+		sess.Close()
 	}
 	return sess, release, nil
 }
