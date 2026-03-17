@@ -167,14 +167,16 @@ jobs:
       - name: Resolve version
         working-directory: asherah-node
         run: |
-          # NPM version is independent of the git release tag
-          if [ -n "${{ vars.NPM_VERSION }}" ]; then
-            VERSION="${{ vars.NPM_VERSION }}"
+          # NPM_VERSION is the PATCH number only. The major.minor is hardcoded.
+          PATCH="${{ vars.NPM_VERSION }}"
+          if [ -n "$PATCH" ]; then
+            VERSION="4.0.${PATCH}"
+            NPM_TAG="latest"
           else
             # Fallback to beta versioning
             BETA="${{ vars.NPM_BETA_VERSION }}"
             if [ -z "$BETA" ]; then
-              echo "::error::Neither NPM_VERSION nor NPM_BETA_VERSION is set"
+              echo "::error::NPM_VERSION (patch number) is not set"
               exit 1
             fi
             while npm view "asherah@4.0.0-beta.${BETA}" version 2>/dev/null; do
@@ -182,16 +184,8 @@ jobs:
               BETA=$(( BETA + 1 ))
             done
             VERSION="4.0.0-beta.${BETA}"
-            echo "NPM_BETA=${BETA}" >> "$GITHUB_ENV"
-          fi
-
-          # Determine npm tag
-          if echo "$VERSION" | grep -qE '(alpha|beta|rc|dev)'; then
             NPM_TAG="beta"
-          elif echo "$VERSION" | grep -qE '^4\.'; then
-            NPM_TAG="next"
-          else
-            NPM_TAG="latest"
+            echo "NPM_BETA=${BETA}" >> "$GITHUB_ENV"
           fi
 
           echo "Publishing version: ${VERSION} with tag: ${NPM_TAG}"
@@ -308,11 +302,9 @@ jobs:
             gh variable set NPM_BETA_VERSION --body "$NEXT"
             echo "Set NPM_BETA_VERSION to ${NEXT}"
           elif [ "$NPM_TAG" = "latest" ]; then
-            # Bump patch version for next stable release
-            MAJOR=$(echo "$NPM_VERSION" | cut -d. -f1)
-            MINOR=$(echo "$NPM_VERSION" | cut -d. -f2)
-            PATCH=$(echo "$NPM_VERSION" | cut -d. -f3)
+            # NPM_VERSION is the patch number only — bump it
+            PATCH=$(echo "$NPM_VERSION" | sed 's/^4\.0\.//')
             NEXT_PATCH=$(( PATCH + 1 ))
-            gh variable set NPM_VERSION --body "${MAJOR}.${MINOR}.${NEXT_PATCH}"
-            echo "Set NPM_VERSION to ${MAJOR}.${MINOR}.${NEXT_PATCH}"
+            gh variable set NPM_VERSION --body "$NEXT_PATCH"
+            echo "Set NPM_VERSION to ${NEXT_PATCH} (next publish will be 4.0.${NEXT_PATCH})"
           fi
