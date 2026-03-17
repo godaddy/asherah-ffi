@@ -167,12 +167,8 @@ jobs:
       - name: Resolve version
         working-directory: asherah-node
         run: |
-          # Determine version from release tag or NPM_VERSION variable
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
-            # Strip 'v' prefix if present
-            VERSION="${TAG#v}"
-          elif [ -n "${{ vars.NPM_VERSION }}" ]; then
+          # NPM version is independent of the git release tag
+          if [ -n "${{ vars.NPM_VERSION }}" ]; then
             VERSION="${{ vars.NPM_VERSION }}"
           else
             # Fallback to beta versioning
@@ -189,9 +185,11 @@ jobs:
             echo "NPM_BETA=${BETA}" >> "$GITHUB_ENV"
           fi
 
-          # Determine npm tag: beta for prerelease, latest for stable
+          # Determine npm tag
           if echo "$VERSION" | grep -qE '(alpha|beta|rc|dev)'; then
             NPM_TAG="beta"
+          elif echo "$VERSION" | grep -qE '^4\.'; then
+            NPM_TAG="next"
           else
             NPM_TAG="latest"
           fi
