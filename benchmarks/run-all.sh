@@ -261,7 +261,7 @@ fi
 
 if [ "$HAVE_GO" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
     log "Running Go FFI benchmark (testing.B)..."
-    (cd "$BENCH_DIR/go-bench" && ASHERAH_GO_NATIVE="$FFI_LIB_DIR" \
+    (cd "$BENCH_DIR/go-bench" && CGO_ENABLED=0 ASHERAH_GO_NATIVE="$FFI_LIB_DIR" \
         go test -bench=. -benchmem -count=3 -benchtime=3s ./... 2>&1) \
         > "$RESULTS_DIR/go_ffi.log"
 
