@@ -1,7 +1,7 @@
 # asherah-go
 
 Go binding for [Asherah](https://github.com/godaddy/asherah) application-layer encryption,
-powered by the native Rust implementation via CGo.
+powered by the native Rust implementation via [purego](https://github.com/ebitengine/purego) (no CGO required).
 
 ## Installation
 
