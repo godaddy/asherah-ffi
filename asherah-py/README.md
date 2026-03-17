@@ -22,7 +22,7 @@ pip install asherah
 ## Quick start
 
 ```python
-import asherah_py as asherah
+import asherah
 
 factory = asherah.SessionFactory()
 session = factory.get_session("partition")

@@ -11,7 +11,7 @@ keywords = ["asherah", "python", "ffi", "encryption"]
 categories = ["cryptography", "api-bindings", "ffi"]
 
 [lib]
-name = "asherah_py"
+name = "_asherah"
 crate-type = ["cdylib"]
 
 [lints]
@@ -29,4 +29,4 @@ parking_lot = "0.12"
 log = "0.4"
 
 [package.metadata.maturin]
-name = "asherah_py"
+module-name = "asherah._asherah"

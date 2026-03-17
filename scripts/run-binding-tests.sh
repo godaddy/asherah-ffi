@@ -145,7 +145,7 @@ if should_run python; then
   PYTHON_VENV_ACTIVE=1
   python3 -m pip install --upgrade pip >/dev/null
   python3 -m pip install -U pytest >/dev/null
-  python3 -m pip uninstall -y asherah-py >/dev/null 2>&1 || true
+  python3 -m pip uninstall -y asherah >/dev/null 2>&1 || true
   if compgen -G "$ARTIFACTS_DIR/python/*.whl" >/dev/null; then
     python3 -m pip install "$ARTIFACTS_DIR"/python/*.whl || {
       echo "[binding-tests] ERROR: Python wheel install failed"
