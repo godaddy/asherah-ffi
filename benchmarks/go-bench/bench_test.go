@@ -73,12 +73,18 @@ func BenchmarkEncrypt(b *testing.B) {
 }
 
 func BenchmarkDecrypt(b *testing.B) {
+	// Warmup: first encrypt after idle may return empty due to purego init timing
+	asherah.Encrypt("bench-partition", []byte("warmup"))
+
 	for _, size := range sizes {
 		payload := make([]byte, size)
 		rand.Read(payload)
 		ct, err := asherah.Encrypt("bench-partition", payload)
 		if err != nil {
 			b.Fatal(err)
+		}
+		if len(ct) == 0 {
+			b.Fatal("encrypt returned empty ciphertext")
 		}
 
 		b.Run(fmt.Sprintf("%dB", size), func(b *testing.B) {

@@ -5,7 +5,7 @@ import os
 import statistics
 import timeit
 
-import asherah_py as asherah
+import asherah
 
 PARTITION = "bench-partition"
 SIZES = [64, 1024, 8192]

@@ -89,7 +89,7 @@ if [ ! -d "$ROOT_DIR/.venv" ]; then
 fi
 # shellcheck source=/dev/null
 source "$ROOT_DIR/.venv/bin/activate"
-python3 -m pip uninstall -y asherah-py >/dev/null 2>&1 || true
+python3 -m pip uninstall -y asherah >/dev/null 2>&1 || true
 IFS=' ' read -r -a _maturin_cmd <<< "$MATURIN_BIN"
 python3 -m pip --version
 python3 -c 'import importlib.util; spec = importlib.util.find_spec("maturin"); print("maturin spec:", spec)' || true

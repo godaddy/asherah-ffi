@@ -27,3 +27,5 @@ Repository = "https://github.com/godaddy/asherah-ffi"
 [tool.maturin]
 bindings = "pyo3"
 features = []
+python-source = "."
+module-name = "asherah._asherah"
