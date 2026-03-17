@@ -11,8 +11,8 @@ def _configure_env():
 
 
 def test_encrypt_decrypt_roundtrip():
-    pytest.importorskip("asherah_py")
-    import asherah_py as asherah
+    pytest.importorskip("asherah")
+    import asherah
 
     _configure_env()
     factory = asherah.SessionFactory()
@@ -29,8 +29,8 @@ def test_encrypt_decrypt_roundtrip():
 
 
 def test_text_helpers():
-    pytest.importorskip("asherah_py")
-    import asherah_py as asherah
+    pytest.importorskip("asherah")
+    import asherah
 
     _configure_env()
     session = asherah.SessionFactory().get_session("pytest-text")
@@ -44,8 +44,8 @@ def test_text_helpers():
 
 
 def test_module_level_setup_flow():
-    pytest.importorskip("asherah_py")
-    import asherah_py as asherah
+    pytest.importorskip("asherah")
+    import asherah
 
     _configure_env()
     config = {
@@ -77,8 +77,8 @@ def test_module_level_setup_flow():
 
 
 def test_module_level_setup_can_repeat():
-    pytest.importorskip("asherah_py")
-    import asherah_py as asherah
+    pytest.importorskip("asherah")
+    import asherah
 
     _configure_env()
     config = {
@@ -103,8 +103,8 @@ def test_module_level_setup_can_repeat():
 
 
 def test_setenv_helper():
-    pytest.importorskip("asherah_py")
-    import asherah_py as asherah
+    pytest.importorskip("asherah")
+    import asherah
 
     env_payload = {"FOO": "BAR", "REMOVE_ME": None}
     asherah.setenv(env_payload)
@@ -119,7 +119,7 @@ def test_setenv_helper():
 
 def _setup_module_api():
     """Setup using module-level API for boundary tests."""
-    import asherah_py as asherah
+    import asherah
 
     _configure_env()
     config = {

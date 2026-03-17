@@ -214,7 +214,7 @@ where
     f(manager)
 }
 
-#[pyclass(module = "asherah_py", frozen, name = "SessionFactory")]
+#[pyclass(module = "asherah", frozen, name = "SessionFactory")]
 #[allow(missing_debug_implementations)]
 pub struct PySessionFactory {
     inner: Factory,
@@ -257,7 +257,7 @@ impl PySessionFactory {
     }
 }
 
-#[pyclass(module = "asherah_py", frozen, name = "Session")]
+#[pyclass(module = "asherah", frozen, name = "Session")]
 #[allow(missing_debug_implementations)]
 pub struct PySession {
     inner: SessionHandle,
@@ -456,7 +456,7 @@ fn version() -> &'static str {
 }
 
 #[pymodule]
-fn asherah_py(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _asherah(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(setup, m)?)?;
     m.add_function(wrap_pyfunction!(shutdown, m)?)?;
     m.add_function(wrap_pyfunction!(get_setup_status, m)?)?;
