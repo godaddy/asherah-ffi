@@ -16,13 +16,16 @@ RUN echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries \
     pkg-config \
     libssl-dev \
     lld \
-    golang \
     ruby-full \
     libffi-dev \
     patchelf
 
 # Ruby FFI gem (native extension requires libffi-dev)
 RUN gem install ffi --no-document
+
+# Install Go 1.23 (Bullseye's packaged Go is too old for purego)
+RUN curl -fsSL https://go.dev/dl/go1.23.0.linux-$(dpkg --print-architecture).tar.gz | tar -C /usr/local -xzf - \
+    && ln -sf /usr/local/go/bin/go /usr/local/bin/go
 
 RUN curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh \
     && chmod +x /tmp/dotnet-install.sh \
