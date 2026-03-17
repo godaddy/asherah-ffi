@@ -46,11 +46,12 @@ func main() {
 
 	destDir := *output
 	if destDir == "" {
-		cacheDir, err := os.UserCacheDir()
+		// Default: current working directory. The loader searches cwd automatically.
+		var err error
+		destDir, err = os.Getwd()
 		if err != nil {
-			fatalf("unable to determine cache dir: %v", err)
+			fatalf("unable to determine working directory: %v", err)
 		}
-		destDir = filepath.Join(cacheDir, "asherah-go")
 	}
 
 	if err := os.MkdirAll(destDir, 0o755); err != nil {
@@ -80,8 +81,12 @@ func main() {
 	}
 
 	fmt.Printf("\nInstalled: %s\n", destFile)
-	fmt.Printf("\nTo use, set the environment variable:\n")
-	fmt.Printf("  export ASHERAH_GO_NATIVE=%s\n", destDir)
+	cwd, _ := os.Getwd()
+	if destDir != cwd {
+		fmt.Printf("\nTo use, either set the environment variable:\n")
+		fmt.Printf("  export ASHERAH_GO_NATIVE=%s\n", destDir)
+		fmt.Printf("\nOr move the library to your project directory.\n")
+	}
 }
 
 func assetNameForPlatform(goos, goarch string) (string, error) {
@@ -230,7 +235,7 @@ func verifyChecksum(checksumURL, assetName, localFile string) error {
 	return nil
 }
 
-func fatalf(format string, args ...interface{}) {
+func fatalf(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
 	os.Exit(1)
 }
