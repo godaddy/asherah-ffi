@@ -164,24 +164,42 @@ jobs:
         run: |
           ls -R artifacts/
 
-      - name: Resolve next available version
+      - name: Resolve version
         working-directory: asherah-node
         run: |
-          BETA="${{ vars.NPM_BETA_VERSION }}"
-          if [ -z "$BETA" ]; then
-            echo "::error::Repository variable NPM_BETA_VERSION is not set"
-            exit 1
+          # Determine version from release tag or NPM_VERSION variable
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+            # Strip 'v' prefix if present
+            VERSION="${TAG#v}"
+          elif [ -n "${{ vars.NPM_VERSION }}" ]; then
+            VERSION="${{ vars.NPM_VERSION }}"
+          else
+            # Fallback to beta versioning
+            BETA="${{ vars.NPM_BETA_VERSION }}"
+            if [ -z "$BETA" ]; then
+              echo "::error::Neither NPM_VERSION nor NPM_BETA_VERSION is set"
+              exit 1
+            fi
+            while npm view "asherah@4.0.0-beta.${BETA}" version 2>/dev/null; do
+              echo "asherah@4.0.0-beta.${BETA} already exists, trying next..."
+              BETA=$(( BETA + 1 ))
+            done
+            VERSION="4.0.0-beta.${BETA}"
+            echo "NPM_BETA=${BETA}" >> "$GITHUB_ENV"
           fi
-          # Find the next version that isn't already published
-          while npm view "asherah@4.0.0-beta.${BETA}" version 2>/dev/null; do
-            echo "asherah@4.0.0-beta.${BETA} already exists, trying next..."
-            BETA=$(( BETA + 1 ))
-          done
-          VERSION="4.0.0-beta.${BETA}"
-          echo "Publishing version: ${VERSION}"
+
+          # Determine npm tag: beta for prerelease, latest for stable
+          if echo "$VERSION" | grep -qE '(alpha|beta|rc|dev)'; then
+            NPM_TAG="beta"
+          else
+            NPM_TAG="latest"
+          fi
+
+          echo "Publishing version: ${VERSION} with tag: ${NPM_TAG}"
           npm version "$VERSION" --no-git-tag-version
           echo "NPM_VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "NPM_BETA=${BETA}" >> "$GITHUB_ENV"
+          echo "NPM_TAG=${NPM_TAG}" >> "$GITHUB_ENV"
 
       - name: Place bindings and set platform versions
         working-directory: asherah-node
@@ -278,15 +296,25 @@ jobs:
       - name: Publish main package
         if: ${{ github.event.inputs.dry_run != 'true' }}
         working-directory: asherah-node
-        run: npm publish --access public --tag beta
+        run: npm publish --access public --tag "$NPM_TAG"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-      - name: Update beta version variable
+      - name: Update version variable
         if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
-          NEXT=$(( NPM_BETA + 1 ))
-          gh variable set NPM_BETA_VERSION --body "$NEXT"
-          echo "Set NPM_BETA_VERSION to ${NEXT}"
+          if [ "$NPM_TAG" = "beta" ] && [ -n "${NPM_BETA:-}" ]; then
+            NEXT=$(( NPM_BETA + 1 ))
+            gh variable set NPM_BETA_VERSION --body "$NEXT"
+            echo "Set NPM_BETA_VERSION to ${NEXT}"
+          elif [ "$NPM_TAG" = "latest" ]; then
+            # Bump patch version for next stable release
+            MAJOR=$(echo "$NPM_VERSION" | cut -d. -f1)
+            MINOR=$(echo "$NPM_VERSION" | cut -d. -f2)
+            PATCH=$(echo "$NPM_VERSION" | cut -d. -f3)
+            NEXT_PATCH=$(( PATCH + 1 ))
+            gh variable set NPM_VERSION --body "${MAJOR}.${MINOR}.${NEXT_PATCH}"
+            echo "Set NPM_VERSION to ${MAJOR}.${MINOR}.${NEXT_PATCH}"
+          fi
