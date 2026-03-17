@@ -13,8 +13,8 @@ go get github.com/godaddy/asherah-go
 
 ### 2. Install the native library
 
-The binding requires the prebuilt native library for your platform. The easiest
-way to get it is with the included install command:
+The binding requires the prebuilt native library for your platform. Run this
+from your project directory:
 
 ```bash
 go run github.com/godaddy/asherah-go/cmd/install-native@latest
@@ -22,22 +22,22 @@ go run github.com/godaddy/asherah-go/cmd/install-native@latest
 
 This downloads the correct binary for your OS/architecture from
 [GitHub Releases](https://github.com/godaddy/asherah-ffi/releases) into your
-user cache directory and verifies the SHA256 checksum.
-
-Then set the environment variable so the loader can find it:
-
-```bash
-export ASHERAH_GO_NATIVE="$HOME/.cache/asherah-go"   # Linux
-export ASHERAH_GO_NATIVE="$HOME/Library/Caches/asherah-go"  # macOS
-```
+current working directory and verifies the SHA256 checksum. The loader finds
+it automatically — no environment variables needed.
 
 Options:
 
 ```
---version v0.6.24    # Pin to a specific release (default: latest)
---output /usr/local/lib  # Custom output directory
---repo owner/repo    # Custom GitHub repository
+--version v0.6.24      # Pin to a specific release (default: latest)
+--output /custom/path  # Custom output directory
+--repo owner/repo      # Custom GitHub repository
 ```
+
+> **Tip:** Add the library to your `.gitignore`:
+> ```
+> libasherah_ffi.*
+> asherah_ffi.dll
+> ```
 
 ### Alternative: Build from source
 
@@ -126,10 +126,11 @@ func main() {
 The loader searches for the native library in this order:
 
 1. `ASHERAH_GO_NATIVE` environment variable (file or directory)
-2. `CARGO_TARGET_DIR` (for development builds)
-3. Repo-relative `target/` directories (for development)
-4. User cache directory (`~/.cache/asherah-go/` on Linux, `~/Library/Caches/asherah-go/` on macOS)
-5. System library paths (via `dlopen`)
+2. Current working directory (default `install-native` output)
+3. `CARGO_TARGET_DIR` (for development builds)
+4. Repo-relative `target/` directories (for development)
+5. User cache directory (`~/.cache/asherah-go/` on Linux, `~/Library/Caches/asherah-go/` on macOS)
+6. System library paths (via `dlopen`)
 
 ## Supported Platforms
 

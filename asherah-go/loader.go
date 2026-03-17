@@ -79,6 +79,16 @@ func candidateLibraryPaths() []string {
 		}
 	}
 
+	// Check current working directory (default install-native output location).
+	if cwd, err := os.Getwd(); err == nil {
+		for _, name := range names {
+			candidate := filepath.Join(cwd, name)
+			if fileExists(candidate) {
+				paths = append(paths, candidate)
+			}
+		}
+	}
+
 	if cargoDir := strings.TrimSpace(os.Getenv("CARGO_TARGET_DIR")); cargoDir != "" {
 		for _, name := range names {
 			paths = append(paths, filepath.Join(cargoDir, "debug", name))
