@@ -1,10 +1,12 @@
 package asherah_test
 
 import (
+    "fmt"
     "os"
     "path/filepath"
     "runtime"
     "strings"
+    "sync"
     "testing"
 
     asherah "github.com/godaddy/asherah-go"
@@ -161,7 +163,7 @@ func TestBinaryAllByteValues(t *testing.T) {
 	defer asherah.Shutdown()
 
 	payload := make([]byte, 256)
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		payload[i] = byte(i)
 	}
 	ct, err := asherah.Encrypt("go-binary", payload)
@@ -205,7 +207,7 @@ func TestLargePayload1MB(t *testing.T) {
 
 	size := 1024 * 1024
 	payload := make([]byte, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		payload[i] = byte(i % 256)
 	}
 	ct, err := asherah.Encrypt("go-large", payload)
@@ -300,4 +302,213 @@ func ensureNativeLibrary(t *testing.T) {
         return
     }
     // leave environment unchanged; loader will fall back to system paths.
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+// newTestFactory creates a Factory with static/memory config for tests.
+func newTestFactory(t *testing.T) *asherah.Factory {
+	t.Helper()
+	ensureNativeLibrary(t)
+	os.Setenv("STATIC_MASTER_KEY_HEX", strings.Repeat("22", 32))
+	cfg := asherah.Config{
+		ServiceName:          "factory-test",
+		ProductID:            "prod",
+		Metastore:            "memory",
+		KMS:                  "static",
+		EnableSessionCaching: boolPtr(false),
+	}
+	factory, err := asherah.NewFactory(cfg)
+	if err != nil {
+		t.Fatalf("NewFactory failed: %v", err)
+	}
+	return factory
+}
+
+// --- Factory / Session API Tests ---
+
+func TestFactorySessionRoundTrip(t *testing.T) {
+	factory := newTestFactory(t)
+	defer factory.Close()
+
+	session, err := factory.GetSession("round-trip")
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	defer session.Close()
+
+	plaintext := []byte("hello from factory/session")
+	ct, err := session.Encrypt(plaintext)
+	if err != nil {
+		t.Fatalf("Encrypt failed: %v", err)
+	}
+	if len(ct) == 0 {
+		t.Fatal("ciphertext was empty")
+	}
+
+	recovered, err := session.Decrypt(ct)
+	if err != nil {
+		t.Fatalf("Decrypt failed: %v", err)
+	}
+	if string(recovered) != string(plaintext) {
+		t.Fatalf("expected %q, got %q", plaintext, recovered)
+	}
+}
+
+func TestFactoryMultipleSessions(t *testing.T) {
+	factory := newTestFactory(t)
+	defer factory.Close()
+
+	sessA, err := factory.GetSession("partition-a")
+	if err != nil {
+		t.Fatalf("GetSession(partition-a) failed: %v", err)
+	}
+	defer sessA.Close()
+
+	sessB, err := factory.GetSession("partition-b")
+	if err != nil {
+		t.Fatalf("GetSession(partition-b) failed: %v", err)
+	}
+	defer sessB.Close()
+
+	// Encrypt with partition-a
+	ctA, err := sessA.Encrypt([]byte("secret-a"))
+	if err != nil {
+		t.Fatalf("sessA.Encrypt failed: %v", err)
+	}
+
+	// Encrypt with partition-b
+	ctB, err := sessB.Encrypt([]byte("secret-b"))
+	if err != nil {
+		t.Fatalf("sessB.Encrypt failed: %v", err)
+	}
+
+	// Each session decrypts its own data
+	recoveredA, err := sessA.Decrypt(ctA)
+	if err != nil {
+		t.Fatalf("sessA.Decrypt failed: %v", err)
+	}
+	if string(recoveredA) != "secret-a" {
+		t.Fatalf("partition-a: expected %q, got %q", "secret-a", recoveredA)
+	}
+
+	recoveredB, err := sessB.Decrypt(ctB)
+	if err != nil {
+		t.Fatalf("sessB.Decrypt failed: %v", err)
+	}
+	if string(recoveredB) != "secret-b" {
+		t.Fatalf("partition-b: expected %q, got %q", "secret-b", recoveredB)
+	}
+
+	// Cross-partition decrypt should fail
+	_, err = sessB.Decrypt(ctA)
+	if err == nil {
+		t.Fatal("expected error decrypting partition-a ciphertext with partition-b session")
+	}
+}
+
+func TestSessionEncryptString(t *testing.T) {
+	factory := newTestFactory(t)
+	defer factory.Close()
+
+	session, err := factory.GetSession("string-test")
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	defer session.Close()
+
+	plaintext := "hello string variant"
+	ct, err := session.EncryptString(plaintext)
+	if err != nil {
+		t.Fatalf("EncryptString failed: %v", err)
+	}
+	if ct == "" {
+		t.Fatal("ciphertext string was empty")
+	}
+
+	recovered, err := session.DecryptString(ct)
+	if err != nil {
+		t.Fatalf("DecryptString failed: %v", err)
+	}
+	if recovered != plaintext {
+		t.Fatalf("expected %q, got %q", plaintext, recovered)
+	}
+}
+
+func TestSessionClosePreventsFurtherUse(t *testing.T) {
+	factory := newTestFactory(t)
+	defer factory.Close()
+
+	session, err := factory.GetSession("close-test")
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+
+	session.Close()
+
+	_, err = session.Encrypt([]byte("should fail"))
+	if err == nil {
+		t.Fatal("expected error encrypting on closed session")
+	}
+
+	_, err = session.Decrypt([]byte("should fail"))
+	if err == nil {
+		t.Fatal("expected error decrypting on closed session")
+	}
+}
+
+func TestFactoryClosePreventsSessions(t *testing.T) {
+	factory := newTestFactory(t)
+
+	factory.Close()
+
+	_, err := factory.GetSession("should-fail")
+	if err == nil {
+		t.Fatal("expected error getting session from closed factory")
+	}
+}
+
+func TestConcurrentEncryptDecrypt(t *testing.T) {
+	factory := newTestFactory(t)
+	defer factory.Close()
+
+	const goroutines = 10
+	var wg sync.WaitGroup
+	errs := make(chan error, goroutines)
+
+	for i := range goroutines {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			session, sessErr := factory.GetSession(fmt.Sprintf("concurrent-%d", id))
+			if sessErr != nil {
+				errs <- fmt.Errorf("goroutine %d: GetSession failed: %w", id, sessErr)
+				return
+			}
+			defer session.Close()
+
+			plaintext := fmt.Sprintf("goroutine-%d-payload", id)
+			ct, encErr := session.EncryptString(plaintext)
+			if encErr != nil {
+				errs <- fmt.Errorf("goroutine %d: EncryptString failed: %w", id, encErr)
+				return
+			}
+			recovered, decErr := session.DecryptString(ct)
+			if decErr != nil {
+				errs <- fmt.Errorf("goroutine %d: DecryptString failed: %w", id, decErr)
+				return
+			}
+			if recovered != plaintext {
+				errs <- fmt.Errorf("goroutine %d: expected %q, got %q", id, plaintext, recovered)
+				return
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Error(err)
+	}
 }

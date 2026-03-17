@@ -131,3 +131,119 @@ class RoundTripTest < Minitest::Test
     end
   end
 end
+
+class FactorySessionTest < Minitest::Test
+  CONFIG = {
+    "ServiceName" => "svc",
+    "ProductID" => "prod",
+    "Metastore" => "memory",
+    "KMS" => "static",
+    "EnableSessionCaching" => true,
+    "Verbose" => false
+  }.freeze
+
+  def make_factory
+    pointer = Asherah::Native.asherah_factory_new_with_config(JSON.generate(CONFIG))
+    Asherah::SessionFactory.new(pointer)
+  end
+
+  def test_factory_session_round_trip
+    factory = make_factory
+    begin
+      session = factory.get_session("factory-rt")
+      begin
+        plaintext = "factory round trip secret".b
+        json = session.encrypt_bytes(plaintext)
+        refute_nil json
+        assert_kind_of String, json
+        recovered = session.decrypt_bytes(json)
+        assert_equal plaintext, recovered
+      ensure
+        session.close
+      end
+      assert session.closed?
+    ensure
+      factory.close
+    end
+    assert factory.closed?
+  end
+
+  def test_factory_multiple_sessions_partition_isolation
+    factory = make_factory
+    begin
+      session_a = factory.get_session("partition-iso-a")
+      session_b = factory.get_session("partition-iso-b")
+      begin
+        json_a = session_a.encrypt_bytes("secret-a".b)
+        json_b = session_b.encrypt_bytes("secret-b".b)
+
+        # Each session decrypts its own data
+        assert_equal "secret-a".b, session_a.decrypt_bytes(json_a)
+        assert_equal "secret-b".b, session_b.decrypt_bytes(json_b)
+
+        # Cross-partition decryption must fail
+        assert_raises(Asherah::Error) { session_a.decrypt_bytes(json_b) }
+        assert_raises(Asherah::Error) { session_b.decrypt_bytes(json_a) }
+      ensure
+        session_a.close
+        session_b.close
+      end
+    ensure
+      factory.close
+    end
+  end
+
+  def test_factory_session_string_api
+    factory = make_factory
+    begin
+      session = factory.get_session("factory-str")
+      begin
+        text = "hello from factory string api"
+        json = session.encrypt_bytes(text)
+        recovered = session.decrypt_bytes(json).force_encoding("UTF-8")
+        assert_equal text, recovered
+      ensure
+        session.close
+      end
+    ensure
+      factory.close
+    end
+  end
+
+  def test_session_close_prevents_use
+    factory = make_factory
+    begin
+      session = factory.get_session("close-test")
+      session.encrypt_bytes("warmup".b)
+      session.close
+      assert session.closed?
+
+      assert_raises(Asherah::Error) { session.encrypt_bytes("should fail".b) }
+      assert_raises(Asherah::Error) { session.decrypt_bytes("{}") }
+    ensure
+      factory.close
+    end
+  end
+
+  def test_concurrent_encrypt_decrypt
+    factory = make_factory
+    begin
+      threads = 8.times.map do |i|
+        Thread.new do
+          session = factory.get_session("concurrent-#{i}")
+          begin
+            plaintext = "thread-#{i}-payload".b
+            json = session.encrypt_bytes(plaintext)
+            recovered = session.decrypt_bytes(json)
+            assert_equal plaintext, recovered
+          ensure
+            session.close
+          end
+        end
+      end
+      threads.each(&:join)
+    ensure
+      factory.close
+    end
+  end
+end
