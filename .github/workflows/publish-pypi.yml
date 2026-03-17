@@ -21,6 +21,7 @@ jobs:
     outputs:
       version: ${{ steps.resolve.outputs.version }}
       beta: ${{ steps.resolve.outputs.beta }}
+      stable: ${{ steps.resolve.outputs.stable }}
     steps:
       - uses: actions/setup-python@v6
         with:
