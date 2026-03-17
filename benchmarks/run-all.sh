@@ -54,7 +54,7 @@ if [ "${1:-}" = "--setup" ]; then
 
     # Python
     if command -v python3 >/dev/null 2>&1; then
-        pip3 install asherah-py 2>&1 | tail -1
+        pip3 install asherah 2>&1 | tail -1
     fi
 
     # Java canonical (clone + install to local maven repo)
