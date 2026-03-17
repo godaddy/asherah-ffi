@@ -26,23 +26,35 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Find next available version
+      - name: Resolve version
         id: resolve
         run: |
-          BETA="${{ vars.PYPI_BETA_VERSION }}"
-          if [ -z "$BETA" ]; then
-            echo "::error::Repository variable PYPI_BETA_VERSION is not set"
-            exit 1
+          # Determine version from PYPI_VERSION variable, release tag, or beta fallback
+          if [ -n "${{ vars.PYPI_VERSION }}" ]; then
+            VERSION="${{ vars.PYPI_VERSION }}"
+            IS_STABLE=true
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+            VERSION="${TAG#v}"
+            IS_STABLE=true
+          else
+            BETA="${{ vars.PYPI_BETA_VERSION }}"
+            if [ -z "$BETA" ]; then
+              echo "::error::Neither PYPI_VERSION nor PYPI_BETA_VERSION is set"
+              exit 1
+            fi
+            while pip index versions asherah 2>/dev/null | grep -q "0.5.0b${BETA}"; do
+              echo "asherah==0.5.0b${BETA} already exists on PyPI, trying next..."
+              BETA=$(( BETA + 1 ))
+            done
+            VERSION="0.5.0b${BETA}"
+            IS_STABLE=false
+            echo "beta=${BETA}" >> "$GITHUB_OUTPUT"
           fi
-          # Advance past any already-published versions
-          while pip index versions asherah 2>/dev/null | grep -q "0.5.0b${BETA}"; do
-            echo "asherah==0.5.0b${BETA} already exists on PyPI, trying next..."
-            BETA=$(( BETA + 1 ))
-          done
-          VERSION="0.5.0b${BETA}"
-          echo "Will publish version: ${VERSION}"
+
+          echo "Will publish version: ${VERSION} (stable=${IS_STABLE})"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "beta=${BETA}" >> "$GITHUB_OUTPUT"
+          echo "stable=${IS_STABLE}" >> "$GITHUB_OUTPUT"
 
   build-wheels:
     needs: resolve-version
@@ -96,14 +108,17 @@ jobs:
         shell: bash
         env:
           PYPI_VERSION: ${{ needs.resolve-version.outputs.version }}
+          PYPI_STABLE: ${{ needs.resolve-version.outputs.stable }}
           PYPI_BETA: ${{ needs.resolve-version.outputs.beta }}
         run: |
           echo "Publishing version: ${PYPI_VERSION}"
-          # Update pyproject.toml version (PEP 440: 0.5.0bN)
           sed -i.bak 's/^version = ".*"/version = "'"${PYPI_VERSION}"'"/' asherah-py/pyproject.toml
           rm -f asherah-py/pyproject.toml.bak
-          # Update Cargo.toml version (semver: 0.5.0-beta.N)
-          sed -i.bak 's/^version = ".*"/version = "0.5.0-beta.'"${PYPI_BETA}"'"/' asherah-py/Cargo.toml
+          if [ "$PYPI_STABLE" = "true" ]; then
+            sed -i.bak 's/^version = ".*"/version = "'"${PYPI_VERSION}"'"/' asherah-py/Cargo.toml
+          else
+            sed -i.bak 's/^version = ".*"/version = "0.5.0-beta.'"${PYPI_BETA}"'"/' asherah-py/Cargo.toml
+          fi
           rm -f asherah-py/Cargo.toml.bak
 
       - name: Build wheel
@@ -156,10 +171,15 @@ jobs:
       - name: Set version
         env:
           PYPI_VERSION: ${{ needs.resolve-version.outputs.version }}
+          PYPI_STABLE: ${{ needs.resolve-version.outputs.stable }}
           PYPI_BETA: ${{ needs.resolve-version.outputs.beta }}
         run: |
           sed -i 's/^version = ".*"/version = "'"${PYPI_VERSION}"'"/' asherah-py/pyproject.toml
-          sed -i 's/^version = ".*"/version = "0.5.0-beta.'"${PYPI_BETA}"'"/' asherah-py/Cargo.toml
+          if [ "$PYPI_STABLE" = "true" ]; then
+            sed -i 's/^version = ".*"/version = "'"${PYPI_VERSION}"'"/' asherah-py/Cargo.toml
+          else
+            sed -i 's/^version = ".*"/version = "0.5.0-beta.'"${PYPI_BETA}"'"/' asherah-py/Cargo.toml
+          fi
 
       - name: Build sdist
         uses: PyO3/maturin-action@v1
@@ -236,12 +256,23 @@ jobs:
           echo "Dry run complete. Would publish:"
           ls -lh dist/
 
-      - name: Update beta version variable
+      - name: Update version variable
         if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
+          PYPI_VERSION: ${{ needs.resolve-version.outputs.version }}
+          PYPI_STABLE: ${{ needs.resolve-version.outputs.stable }}
         run: |
-          BETA="${{ needs.resolve-version.outputs.beta }}"
-          NEXT=$(( BETA + 1 ))
-          gh variable set PYPI_BETA_VERSION --body "$NEXT"
-          echo "Set PYPI_BETA_VERSION to ${NEXT}"
+          if [ "$PYPI_STABLE" = "true" ]; then
+            MAJOR=$(echo "$PYPI_VERSION" | cut -d. -f1)
+            MINOR=$(echo "$PYPI_VERSION" | cut -d. -f2)
+            PATCH=$(echo "$PYPI_VERSION" | cut -d. -f3)
+            NEXT_PATCH=$(( PATCH + 1 ))
+            gh variable set PYPI_VERSION --body "${MAJOR}.${MINOR}.${NEXT_PATCH}"
+            echo "Set PYPI_VERSION to ${MAJOR}.${MINOR}.${NEXT_PATCH}"
+          else
+            BETA="${{ needs.resolve-version.outputs.beta }}"
+            NEXT=$(( BETA + 1 ))
+            gh variable set PYPI_BETA_VERSION --body "$NEXT"
+            echo "Set PYPI_BETA_VERSION to ${NEXT}"
+          fi
