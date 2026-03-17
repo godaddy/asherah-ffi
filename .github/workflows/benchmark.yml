@@ -38,9 +38,10 @@ jobs:
       - name: Install Ruby gems
         run: gem install ffi benchmark-ips kalibera asherah --no-document
 
-      - name: Install Python binding
+      - name: Build and install Python binding
         run: |
-          pip install asherah-py
+          pip install maturin
+          maturin develop --release --manifest-path asherah-py/Cargo.toml
 
       - name: Install Node.js dependencies
         run: |

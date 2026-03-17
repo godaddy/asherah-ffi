@@ -74,6 +74,21 @@ export declare function decryptStringAsync(partitionId: string, dataRowRecordJso
 export declare function setMaxStackAllocItemSize(n: number): void;
 export declare function setSafetyPaddingOverhead(n: number): void;
 
+export declare class SessionFactory {
+  constructor(config: AsherahConfig | AsherahConfigCompat);
+  static fromEnv(): SessionFactory;
+  getSession(partitionId: string): AsherahSession;
+  close(): void;
+}
+
+export declare class AsherahSession {
+  encrypt(data: Buffer): string;
+  encryptString(data: string): string;
+  decrypt(dataRowRecordJson: string): Buffer;
+  decryptString(dataRowRecordJson: string): string;
+  close(): void;
+}
+
 export type LogEvent = {
   level: 'trace' | 'debug' | 'info' | 'warn' | 'error';
   message: string;

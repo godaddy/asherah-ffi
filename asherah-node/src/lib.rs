@@ -296,6 +296,131 @@ pub async fn decrypt_string_async(partition_id: String, drr: String) -> Result<S
     String::from_utf8(buf.to_vec()).map_err(|e| Error::from_reason(format!("utf8 error: {e}")))
 }
 
+// ── Factory/Session API ─────────────────────────────────────────────
+
+#[napi]
+pub struct SessionFactory {
+    factory: Mutex<Option<Factory>>,
+}
+
+impl std::fmt::Debug for SessionFactory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionFactory")
+            .field("open", &self.factory.lock().is_some())
+            .finish()
+    }
+}
+
+#[napi]
+impl SessionFactory {
+    #[napi(constructor)]
+    pub fn new(config: AsherahConfig) -> Result<Self> {
+        let opts = to_config_options(&config);
+        let (factory, _applied) = asherah_config::factory_from_config(&opts)
+            .map_err(|e| Error::from_reason(format!("factory creation failed: {e}")))?;
+        Ok(Self {
+            factory: Mutex::new(Some(factory)),
+        })
+    }
+
+    #[napi(factory)]
+    pub fn from_env() -> Result<Self> {
+        let opts = asherah_config::ConfigOptions::default();
+        let (factory, _applied) = asherah_config::factory_from_config(&opts)
+            .map_err(|e| Error::from_reason(format!("factory_from_env failed: {e}")))?;
+        Ok(Self {
+            factory: Mutex::new(Some(factory)),
+        })
+    }
+
+    #[napi]
+    pub fn get_session(&self, partition_id: String) -> Result<AsherahSession> {
+        let guard = self.factory.lock();
+        let factory = guard
+            .as_ref()
+            .ok_or_else(|| Error::from_reason("factory is closed"))?;
+        let session = factory.get_session(&partition_id);
+        Ok(AsherahSession {
+            session: Mutex::new(Some(session)),
+        })
+    }
+
+    #[napi]
+    pub fn close(&self) -> Result<()> {
+        let mut guard = self.factory.lock();
+        if let Some(factory) = guard.take() {
+            factory
+                .close()
+                .map_err(|e| Error::from_reason(format!("factory close error: {e}")))?;
+        }
+        Ok(())
+    }
+}
+
+#[napi]
+pub struct AsherahSession {
+    session: Mutex<Option<Session>>,
+}
+
+impl std::fmt::Debug for AsherahSession {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AsherahSession")
+            .field("open", &self.session.lock().is_some())
+            .finish()
+    }
+}
+
+#[napi]
+impl AsherahSession {
+    #[napi]
+    pub fn encrypt(&self, data: Buffer) -> Result<String> {
+        let guard = self.session.lock();
+        let session = guard
+            .as_ref()
+            .ok_or_else(|| Error::from_reason("session is closed"))?;
+        let drr = session
+            .encrypt(&data)
+            .map_err(|e| Error::from_reason(format!("encrypt error: {e}")))?;
+        Ok(drr.to_json_fast())
+    }
+
+    #[napi]
+    pub fn encrypt_string(&self, data: String) -> Result<String> {
+        self.encrypt(Buffer::from(data.into_bytes()))
+    }
+
+    #[napi]
+    pub fn decrypt(&self, data_row_record: String) -> Result<Buffer> {
+        let drr: asherah::types::DataRowRecord = serde_json::from_str(&data_row_record)
+            .map_err(|e| Error::from_reason(format!("invalid DataRowRecord JSON: {e}")))?;
+        let guard = self.session.lock();
+        let session = guard
+            .as_ref()
+            .ok_or_else(|| Error::from_reason("session is closed"))?;
+        let pt = session
+            .decrypt(drr)
+            .map_err(|e| Error::from_reason(format!("decrypt error: {e}")))?;
+        Ok(Buffer::from(pt))
+    }
+
+    #[napi]
+    pub fn decrypt_string(&self, data_row_record: String) -> Result<String> {
+        let buf = self.decrypt(data_row_record)?;
+        String::from_utf8(buf.to_vec()).map_err(|e| Error::from_reason(format!("utf8 error: {e}")))
+    }
+
+    #[napi]
+    pub fn close(&self) -> Result<()> {
+        let mut guard = self.session.lock();
+        if let Some(session) = guard.take() {
+            session
+                .close()
+                .map_err(|e| Error::from_reason(format!("session close error: {e}")))?;
+        }
+        Ok(())
+    }
+}
+
 #[napi]
 pub fn set_max_stack_alloc_item_size(_n: u32) {}
 

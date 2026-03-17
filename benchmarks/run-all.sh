@@ -11,7 +11,6 @@ BENCH_DIR="$ROOT_DIR/benchmarks"
 if [ "${1:-}" = "--clean" ]; then
     echo "Cleaning benchmark artifacts..."
     rm -rf /tmp/asherah-canonical
-    rm -rf /tmp/asherah-go-wip
     rm -rf "$BENCH_DIR/dotnet-bench-newmetastore/asherah-upstream"
     # Fetched npm packages
     rm -rf "$BENCH_DIR"/*/node_modules
@@ -55,7 +54,7 @@ if [ "${1:-}" = "--setup" ]; then
 
     # Python
     if command -v python3 >/dev/null 2>&1; then
-        pip3 install asherah-py 2>&1 | tail -1
+        pip3 install asherah 2>&1 | tail -1
     fi
 
     # Java canonical (clone + install to local maven repo)
@@ -103,7 +102,7 @@ if [ -z "${JAVA_HOME:-}" ]; then
 fi
 HAVE_JAVA=0; command -v java >/dev/null 2>&1 && "$JAVA_HOME/bin/java" --version >/dev/null 2>&1 && HAVE_JAVA=1
 HAVE_GO=0; command -v go >/dev/null 2>&1 && HAVE_GO=1
-HAVE_PYTHON=0; python3 -c "import asherah_py" 2>/dev/null && HAVE_PYTHON=1
+HAVE_PYTHON=0; python3 -c "import asherah" 2>/dev/null && HAVE_PYTHON=1
 HAVE_NODE=0; command -v node >/dev/null 2>&1 && HAVE_NODE=1
 
 RUBY_CMD="ruby"
@@ -261,21 +260,10 @@ fi
 ########################################################################
 
 if [ "$HAVE_GO" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
-    GO_WIP_MOVED=0
-    if [ -f "$ROOT_DIR/asherah-go/ffi.go" ]; then
-        mkdir -p /tmp/asherah-go-wip
-        mv "$ROOT_DIR"/asherah-go/ffi.go "$ROOT_DIR"/asherah-go/ffi_unix.go "$ROOT_DIR"/asherah-go/ffi_windows.go /tmp/asherah-go-wip/ 2>/dev/null || true
-        GO_WIP_MOVED=1
-    fi
-
     log "Running Go FFI benchmark (testing.B)..."
-    (cd "$BENCH_DIR/go-bench" && CGO_ENABLED=1 go test -bench=. -benchmem -count=3 -benchtime=3s ./... 2>&1) \
+    (cd "$BENCH_DIR/go-bench" && CGO_ENABLED=0 ASHERAH_GO_NATIVE="$FFI_LIB_DIR" \
+        go test -bench=. -benchmem -count=3 -benchtime=3s ./... 2>&1) \
         > "$RESULTS_DIR/go_ffi.log"
-
-    if [ "$GO_WIP_MOVED" = 1 ]; then
-        mv /tmp/asherah-go-wip/* "$ROOT_DIR/asherah-go/" 2>/dev/null || true
-        rmdir /tmp/asherah-go-wip 2>/dev/null || true
-    fi
 
     python3 -c "
 import re, collections
@@ -358,7 +346,7 @@ for line in open('$RESULTS_DIR/python.log'):
 print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
 " > "$RESULTS_DIR/04_Python_FFI"
 else
-    skip "Python asherah_py not installed"
+    skip "Python Python asherah not installed"
 fi
 
 ########################################################################
