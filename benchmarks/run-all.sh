@@ -11,7 +11,6 @@ BENCH_DIR="$ROOT_DIR/benchmarks"
 if [ "${1:-}" = "--clean" ]; then
     echo "Cleaning benchmark artifacts..."
     rm -rf /tmp/asherah-canonical
-    rm -rf /tmp/asherah-go-wip
     rm -rf "$BENCH_DIR/dotnet-bench-newmetastore/asherah-upstream"
     # Fetched npm packages
     rm -rf "$BENCH_DIR"/*/node_modules
@@ -261,21 +260,10 @@ fi
 ########################################################################
 
 if [ "$HAVE_GO" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
-    GO_WIP_MOVED=0
-    if [ -f "$ROOT_DIR/asherah-go/ffi.go" ]; then
-        mkdir -p /tmp/asherah-go-wip
-        mv "$ROOT_DIR"/asherah-go/ffi.go "$ROOT_DIR"/asherah-go/ffi_unix.go "$ROOT_DIR"/asherah-go/ffi_windows.go /tmp/asherah-go-wip/ 2>/dev/null || true
-        GO_WIP_MOVED=1
-    fi
-
     log "Running Go FFI benchmark (testing.B)..."
-    (cd "$BENCH_DIR/go-bench" && CGO_ENABLED=1 go test -bench=. -benchmem -count=3 -benchtime=3s ./... 2>&1) \
+    (cd "$BENCH_DIR/go-bench" && ASHERAH_GO_NATIVE="$FFI_LIB_DIR" \
+        go test -bench=. -benchmem -count=3 -benchtime=3s ./... 2>&1) \
         > "$RESULTS_DIR/go_ffi.log"
-
-    if [ "$GO_WIP_MOVED" = 1 ]; then
-        mv /tmp/asherah-go-wip/* "$ROOT_DIR/asherah-go/" 2>/dev/null || true
-        rmdir /tmp/asherah-go-wip 2>/dev/null || true
-    fi
 
     python3 -c "
 import re, collections
