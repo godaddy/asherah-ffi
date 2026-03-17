@@ -220,7 +220,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
           export PATH="$CARGO_HOME/bin:$PATH"
-          rustup toolchain install 1.88.0 --profile minimal --component rustfmt
+          rustup toolchain install 1.91.0 --profile minimal --component rustfmt
           curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           mv sccache-*/sccache /usr/local/bin/
           chmod +x /usr/local/bin/sccache
@@ -822,8 +822,8 @@ jobs:
           TARGET_ARCH: aarch64
           CARGO_LOG: cargo::core::compiler::fingerprint=info
         run: |
-          rustup toolchain install 1.88.0 --profile minimal --component rustfmt
-          rustup default 1.88.0
+          rustup toolchain install 1.91.0 --profile minimal --component rustfmt
+          rustup default 1.91.0
           rustup target add aarch64-unknown-linux-gnu
           rm -rf artifacts/aarch64/python || true
           mkdir -p artifacts/aarch64/python
