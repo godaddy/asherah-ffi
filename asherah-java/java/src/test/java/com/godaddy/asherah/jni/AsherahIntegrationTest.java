@@ -7,6 +7,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -179,6 +184,79 @@ class AsherahIntegrationTest {
       assertThrows(Exception.class, () ->
           Asherah.decrypt("partition-b", ct.getBytes(StandardCharsets.UTF_8)));
     });
+  }
+
+  // --- Factory / Session API Tests ---
+
+  private AsherahConfig factoryConfig() {
+    return AsherahConfig.builder()
+        .serviceName("factory-test")
+        .productId("prod")
+        .metastore("memory")
+        .kms("static")
+        .enableSessionCaching(Boolean.FALSE)
+        .build();
+  }
+
+  @Test
+  void factorySessionRoundTrip() {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession session = factory.getSession("factory-bytes")) {
+      byte[] plaintext = "factory-session-bytes".getBytes(StandardCharsets.UTF_8);
+      String json = session.encryptToJson(plaintext);
+      byte[] decrypted = session.decryptFromJson(json);
+      assertArrayEquals(plaintext, decrypted);
+    }
+  }
+
+  @Test
+  void factorySessionStringApi() {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession session = factory.getSession("factory-string")) {
+      String plaintext = "factory-session-string-api";
+      String json = session.encryptString(plaintext);
+      String decrypted = session.decryptString(json);
+      assertEquals(plaintext, decrypted);
+    }
+  }
+
+  @Test
+  void factoryMultipleSessionsIsolation() {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession sessionA = factory.getSession("isolation-a");
+        AsherahSession sessionB = factory.getSession("isolation-b")) {
+      String json = sessionA.encryptString("secret-a");
+      // session B with a different partition should fail to decrypt
+      assertThrows(Exception.class, () -> sessionB.decryptString(json));
+    }
+  }
+
+  @Test
+  void concurrentEncryptDecrypt() throws Exception {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig())) {
+      ExecutorService executor = Executors.newFixedThreadPool(10);
+      List<Future<Void>> futures = new ArrayList<>();
+      for (int t = 0; t < 10; t++) {
+        final int threadId = t;
+        futures.add(executor.submit(() -> {
+          String partition = "concurrent-" + threadId;
+          try (AsherahSession session = factory.getSession(partition)) {
+            for (int i = 0; i < 50; i++) {
+              byte[] plaintext = ("thread-" + threadId + "-iter-" + i)
+                  .getBytes(StandardCharsets.UTF_8);
+              String json = session.encryptToJson(plaintext);
+              byte[] decrypted = session.decryptFromJson(json);
+              assertArrayEquals(plaintext, decrypted);
+            }
+          }
+          return null;
+        }));
+      }
+      executor.shutdown();
+      for (Future<Void> f : futures) {
+        f.get();
+      }
+    }
   }
 
   private static String repeat(String value, int count) {

@@ -235,5 +235,131 @@ function testCompatApi() {
   console.log('asherah-node compat API OK');
 }
 
+function testFactorySessionApi() {
+  const factoryCfg = {
+    serviceName: 'factory-svc',
+    productId: 'factory-prod',
+    metastore: 'memory',
+    kms: 'static',
+    enableSessionCaching: false,
+  };
+
+  // --- Factory/Session basic round-trip ---
+  {
+    const factory = new addon.SessionFactory(factoryCfg);
+    const session = factory.getSession('fs-p1');
+    const drr = session.encrypt(Buffer.from('factory-hello'));
+    assert.ok(typeof drr === 'string' && drr.includes('"Key"'), 'session encrypt should return DRR JSON');
+    const out = session.decrypt(drr);
+    assert.ok(Buffer.isBuffer(out), 'session decrypt should return Buffer');
+    assert.strictEqual(out.toString(), 'factory-hello');
+    session.close();
+    factory.close();
+    console.log('asherah-node Factory/Session basic round-trip OK');
+  }
+
+  // --- Factory/Session string API ---
+  {
+    const factory = new addon.SessionFactory(factoryCfg);
+    const session = factory.getSession('fs-p2');
+    const drr = session.encryptString('string-via-session');
+    assert.ok(typeof drr === 'string' && drr.includes('"Key"'));
+    const out = session.decryptString(drr);
+    assert.strictEqual(out, 'string-via-session');
+    session.close();
+    factory.close();
+    console.log('asherah-node Factory/Session string API OK');
+  }
+
+  // --- Multiple sessions on different partitions (verify isolation) ---
+  {
+    const factory = new addon.SessionFactory(factoryCfg);
+    const sessionA = factory.getSession('iso-a');
+    const sessionB = factory.getSession('iso-b');
+
+    const drrA = sessionA.encrypt(Buffer.from('data-for-a'));
+    const drrB = sessionB.encrypt(Buffer.from('data-for-b'));
+
+    // Each session can decrypt its own data
+    assert.strictEqual(sessionA.decrypt(drrA).toString(), 'data-for-a');
+    assert.strictEqual(sessionB.decrypt(drrB).toString(), 'data-for-b');
+
+    // Cross-partition decrypt should fail
+    let caught = false;
+    try {
+      sessionA.decrypt(drrB);
+    } catch (e) {
+      caught = true;
+    }
+    assert.ok(caught, 'session A should not decrypt session B data');
+
+    caught = false;
+    try {
+      sessionB.decrypt(drrA);
+    } catch (e) {
+      caught = true;
+    }
+    assert.ok(caught, 'session B should not decrypt session A data');
+
+    sessionA.close();
+    sessionB.close();
+    factory.close();
+    console.log('asherah-node Factory/Session partition isolation OK');
+  }
+
+  // --- Session close prevents further use (should throw) ---
+  {
+    const factory = new addon.SessionFactory(factoryCfg);
+    const session = factory.getSession('fs-closed');
+    const drr = session.encryptString('before-close');
+    session.close();
+
+    let caught = false;
+    try {
+      session.encryptString('after-close');
+    } catch (e) {
+      caught = true;
+      assert.ok(e.message.includes('closed'), 'error should mention closed: ' + e.message);
+    }
+    assert.ok(caught, 'encrypt after session.close() should throw');
+
+    caught = false;
+    try {
+      session.decrypt(drr);
+    } catch (e) {
+      caught = true;
+      assert.ok(e.message.includes('closed'), 'error should mention closed: ' + e.message);
+    }
+    assert.ok(caught, 'decrypt after session.close() should throw');
+
+    // Closing again should be a no-op (not throw)
+    session.close();
+
+    factory.close();
+    console.log('asherah-node Session close prevents further use OK');
+  }
+
+  // --- Factory close prevents new sessions (should throw) ---
+  {
+    const factory = new addon.SessionFactory(factoryCfg);
+    factory.close();
+
+    let caught = false;
+    try {
+      factory.getSession('after-factory-close');
+    } catch (e) {
+      caught = true;
+      assert.ok(e.message.includes('closed'), 'error should mention closed: ' + e.message);
+    }
+    assert.ok(caught, 'getSession after factory.close() should throw');
+
+    // Closing again should be a no-op (not throw)
+    factory.close();
+
+    console.log('asherah-node Factory close prevents new sessions OK');
+  }
+}
+
 main();
 testCompatApi();
+testFactorySessionApi();

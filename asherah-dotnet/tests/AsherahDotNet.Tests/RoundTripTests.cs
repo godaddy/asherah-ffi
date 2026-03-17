@@ -1,6 +1,8 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using GoDaddy.Asherah;
 using Xunit;
 
@@ -291,6 +293,106 @@ public class RoundTripTests
                 Asherah.DecryptString("partition-b", ct));
         }
         finally { Asherah.Shutdown(); }
+    }
+
+    // --- Factory/Session API Tests ---
+
+    private AsherahConfig CreateFactoryConfig()
+    {
+        return AsherahConfig.CreateBuilder()
+            .WithServiceName("factory-test")
+            .WithProductId("prod")
+            .WithMetastore("memory")
+            .WithKms("static")
+            .WithEnableSessionCaching(false)
+            .Build();
+    }
+
+    [Fact]
+    public void FactorySession_RoundTrip()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateFactoryConfig());
+        using var session = factory.GetSession("factory-bytes");
+
+        var plaintext = Encoding.UTF8.GetBytes("factory session payload");
+        var ciphertext = session.EncryptBytes(plaintext);
+        var recovered = session.DecryptBytes(ciphertext);
+
+        Assert.Equal(plaintext, recovered);
+    }
+
+    [Fact]
+    public void FactorySession_StringApi()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateFactoryConfig());
+        using var session = factory.GetSession("factory-string");
+
+        const string plaintext = "factory string round-trip";
+        var ciphertext = session.EncryptString(plaintext);
+        var recovered = session.DecryptString(ciphertext);
+
+        Assert.Equal(plaintext, recovered);
+    }
+
+    [Fact]
+    public void FactorySession_MultipleSessions()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateFactoryConfig());
+        using var sessionA = factory.GetSession("partition-alpha");
+        using var sessionB = factory.GetSession("partition-beta");
+
+        const string plaintextA = "alpha payload";
+        const string plaintextB = "beta payload";
+
+        var ctA = sessionA.EncryptString(plaintextA);
+        var ctB = sessionB.EncryptString(plaintextB);
+
+        // Each session can decrypt its own ciphertext
+        Assert.Equal(plaintextA, sessionA.DecryptString(ctA));
+        Assert.Equal(plaintextB, sessionB.DecryptString(ctB));
+
+        // Cross-partition decrypt should fail
+        Assert.ThrowsAny<Exception>(() => sessionB.DecryptString(ctA));
+        Assert.ThrowsAny<Exception>(() => sessionA.DecryptString(ctB));
+    }
+
+    [Fact]
+    public void FactorySession_DisposePreventsUse()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateFactoryConfig());
+        var session = factory.GetSession("dispose-test");
+        session.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() =>
+            session.EncryptBytes(Encoding.UTF8.GetBytes("should fail")));
+    }
+
+    [Fact]
+    public async Task ConcurrentEncryptDecrypt()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateFactoryConfig());
+
+        var tasks = Enumerable.Range(0, 10).Select(i => Task.Run(() =>
+        {
+            using var session = factory.GetSession($"concurrent-{i}");
+            var plaintext = $"concurrent payload {i}";
+            var ciphertext = session.EncryptString(plaintext);
+            var recovered = session.DecryptString(ciphertext);
+            Assert.Equal(plaintext, recovered);
+        })).ToArray();
+
+        await Task.WhenAll(tasks);
+    }
+
+    [Fact]
+    public void ConfigValidation_MissingServiceName()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            AsherahConfig.CreateBuilder()
+                .WithProductId("prod")
+                .WithMetastore("memory")
+                .WithKms("static")
+                .Build());
     }
 
     private static string LocateRepoRoot()

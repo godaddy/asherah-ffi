@@ -1,4 +1,5 @@
 import os
+import threading
 
 import pytest
 
@@ -231,5 +232,130 @@ def test_decrypt_wrong_partition():
         ct = asherah.encrypt_bytes("partition-a", b"secret")
         with pytest.raises(Exception):
             asherah.decrypt_bytes("partition-b", ct)
+    finally:
+        asherah.shutdown()
+
+
+# ============================================================================
+# Factory / Session API Tests
+# ============================================================================
+
+
+def test_factory_multiple_sessions():
+    pytest.importorskip("asherah")
+    import asherah
+
+    _configure_env()
+    factory = asherah.SessionFactory()
+    try:
+        session_a = factory.get_session("partition-alpha")
+        session_b = factory.get_session("partition-beta")
+
+        ct_a = session_a.encrypt_bytes(b"alpha secret")
+        ct_b = session_b.encrypt_bytes(b"beta secret")
+
+        # Each session can decrypt its own data
+        assert session_a.decrypt_bytes(ct_a) == b"alpha secret"
+        assert session_b.decrypt_bytes(ct_b) == b"beta secret"
+
+        # Cross-partition decrypt must fail
+        with pytest.raises(Exception):
+            session_a.decrypt_bytes(ct_b)
+        with pytest.raises(Exception):
+            session_b.decrypt_bytes(ct_a)
+    finally:
+        factory.close()
+
+
+def test_factory_context_manager():
+    pytest.importorskip("asherah")
+    import asherah
+
+    _configure_env()
+    with asherah.SessionFactory() as factory:
+        session = factory.get_session("ctx-mgr")
+        payload = b"context manager payload"
+        ct = session.encrypt_bytes(payload)
+        recovered = session.decrypt_bytes(ct)
+        assert recovered == payload
+
+
+def test_session_encrypt_string_via_factory():
+    pytest.importorskip("asherah")
+    import asherah
+
+    _configure_env()
+    factory = asherah.SessionFactory()
+    try:
+        session = factory.get_session("factory-text")
+        text = "factory string roundtrip"
+        ct = session.encrypt_text(text)
+        assert isinstance(ct, str)
+        recovered = session.decrypt_text(ct)
+        assert recovered == text
+    finally:
+        factory.close()
+
+
+def test_concurrent_encrypt_decrypt():
+    pytest.importorskip("asherah")
+    import asherah
+
+    _configure_env()
+    factory = asherah.SessionFactory()
+    errors = []
+
+    def worker(thread_id):
+        try:
+            session = factory.get_session(f"thread-{thread_id}")
+            payload = f"thread-{thread_id}-data".encode()
+            ct = session.encrypt_bytes(payload)
+            recovered = session.decrypt_bytes(ct)
+            assert recovered == payload, (
+                f"thread {thread_id}: expected {payload!r}, got {recovered!r}"
+            )
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    factory.close()
+    assert errors == [], f"threads raised errors: {errors}"
+
+
+def test_config_missing_required_fields():
+    pytest.importorskip("asherah")
+    import asherah
+
+    _configure_env()
+    config = {
+        # ServiceName intentionally omitted
+        "ProductID": "prod",
+        "Metastore": "memory",
+        "KMS": "static",
+    }
+    with pytest.raises(Exception):
+        asherah.setup(config)
+
+
+def test_multiple_partitions_global_api():
+    asherah = _setup_module_api()
+    try:
+        ct_a = asherah.encrypt_bytes("global-part-a", b"data for a")
+        ct_b = asherah.encrypt_bytes("global-part-b", b"data for b")
+
+        # Same partition decrypts fine
+        assert asherah.decrypt_bytes("global-part-a", ct_a) == b"data for a"
+        assert asherah.decrypt_bytes("global-part-b", ct_b) == b"data for b"
+
+        # Cross-partition must fail
+        with pytest.raises(Exception):
+            asherah.decrypt_bytes("global-part-b", ct_a)
+        with pytest.raises(Exception):
+            asherah.decrypt_bytes("global-part-a", ct_b)
     finally:
         asherah.shutdown()
