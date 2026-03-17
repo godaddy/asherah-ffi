@@ -171,7 +171,7 @@ jobs:
           PATCH="${{ vars.NPM_VERSION }}"
           if [ -n "$PATCH" ]; then
             VERSION="4.0.${PATCH}"
-            NPM_TAG="latest"
+            NPM_TAG="next"
           else
             # Fallback to beta versioning
             BETA="${{ vars.NPM_BETA_VERSION }}"
