@@ -63,6 +63,7 @@ pub struct AsherahConfig {
     pub dynamo_db_endpoint: Option<String>,
     pub dynamo_db_region: Option<String>,
     pub dynamo_db_table_name: Option<String>,
+    pub intermediate_key_cache_max_size: Option<u32>,
     pub session_cache_max_size: Option<u32>,
     pub session_cache_duration: Option<i64>,
     pub kms: Option<String>,                         // "aws" | "static"
@@ -90,6 +91,7 @@ fn to_config_options(cfg: &AsherahConfig) -> asherah_config::ConfigOptions {
         dynamo_db_endpoint: cfg.dynamo_db_endpoint.clone(),
         dynamo_db_region: cfg.dynamo_db_region.clone(),
         dynamo_db_table_name: cfg.dynamo_db_table_name.clone(),
+        intermediate_key_cache_max_size: cfg.intermediate_key_cache_max_size,
         session_cache_max_size: cfg.session_cache_max_size,
         session_cache_duration: cfg.session_cache_duration,
         kms: cfg.kms.clone(),

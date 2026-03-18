@@ -5,14 +5,15 @@
 require "benchmark/ips"
 require "asherah"
 
-ENV["STATIC_MASTER_KEY_HEX"] ||= "22" * 32
+ENV["STATIC_MASTER_KEY_HEX"] ||= "746869734973415374617469634d61737465724b6579466f7254657374696e67"
 
 Asherah.configure do |config|
   config.service_name = "bench-svc"
   config.product_id = "bench-prod"
-  config.metastore = "memory"
+  config.metastore = ENV.fetch("BENCH_METASTORE", "memory")
   config.kms = "static"
   config.enable_session_caching = true
+  config.connection_string = ENV["BENCH_CONNECTION_STRING_GO"] if ENV["BENCH_CONNECTION_STRING_GO"]
 end
 
 PARTITION = "bench-partition"

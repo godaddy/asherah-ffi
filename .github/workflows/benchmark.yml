@@ -77,7 +77,16 @@ jobs:
           npx @napi-rs/cli build --release --platform linux-x64-gnu --target x86_64-unknown-linux-gnu
           # Place the built addon where the loader expects it
           mkdir -p npm/linux-x64-gnu
-          cp index.linux-x64-gnu.node npm/linux-x64-gnu/ || cp *.node npm/linux-x64-gnu/index.linux-x64-gnu.node || true
+          # napi-rs may output to cwd or elsewhere depending on version; search for it
+          NODE_FILE=$(find . target -maxdepth 4 -name '*.node' -newer package.json 2>/dev/null | head -1)
+          if [ -n "$NODE_FILE" ]; then
+            cp "$NODE_FILE" npm/linux-x64-gnu/index.linux-x64-gnu.node
+            echo "Copied $NODE_FILE to npm/linux-x64-gnu/"
+          else
+            echo "WARNING: No .node file found after napi build"
+            find . -name '*.node' 2>/dev/null
+          fi
+          ls -la npm/linux-x64-gnu/
 
       - name: Tidy Go modules
         run: |
@@ -85,7 +94,7 @@ jobs:
 
       - name: Verify Go FFI binding
         env:
-          STATIC_MASTER_KEY_HEX: "2222222222222222222222222222222222222222222222222222222222222222"
+          STATIC_MASTER_KEY_HEX: "746869734973415374617469634d61737465724b6579466f7254657374696e67"
           ASHERAH_GO_NATIVE: ${{ github.workspace }}/target/release
         run: |
           cd benchmarks/go-bench
@@ -94,8 +103,8 @@ jobs:
 
       - name: Run benchmarks
         env:
-          STATIC_MASTER_KEY_HEX: "2222222222222222222222222222222222222222222222222222222222222222"
+          STATIC_MASTER_KEY_HEX: "746869734973415374617469634d61737465724b6579466f7254657374696e67"
           ASHERAH_DOTNET_NATIVE: ${{ github.workspace }}/target/release
           ASHERAH_RUBY_NATIVE: ${{ github.workspace }}/target/release
           ASHERAH_GO_NATIVE: ${{ github.workspace }}/target/release
-        run: benchmarks/run-all.sh
+        run: benchmarks/run-all.sh --hot

@@ -10,6 +10,7 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.NANOSECONDS)
@@ -24,22 +25,39 @@ public class AsherahBenchmark {
 
     private byte[] payload;
     private byte[] ciphertext;
+    private boolean cold;
+    private byte[] coldCt0;
+    private byte[] coldCt1;
+    private final AtomicInteger encCtr = new AtomicInteger(0);
+    private final AtomicInteger decCtr = new AtomicInteger(0);
 
     @Setup(Level.Trial)
     public void setup() {
         System.setProperty("asherah.java.nativeLibraryPath",
             System.getProperty("native.lib.path", "target/release"));
 
-        AsherahConfig config = AsherahConfig.builder()
+        cold = "1".equals(System.getenv("BENCH_COLD"));
+
+        String metastore = System.getenv("BENCH_METASTORE") != null
+            ? System.getenv("BENCH_METASTORE") : "memory";
+        AsherahConfig.Builder configBuilder = AsherahConfig.builder()
             .serviceName("bench-svc")
             .productId("bench-prod")
-            .metastore("memory")
+            .metastore(metastore)
             .kms("static")
-            .enableSessionCaching(true)
-            .build();
+            .enableSessionCaching(true);
+        if (System.getenv("BENCH_CONNECTION_STRING") != null) {
+            configBuilder.connectionString(System.getenv("BENCH_CONNECTION_STRING"));
+        }
+        if (System.getenv("BENCH_CHECK_INTERVAL") != null) {
+            configBuilder.checkInterval(Long.parseLong(System.getenv("BENCH_CHECK_INTERVAL")));
+        }
+        AsherahConfig config = configBuilder.build();
 
-        System.setProperty("STATIC_MASTER_KEY_HEX",
-            "2222222222222222222222222222222222222222222222222222222222222222");
+        String masterKeyHex = System.getenv("STATIC_MASTER_KEY_HEX") != null
+            ? System.getenv("STATIC_MASTER_KEY_HEX")
+            : "746869734973415374617469634d61737465724b6579466f7254657374696e67";
+        System.setProperty("STATIC_MASTER_KEY_HEX", masterKeyHex);
         System.setProperty("SERVICE_NAME", "bench-svc");
         System.setProperty("PRODUCT_ID", "bench-prod");
         System.setProperty("KMS", "static");
@@ -48,12 +66,17 @@ public class AsherahBenchmark {
 
         payload = new byte[payloadSize];
         new Random(12345).nextBytes(payload);
-        ciphertext = Asherah.encrypt("bench-partition", payload);
 
-        // Verify round-trip correctness
-        byte[] decrypted = Asherah.decrypt("bench-partition", ciphertext);
-        if (!Arrays.equals(payload, decrypted)) {
-            throw new RuntimeException("Round-trip verification failed for " + payloadSize + "B");
+        if (cold) {
+            coldCt0 = Asherah.encrypt("cold-0", payload);
+            coldCt1 = Asherah.encrypt("cold-1", payload);
+            Asherah.decrypt("cold-0", coldCt0); // warm SK cache
+        } else {
+            ciphertext = Asherah.encrypt("bench-partition", payload);
+            byte[] decrypted = Asherah.decrypt("bench-partition", ciphertext);
+            if (!Arrays.equals(payload, decrypted)) {
+                throw new RuntimeException("Round-trip verification failed for " + payloadSize + "B");
+            }
         }
     }
 
@@ -64,11 +87,19 @@ public class AsherahBenchmark {
 
     @Benchmark
     public byte[] encrypt() {
+        if (cold) {
+            int i = encCtr.incrementAndGet();
+            return Asherah.encrypt("cold-enc-" + i, payload);
+        }
         return Asherah.encrypt("bench-partition", payload);
     }
 
     @Benchmark
     public byte[] decrypt() {
+        if (cold) {
+            int i = decCtr.incrementAndGet() % 2;
+            return Asherah.decrypt("cold-" + i, i == 0 ? coldCt0 : coldCt1);
+        }
         return Asherah.decrypt("bench-partition", ciphertext);
     }
 

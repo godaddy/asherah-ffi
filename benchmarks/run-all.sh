@@ -7,10 +7,28 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
 BENCH_DIR="$ROOT_DIR/benchmarks"
 
 ########################################################################
-# --clean: remove all fetched canonical assets and build artifacts
+# Argument handling
 ########################################################################
 
-if [ "${1:-}" = "--clean" ]; then
+show_help() {
+    cat >&2 <<EOF
+Usage: $(basename "$0") <mode>
+
+Modes:
+  --hot         In-memory metastore, all caches hot (baseline)
+  --warm        MySQL metastore, caches active (steady-state)
+  --cold        MySQL metastore, caches disabled (every op hits MySQL)
+  --setup       Install runtime dependencies (gems, npm packages, etc.)
+  --clean       Remove fetched canonical assets and build artifacts
+  --cleanup     Alias for --clean
+
+All three benchmark modes produce the same multi-language comparison table.
+Warm and cold require Docker (starts a MySQL 8.1 container automatically).
+EOF
+    exit 1
+}
+
+do_clean() {
     echo "Cleaning benchmark artifacts..."
     rm -rf /tmp/asherah-canonical
     rm -rf "$BENCH_DIR/dotnet-bench-newmetastore/asherah-upstream"
@@ -27,13 +45,9 @@ if [ "${1:-}" = "--clean" ]; then
     # to rebuild and contain only our own compiled code, not fetched assets.
     echo "Done."
     exit 0
-fi
+}
 
-########################################################################
-# --setup: install runtime dependencies only (no benchmarks)
-########################################################################
-
-if [ "${1:-}" = "--setup" ]; then
+do_setup() {
     echo "Installing benchmark dependencies..."
 
     # Node.js
@@ -67,9 +81,18 @@ if [ "${1:-}" = "--setup" ]; then
         mvn -B -f /tmp/asherah-canonical/java/app-encryption/pom.xml install -DskipTests -q 2>&1
     fi
 
-    echo "Done. Run $0 to execute benchmarks."
+    echo "Done. Run $0 --hot to execute benchmarks."
     exit 0
-fi
+}
+
+MODE="${1:-}"
+case "$MODE" in
+    --clean|--cleanup) do_clean ;;
+    --setup)           do_setup ;;
+    --hot)             ;; # fall through to hot benchmarks below
+    --warm|--cold)     ;; # handled after prerequisites
+    *)                 show_help ;;
+esac
 
 RESULTS_DIR=$(mktemp -d)
 trap 'rm -rf "$RESULTS_DIR"' EXIT
@@ -89,6 +112,30 @@ write_result() {
     shift
     echo "$@" > "$RESULTS_DIR/$name"
 }
+
+# Pre-create all result files with zeros so every implementation always
+# appears in the table (dashes for failures/skips instead of hidden rows).
+init_all_results() {
+    local zeros="0 0 0 0 0 0"
+    for f in \
+        "01_Rust_native" \
+        "02_.NET_FFI" \
+        "03_Go_FFI" \
+        "04_Python_FFI" \
+        "05_Java_FFI" \
+        "06_Ruby_FFI" \
+        "07_Node.js_FFI" \
+        "90_Canonical_C#_v0.2.10" \
+        "91_Canon._Go_(protectedmem)" \
+        "93_Canonical_Java" \
+        "94_Canon._Go_(memguard)" \
+        "95_Canon._Ruby_(Cobhan)" \
+        "96_Canon._Node.js_(Cobhan)" \
+    ; do
+        echo "$zeros" > "$RESULTS_DIR/$f"
+    done
+}
+init_all_results
 
 ########################################################################
 # Prerequisites
@@ -114,7 +161,9 @@ fi
 HAVE_RUBY=0; $RUBY_CMD -e 'require "benchmark/ips"; require "ffi"' 2>/dev/null && HAVE_RUBY=1
 HAVE_RUBY_CANONICAL=0; $RUBY_CMD -e 'require "asherah"; require "benchmark/ips"' 2>/dev/null && HAVE_RUBY_CANONICAL=1
 
-export STATIC_MASTER_KEY_HEX="${STATIC_MASTER_KEY_HEX:-$(printf '22%.0s' {1..32})}"
+# Use the hex encoding of Go's hardcoded "thisIsAStaticMasterKeyForTesting" so
+# Rust FFI and canonical Go cobhan bindings use the same master key.
+export STATIC_MASTER_KEY_HEX="${STATIC_MASTER_KEY_HEX:-746869734973415374617469634d61737465724b6579466f7254657374696e67}"
 
 ########################################################################
 # Build
@@ -126,18 +175,178 @@ if [ -f "$FFI_LIB_DIR/libasherah_ffi.dylib" ] || [ -f "$FFI_LIB_DIR/libasherah_f
     FFI_LIB_EXISTS=1
 fi
 
-if [ "$HAVE_RUST" = 1 ] && [ "$FFI_LIB_EXISTS" = 0 ]; then
-    log "Building Rust FFI library..."
-    cargo build --release -p asherah-ffi --manifest-path "$ROOT_DIR/Cargo.toml" -q 2>&1
-    FFI_LIB_EXISTS=1
-elif [ "$FFI_LIB_EXISTS" = 1 ]; then
-    log "Using existing Rust FFI library in $FFI_LIB_DIR"
+NEED_MYSQL=0
+if [ "$MODE" = "--warm" ] || [ "$MODE" = "--cold" ]; then
+    NEED_MYSQL=1
+fi
+
+# Check if a shared library has MySQL support compiled in
+has_mysql() {
+    strings "$1" 2>/dev/null | grep -q 'asherah::metastore_mysql' 2>/dev/null
+}
+
+ffi_has_mysql() {
+    local lib=""
+    if [ -f "$FFI_LIB_DIR/libasherah_ffi.dylib" ]; then lib="$FFI_LIB_DIR/libasherah_ffi.dylib"
+    elif [ -f "$FFI_LIB_DIR/libasherah_ffi.so" ]; then lib="$FFI_LIB_DIR/libasherah_ffi.so"
+    else return 1; fi
+    has_mysql "$lib"
+}
+
+if [ "$HAVE_RUST" = 1 ]; then
+    if [ "$FFI_LIB_EXISTS" = 0 ] || { [ "$NEED_MYSQL" = 1 ] && ! ffi_has_mysql; }; then
+        log "Building Rust FFI library (with MySQL support)..."
+        cargo build --release -p asherah-ffi -p asherah-java --manifest-path "$ROOT_DIR/Cargo.toml" -q 2>&1
+        FFI_LIB_EXISTS=1
+    else
+        log "Using existing Rust FFI library in $FFI_LIB_DIR"
+    fi
 fi
 export ASHERAH_DOTNET_NATIVE="$FFI_LIB_DIR"
 export ASHERAH_RUBY_NATIVE="$FFI_LIB_DIR"
 export ASHERAH_GO_NATIVE="$FFI_LIB_DIR"
 
+# Ensure Node.js addon is built and in the right place
+if [ "$HAVE_NODE" = 1 ] && [ "$HAVE_RUST" = 1 ]; then
+    NODE_ADDON="$ROOT_DIR/asherah-node/npm/darwin-arm64/index.darwin-arm64.node"
+    # Detect platform-specific addon path
+    case "$(uname -s)-$(uname -m)" in
+        Darwin-arm64) NODE_ADDON_DIR="$ROOT_DIR/asherah-node/npm/darwin-arm64" ;;
+        Darwin-x86_64) NODE_ADDON_DIR="$ROOT_DIR/asherah-node/npm/darwin-x64" ;;
+        Linux-x86_64) NODE_ADDON_DIR="$ROOT_DIR/asherah-node/npm/linux-x64-gnu" ;;
+        Linux-aarch64) NODE_ADDON_DIR="$ROOT_DIR/asherah-node/npm/linux-arm64-gnu" ;;
+        *) NODE_ADDON_DIR="" ;;
+    esac
+
+    NEED_NODE_REBUILD=0
+    if [ -n "$NODE_ADDON_DIR" ]; then
+        NODE_ADDON=$(ls "$NODE_ADDON_DIR"/*.node 2>/dev/null | head -1)
+        if [ -z "$NODE_ADDON" ]; then
+            NEED_NODE_REBUILD=1
+        elif [ "$NEED_MYSQL" = 1 ] && ! has_mysql "$NODE_ADDON"; then
+            NEED_NODE_REBUILD=1
+        fi
+    fi
+
+    if [ "$NEED_NODE_REBUILD" = 1 ]; then
+        log "Building Node.js addon (with MySQL support)..."
+        (cd "$ROOT_DIR/asherah-node" && cargo clean -p asherah-node 2>/dev/null; npx @napi-rs/cli build --release 2>&1 | tail -1)
+        # Copy built addon to platform directory
+        if [ -n "$NODE_ADDON_DIR" ]; then
+            mkdir -p "$NODE_ADDON_DIR"
+            BUILT="$ROOT_DIR/asherah-node/index.node"
+            if [ -f "$BUILT" ]; then
+                # Overwrite whatever .node file exists in the platform dir
+                EXISTING=$(ls "$NODE_ADDON_DIR"/*.node 2>/dev/null | head -1)
+                if [ -n "$EXISTING" ]; then
+                    cp "$BUILT" "$EXISTING"
+                else
+                    cp "$BUILT" "$NODE_ADDON_DIR/index.node"
+                fi
+                log "Copied Node.js addon to $NODE_ADDON_DIR"
+            fi
+        fi
+    fi
+fi
+
+# Ensure Python binding is installed and has MySQL support
+if [ "$HAVE_PYTHON" = 1 ] && [ "$HAVE_RUST" = 1 ] && [ "$NEED_MYSQL" = 1 ]; then
+    if ! python3 -c "
+import asherah, os
+os.environ['STATIC_MASTER_KEY_HEX'] = '22' * 32
+try:
+    asherah.setup({'ServiceName':'t','ProductID':'t','Metastore':'rdbms','KMS':'static','ConnectionString':'mysql://invalid:0/x'})
+except Exception as e:
+    if 'feature' in str(e).lower(): raise
+    pass  # connection error is fine — means mysql feature is compiled in
+" 2>/dev/null; then
+        log "Rebuilding Python binding with MySQL support..."
+        (cd "$ROOT_DIR" && maturin develop --release --manifest-path asherah-py/Cargo.toml 2>&1 | tail -1)
+        HAVE_PYTHON=0; python3 -c "import asherah" 2>/dev/null && HAVE_PYTHON=1
+    fi
+fi
+
 # JAVA_HOME already set above in prerequisites
+
+########################################################################
+# MySQL container management (--warm / --cold)
+########################################################################
+
+MYSQL_CONTAINER=""
+start_mysql() {
+    if ! docker info >/dev/null 2>&1; then
+        echo "ERROR: Docker is not running. Start Docker and try again." >&2
+        exit 1
+    fi
+    log "Starting MySQL 8.1 container..."
+    MYSQL_CONTAINER="asherah-bench-mysql-$$"
+    if ! docker run -d --name "$MYSQL_CONTAINER" \
+        -e MYSQL_ALLOW_EMPTY_PASSWORD=yes -e MYSQL_DATABASE=test \
+        -p 13306:3306 mysql:8.1 >/dev/null 2>&1; then
+        echo "ERROR: Failed to start MySQL container. Is port 13306 in use?" >&2
+        echo "  Try: docker rm -f \$(docker ps -q --filter name=asherah-bench-mysql)" >&2
+        exit 1
+    fi
+    # Wait for MySQL to accept connections
+    log "Waiting for MySQL to be ready..."
+    local ready=0
+    for i in $(seq 1 60); do
+        if docker exec "$MYSQL_CONTAINER" mysql -u root -e "SELECT 1" test >/dev/null 2>&1; then
+            ready=1
+            break
+        fi
+        sleep 1
+    done
+    if [ "$ready" = 0 ]; then
+        echo "ERROR: MySQL did not become ready after 60 seconds" >&2
+        docker logs "$MYSQL_CONTAINER" 2>&1 | tail -10 >&2
+        exit 1
+    fi
+    if ! docker exec "$MYSQL_CONTAINER" mysql -u root -e \
+        "CREATE TABLE IF NOT EXISTS encryption_key (
+            id VARCHAR(255) NOT NULL,
+            created TIMESTAMP NOT NULL,
+            key_record JSON NOT NULL,
+            PRIMARY KEY(id, created)
+        ) ENGINE=InnoDB" test 2>&1; then
+        echo "ERROR: Failed to create encryption_key table" >&2
+        exit 1
+    fi
+    log "MySQL ready on port 13306"
+    # Rust FFI bindings use URL-style connection string
+    export BENCH_METASTORE="rdbms"
+    export BENCH_CONNECTION_STRING="mysql://root@127.0.0.1:13306/test"
+    export MYSQL_URL="mysql://root@127.0.0.1:13306/test"
+    # Cobhan/Go-based bindings use Go MySQL DSN format
+    export BENCH_CONNECTION_STRING_GO="root@tcp(127.0.0.1:13306)/test?parseTime=true"
+    # For cobhan env var path
+    export Metastore="rdbms"
+    export ConnectionString="root@tcp(127.0.0.1:13306)/test?parseTime=true"
+}
+
+stop_mysql() {
+    if [ -n "$MYSQL_CONTAINER" ]; then
+        log "Stopping MySQL container..."
+        docker rm -f "$MYSQL_CONTAINER" >/dev/null 2>&1 || true
+    fi
+}
+
+if [ "$MODE" = "--warm" ] || [ "$MODE" = "--cold" ]; then
+    start_mysql
+    trap 'stop_mysql; rm -rf "$RESULTS_DIR"' EXIT
+    if [ "$MODE" = "--cold" ]; then
+        # Cold: IK cache size 1 + rotate partitions = every op is a cache miss
+        export BENCH_COLD=1
+        # Set directly so all implementations pick it up via env, including
+        # Rust factory_from_env() and cobhan bindings
+        export INTERMEDIATE_KEY_CACHE_MAX_SIZE=1
+    fi
+    # Fall through to run the same language benchmarks as --hot, but against MySQL
+fi
+
+########################################################################
+# Hot (in-memory) benchmarks — all languages
+########################################################################
 
 ########################################################################
 # Rust native (Criterion)
@@ -145,16 +354,21 @@ export ASHERAH_GO_NATIVE="$FFI_LIB_DIR"
 
 if [ "$HAVE_RUST" = 1 ]; then
     log "Running Rust native benchmark (Criterion)..."
-    cargo bench --manifest-path "$BENCH_DIR/asherah-bench/Cargo.toml" --bench native 2>&1 \
+    CRITERION_EXTRA=""
+    if [ "${BENCH_COLD:-}" = "1" ]; then
+        CRITERION_EXTRA="-- --sample-size 20 --warm-up-time 1"
+    fi
+    cargo bench --manifest-path "$BENCH_DIR/asherah-bench/Cargo.toml" --bench native $CRITERION_EXTRA 2>&1 \
         > "$RESULTS_DIR/criterion_native.log"
     # Parse: extract "group/rust_native/SIZE\n...\ntime:   [low mid high]"
     python3 -c "
 import re, sys
 text = open('$RESULTS_DIR/criterion_native.log').read()
 enc, dec = {}, {}
-for m in re.finditer(r'native_(encrypt|decrypt)/rust_native/(\d+)\s.*?time:\s+\[[\d.]+ \w+ ([\d.]+) (ns|µs)', text, re.S):
+for m in re.finditer(r'native_(encrypt|decrypt)/rust_native/(\d+)\s.*?time:\s+\[[\d.]+ \w+ ([\d.]+) (ns|µs|ms)', text, re.S):
     op, size, val, unit = m.group(1), int(m.group(2)), float(m.group(3)), m.group(4)
     if 'µ' in unit: val *= 1000
+    elif unit == 'ms': val *= 1_000_000
     d = enc if op == 'encrypt' else dec
     d[size] = int(val)
 print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
@@ -183,9 +397,12 @@ for line in open('$RESULTS_DIR/bdn.log'):
     for impl_name in ['Rust FFI', 'Canonical C# v0.2.10']:
         if impl_name in name_field:
             size = int(size_field)
-            m = re.search(r'([\d,]+\.?\d*)\s*ns', mean_field)
+            m = re.search(r'([\d,]+\.?\d*)\s*(ns|us|µs|ms)', mean_field)
             if m:
                 val = float(m.group(1).replace(',', ''))
+                unit = m.group(2)
+                if unit in ('us', 'µs'): val *= 1000
+                elif unit == 'ms': val *= 1_000_000
                 results.setdefault(impl_name, {}).setdefault(cat_field, {})[size] = int(val)
 if not results:
     print('BDN produced no results. Log tail:', file=sys.stderr)
@@ -271,8 +488,13 @@ fi
 
 if [ "$HAVE_GO" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
     log "Running Go FFI benchmark (testing.B)..."
+    (cd "$BENCH_DIR/go-bench" && go mod tidy 2>&1) || true
+    GO_BENCH_ARGS="-bench=. -benchmem -count=3 -benchtime=3s"
+    if [ "${BENCH_COLD:-}" = "1" ]; then
+        GO_BENCH_ARGS="-bench=. -benchmem -count=1 -benchtime=100x -timeout=120s"
+    fi
     if (cd "$BENCH_DIR/go-bench" && CGO_ENABLED=0 ASHERAH_GO_NATIVE="$FFI_LIB_DIR" \
-        go test -bench=. -benchmem -count=3 -benchtime=3s ./... 2>&1) \
+        go test $GO_BENCH_ARGS ./... 2>&1) \
         > "$RESULTS_DIR/go_ffi.log"; then
         python3 -c "
 import re, collections
@@ -298,6 +520,7 @@ fi
 
 if [ "$HAVE_GO" = 1 ]; then
     log "Running Go Canonical benchmark (testing.B)..."
+    (cd "$BENCH_DIR/native-bench/go-bench" && go mod tidy 2>&1) || true
     (cd "$BENCH_DIR/native-bench/go-bench" && go test -bench=. -benchmem -count=3 -benchtime=3s ./... 2>&1) \
         > "$RESULTS_DIR/go_canon.log"
 
@@ -393,8 +616,7 @@ fi
 
 if [ "$HAVE_RUBY_CANONICAL" = 1 ]; then
     log "Running Ruby Canonical benchmark (benchmark-ips)..."
-    $RUBY_CMD "$BENCH_DIR/ruby-bench/bench_canonical.rb" 2>&1 | grep -v 'asherah-cobhan:' \
-        > "$RESULTS_DIR/ruby_canon.log"
+    $RUBY_CMD "$BENCH_DIR/ruby-bench/bench_canonical.rb" > "$RESULTS_DIR/ruby_canon.log" 2>/dev/null
     parse_ruby_ips "$RESULTS_DIR/ruby_canon.log" > "$RESULTS_DIR/95_Canon._Ruby_(Cobhan)"
 fi
 
@@ -408,19 +630,38 @@ run_node_bench() {
 const { Bench } = require('tinybench');
 const asherah = require('$pkg');
 asherah.setup($config);
-const p = 'bench-partition';
+const cold = process.env.BENCH_COLD === '1';
 async function run() {
   for (const size of [64, 1024, 8192]) {
     const payload = Buffer.alloc(size, 0x41);
-    const ct = asherah.encrypt(p, payload);
-    const pt = asherah.decrypt(p, ct);
-    if (!payload.equals(pt)) throw new Error('verify failed ' + size);
-    const bench = new Bench({ warmupIterations: 1000, iterations: 5000 });
-    bench.add('encrypt ' + size, () => { asherah.encrypt(p, payload); });
-    bench.add('decrypt ' + size, () => { asherah.decrypt(p, ct); });
-    await bench.run();
-    for (const t of bench.tasks) {
-      console.log(t.name + ' ' + Math.round(t.result.latency.mean * 1e6));
+    if (cold) {
+      // Cold: pre-encrypt on 2 partitions, alternate to force IK cache miss
+      const ct0 = asherah.encrypt('cold-0', payload);
+      const ct1 = asherah.encrypt('cold-1', payload);
+      asherah.decrypt('cold-0', ct0); // warm SK cache
+      let ei = 0, di = 0;
+      const bench = new Bench({ warmupIterations: 10, iterations: 500 });
+      bench.add('encrypt ' + size, () => { asherah.encrypt('cold-enc-' + (ei++), payload); });
+      bench.add('decrypt ' + size, () => {
+        const i = di++ % 2;
+        asherah.decrypt('cold-' + i, i === 0 ? ct0 : ct1);
+      });
+      await bench.run();
+      for (const t of bench.tasks) {
+        console.log(t.name + ' ' + Math.round(t.result.latency.mean * 1e6));
+      }
+    } else {
+      const p = 'bench-partition';
+      const ct = asherah.encrypt(p, payload);
+      const pt = asherah.decrypt(p, ct);
+      if (!payload.equals(pt)) throw new Error('verify failed ' + size);
+      const bench = new Bench({ warmupIterations: 1000, iterations: 5000 });
+      bench.add('encrypt ' + size, () => { asherah.encrypt(p, payload); });
+      bench.add('decrypt ' + size, () => { asherah.decrypt(p, ct); });
+      await bench.run();
+      for (const t of bench.tasks) {
+        console.log(t.name + ' ' + Math.round(t.result.latency.mean * 1e6));
+      }
     }
   }
   asherah.shutdown();
@@ -441,10 +682,31 @@ print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(10
 "
 }
 
+NODE_METASTORE="${BENCH_METASTORE:-memory}"
+NODE_CONN="${BENCH_CONNECTION_STRING:-}"
+NODE_CONN_GO="${BENCH_CONNECTION_STRING_GO:-}"
+NODE_CHECK="${BENCH_CHECK_INTERVAL:-}"
+NODE_FFI_EXTRA=""
+NODE_CANON_EXTRA=""
+if [ -n "$NODE_CONN" ]; then
+    NODE_FFI_EXTRA=", connectionString: '$NODE_CONN'"
+fi
+if [ -n "$NODE_CONN_GO" ]; then
+    NODE_CANON_EXTRA=", ConnectionString: '$NODE_CONN_GO'"
+fi
+if [ "${BENCH_COLD:-}" = "1" ]; then
+    NODE_FFI_EXTRA="$NODE_FFI_EXTRA, intermediateKeyCacheMaxSize: 1"
+    NODE_CANON_EXTRA="$NODE_CANON_EXTRA, IntermediateKeyCacheMaxSize: 1"
+fi
+if [ -n "$NODE_CHECK" ]; then
+    NODE_FFI_EXTRA="$NODE_FFI_EXTRA, checkInterval: $NODE_CHECK"
+    NODE_CANON_EXTRA="$NODE_CANON_EXTRA, CheckInterval: $NODE_CHECK"
+fi
+
 if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/asherah-node-bench/node_modules/tinybench" ]; then
     log "Running Node.js FFI benchmark (tinybench)..."
     (cd "$BENCH_DIR/asherah-node-bench" && run_node_bench "asherah-node" \
-        "{ serviceName: 'bench-svc', productId: 'bench-prod', metastore: 'memory', kms: 'static', enableSessionCaching: false }") \
+        "{ serviceName: 'bench-svc', productId: 'bench-prod', metastore: '$NODE_METASTORE', kms: 'static', enableSessionCaching: true${NODE_FFI_EXTRA} }") \
         > "$RESULTS_DIR/node_ffi.log"
     parse_node_bench "$RESULTS_DIR/node_ffi.log" > "$RESULTS_DIR/07_Node.js_FFI"
 else
@@ -457,9 +719,10 @@ fi
 
 if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/node-bench-canonical/node_modules/tinybench" ]; then
     log "Running Node.js Canonical benchmark (tinybench)..."
+    # Canonical cobhan package accepts the same config keys as our FFI
     (cd "$BENCH_DIR/node-bench-canonical" && run_node_bench "asherah" \
-        "{ ServiceName: 'bench-svc', ProductID: 'bench-prod', Metastore: 'memory', KMS: 'static', EnableSessionCaching: false }") \
-        2>&1 | grep -v 'asherah-cobhan:' > "$RESULTS_DIR/node_canon.log"
+        "{ ServiceName: 'bench-svc', ProductID: 'bench-prod', Metastore: '$NODE_METASTORE', KMS: 'static', EnableSessionCaching: true, SQLMetastoreDBType: 'mysql'${NODE_CANON_EXTRA} }") \
+        > "$RESULTS_DIR/node_canon.log" 2>/dev/null
     parse_node_bench "$RESULTS_DIR/node_canon.log" > "$RESULTS_DIR/96_Canon._Node.js_(Cobhan)"
 fi
 
@@ -470,6 +733,7 @@ fi
 python3 -c "
 import os, sys
 
+mode = '$MODE'
 results_dir = '$RESULTS_DIR'
 rows = []
 for fname in sorted(os.listdir(results_dir)):
@@ -505,6 +769,9 @@ bot = f'└{hdr}┴{dat}┴{dat}┘'
 def row(name, e64, e1k, e8k, d64, d1k, d8k):
     return f'│ {name:<{N}} │ {fmt(e64)} {fmt(e1k)} {fmt(e8k)} │ {fmt(d64)} {fmt(d1k)} {fmt(d8k)} │'
 
+mode_label = {'--hot': 'Hot (in-memory)', '--warm': 'Warm (MySQL, cached)', '--cold': 'Cold (MySQL, no cache)'}.get(mode, mode)
+print()
+print(f'  Mode: {mode_label}')
 print()
 print(top)
 print(f'│ {\"\":<{N}} │ {\"ENCRYPT (ns/op)\":^{D-2}} │ {\"DECRYPT (ns/op)\":^{D-2}} │')

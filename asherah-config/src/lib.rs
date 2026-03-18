@@ -31,6 +31,8 @@ pub struct ConfigOptions {
     pub dynamo_db_region: Option<String>,
     #[serde(rename = "DynamoDBTableName")]
     pub dynamo_db_table_name: Option<String>,
+    #[serde(rename = "IntermediateKeyCacheMaxSize")]
+    pub intermediate_key_cache_max_size: Option<u32>,
     #[serde(rename = "SessionCacheMaxSize")]
     pub session_cache_max_size: Option<u32>,
     #[serde(rename = "SessionCacheDuration")]
@@ -135,6 +137,10 @@ impl ConfigOptions {
         set_env_opt_i64("REVOKE_CHECK_INTERVAL_SECS", self.check_interval);
         set_env_opt_i64("SESSION_CACHE_DURATION_SECS", self.session_cache_duration);
         set_env_opt_u32("SESSION_CACHE_MAX_SIZE", self.session_cache_max_size);
+        set_env_opt_u32(
+            "INTERMEDIATE_KEY_CACHE_MAX_SIZE",
+            self.intermediate_key_cache_max_size,
+        );
         set_env_opt_str(
             "REPLICA_READ_CONSISTENCY",
             self.replica_read_consistency.as_deref(),

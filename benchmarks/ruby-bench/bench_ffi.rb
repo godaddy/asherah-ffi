@@ -4,36 +4,68 @@
 require "benchmark/ips"
 require "asherah"
 
-ENV["STATIC_MASTER_KEY_HEX"] ||= "22" * 32
+ENV["STATIC_MASTER_KEY_HEX"] ||= "746869734973415374617469634d61737465724b6579466f7254657374696e67"
 
-Asherah.setup(
+cold = ENV["BENCH_COLD"] == "1"
+
+bench_config = {
   "ServiceName" => "bench-svc",
   "ProductID" => "bench-prod",
-  "Metastore" => "memory",
+  "Metastore" => ENV.fetch("BENCH_METASTORE", "memory"),
   "KMS" => "static",
   "EnableSessionCaching" => true
-)
+}
+bench_config["ConnectionString"] = ENV["BENCH_CONNECTION_STRING"] if ENV["BENCH_CONNECTION_STRING"]
+bench_config["CheckInterval"] = ENV["BENCH_CHECK_INTERVAL"].to_i if ENV["BENCH_CHECK_INTERVAL"]
+bench_config["IntermediateKeyCacheMaxSize"] = 1 if cold
+Asherah.setup(bench_config)
 
-PARTITION = "bench-partition"
 SIZES = [64, 1024, 8192]
 
 SIZES.each do |size|
   payload = Random.bytes(size)
-  ct = Asherah.encrypt(PARTITION, payload)
 
-  # Verify round-trip correctness
-  recovered = Asherah.decrypt(PARTITION, ct)
-  raise "Round-trip verification failed for #{size}B" unless recovered == payload
+  if cold
+    # Pre-encrypt on 2 partitions, alternate to force IK cache miss
+    ct0 = Asherah.encrypt("cold-0", payload)
+    ct1 = Asherah.encrypt("cold-1", payload)
+    Asherah.decrypt("cold-0", ct0) # warm SK cache
 
-  puts "\n=== #{size}B payload ==="
-  Benchmark.ips do |x|
-    x.warmup = 2
-    x.time = 5
-    x.stats = :bootstrap
-    x.confidence = 95
+    enc_ctr = 0
+    dec_ctr = 0
 
-    x.report("encrypt #{size}B") { Asherah.encrypt(PARTITION, payload) }
-    x.report("decrypt #{size}B") { Asherah.decrypt(PARTITION, ct) }
+    puts "\n=== #{size}B payload (cold) ==="
+    Benchmark.ips do |x|
+      x.warmup = 1
+      x.time = 5
+      x.stats = :bootstrap
+      x.confidence = 95
+
+      x.report("encrypt #{size}B") do
+        enc_ctr += 1
+        Asherah.encrypt("cold-enc-#{enc_ctr}", payload)
+      end
+      x.report("decrypt #{size}B") do
+        i = dec_ctr % 2
+        dec_ctr += 1
+        Asherah.decrypt("cold-#{i}", i == 0 ? ct0 : ct1)
+      end
+    end
+  else
+    ct = Asherah.encrypt("bench-partition", payload)
+    recovered = Asherah.decrypt("bench-partition", ct)
+    raise "Round-trip verification failed for #{size}B" unless recovered == payload
+
+    puts "\n=== #{size}B payload ==="
+    Benchmark.ips do |x|
+      x.warmup = 2
+      x.time = 5
+      x.stats = :bootstrap
+      x.confidence = 95
+
+      x.report("encrypt #{size}B") { Asherah.encrypt("bench-partition", payload) }
+      x.report("decrypt #{size}B") { Asherah.decrypt("bench-partition", ct) }
+    end
   end
 end
 

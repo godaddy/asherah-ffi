@@ -17,7 +17,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 jni = { version = "0.22", default-features = false, features = ["invocation"] }
-asherah = { path = "../asherah", features = ["sqlite"] }
+asherah = { path = "../asherah", features = ["sqlite", "mysql", "postgres"] }
 asherah-config = { path = "../asherah-config" }
 anyhow = "1.0"
 serde_json = "1.0"
