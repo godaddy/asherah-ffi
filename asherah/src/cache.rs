@@ -5,6 +5,11 @@ use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// Jitter factor for cache TTL to prevent thundering herd.
+/// Each entry gets up to 10% of the TTL added as random jitter,
+/// so entries loaded at the same time don't all expire simultaneously.
+const TTL_JITTER_FRACTION: f64 = 0.10;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CachePolicy {
     Simple,
@@ -33,6 +38,8 @@ const SEG_PROTECTED: u8 = 1;
 struct CacheEntry {
     key: Arc<CryptoKey>,
     loaded_at: Instant,
+    /// Per-entry jitter added to TTL to prevent thundering herd expiry.
+    ttl_jitter: Duration,
     last_access: AtomicU64,
     freq: AtomicU64,
     segment: AtomicU8,
@@ -132,11 +139,29 @@ impl SimpleKeyCache {
         self.access_ctr.fetch_add(1, Ordering::Relaxed) + 1
     }
 
-    fn is_expired(&self, loaded_at: Instant) -> bool {
+    fn is_expired(&self, loaded_at: Instant, jitter: Duration) -> bool {
         if self.ttl == Duration::from_secs(0) {
             return true;
         }
-        loaded_at.elapsed() >= self.ttl
+        loaded_at.elapsed() >= self.ttl + jitter
+    }
+
+    /// Generate a random jitter duration up to TTL_JITTER_FRACTION of the TTL.
+    fn random_jitter(&self) -> Duration {
+        if self.ttl == Duration::from_secs(0) {
+            return Duration::from_secs(0);
+        }
+        let max_jitter_ns = (self.ttl.as_nanos() as f64 * TTL_JITTER_FRACTION) as u64;
+        if max_jitter_ns == 0 {
+            return Duration::from_secs(0);
+        }
+        // Use the access counter as a cheap pseudo-random seed (no syscall)
+        let pseudo_rand = self.access_ctr.load(Ordering::Relaxed);
+        let jitter_ns = pseudo_rand
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1)
+            % max_jitter_ns;
+        Duration::from_nanos(jitter_ns)
     }
 
     fn is_invalid(&self, key: &CryptoKey) -> bool {
@@ -155,7 +180,7 @@ impl SimpleKeyCache {
         let (interned_id, created) = self.latest.read(id, |k, &v| (k.clone(), v))?;
 
         let result = self.by_meta.read(&(interned_id, created), |_, entry| {
-            let expired = self.is_expired(entry.loaded_at);
+            let expired = self.is_expired(entry.loaded_at, entry.ttl_jitter);
             let invalid = self.is_invalid(&entry.key);
             entry
                 .last_access
@@ -178,7 +203,7 @@ impl SimpleKeyCache {
     fn get_meta_if_fresh(&self, meta: &KeyMeta) -> Option<(Arc<CryptoKey>, bool)> {
         let cache_key = (Arc::<str>::from(meta.id.as_str()), meta.created);
         let result = self.by_meta.read(&cache_key, |_, entry| {
-            let mut expired = self.is_expired(entry.loaded_at);
+            let mut expired = self.is_expired(entry.loaded_at, entry.ttl_jitter);
             if entry.key.revoked() {
                 expired = false;
             }
@@ -213,6 +238,7 @@ impl SimpleKeyCache {
         let entry = CacheEntry {
             key,
             loaded_at: Instant::now(),
+            ttl_jitter: self.random_jitter(),
             last_access: AtomicU64::new(self.next_access()),
             freq: AtomicU64::new(1),
             segment: AtomicU8::new(SEG_PROBATIONARY),
