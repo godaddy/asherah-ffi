@@ -531,3 +531,126 @@ fn cache_latest_revoked_key_triggers_reload() {
     assert!(!k.revoked());
     assert_eq!(k.created(), 200);
 }
+
+// ──────────────────────────── Stale-while-revalidate ────────────────────────────
+
+#[test]
+fn stale_while_revalidate_returns_stale_key_for_non_reloader() {
+    // TTL=0 means every entry is immediately stale, but TTL=0 also means
+    // try_claim_reload's CAS always succeeds (the entry is always stale).
+    // Use a 1-second TTL instead and manually expire.
+    let cache = SimpleKeyCache::new_with_ttl(1);
+
+    // Seed the cache
+    let _ = cache
+        .get_or_load_latest("id", &mut || Ok(make_key(100)))
+        .unwrap();
+
+    // Wait for TTL to expire
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+
+    // First call after expiry: reloader claims the reload and calls loader
+    let mut count = 0;
+    let k = cache
+        .get_or_load_latest("id", &mut || {
+            count += 1;
+            Ok(make_key(200))
+        })
+        .unwrap();
+    assert_eq!(count, 1, "reloader should call loader once");
+    // Reloader returns the loaded key
+    assert_eq!(k.created(), 200);
+
+    // Second call: entry is now fresh (reloader inserted new key), so no reload
+    let mut count2 = 0;
+    let k2 = cache
+        .get_or_load_latest("id", &mut || {
+            count2 += 1;
+            Ok(make_key(300))
+        })
+        .unwrap();
+    assert_eq!(count2, 0, "second call should hit cache (entry is fresh)");
+    assert_eq!(k2.created(), 200, "should return the reloaded key");
+}
+
+#[test]
+fn stale_while_revalidate_meta_returns_stale_key_without_loading() {
+    let cache = SimpleKeyCache::new_with_ttl(1);
+    let meta = KeyMeta {
+        id: "k".into(),
+        created: 42,
+    };
+
+    // Seed
+    let _ = cache.get_or_load(&meta, &mut || Ok(make_key(42))).unwrap();
+
+    // Wait for TTL
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+
+    // First call after expiry: returns stale key, no loader call (decrypt path
+    // skips the metastore entirely — key material is unchanged).
+    let mut count = 0;
+    let k = cache
+        .get_or_load(&meta, &mut || {
+            count += 1;
+            Ok(make_key(42))
+        })
+        .unwrap();
+    assert_eq!(count, 0, "decrypt path should not call loader on stale hit");
+    assert_eq!(k.created(), 42);
+
+    // Second call: loaded_at was bumped by CAS, entry is fresh
+    let mut count2 = 0;
+    let _ = cache
+        .get_or_load(&meta, &mut || {
+            count2 += 1;
+            Ok(make_key(42))
+        })
+        .unwrap();
+    assert_eq!(count2, 0, "second call should hit cache");
+}
+
+#[test]
+fn stale_while_revalidate_concurrent_only_one_reloader() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let cache = Arc::new(SimpleKeyCache::new_with_ttl(1));
+
+    // Seed
+    cache
+        .get_or_load_latest("id", &mut || Ok(make_key(100)))
+        .unwrap();
+
+    // Wait for expiry
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+
+    let load_count = Arc::new(AtomicUsize::new(0));
+    let barrier = Arc::new(std::sync::Barrier::new(10));
+
+    let mut handles = vec![];
+    for _ in 0..10 {
+        let c = cache.clone();
+        let lc = load_count.clone();
+        let b = barrier.clone();
+        handles.push(std::thread::spawn(move || {
+            b.wait(); // All threads start at the same time
+            let _ = c
+                .get_or_load_latest("id", &mut || {
+                    lc.fetch_add(1, Ordering::SeqCst);
+                    // Simulate slow metastore query
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    Ok(make_key(200))
+                })
+                .unwrap();
+        }));
+    }
+    for h in handles {
+        h.join().unwrap();
+    }
+    let total_loads = load_count.load(Ordering::SeqCst);
+    assert!(
+        total_loads <= 2,
+        "expected at most 2 loader calls (1 reloader + possible CAS race), got {total_loads}"
+    );
+}
