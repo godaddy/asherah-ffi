@@ -133,7 +133,7 @@ impl Metastore for MySqlMetastore {
         let ts = epoch_to_utc_datetime(created);
         let row: Option<(String,)> = conn
             .exec_first(
-                "SELECT JSON_EXTRACT(key_record, '$') FROM encryption_key WHERE id=? AND created=?",
+                "SELECT key_record FROM encryption_key WHERE id=? AND created=?",
                 (id, &ts),
             )
             .context(format!(
@@ -154,10 +154,12 @@ impl Metastore for MySqlMetastore {
     fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         log::debug!("mysql load_latest: id={id}");
         let mut conn = self.conn()?;
-        let row: Option<(String,)> = conn.exec_first(
-            "SELECT JSON_EXTRACT(key_record, '$') FROM encryption_key WHERE id=? ORDER BY created DESC LIMIT 1",
-            (id,),
-        ).context(format!("MySQL load_latest query failed for id={id}"))?;
+        let row: Option<(String,)> = conn
+            .exec_first(
+                "SELECT key_record FROM encryption_key WHERE id=? ORDER BY created DESC LIMIT 1",
+                (id,),
+            )
+            .context(format!("MySQL load_latest query failed for id={id}"))?;
         if let Some((json_str,)) = row {
             log::debug!("mysql load_latest hit: id={id}");
             let ekr = serde_json::from_str(&json_str).context(format!(
