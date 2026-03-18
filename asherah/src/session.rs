@@ -433,6 +433,7 @@ pub struct PublicFactory<A: AEAD + Clone, K: KeyManagementService + Clone, M: Me
     metastore: Arc<M>,
     kms: Arc<K>,
     crypto: Arc<A>,
+    shared_sk_cache: Arc<dyn KeyCacher>, // factory-level system key cache (shared by all sessions)
     shared_ik_cache: Option<Arc<dyn KeyCacher>>, // optional shared IK cache
     session_cache: Option<SessionCache<A, K, M>>,
     metrics_enabled: bool,
@@ -458,6 +459,20 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             } else {
                 None
             };
+        let shared_sk: Arc<dyn KeyCacher> = if cfg.policy.cache_system_keys {
+            let policy = CachePolicy::parse(
+                &cfg.policy.system_key_cache_eviction_policy,
+                CachePolicy::Simple,
+            );
+            Arc::new(SimpleKeyCache::new_with_policy(
+                cfg.policy.revoke_check_interval_s,
+                cfg.policy.system_key_cache_max_size,
+                policy,
+                cfg.policy.expire_key_after_s,
+            ))
+        } else {
+            Arc::new(NeverCache)
+        };
         let sess_cache = if cfg.policy.cache_sessions {
             Some(SessionCache::new(
                 cfg.policy.session_cache_max_size,
@@ -472,6 +487,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             metastore,
             kms,
             crypto,
+            shared_sk_cache: shared_sk,
             shared_ik_cache: shared,
             session_cache: sess_cache,
             metrics_enabled: true,
@@ -511,20 +527,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                 Arc::new(part),
             )
             .session();
-            let sk_cache: Arc<dyn KeyCacher> = if self.cfg.policy.cache_system_keys {
-                let policy = CachePolicy::parse(
-                    &self.cfg.policy.system_key_cache_eviction_policy,
-                    CachePolicy::Simple,
-                );
-                Arc::new(SimpleKeyCache::new_with_policy(
-                    self.cfg.policy.revoke_check_interval_s,
-                    self.cfg.policy.system_key_cache_max_size,
-                    policy,
-                    self.cfg.policy.expire_key_after_s,
-                ))
-            } else {
-                Arc::new(NeverCache)
-            };
+            let sk_cache = self.shared_sk_cache.clone();
             let ik_cache: Arc<dyn KeyCacher> = match &self.shared_ik_cache {
                 Some(shared) => shared.clone(),
                 None => {
