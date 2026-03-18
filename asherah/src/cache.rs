@@ -3,7 +3,7 @@ use crate::internal::CryptoKey;
 use crate::types::KeyMeta;
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Jitter factor for cache TTL to prevent thundering herd.
 /// Each entry gets up to 10% of the TTL added as random jitter,
@@ -35,11 +35,20 @@ impl CachePolicy {
 const SEG_PROBATIONARY: u8 = 0;
 const SEG_PROTECTED: u8 = 1;
 
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
 struct CacheEntry {
     key: Arc<CryptoKey>,
-    loaded_at: Instant,
-    /// Per-entry jitter added to TTL to prevent thundering herd expiry.
-    ttl_jitter: Duration,
+    /// Epoch milliseconds when this entry was last loaded/validated from the metastore.
+    /// Stored as AtomicU64 so stale-while-revalidate can CAS it without exclusive locks.
+    loaded_at_ms: AtomicU64,
+    /// Per-entry jitter (millis) added to TTL to prevent thundering herd expiry.
+    ttl_jitter_ms: u64,
     last_access: AtomicU64,
     freq: AtomicU64,
     segment: AtomicU8,
@@ -87,7 +96,7 @@ impl KeyCacher for NeverCache {
 pub struct SimpleKeyCache {
     by_meta: scc::HashMap<CacheKey, CacheEntry>,
     latest: scc::HashMap<Arc<str>, i64>,
-    ttl: Duration,
+    ttl_ms: u64,
     max: usize,
     policy: CachePolicy,
     expire_after_s: i64,
@@ -98,7 +107,7 @@ pub struct SimpleKeyCache {
 impl std::fmt::Debug for SimpleKeyCache {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SimpleKeyCache")
-            .field("ttl", &self.ttl)
+            .field("ttl_ms", &self.ttl_ms)
             .field("max", &self.max)
             .field("policy", &self.policy)
             .finish()
@@ -119,11 +128,7 @@ impl SimpleKeyCache {
         Self {
             by_meta: scc::HashMap::new(),
             latest: scc::HashMap::new(),
-            ttl: if ttl_s <= 0 {
-                Duration::from_secs(0)
-            } else {
-                Duration::from_secs(ttl_s as u64)
-            },
+            ttl_ms: if ttl_s <= 0 { 0 } else { ttl_s as u64 * 1000 },
             max,
             policy,
             expire_after_s,
@@ -139,29 +144,28 @@ impl SimpleKeyCache {
         self.access_ctr.fetch_add(1, Ordering::Relaxed) + 1
     }
 
-    fn is_expired(&self, loaded_at: Instant, jitter: Duration) -> bool {
-        if self.ttl == Duration::from_secs(0) {
+    fn is_expired(&self, loaded_at_ms: u64, jitter_ms: u64) -> bool {
+        if self.ttl_ms == 0 {
             return true;
         }
-        loaded_at.elapsed() >= self.ttl + jitter
+        now_ms().saturating_sub(loaded_at_ms) >= self.ttl_ms + jitter_ms
     }
 
-    /// Generate a random jitter duration up to TTL_JITTER_FRACTION of the TTL.
-    fn random_jitter(&self) -> Duration {
-        if self.ttl == Duration::from_secs(0) {
-            return Duration::from_secs(0);
+    /// Generate a random jitter in milliseconds, up to TTL_JITTER_FRACTION of the TTL.
+    fn random_jitter_ms(&self) -> u64 {
+        if self.ttl_ms == 0 {
+            return 0;
         }
-        let max_jitter_ns = (self.ttl.as_nanos() as f64 * TTL_JITTER_FRACTION) as u64;
-        if max_jitter_ns == 0 {
-            return Duration::from_secs(0);
+        let max_jitter_ms = (self.ttl_ms as f64 * TTL_JITTER_FRACTION) as u64;
+        if max_jitter_ms == 0 {
+            return 0;
         }
         // Use the access counter as a cheap pseudo-random seed (no syscall)
         let pseudo_rand = self.access_ctr.load(Ordering::Relaxed);
-        let jitter_ns = pseudo_rand
+        pseudo_rand
             .wrapping_mul(6364136223846793005)
             .wrapping_add(1)
-            % max_jitter_ns;
-        Duration::from_nanos(jitter_ns)
+            % max_jitter_ms
     }
 
     fn is_invalid(&self, key: &CryptoKey) -> bool {
@@ -180,7 +184,8 @@ impl SimpleKeyCache {
         let (interned_id, created) = self.latest.read(id, |k, &v| (k.clone(), v))?;
 
         let result = self.by_meta.read(&(interned_id, created), |_, entry| {
-            let expired = self.is_expired(entry.loaded_at, entry.ttl_jitter);
+            let loaded = entry.loaded_at_ms.load(Ordering::Relaxed);
+            let expired = self.is_expired(loaded, entry.ttl_jitter_ms);
             let invalid = self.is_invalid(&entry.key);
             entry
                 .last_access
@@ -203,7 +208,8 @@ impl SimpleKeyCache {
     fn get_meta_if_fresh(&self, meta: &KeyMeta) -> Option<(Arc<CryptoKey>, bool)> {
         let cache_key = (Arc::<str>::from(meta.id.as_str()), meta.created);
         let result = self.by_meta.read(&cache_key, |_, entry| {
-            let mut expired = self.is_expired(entry.loaded_at, entry.ttl_jitter);
+            let loaded = entry.loaded_at_ms.load(Ordering::Relaxed);
+            let mut expired = self.is_expired(loaded, entry.ttl_jitter_ms);
             if entry.key.revoked() {
                 expired = false;
             }
@@ -237,8 +243,8 @@ impl SimpleKeyCache {
         let interned_id: Arc<str> = Arc::from(meta.id.as_str());
         let entry = CacheEntry {
             key,
-            loaded_at: Instant::now(),
-            ttl_jitter: self.random_jitter(),
+            loaded_at_ms: AtomicU64::new(now_ms()),
+            ttl_jitter_ms: self.random_jitter_ms(),
             last_access: AtomicU64::new(self.next_access()),
             freq: AtomicU64::new(1),
             segment: AtomicU8::new(SEG_PROBATIONARY),
@@ -407,6 +413,44 @@ impl SimpleKeyCache {
             });
         }
     }
+
+    /// Attempt to claim the reload for the latest key of `id` by CAS-ing loaded_at_ms.
+    /// Returns true if this thread claimed the reload (and should do the metastore query).
+    /// Other threads see the updated loaded_at and return the stale key without reloading.
+    fn try_claim_reload_latest(&self, id: &str) -> bool {
+        let Some((interned_id, created)) = self.latest.read(id, |k, &v| (k.clone(), v)) else {
+            return false;
+        };
+        let fresh = now_ms();
+        let mut claimed = false;
+        self.by_meta.read(&(interned_id, created), |_, entry| {
+            let old = entry.loaded_at_ms.load(Ordering::Relaxed);
+            if fresh.saturating_sub(old) >= self.ttl_ms + entry.ttl_jitter_ms {
+                claimed = entry
+                    .loaded_at_ms
+                    .compare_exchange(old, fresh, Ordering::AcqRel, Ordering::Relaxed)
+                    .is_ok();
+            }
+        });
+        claimed
+    }
+
+    /// Attempt to claim the reload for a specific key meta by CAS-ing loaded_at_ms.
+    fn try_claim_reload_meta(&self, meta: &KeyMeta) -> bool {
+        let cache_key = (Arc::<str>::from(meta.id.as_str()), meta.created);
+        let fresh = now_ms();
+        let mut claimed = false;
+        self.by_meta.read(&cache_key, |_, entry| {
+            let old = entry.loaded_at_ms.load(Ordering::Relaxed);
+            if fresh.saturating_sub(old) >= self.ttl_ms + entry.ttl_jitter_ms {
+                claimed = entry
+                    .loaded_at_ms
+                    .compare_exchange(old, fresh, Ordering::AcqRel, Ordering::Relaxed)
+                    .is_ok();
+            }
+        });
+        claimed
+    }
 }
 
 impl Default for SimpleKeyCache {
@@ -426,7 +470,36 @@ impl KeyCacher for SimpleKeyCache {
                 crate::metrics::record_cache_hit("latest");
                 return Ok(v);
             }
+            // Stale-while-revalidate: stale but not invalid (not revoked, not policy-expired).
+            // Try to claim the reload via CAS. Only one thread does the metastore query;
+            // all others return the stale key immediately.
+            if expired && !invalid {
+                if self.try_claim_reload_latest(id) {
+                    // We claimed the reload. Do the metastore query.
+                    // Other threads now see fresh loaded_at and won't reload.
+                    crate::metrics::record_cache_stale("latest");
+                    match loader() {
+                        Ok(new_key) => {
+                            self.insert_latest(id, new_key.clone());
+                            // Return the loaded key: handles key rotation and
+                            // revocation discovery (loader returns a new valid key
+                            // when the cached one was revoked in the metastore).
+                            return Ok(new_key);
+                        }
+                        Err(_) => {
+                            // Metastore error: loaded_at was already bumped by the CAS,
+                            // so we won't retry until next TTL expiry. This is acceptable
+                            // since the metastore is unreachable anyway.
+                        }
+                    }
+                } else {
+                    crate::metrics::record_cache_stale("latest");
+                }
+                return Ok(v);
+            }
+            // Key is invalid (revoked or policy-expired): must do a full reload
         }
+        // Cold miss or invalid key — must load from metastore
         crate::metrics::record_cache_miss("latest");
         let v = loader()?;
         self.insert_latest(id, v.clone());
@@ -442,7 +515,17 @@ impl KeyCacher for SimpleKeyCache {
                 crate::metrics::record_cache_hit("meta");
                 return Ok(v);
             }
+            // Stale-while-revalidate for meta lookups (decrypt path).
+            // Revoked keys are never marked expired by get_meta_if_fresh, so we
+            // only reach here for non-revoked stale entries loaded by exact
+            // (id, created). The key material is identical whether we reload or
+            // not — just bump loaded_at via CAS so the entry stays fresh.
+            // No loader call needed: zero metastore queries on the decrypt path.
+            let _ = self.try_claim_reload_meta(meta);
+            crate::metrics::record_cache_stale("meta");
+            return Ok(v);
         }
+        // Cold miss — must load from metastore
         crate::metrics::record_cache_miss("meta");
         let v = loader()?;
         self.insert_meta(meta, v.clone());

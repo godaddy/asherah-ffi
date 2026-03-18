@@ -34,6 +34,7 @@ pub trait MetricsSink: Send + Sync + 'static {
     fn load(&self, _dur: std::time::Duration) {}
     fn cache_hit(&self, _name: &str) {}
     fn cache_miss(&self, _name: &str) {}
+    fn cache_stale(&self, _name: &str) {}
 }
 
 struct NoopSink;
@@ -115,4 +116,10 @@ pub fn record_cache_miss(name: &str) {
         return;
     }
     with_sink(|sink| sink.cache_miss(name));
+}
+pub fn record_cache_stale(name: &str) {
+    if !is_enabled() {
+        return;
+    }
+    with_sink(|sink| sink.cache_stale(name));
 }
