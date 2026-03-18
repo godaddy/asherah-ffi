@@ -17,7 +17,7 @@ fn default_policy_values() {
     assert_eq!(p.intermediate_key_cache_eviction_policy, "simple");
     assert_eq!(p.system_key_cache_max_size, 1000);
     assert_eq!(p.system_key_cache_eviction_policy, "simple");
-    assert!(!p.cache_sessions);
+    assert!(p.cache_sessions);
     assert_eq!(p.session_cache_max_size, 1000);
     assert_eq!(p.session_cache_ttl_s, 2 * 60 * 60);
     assert_eq!(p.session_cache_eviction_policy, "slru");
@@ -87,8 +87,12 @@ fn option_session_cache() {
 
 #[test]
 fn option_session_cache_max_size() {
+    // Value below minimum (100) gets clamped up
     let p = new_crypto_policy(&[PolicyOption::SessionCacheMaxSize(42)]);
-    assert_eq!(p.session_cache_max_size, 42);
+    assert_eq!(p.session_cache_max_size, 100);
+    // Value above minimum is kept
+    let p = new_crypto_policy(&[PolicyOption::SessionCacheMaxSize(500)]);
+    assert_eq!(p.session_cache_max_size, 500);
 }
 
 #[test]
@@ -159,15 +163,16 @@ fn negative_expire_after() {
 }
 
 #[test]
-fn zero_cache_size() {
+fn zero_cache_size_clamped_to_minimums() {
+    // Zero-size caches are clamped to minimum sizes
     let p = new_crypto_policy(&[
         PolicyOption::IntermediateKeyCacheMaxSize(0),
         PolicyOption::SystemKeyCacheMaxSize(0),
         PolicyOption::SessionCacheMaxSize(0),
     ]);
-    assert_eq!(p.intermediate_key_cache_max_size, 0);
-    assert_eq!(p.system_key_cache_max_size, 0);
-    assert_eq!(p.session_cache_max_size, 0);
+    assert_eq!(p.intermediate_key_cache_max_size, 100); // MIN_INTERMEDIATE_KEY_CACHE_SIZE
+    assert_eq!(p.system_key_cache_max_size, 10); // MIN_SYSTEM_KEY_CACHE_SIZE
+    assert_eq!(p.session_cache_max_size, 100); // MIN_SESSION_CACHE_SIZE
 }
 
 #[test]

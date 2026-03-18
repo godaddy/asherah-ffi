@@ -174,5 +174,147 @@ fn bench_mysql_cold(c: &mut Criterion) {
     factory_a.close().ok();
 }
 
-criterion_group!(benches, bench_mysql_hot, bench_mysql_cold);
+/// Warm SK, cold IK: same long-lived factory (SK cached), but each iteration
+/// decrypts data from a partition it hasn't seen → 1 MySQL round-trip for IK.
+/// This is the realistic production case: factory lives for the process lifetime,
+/// SK is loaded once, but new partitions arrive continuously.
+fn bench_mysql_warm_sk(c: &mut Criterion) {
+    let env = &*MYSQL;
+
+    // Long-lived factory with tiny IK cache (1 entry) so every new partition
+    // is a guaranteed IK miss, but the SK stays cached at factory level.
+    let master_key = vec![0x22u8; 32];
+    let crypto = Arc::new(AES256GCM::new());
+    let metastore = Arc::new(MySqlMetastore::connect(&env.url).expect("mysql connect"));
+    let kms = Arc::new(StaticKMS::new(crypto.clone(), master_key).expect("kms"));
+    let mut cfg = Config::new("bench-svc", "bench-prod");
+    cfg.policy.intermediate_key_cache_max_size = 1;
+    let factory = new_session_factory_with_options(cfg, metastore, kms, crypto, &[FactoryOption::Metrics(false)]);
+
+    // Pre-encrypt data on many distinct partitions so each decrypt is a new IK
+    let mut rng = StdRng::seed_from_u64(99999);
+    let sizes = [64, 1024, 8192];
+
+    let mut test_data: Vec<(usize, Vec<(String, asherah::types::DataRowRecord)>)> = Vec::new();
+    for size in sizes {
+        let mut entries = Vec::new();
+        // Create enough distinct partitions to exceed any iteration count
+        for i in 0..10000 {
+            let partition = format!("warm-sk-{size}-{i}");
+            let session = factory.get_session(&partition);
+            let mut data = vec![0u8; size];
+            rng.fill_bytes(&mut data);
+            let drr = session.encrypt(&data).expect("encrypt");
+            entries.push((partition, drr));
+            session.close().ok();
+        }
+        test_data.push((size, entries));
+    }
+
+    // Warm the SK cache with one decrypt (so only IK misses remain)
+    {
+        let (_, ref entries) = test_data[0];
+        let session = factory.get_session(&entries[0].0);
+        let _ = session.decrypt(entries[0].1.clone()).expect("warm SK");
+        session.close().ok();
+    }
+
+    let mut group = c.benchmark_group("mysql_warm_sk_decrypt");
+    for (size, entries) in &test_data {
+        let counter = std::sync::atomic::AtomicUsize::new(1); // start at 1, 0 used for warmup
+        group.bench_function(BenchmarkId::new("mysql", *size), |b| {
+            b.iter_custom(|iters| {
+                let start = std::time::Instant::now();
+                for _ in 0..iters {
+                    // Each iteration uses a different partition, guaranteeing
+                    // an IK cache miss (cache max=1, always evicted by prior).
+                    let idx = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % entries.len();
+                    let (ref partition, ref drr) = entries[idx];
+                    let session = factory.get_session(partition);
+                    black_box(session.decrypt(black_box(drr.clone())).expect("warm-sk decrypt"));
+                    session.close().ok();
+                }
+                start.elapsed()
+            })
+        });
+    }
+    group.finish();
+
+    factory.close().ok();
+}
+
+/// Simulates pre-fix behavior: SK cache disabled (NeverCache), so every decrypt
+/// loads BOTH IK and SK from MySQL. This is what every request looked like before
+/// the shared SK cache fix.
+fn bench_mysql_no_sk_cache(c: &mut Criterion) {
+    let env = &*MYSQL;
+
+    let master_key = vec![0x22u8; 32];
+    let crypto = Arc::new(AES256GCM::new());
+    let metastore = Arc::new(MySqlMetastore::connect(&env.url).expect("mysql connect"));
+    let kms = Arc::new(StaticKMS::new(crypto.clone(), master_key).expect("kms"));
+    let mut cfg = Config::new("bench-svc", "bench-prod");
+    // Simulate old behavior: per-session SK cache = NeverCache
+    cfg.policy.cache_system_keys = false;
+    cfg.policy.intermediate_key_cache_max_size = 1;
+    let factory = new_session_factory_with_options(
+        cfg,
+        metastore,
+        kms,
+        crypto,
+        &[FactoryOption::Metrics(false)],
+    );
+
+    let mut rng = StdRng::seed_from_u64(77777);
+    let sizes = [64, 1024, 8192];
+
+    let mut test_data: Vec<(usize, Vec<(String, asherah::types::DataRowRecord)>)> = Vec::new();
+    for size in sizes {
+        let mut entries = Vec::new();
+        for i in 0..10000 {
+            let partition = format!("no-sk-{size}-{i}");
+            let session = factory.get_session(&partition);
+            let mut data = vec![0u8; size];
+            rng.fill_bytes(&mut data);
+            let drr = session.encrypt(&data).expect("encrypt");
+            entries.push((partition, drr));
+            session.close().ok();
+        }
+        test_data.push((size, entries));
+    }
+
+    let mut group = c.benchmark_group("mysql_no_sk_cache_decrypt");
+    for (size, entries) in &test_data {
+        let counter = std::sync::atomic::AtomicUsize::new(0);
+        group.bench_function(BenchmarkId::new("mysql", *size), |b| {
+            b.iter_custom(|iters| {
+                let start = std::time::Instant::now();
+                for _ in 0..iters {
+                    let idx =
+                        counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % entries.len();
+                    let (ref partition, ref drr) = entries[idx];
+                    let session = factory.get_session(partition);
+                    black_box(
+                        session
+                            .decrypt(black_box(drr.clone()))
+                            .expect("no-sk decrypt"),
+                    );
+                    session.close().ok();
+                }
+                start.elapsed()
+            })
+        });
+    }
+    group.finish();
+
+    factory.close().ok();
+}
+
+criterion_group!(
+    benches,
+    bench_mysql_hot,
+    bench_mysql_cold,
+    bench_mysql_warm_sk,
+    bench_mysql_no_sk_cache
+);
 criterion_main!(benches);
