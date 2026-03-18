@@ -243,5 +243,78 @@ fn bench_mysql_warm_sk(c: &mut Criterion) {
     factory.close().ok();
 }
 
-criterion_group!(benches, bench_mysql_hot, bench_mysql_cold, bench_mysql_warm_sk);
+/// Simulates pre-fix behavior: SK cache disabled (NeverCache), so every decrypt
+/// loads BOTH IK and SK from MySQL. This is what every request looked like before
+/// the shared SK cache fix.
+fn bench_mysql_no_sk_cache(c: &mut Criterion) {
+    let env = &*MYSQL;
+
+    let master_key = vec![0x22u8; 32];
+    let crypto = Arc::new(AES256GCM::new());
+    let metastore = Arc::new(MySqlMetastore::connect(&env.url).expect("mysql connect"));
+    let kms = Arc::new(StaticKMS::new(crypto.clone(), master_key).expect("kms"));
+    let mut cfg = Config::new("bench-svc", "bench-prod");
+    // Simulate old behavior: per-session SK cache = NeverCache
+    cfg.policy.cache_system_keys = false;
+    cfg.policy.intermediate_key_cache_max_size = 1;
+    let factory = new_session_factory_with_options(
+        cfg,
+        metastore,
+        kms,
+        crypto,
+        &[FactoryOption::Metrics(false)],
+    );
+
+    let mut rng = StdRng::seed_from_u64(77777);
+    let sizes = [64, 1024, 8192];
+
+    let mut test_data: Vec<(usize, Vec<(String, asherah::types::DataRowRecord)>)> = Vec::new();
+    for size in sizes {
+        let mut entries = Vec::new();
+        for i in 0..10000 {
+            let partition = format!("no-sk-{size}-{i}");
+            let session = factory.get_session(&partition);
+            let mut data = vec![0u8; size];
+            rng.fill_bytes(&mut data);
+            let drr = session.encrypt(&data).expect("encrypt");
+            entries.push((partition, drr));
+            session.close().ok();
+        }
+        test_data.push((size, entries));
+    }
+
+    let mut group = c.benchmark_group("mysql_no_sk_cache_decrypt");
+    for (size, entries) in &test_data {
+        let counter = std::sync::atomic::AtomicUsize::new(0);
+        group.bench_function(BenchmarkId::new("mysql", *size), |b| {
+            b.iter_custom(|iters| {
+                let start = std::time::Instant::now();
+                for _ in 0..iters {
+                    let idx =
+                        counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % entries.len();
+                    let (ref partition, ref drr) = entries[idx];
+                    let session = factory.get_session(partition);
+                    black_box(
+                        session
+                            .decrypt(black_box(drr.clone()))
+                            .expect("no-sk decrypt"),
+                    );
+                    session.close().ok();
+                }
+                start.elapsed()
+            })
+        });
+    }
+    group.finish();
+
+    factory.close().ok();
+}
+
+criterion_group!(
+    benches,
+    bench_mysql_hot,
+    bench_mysql_cold,
+    bench_mysql_warm_sk,
+    bench_mysql_no_sk_cache
+);
 criterion_main!(benches);
