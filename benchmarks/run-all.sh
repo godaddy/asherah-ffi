@@ -167,9 +167,9 @@ fi
 
 if [ "$HAVE_DOTNET" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
     log "Running .NET benchmark (BenchmarkDotNet)..."
-    dotnet run --project "$BENCH_DIR/dotnet-bench" -c Release > "$RESULTS_DIR/bdn.log" 2>&1
-    python3 -c "
-import re
+    if dotnet run --project "$BENCH_DIR/dotnet-bench" -c Release > "$RESULTS_DIR/bdn.log" 2>&1; then
+        python3 -c "
+import re, sys
 results = {}
 for line in open('$RESULTS_DIR/bdn.log'):
     if '|' not in line or 'Method' in line or '---' in line: continue
@@ -183,17 +183,25 @@ for line in open('$RESULTS_DIR/bdn.log'):
     for impl_name in ['Rust FFI', 'Canonical C# v0.2.10']:
         if impl_name in name_field:
             size = int(size_field)
-            # Mean field looks like '18,947.7 ns' or '652.6 ns'
             m = re.search(r'([\d,]+\.?\d*)\s*ns', mean_field)
             if m:
                 val = float(m.group(1).replace(',', ''))
                 results.setdefault(impl_name, {}).setdefault(cat_field, {})[size] = int(val)
+if not results:
+    print('BDN produced no results. Log tail:', file=sys.stderr)
+    lines = open('$RESULTS_DIR/bdn.log').readlines()
+    for line in lines[-30:]:
+        print('  ' + line.rstrip(), file=sys.stderr)
 for name, fname in [('Rust FFI', '02_.NET_FFI'), ('Canonical C# v0.2.10', '90_Canonical_C#_v0.2.10')]:
     d = results.get(name, {})
     e, dc = d.get('Encrypt', {}), d.get('Decrypt', {})
     with open('$RESULTS_DIR/' + fname, 'w') as f:
         f.write(f\"{e.get(64,0)} {e.get(1024,0)} {e.get(8192,0)} {dc.get(64,0)} {dc.get(1024,0)} {dc.get(8192,0)}\n\")
 "
+    else
+        skip ".NET benchmark failed. Log tail:"
+        tail -20 "$RESULTS_DIR/bdn.log" 2>/dev/null >&2
+    fi
 else
     skip ".NET SDK or Rust FFI lib not available"
 fi
