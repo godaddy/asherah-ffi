@@ -191,13 +191,14 @@ fn session_cache_bool_true_variants() {
 fn session_cache_bool_false_variants() {
     let _lock = ENV_MUTEX.lock().unwrap();
 
+    // SESSION_CACHE=false is ignored — cache is always enabled
     for val in &["0", "false", "no", "off", "FALSE", "No", "OFF"] {
         clear_config_env();
         std::env::set_var("SESSION_CACHE", val);
         let cfg = config_from_env();
         assert!(
-            !cfg.policy.cache_sessions,
-            "SESSION_CACHE={val} should parse as false"
+            cfg.policy.cache_sessions,
+            "SESSION_CACHE={val} should be ignored — caches always enabled"
         );
     }
 
@@ -222,10 +223,10 @@ fn cache_system_keys_bool() {
     let _lock = ENV_MUTEX.lock().unwrap();
     clear_config_env();
 
-    // Default is true, set to false
+    // CACHE_SYSTEM_KEYS=false is ignored — cache is always enabled
     std::env::set_var("CACHE_SYSTEM_KEYS", "false");
     let cfg = config_from_env();
-    assert!(!cfg.policy.cache_system_keys);
+    assert!(cfg.policy.cache_system_keys);
 
     std::env::set_var("CACHE_SYSTEM_KEYS", "1");
     let cfg = config_from_env();
@@ -239,10 +240,10 @@ fn cache_intermediate_keys_bool() {
     let _lock = ENV_MUTEX.lock().unwrap();
     clear_config_env();
 
-    // Default is true, set to false
+    // CACHE_INTERMEDIATE_KEYS=off is ignored — cache is always enabled
     std::env::set_var("CACHE_INTERMEDIATE_KEYS", "off");
     let cfg = config_from_env();
-    assert!(!cfg.policy.cache_intermediate_keys);
+    assert!(cfg.policy.cache_intermediate_keys);
 
     std::env::set_var("CACHE_INTERMEDIATE_KEYS", "yes");
     let cfg = config_from_env();
@@ -375,8 +376,9 @@ fn all_env_vars_set_at_once() {
     assert!(cfg.policy.cache_sessions);
     assert_eq!(cfg.policy.session_cache_max_size, 2000);
     assert_eq!(cfg.policy.session_cache_ttl_s, 300);
-    assert!(!cfg.policy.cache_system_keys);
-    assert!(!cfg.policy.cache_intermediate_keys);
+    // Caches are always enabled regardless of env var setting
+    assert!(cfg.policy.cache_system_keys);
+    assert!(cfg.policy.cache_intermediate_keys);
     assert!(cfg.policy.shared_intermediate_key_cache);
 
     clear_config_env();

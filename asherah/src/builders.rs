@@ -279,8 +279,18 @@ pub fn config_from_env() -> crate::Config {
     if let Some(v) = get_i64("REVOKE_CHECK_INTERVAL_SECS") {
         cfg.policy.revoke_check_interval_s = v;
     }
-    if let Some(b) = get_bool("SESSION_CACHE") {
-        cfg.policy.cache_sessions = b;
+    // SESSION_CACHE, CACHE_SYSTEM_KEYS, CACHE_INTERMEDIATE_KEYS env vars
+    // are accepted but ignored — caches are always enabled.
+    if get_bool("SESSION_CACHE") == Some(false) {
+        log::warn!("SESSION_CACHE=false is ignored — session cache is always enabled");
+    }
+    if get_bool("CACHE_SYSTEM_KEYS") == Some(false) {
+        log::warn!("CACHE_SYSTEM_KEYS=false is ignored — system key cache is always enabled");
+    }
+    if get_bool("CACHE_INTERMEDIATE_KEYS") == Some(false) {
+        log::warn!(
+            "CACHE_INTERMEDIATE_KEYS=false is ignored — intermediate key cache is always enabled"
+        );
     }
     if let Some(v) = get_usize("SESSION_CACHE_MAX_SIZE") {
         cfg.policy.session_cache_max_size = v;
@@ -288,15 +298,10 @@ pub fn config_from_env() -> crate::Config {
     if let Some(v) = get_i64("SESSION_CACHE_DURATION_SECS") {
         cfg.policy.session_cache_ttl_s = v;
     }
-    if let Some(b) = get_bool("CACHE_SYSTEM_KEYS") {
-        cfg.policy.cache_system_keys = b;
-    }
-    if let Some(b) = get_bool("CACHE_INTERMEDIATE_KEYS") {
-        cfg.policy.cache_intermediate_keys = b;
-    }
     if let Some(b) = get_bool("SHARED_INTERMEDIATE_KEY_CACHE") {
         cfg.policy.shared_intermediate_key_cache = b;
     }
+    cfg.policy.enforce_minimums();
     cfg
 }
 
