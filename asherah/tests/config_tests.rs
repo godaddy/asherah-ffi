@@ -45,6 +45,7 @@ fn config_with_policy_options() {
         ael::policy::PolicyOption::NoCache,
     ]);
     assert_eq!(cfg.policy.expire_key_after_s, 1000);
+    // NoCache disables SK/IK caching from programmatic API
     assert!(!cfg.policy.cache_system_keys);
 }
 
@@ -392,5 +393,6 @@ fn config_builder_full_chain() {
         ]);
     assert_eq!(cfg.region_suffix.as_deref(), Some("us-east-1"));
     assert_eq!(cfg.policy.expire_key_after_s, 3600);
+    // NoCache disables SK/IK caching from programmatic API
     assert!(!cfg.policy.cache_system_keys);
 }

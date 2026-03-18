@@ -443,6 +443,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     PublicFactory<A, K, M>
 {
     pub fn new(cfg: Config, metastore: Arc<M>, kms: Arc<K>, crypto: Arc<A>) -> Self {
+        // IK cache: optionally shared across sessions
         let shared =
             if cfg.policy.shared_intermediate_key_cache && cfg.policy.cache_intermediate_keys {
                 let policy = CachePolicy::parse(
@@ -459,6 +460,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             } else {
                 None
             };
+        // SK cache: shared at factory level (NeverCache if explicitly disabled for tests)
         let shared_sk: Arc<dyn KeyCacher> = if cfg.policy.cache_system_keys {
             let policy = CachePolicy::parse(
                 &cfg.policy.system_key_cache_eviction_policy,
@@ -473,6 +475,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         } else {
             Arc::new(NeverCache)
         };
+        // Session cache (None if explicitly disabled for tests)
         let sess_cache = if cfg.policy.cache_sessions {
             Some(SessionCache::new(
                 cfg.policy.session_cache_max_size,
@@ -528,6 +531,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             )
             .session();
             let sk_cache = self.shared_sk_cache.clone();
+            // IK cache: use shared factory cache, create per-session, or NeverCache
             let ik_cache: Arc<dyn KeyCacher> = match &self.shared_ik_cache {
                 Some(shared) => shared.clone(),
                 None => {
