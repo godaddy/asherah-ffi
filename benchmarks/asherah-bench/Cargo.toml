@@ -26,3 +26,7 @@ harness = false
 [[bench]]
 name = "native"
 harness = false
+
+[[bench]]
+name = "cold_cache"
+harness = false
