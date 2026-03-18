@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
+# NOTE: not using set -e — individual benchmark failures should not abort
+# the entire run. Each section handles its own errors.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. && pwd)"
 BENCH_DIR="$ROOT_DIR/benchmarks"
@@ -261,11 +263,10 @@ fi
 
 if [ "$HAVE_GO" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
     log "Running Go FFI benchmark (testing.B)..."
-    (cd "$BENCH_DIR/go-bench" && CGO_ENABLED=0 ASHERAH_GO_NATIVE="$FFI_LIB_DIR" \
+    if (cd "$BENCH_DIR/go-bench" && CGO_ENABLED=0 ASHERAH_GO_NATIVE="$FFI_LIB_DIR" \
         go test -bench=. -benchmem -count=3 -benchtime=3s ./... 2>&1) \
-        > "$RESULTS_DIR/go_ffi.log"
-
-    python3 -c "
+        > "$RESULTS_DIR/go_ffi.log"; then
+        python3 -c "
 import re, collections
 enc, dec = collections.defaultdict(list), collections.defaultdict(list)
 for line in open('$RESULTS_DIR/go_ffi.log'):
@@ -276,6 +277,9 @@ for line in open('$RESULTS_DIR/go_ffi.log'):
 def avg(d, s): vals = d.get(s, []); return int(sum(vals)/len(vals)) if vals else 0
 print(avg(enc,64), avg(enc,1024), avg(enc,8192), avg(dec,64), avg(dec,1024), avg(dec,8192))
 " > "$RESULTS_DIR/03_Go_FFI"
+    else
+        skip "Go FFI benchmark failed (see log): $(tail -5 "$RESULTS_DIR/go_ffi.log" 2>/dev/null)"
+    fi
 else
     skip "Go or Rust FFI lib not available"
 fi
