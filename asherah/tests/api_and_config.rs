@@ -158,13 +158,14 @@ fn test_config_with_policy_options() {
     let cfg = Config::new("svc", "prod").with_policy_options(&[
         PolicyOption::ExpireAfterSecs(1800),
         PolicyOption::NoCache,
-        PolicyOption::SessionCache(true),
+        PolicyOption::SessionCache(false),
         PolicyOption::SessionCacheMaxSize(500),
     ]);
     assert_eq!(cfg.policy.expire_key_after_s, 1800);
+    // NoCache disables SK/IK caching (programmatic API honors it for tests)
     assert!(!cfg.policy.cache_system_keys);
     assert!(!cfg.policy.cache_intermediate_keys);
-    assert!(cfg.policy.cache_sessions);
+    assert!(!cfg.policy.cache_sessions);
     assert_eq!(cfg.policy.session_cache_max_size, 500);
 }
 

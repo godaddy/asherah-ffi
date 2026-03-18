@@ -187,11 +187,10 @@ fn make_factory(
     kms: Arc<FailableKms<AES256GCM>>,
 ) -> asherah::session::PublicFactory<AES256GCM, FailableKms<AES256GCM>, FailableMetastore> {
     let crypto = make_crypto();
-    let mut cfg = asherah::Config::new("err-svc", "err-prod");
-    // Disable all caching so tests hit the metastore/KMS on every operation
-    cfg.policy.cache_system_keys = false;
-    cfg.policy.cache_intermediate_keys = false;
-    cfg.policy.cache_sessions = false;
+    // Disable all caching so tests hit the metastore/KMS on every operation.
+    // NoCache via PolicyOption is honored from the programmatic API.
+    let cfg = asherah::Config::new("err-svc", "err-prod")
+        .with_policy_options(&[asherah::policy::PolicyOption::NoCache]);
     asherah::api::new_session_factory(cfg, metastore, kms, crypto)
 }
 
