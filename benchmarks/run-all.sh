@@ -183,9 +183,12 @@ for line in open('$RESULTS_DIR/bdn.log'):
     for impl_name in ['Rust FFI', 'Canonical C# v0.2.10']:
         if impl_name in name_field:
             size = int(size_field)
-            m = re.search(r'([\d,]+\.?\d*)\s*ns', mean_field)
+            m = re.search(r'([\d,]+\.?\d*)\s*(ns|us|µs|ms)', mean_field)
             if m:
                 val = float(m.group(1).replace(',', ''))
+                unit = m.group(2)
+                if unit in ('us', 'µs'): val *= 1000
+                elif unit == 'ms': val *= 1_000_000
                 results.setdefault(impl_name, {}).setdefault(cat_field, {})[size] = int(val)
 if not results:
     print('BDN produced no results. Log tail:', file=sys.stderr)
