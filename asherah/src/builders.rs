@@ -241,6 +241,13 @@ pub fn metastore_from_env() -> anyhow::Result<MetastoreEnvResult> {
             anyhow::bail!("Enable feature 'mysql' to use MySQL metastore");
         }
     }
+    // If explicitly rdbms but no DB URL resolved, fail instead of silently falling back
+    if mchoice == "rdbms" {
+        anyhow::bail!(
+            "Metastore=rdbms requires POSTGRES_URL or MYSQL_URL to be set \
+             (and the corresponding feature enabled)"
+        );
+    }
     // Fallback to in-memory
     let mem = crate::metastore::InMemoryMetastore::new();
     Ok((Arc::new(mem), service, product, region_suffix))
@@ -399,17 +406,35 @@ pub fn factory_from_env(
                 Arc::new(kms)
             }
         }
-        _ => {
-            // Default matches Go asherah's hardcoded key "thisIsAStaticMasterKeyForTesting"
+        "static" | "test-debug-static" => {
+            log::warn!(
+                "Using static master key (KMS={kms_kind}). \
+                 This is for testing only — do NOT use in production."
+            );
             let hex = std::env::var("STATIC_MASTER_KEY_HEX").unwrap_or_else(|_| {
+                // Default matches Go asherah's hardcoded key "thisIsAStaticMasterKeyForTesting"
                 "746869734973415374617469634d61737465724b6579466f7254657374696e67".to_string()
             });
+            if !hex.len().is_multiple_of(2) {
+                anyhow::bail!(
+                    "STATIC_MASTER_KEY_HEX has odd length ({}) — must be even",
+                    hex.len()
+                );
+            }
             let mut key = vec![0_u8; hex.len() / 2];
             for i in 0..key.len() {
-                key[i] = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).unwrap_or(0);
+                key[i] = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).map_err(|_| {
+                    anyhow::anyhow!(
+                        "STATIC_MASTER_KEY_HEX contains invalid hex at position {}",
+                        2 * i
+                    )
+                })?;
             }
             let kms = crate::kms::StaticKMS::new(crypto.clone(), key)?;
             Arc::new(kms)
+        }
+        other => {
+            anyhow::bail!("Unknown KMS type '{other}'. Valid values: 'aws', 'static'");
         }
     };
     let kms = Arc::new(DynKms(kms_dyn));

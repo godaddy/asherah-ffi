@@ -31,6 +31,7 @@ type Session = ael::session::PublicSession<
 pub struct AsherahBuffer {
     pub data: *mut u8,
     pub len: usize,
+    pub capacity: usize,
 }
 
 #[repr(C)]
@@ -175,10 +176,15 @@ pub unsafe extern "C" fn asherah_session_free(ptr: *mut AsherahSession) {
 }
 
 fn take_vec_into_buffer(v: Vec<u8>, out: *mut AsherahBuffer) -> c_int {
+    if out.is_null() {
+        set_error("null output buffer");
+        return -1;
+    }
     let mut v = ManuallyDrop::new(v);
     let buf = AsherahBuffer {
         data: v.as_mut_ptr(),
         len: v.len(),
+        capacity: v.capacity(),
     };
     unsafe {
         *out = buf;
@@ -194,11 +200,12 @@ pub unsafe extern "C" fn asherah_buffer_free(buf: *mut AsherahBuffer) {
         return;
     }
     let b = &mut *buf;
-    if !b.data.is_null() && b.len > 0 {
-        drop(Vec::from_raw_parts(b.data, b.len, b.len));
+    if !b.data.is_null() && b.capacity > 0 {
+        drop(Vec::from_raw_parts(b.data, b.len, b.capacity));
     }
     b.data = null_mut();
     b.len = 0;
+    b.capacity = 0;
 }
 
 /// # Safety
