@@ -92,9 +92,73 @@ Impact: Low-level resource failures can hard-crash process instead of propagatin
 Note: Intentional — panicking on failed RNG or secure memory is safer than continuing with broken primitives.
 Recommendation: Prefer error-returning initialization paths and graceful fallback/fail-fast with context.
 
+## Medium (Additional — from comprehensive sweep)
+
+17. **[MEDIUM] DRK not wiped on early return in encrypt path**
+Evidence: `asherah/src/session.rs:771-785`.
+Impact: If an error occurs between DRK generation (line 772) and DRK wipe (line 785), the 32-byte data row key remains on the stack until overwritten by subsequent allocations.
+Recommendation: Use a `Drop` guard or `scopeguard` to ensure DRK is wiped on all exit paths.
+
+18. **[MEDIUM] Cobhan aborts entire process on canary corruption**
+Evidence: `asherah-cobhan/src/lib.rs:95`, `asherah-cobhan/src/lib.rs:112`, `asherah-cobhan/src/lib.rs:120`.
+Impact: Buffer overflow detection calls `std::process::abort()` instead of returning an error. In library code, this terminates the host process without cleanup.
+Note: This is a deliberate security-vs-availability tradeoff — continuing after detected memory corruption is dangerous. But it removes the host application's ability to handle the failure.
+Recommendation: Consider returning an error code and letting the host decide whether to abort.
+
+19. **[MEDIUM] Cobhan RwLock poisoning causes permanent failure cascade**
+Evidence: `asherah-cobhan/src/lib.rs:396-398`, `asherah-cobhan/src/lib.rs:520-522`, `asherah-cobhan/src/lib.rs:637-639`.
+Impact: If any FFI call panics while holding the FACTORY RwLock, the lock becomes permanently poisoned. All subsequent encrypt/decrypt calls return ERR_PANIC with no recovery mechanism.
+Recommendation: Use `PoisonError::into_inner()` to recover the lock, or add a reset/re-setup path.
+
+20. **[MEDIUM] Metastore store error conflated with duplicate key**
+Evidence: `asherah/src/session.rs:671-679`.
+Impact: `metastore.store()` errors are logged as warnings and treated identically to "duplicate key" (returns false). Callers cannot distinguish persistent storage failure from benign duplicate, leading to repeated retry loops.
+Recommendation: Distinguish error types — return the error for non-duplicate failures.
+
+21. **[MEDIUM] Go lastErrorMessage unbounded read**
+Evidence: `asherah-go/ffi.go:25-40`.
+Impact: The function reads a null-terminated C string byte-by-byte with no maximum length bound. If the Rust side returns a malformed (non-terminated) string, this loops until segfault.
+Note: In practice, Rust always returns CString (null-terminated), so risk is theoretical.
+Recommendation: Add a max-length bound (e.g., 4096 bytes) to the read loop.
+
+22. **[MEDIUM] Metrics TSFN NonBlocking silently drops events**
+Evidence: `asherah-node/src/lib.rs:480-483`.
+Impact: Metrics callback uses `NonBlocking` mode and discards the result (`let _ = ...`). Under high event rates, metrics are silently incomplete with no indication of data loss.
+Recommendation: Log or count dropped events.
+
 ## Low
 
-16. **[LOW] Postgres timestamp conversion uses `i64 -> f64`**
+23. **[LOW] Postgres timestamp conversion uses `i64 -> f64`**
 Evidence: `asherah/src/metastore_postgres.rs:222`, `asherah/src/metastore_postgres.rs:275`, `asherah/src/metastore_postgres.rs:280-281`.
 Impact: Theoretical precision loss for timestamps, but Unix-second timestamps won't lose precision for ~285 million years.
 Recommendation: Use integer-safe conversion without float intermediary if refactoring this area.
+
+24. **[LOW] Partition ID format is ambiguous with underscores**
+Evidence: `asherah/src/partition.rs:31-35`.
+Impact: If partition ID, service name, or product ID contain underscores, the IK ID format `_IK_{id}_{service}_{product}` becomes ambiguous. Two different partitions could produce the same IK ID prefix.
+Note: Partition IDs are application-controlled and typically alphanumeric. Matches Go canonical behavior.
+Recommendation: Document the restriction or add validation.
+
+25. **[LOW] Weak pseudo-random jitter for cache TTL**
+Evidence: `asherah/src/cache.rs:159-168`.
+Impact: Jitter is based on a monotonic counter with a fixed LCG constant, not actual randomness. Deterministic and predictable.
+Note: Jitter purpose is thundering herd prevention, not security. Predictability doesn't matter.
+Recommendation: Use actual random source if concerned about timing oracle attacks.
+
+26. **[LOW] Cobhan buffer negative length error is misleading**
+Evidence: `asherah-cobhan/src/lib.rs:237-241`.
+Impact: Negative buffer lengths (Go temp-file protocol) return `ERR_BUFFER_TOO_LARGE` which is confusing. Callers expect a size error, not a protocol feature mismatch.
+Recommendation: Add a distinct error code for unsupported temp-file buffers.
+
+## Performance Opportunities
+
+P1. **[PERF] Cobhan buffer always copies to Vec on read**
+Evidence: `asherah-cobhan/src/lib.rs:246-247`.
+Impact: Every encrypt/decrypt FFI call allocates and copies the input buffer into a new Vec, even when only a temporary reference is needed.
+Recommendation: Use slice references where possible to avoid the copy.
+
+P2. **[PERF] Cobhan single RwLock for all factory operations**
+Evidence: `asherah-cobhan/src/lib.rs:181`.
+Impact: All encrypt/decrypt operations acquire `FACTORY.read()`. Under high concurrency the read-lock overhead adds latency.
+Note: RwLock read-side is cheap on modern hardware. Practical impact is minimal unless contention is extreme.
+Recommendation: Consider lock-free session access for the common path.
