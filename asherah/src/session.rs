@@ -767,22 +767,29 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             .get_or_load_latest(&self.cached_ik_id, &mut loader)
             .context("encrypt: failed to get or create intermediate key")?;
         let created = now_s();
-        // Stack-allocated DRK filled from thread-local ChaCha20Rng (no syscall)
-        let mut drk = [0_u8; 32];
-        crate::aead::fast_random_bytes(&mut drk);
+        // Stack-allocated DRK filled from thread-local ChaCha20Rng (no syscall).
+        // Wrapped in a guard that wipes on drop so early returns via ? don't leak key material.
+        struct DrkGuard([u8; 32]);
+        impl Drop for DrkGuard {
+            fn drop(&mut self) {
+                self.0.fill(0);
+            }
+        }
+        let mut drk = DrkGuard([0_u8; 32]);
+        crate::aead::fast_random_bytes(&mut drk.0);
         // Create DRK LessSafeKey once, use for both data + DRK encryption
-        let drk_lsk = crate::aead::make_lsk(&drk).context("encrypt: failed to create DRK key")?;
+        let drk_lsk = crate::aead::make_lsk(&drk.0).context("encrypt: failed to create DRK key")?;
         let enc_data = crate::aead::encrypt_with_lsk(data, &drk_lsk)
             .context("encrypt: failed to encrypt data with DRK")?;
         // Encrypt DRK under IK: use cached LessSafeKey if available (no Enclave::open)
         let enc_drk = if let Some(ik_lsk) = ik.less_safe_key() {
-            crate::aead::encrypt_with_lsk(&drk, ik_lsk)
+            crate::aead::encrypt_with_lsk(&drk.0, ik_lsk)
                 .context("encrypt: failed to encrypt DRK with IK")?
         } else {
-            ik.with_key_func(|ikb| self.crypto.encrypt(&drk, ikb))
+            ik.with_key_func(|ikb| self.crypto.encrypt(&drk.0, ikb))
                 .context("encrypt: failed to encrypt DRK with IK")??
         };
-        drk.fill(0);
+        drop(drk); // explicit wipe via Drop
         let result = crate::types::DataRowRecord {
             key: Some(EnvelopeKeyRecord {
                 id: String::new(),

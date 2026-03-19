@@ -167,6 +167,8 @@ const ERR_DECRYPT_FAILED: i32 = -104;
 const ERR_BAD_CONFIG: i32 = -105;
 /// Panic recovery error
 const ERR_PANIC: i32 = -106;
+/// Unsupported temp-file buffer (negative length in cobhan protocol)
+const ERR_UNSUPPORTED_TEMP_FILE: i32 = -107;
 
 /// Estimated encryption overhead (matches Go EstimatedEncryptionOverhead)
 const ESTIMATED_ENCRYPTION_OVERHEAD: i32 = 48;
@@ -236,8 +238,8 @@ unsafe fn cobhan_buffer_to_bytes(buf: *const c_char) -> Result<Vec<u8>, i32> {
     }
     let len = cobhan_buffer_get_length(buf);
     if len < 0 {
-        // Negative length indicates temp file - not supported
-        return Err(ERR_BUFFER_TOO_LARGE);
+        // Negative length indicates temp file reference (Go cobhan protocol) - not supported
+        return Err(ERR_UNSUPPORTED_TEMP_FILE);
     }
     if len == 0 {
         return Ok(Vec::new());
@@ -269,7 +271,7 @@ unsafe fn cobhan_bytes_to_buffer(data: &[u8], buf: *mut c_char) -> i32 {
     }
     let capacity = cobhan_buffer_get_length(buf as *const c_char);
     if capacity < 0 {
-        return ERR_BUFFER_TOO_LARGE;
+        return ERR_UNSUPPORTED_TEMP_FILE;
     }
     let data_len = data.len() as i32;
     if data_len > capacity {
@@ -395,7 +397,7 @@ pub unsafe extern "C" fn SetupJson(config_json: *const c_char) -> i32 {
 
     let mut guard = match FACTORY.write() {
         Ok(g) => g,
-        Err(_) => return ERR_PANIC,
+        Err(poisoned) => poisoned.into_inner(),
     };
 
     // Check if already initialized
@@ -519,7 +521,7 @@ pub unsafe extern "C" fn Encrypt(
     // Get factory
     let guard = match FACTORY.read() {
         Ok(g) => g,
-        Err(_) => return ERR_PANIC,
+        Err(poisoned) => poisoned.into_inner(),
     };
     let factory = match guard.as_ref() {
         Some(f) => f,
@@ -636,7 +638,7 @@ pub unsafe extern "C" fn Decrypt(
     // Get factory
     let guard = match FACTORY.read() {
         Ok(g) => g,
-        Err(_) => return ERR_PANIC,
+        Err(poisoned) => poisoned.into_inner(),
     };
     let factory = match guard.as_ref() {
         Some(f) => f,
@@ -724,7 +726,7 @@ pub unsafe extern "C" fn EncryptToJson(
     // Get factory
     let guard = match FACTORY.read() {
         Ok(g) => g,
-        Err(_) => return ERR_PANIC,
+        Err(poisoned) => poisoned.into_inner(),
     };
     let factory = match guard.as_ref() {
         Some(f) => f,
@@ -784,7 +786,7 @@ pub unsafe extern "C" fn DecryptFromJson(
     // Get factory
     let guard = match FACTORY.read() {
         Ok(g) => g,
-        Err(_) => return ERR_PANIC,
+        Err(poisoned) => poisoned.into_inner(),
     };
     let factory = match guard.as_ref() {
         Some(f) => f,
@@ -1093,7 +1095,10 @@ mod tests {
         unsafe {
             let result = cobhan_buffer_to_bytes(buf.as_ptr().cast::<c_char>());
             assert!(result.is_err());
-            assert_eq!(result.expect_err("should be err"), ERR_BUFFER_TOO_LARGE);
+            assert_eq!(
+                result.expect_err("should be err"),
+                ERR_UNSUPPORTED_TEMP_FILE
+            );
         }
     }
 
