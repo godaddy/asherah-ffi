@@ -11,7 +11,7 @@ import (
 // Factory creates cryptographic sessions for encrypt/decrypt operations.
 // It must be closed when no longer needed.
 type Factory struct {
-	mu  sync.Mutex
+	mu  sync.RWMutex
 	ptr uintptr
 }
 
@@ -63,14 +63,13 @@ func (f *Factory) GetSession(partitionID string) (*Session, error) {
 	if partitionID == "" {
 		return nil, errors.New("asherah-go: partition ID cannot be empty")
 	}
-	f.mu.Lock()
-	p := f.ptr
-	f.mu.Unlock()
-	if p == 0 {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	if f.ptr == 0 {
 		return nil, errors.New("asherah-go: factory is closed")
 	}
 
-	ptr := fnFactoryGetSession(p, partitionID)
+	ptr := fnFactoryGetSession(f.ptr, partitionID)
 	if ptr == 0 {
 		return nil, fmt.Errorf("asherah-go: get_session failed: %s", lastErrorMessage())
 	}
@@ -93,16 +92,15 @@ func (f *Factory) Close() {
 // Session provides encrypt/decrypt operations for a specific partition.
 // It must be closed when no longer needed (unless managed by the global API).
 type Session struct {
-	mu  sync.Mutex
+	mu  sync.RWMutex
 	ptr uintptr
 }
 
 // Encrypt encrypts the provided plaintext and returns the DataRowRecord JSON.
 func (s *Session) Encrypt(plaintext []byte) ([]byte, error) {
-	s.mu.Lock()
-	p := s.ptr
-	s.mu.Unlock()
-	if p == 0 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.ptr == 0 {
 		return nil, errors.New("asherah-go: session is closed")
 	}
 
@@ -111,7 +109,7 @@ func (s *Session) Encrypt(plaintext []byte) ([]byte, error) {
 	if len(plaintext) > 0 {
 		dataPtr = uintptr(unsafe.Pointer(&plaintext[0]))
 	}
-	rc := fnEncryptToJSON(p, dataPtr, uintptr(len(plaintext)), uintptr(unsafe.Pointer(&buf)))
+	rc := fnEncryptToJSON(s.ptr, dataPtr, uintptr(len(plaintext)), uintptr(unsafe.Pointer(&buf)))
 	runtime.KeepAlive(plaintext)
 	if rc != 0 {
 		return nil, fmt.Errorf("asherah-go: encrypt failed: %s", lastErrorMessage())
@@ -131,10 +129,9 @@ func (s *Session) EncryptString(plaintext string) (string, error) {
 
 // Decrypt decrypts the provided DataRowRecord JSON.
 func (s *Session) Decrypt(dataRowRecord []byte) ([]byte, error) {
-	s.mu.Lock()
-	p := s.ptr
-	s.mu.Unlock()
-	if p == 0 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.ptr == 0 {
 		return nil, errors.New("asherah-go: session is closed")
 	}
 
@@ -143,7 +140,7 @@ func (s *Session) Decrypt(dataRowRecord []byte) ([]byte, error) {
 	if len(dataRowRecord) > 0 {
 		jsonPtr = uintptr(unsafe.Pointer(&dataRowRecord[0]))
 	}
-	rc := fnDecryptFromJSON(p, jsonPtr, uintptr(len(dataRowRecord)), uintptr(unsafe.Pointer(&buf)))
+	rc := fnDecryptFromJSON(s.ptr, jsonPtr, uintptr(len(dataRowRecord)), uintptr(unsafe.Pointer(&buf)))
 	runtime.KeepAlive(dataRowRecord)
 	if rc != 0 {
 		return nil, fmt.Errorf("asherah-go: decrypt failed: %s", lastErrorMessage())
