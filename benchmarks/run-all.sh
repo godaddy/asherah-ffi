@@ -274,6 +274,7 @@ fi
 
 if [ "$HAVE_GO" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
     log "Running Go FFI benchmark (testing.B)..."
+    (cd "$BENCH_DIR/go-bench" && go mod tidy 2>&1) || true
     if (cd "$BENCH_DIR/go-bench" && CGO_ENABLED=0 ASHERAH_GO_NATIVE="$FFI_LIB_DIR" \
         go test -bench=. -benchmem -count=3 -benchtime=3s ./... 2>&1) \
         > "$RESULTS_DIR/go_ffi.log"; then
@@ -301,6 +302,7 @@ fi
 
 if [ "$HAVE_GO" = 1 ]; then
     log "Running Go Canonical benchmark (testing.B)..."
+    (cd "$BENCH_DIR/native-bench/go-bench" && go mod tidy 2>&1) || true
     (cd "$BENCH_DIR/native-bench/go-bench" && go test -bench=. -benchmem -count=3 -benchtime=3s ./... 2>&1) \
         > "$RESULTS_DIR/go_canon.log"
 
@@ -396,8 +398,7 @@ fi
 
 if [ "$HAVE_RUBY_CANONICAL" = 1 ]; then
     log "Running Ruby Canonical benchmark (benchmark-ips)..."
-    $RUBY_CMD "$BENCH_DIR/ruby-bench/bench_canonical.rb" 2>&1 | grep -v 'asherah-cobhan:' \
-        > "$RESULTS_DIR/ruby_canon.log"
+    $RUBY_CMD "$BENCH_DIR/ruby-bench/bench_canonical.rb" > "$RESULTS_DIR/ruby_canon.log" 2>/dev/null
     parse_ruby_ips "$RESULTS_DIR/ruby_canon.log" > "$RESULTS_DIR/95_Canon._Ruby_(Cobhan)"
 fi
 
@@ -514,13 +515,22 @@ print(f'│ {\"\":<{N}} │ {\"ENCRYPT (ns/op)\":^{D-2}} │ {\"DECRYPT (ns/op)\
 print(f'│ {\"Implementation\":<{N}} │ {\"64B\":>8} {\"1KB\":>8} {\"8KB\":>8} │ {\"64B\":>8} {\"1KB\":>8} {\"8KB\":>8} │')
 print(mid)
 
-printed_sep = False
-for name, nums in rows:
-    if name.startswith('Canon') and not printed_sep:
-        print(mid)
-        printed_sep = True
+# Split into FFI and canonical groups, sort each by 64B encrypt
+ffi_rows = [(n, v) for n, v in rows if not n.startswith('Canon')]
+canon_rows = [(n, v) for n, v in rows if n.startswith('Canon')]
+# Sort by encrypt 64B (index 0), putting zeros (missing data) at the end
+def sort_key(pair): return (pair[1][0] == 0, pair[1][0])
+ffi_rows.sort(key=sort_key)
+canon_rows.sort(key=sort_key)
+
+for name, nums in ffi_rows:
     e64, e1k, e8k, d64, d1k, d8k = nums
     print(row(name, e64, e1k, e8k, d64, d1k, d8k))
+if canon_rows:
+    print(mid)
+    for name, nums in canon_rows:
+        e64, e1k, e8k, d64, d1k, d8k = nums
+        print(row(name, e64, e1k, e8k, d64, d1k, d8k))
 
 print(bot)
 print()
