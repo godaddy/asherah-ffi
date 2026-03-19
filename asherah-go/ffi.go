@@ -27,9 +27,9 @@ func lastErrorMessage() string {
 	if ptr == 0 {
 		return "(unknown error)"
 	}
-	// Read null-terminated C string without CGO.
+	// Read null-terminated C string without CGO (bounded to 4096 bytes).
 	var buf []byte
-	for i := uintptr(0); ; i++ {
+	for i := uintptr(0); i < 4096; i++ {
 		b := *(*byte)(unsafe.Pointer(ptr + i))
 		if b == 0 {
 			break
