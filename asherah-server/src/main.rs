@@ -55,8 +55,8 @@ struct Cli {
     #[arg(long, value_parser = parse_go_duration, env = "ASHERAH_CHECK_INTERVAL")]
     check_interval: Option<i64>,
 
-    /// Enable shared session caching
-    #[arg(long, env = "ASHERAH_ENABLE_SESSION_CACHING")]
+    /// Enable shared session caching (default: true)
+    #[arg(long, default_value = "true", env = "ASHERAH_ENABLE_SESSION_CACHING")]
     enable_session_caching: bool,
 
     /// Define the maximum number of sessions to cache
@@ -107,9 +107,14 @@ fn parse_region_map(s: &str) -> Option<std::collections::HashMap<String, String>
         if pair.is_empty() {
             continue;
         }
-        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
-        if !v.is_empty() {
-            map.insert(k.to_string(), v.to_string());
+        if let Some((k, v)) = pair.split_once('=') {
+            if v.is_empty() {
+                log::warn!("region-map: ignoring entry with empty value: '{pair}'");
+            } else {
+                map.insert(k.to_string(), v.to_string());
+            }
+        } else {
+            log::warn!("region-map: ignoring malformed entry (missing '='): '{pair}'");
         }
     }
     if map.is_empty() {
@@ -161,8 +166,23 @@ async fn main() -> Result<()> {
     let svc = asherah_server::service::AppEncryptionService::new(factory);
     let grpc_svc = proto::app_encryption_server::AppEncryptionServer::new(svc);
 
-    // Remove stale socket file from previous run
-    drop(std::fs::remove_file(&cli.socket_file));
+    // Remove stale socket file from previous run (only if it's a socket)
+    if let Ok(meta) = std::fs::symlink_metadata(&cli.socket_file) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileTypeExt;
+            if meta.file_type().is_socket() {
+                drop(std::fs::remove_file(&cli.socket_file));
+            } else {
+                anyhow::bail!(
+                    "socket path '{}' exists but is not a Unix socket",
+                    cli.socket_file
+                );
+            }
+        }
+        #[cfg(not(unix))]
+        drop(std::fs::remove_file(&cli.socket_file));
+    }
 
     let listener =
         tokio::net::UnixListener::bind(&cli.socket_file).context("failed to bind Unix socket")?;
@@ -200,6 +220,18 @@ async fn main() -> Result<()> {
     }
 
     log::info!("shutting down");
+    // Only remove if it's still a socket (could have been replaced during runtime)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt;
+        if std::fs::symlink_metadata(&cli.socket_file)
+            .map(|m| m.file_type().is_socket())
+            .unwrap_or(false)
+        {
+            drop(std::fs::remove_file(&cli.socket_file));
+        }
+    }
+    #[cfg(not(unix))]
     drop(std::fs::remove_file(&cli.socket_file));
 
     Ok(())

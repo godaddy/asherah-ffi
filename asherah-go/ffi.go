@@ -2,10 +2,11 @@ package asherah
 
 import "unsafe"
 
-// asherahBuffer mirrors the C AsherahBuffer struct { data *uint8; len uintptr }.
+// asherahBuffer mirrors the C AsherahBuffer struct { data *uint8; len uintptr; capacity uintptr }.
 type asherahBuffer struct {
-	data uintptr
-	len  uintptr
+	data     uintptr
+	len      uintptr
+	capacity uintptr
 }
 
 // Function pointers populated by loadSymbols.

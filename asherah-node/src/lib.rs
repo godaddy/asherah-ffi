@@ -35,8 +35,9 @@ type Session = asherah::session::PublicSession<
 
 struct GlobalState {
     factory: Factory,
-    sessions: HashMap<String, Session>,
+    sessions: HashMap<String, Arc<Session>>,
     session_caching: bool,
+    session_cache_max: usize,
 }
 
 static STATE: Lazy<Mutex<Option<GlobalState>>> = Lazy::new(|| Mutex::new(None));
@@ -126,10 +127,12 @@ pub fn setup(config: AsherahConfig) -> Result<()> {
         ));
     }
 
+    let max_size = config.session_cache_max_size.unwrap_or(1000) as usize;
     *guard = Some(GlobalState {
         factory,
         sessions: HashMap::new(),
         session_caching: applied.enable_session_caching,
+        session_cache_max: max_size,
     });
     Ok(())
 }
@@ -162,33 +165,47 @@ pub async fn shutdown_async() -> Result<()> {
 }
 
 fn with_session<R>(partition_id: &str, fcall: impl FnOnce(&Session) -> Result<R>) -> Result<R> {
-    let mut guard = STATE.lock();
-    let state = guard
-        .as_mut()
-        .ok_or_else(|| Error::from_reason("asherah not configured; call setup() first"))?;
+    let session_arc;
 
-    if state.session_caching {
-        let session = state
-            .sessions
-            .entry(partition_id.to_string())
-            .or_insert_with(|| state.factory.get_session(partition_id));
-        return fcall(session);
-    }
+    {
+        let mut guard = STATE.lock();
+        let state = guard
+            .as_mut()
+            .ok_or_else(|| Error::from_reason("asherah not configured; call setup() first"))?;
 
-    let session = state.factory.get_session(partition_id);
-    drop(guard);
-    let result = fcall(&session);
-    let close_result = session
-        .close()
-        .map_err(|e| Error::from_reason(format!("session close error: {e}")));
-    match (result, close_result) {
-        (Ok(value), Ok(())) => Ok(value),
-        (Ok(_), Err(e)) | (Err(e), Ok(())) => Err(e),
-        (Err(e), Err(close_err)) => {
-            debug_log(&format!("error closing session after failure: {close_err}"));
-            Err(e)
+        if state.session_caching {
+            session_arc = state
+                .sessions
+                .entry(partition_id.to_string())
+                .or_insert_with(|| Arc::new(state.factory.get_session(partition_id)))
+                .clone();
+
+            // Evict oldest if over limit (simple eviction: remove arbitrary entry)
+            while state.sessions.len() > state.session_cache_max {
+                if let Some(key) = state.sessions.keys().next().cloned() {
+                    state.sessions.remove(&key);
+                }
+            }
+        } else {
+            let session = state.factory.get_session(partition_id);
+            drop(guard);
+            // Non-caching path: run crypto without lock, close session after
+            let result = fcall(&session);
+            let close_result = session
+                .close()
+                .map_err(|e| Error::from_reason(format!("session close error: {e}")));
+            return match (result, close_result) {
+                (Ok(value), Ok(())) => Ok(value),
+                (Ok(_), Err(e)) | (Err(e), Ok(())) => Err(e),
+                (Err(e), Err(close_err)) => {
+                    debug_log(&format!("error closing session after failure: {close_err}"));
+                    Err(e)
+                }
+            };
         }
     }
+    // Lock dropped — run crypto outside the lock
+    fcall(&session_arc)
 }
 
 #[napi]

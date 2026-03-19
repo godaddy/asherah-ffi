@@ -4,12 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync"
 	"unsafe"
 )
 
 // Factory creates cryptographic sessions for encrypt/decrypt operations.
 // It must be closed when no longer needed.
 type Factory struct {
+	mu  sync.RWMutex
 	ptr uintptr
 }
 
@@ -61,6 +63,8 @@ func (f *Factory) GetSession(partitionID string) (*Session, error) {
 	if partitionID == "" {
 		return nil, errors.New("asherah-go: partition ID cannot be empty")
 	}
+	f.mu.RLock()
+	defer f.mu.RUnlock()
 	if f.ptr == 0 {
 		return nil, errors.New("asherah-go: factory is closed")
 	}
@@ -76,20 +80,26 @@ func (f *Factory) GetSession(partitionID string) (*Session, error) {
 // Close releases the native factory. Any sessions obtained from this
 // factory should be closed before calling this method.
 func (f *Factory) Close() {
-	if f.ptr != 0 {
-		fnFactoryFree(f.ptr)
-		f.ptr = 0
+	f.mu.Lock()
+	p := f.ptr
+	f.ptr = 0
+	f.mu.Unlock()
+	if p != 0 {
+		fnFactoryFree(p)
 	}
 }
 
 // Session provides encrypt/decrypt operations for a specific partition.
 // It must be closed when no longer needed (unless managed by the global API).
 type Session struct {
+	mu  sync.RWMutex
 	ptr uintptr
 }
 
 // Encrypt encrypts the provided plaintext and returns the DataRowRecord JSON.
 func (s *Session) Encrypt(plaintext []byte) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.ptr == 0 {
 		return nil, errors.New("asherah-go: session is closed")
 	}
@@ -119,6 +129,8 @@ func (s *Session) EncryptString(plaintext string) (string, error) {
 
 // Decrypt decrypts the provided DataRowRecord JSON.
 func (s *Session) Decrypt(dataRowRecord []byte) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if s.ptr == 0 {
 		return nil, errors.New("asherah-go: session is closed")
 	}
@@ -148,8 +160,11 @@ func (s *Session) DecryptString(dataRowRecord string) (string, error) {
 
 // Close releases the native session.
 func (s *Session) Close() {
-	if s.ptr != 0 {
-		fnSessionFree(s.ptr)
-		s.ptr = 0
+	s.mu.Lock()
+	p := s.ptr
+	s.ptr = 0
+	s.mu.Unlock()
+	if p != 0 {
+		fnSessionFree(p)
 	}
 }

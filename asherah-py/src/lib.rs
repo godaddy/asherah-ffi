@@ -111,17 +111,11 @@ fn setenv(env_obj: &Bound<'_, PyAny>) -> PyResult<()> {
 
 #[pyfunction]
 fn encrypt_bytes(partition_id: &str, data: &[u8]) -> PyResult<String> {
-    with_manager(|mgr| {
-        let json = mgr
-            .with_session(partition_id, |session| {
-                let drr = session.encrypt(data)?;
-                let json =
-                    serde_json::to_string(&drr).map_err(|e| anyhow::anyhow!("json error: {e}"))?;
-                Ok(json)
-            })
-            .map_err(anyhow_to_py)?;
-        Ok(json)
-    })
+    let session = with_manager(|mgr| Ok(mgr.get_or_create_session(partition_id)))?;
+    let drr = session.encrypt(data).map_err(anyhow_to_py)?;
+    let json = serde_json::to_string(&drr)
+        .map_err(|e| PyRuntimeError::new_err(format!("json error: {e}")))?;
+    Ok(json)
 }
 
 #[pyfunction]
@@ -135,16 +129,11 @@ fn decrypt_bytes<'py>(
     partition_id: &str,
     data_row_record: &str,
 ) -> PyResult<Bound<'py, PyBytes>> {
-    with_manager(|mgr| {
-        let bytes = mgr
-            .with_session(partition_id, |session| {
-                let drr: ael::types::DataRowRecord = serde_json::from_str(data_row_record)
-                    .map_err(|e| anyhow::anyhow!("invalid DataRowRecord JSON: {e}"))?;
-                session.decrypt(drr)
-            })
-            .map_err(anyhow_to_py)?;
-        Ok(PyBytes::new(py, &bytes))
-    })
+    let session = with_manager(|mgr| Ok(mgr.get_or_create_session(partition_id)))?;
+    let drr: ael::types::DataRowRecord = serde_json::from_str(data_row_record)
+        .map_err(|e| PyRuntimeError::new_err(format!("invalid DataRowRecord JSON: {e}")))?;
+    let bytes = session.decrypt(drr).map_err(anyhow_to_py)?;
+    Ok(PyBytes::new(py, &bytes))
 }
 
 #[pyfunction]
@@ -157,44 +146,49 @@ fn decrypt_string(partition_id: &str, data_row_record: &str) -> PyResult<String>
 }
 
 struct FactoryManager {
-    factory: Factory,
-    sessions: HashMap<String, SessionHandle>,
+    factory: Arc<Factory>,
+    sessions: Mutex<HashMap<String, Arc<SessionHandle>>>,
     enable_session_caching: bool,
+    session_cache_max: usize,
 }
 
 impl FactoryManager {
     fn new(factory: Factory, applied: config::AppliedConfig) -> Self {
         Self {
-            factory,
-            sessions: HashMap::new(),
+            factory: Arc::new(factory),
+            sessions: Mutex::new(HashMap::new()),
             enable_session_caching: applied.enable_session_caching,
+            session_cache_max: 1000,
         }
     }
 
-    fn with_session<R>(
-        &mut self,
-        partition: &str,
-        mut f: impl FnMut(&mut SessionHandle) -> anyhow::Result<R>,
-    ) -> anyhow::Result<R> {
+    fn get_or_create_session(&self, partition: &str) -> Arc<SessionHandle> {
         if self.enable_session_caching {
-            let session = self
-                .sessions
+            let mut sessions = self.sessions.lock();
+            let session = sessions
                 .entry(partition.to_string())
-                .or_insert_with(|| self.factory.get_session(partition));
-            f(session)
+                .or_insert_with(|| Arc::new(self.factory.get_session(partition)))
+                .clone();
+            // Evict oldest if over limit
+            while sessions.len() > self.session_cache_max {
+                if let Some(key) = sessions.keys().next().cloned() {
+                    sessions.remove(&key);
+                }
+            }
+            session
+            // Lock dropped here — crypto runs outside
         } else {
-            let mut session = self.factory.get_session(partition);
-            let result = f(&mut session)?;
-            session.close()?;
-            Ok(result)
+            Arc::new(self.factory.get_session(partition))
         }
     }
 
-    fn shutdown(mut self) -> anyhow::Result<()> {
-        for (_, session) in self.sessions.drain() {
-            session.close()?;
+    fn shutdown(self) -> anyhow::Result<()> {
+        let sessions = self.sessions.into_inner();
+        drop(sessions); // drop all Arc<SessionHandle>
+                        // Factory is in an Arc; it's dropped when the last reference goes away
+        if let Some(factory) = Arc::into_inner(self.factory) {
+            factory.close()?;
         }
-        self.factory.close()?;
         Ok(())
     }
 }
@@ -205,11 +199,11 @@ static PY_LOG_CALLBACK: Lazy<Mutex<Option<Arc<Py<PyAny>>>>> = Lazy::new(|| Mutex
 
 fn with_manager<F, R>(f: F) -> PyResult<R>
 where
-    F: FnOnce(&mut FactoryManager) -> PyResult<R>,
+    F: FnOnce(&FactoryManager) -> PyResult<R>,
 {
-    let mut guard = MANAGER.lock();
+    let guard = MANAGER.lock();
     let manager = guard
-        .as_mut()
+        .as_ref()
         .ok_or_else(|| PyRuntimeError::new_err("Asherah not configured; call setup()"))?;
     f(manager)
 }
