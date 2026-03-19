@@ -654,3 +654,79 @@ fn stale_while_revalidate_concurrent_only_one_reloader() {
         "expected at most 2 loader calls (1 reloader + possible CAS race), got {total_loads}"
     );
 }
+
+#[test]
+fn cache_recovers_after_ttl_expiry() {
+    // Reproduces production bug: after TTL expires, reloading the same key
+    // (same id + created) must refresh the cache entry. If insert doesn't
+    // replace the existing entry, the cache stays expired forever.
+    let cache = SimpleKeyCache::new_with_ttl(1);
+
+    // Seed: key with created=100
+    let _ = cache
+        .get_or_load_latest("id", &mut || Ok(make_key(100)))
+        .unwrap();
+
+    // Verify it's cached
+    let mut count = 0;
+    let _ = cache
+        .get_or_load_latest("id", &mut || {
+            count += 1;
+            Ok(make_key(100))
+        })
+        .unwrap();
+    assert_eq!(count, 0, "should be a cache hit before expiry");
+
+    // Wait for TTL to expire
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+
+    // First call after expiry: reloads from "metastore" (same key, same created)
+    let mut reload_count = 0;
+    let _ = cache
+        .get_or_load_latest("id", &mut || {
+            reload_count += 1;
+            Ok(make_key(100)) // same key, same created timestamp
+        })
+        .unwrap();
+    assert_eq!(reload_count, 1, "should reload after expiry");
+
+    // THE CRITICAL CHECK: the cache must now be fresh.
+    // If insert didn't replace the old entry, this will reload again (the bug).
+    let mut post_reload_count = 0;
+    let _ = cache
+        .get_or_load_latest("id", &mut || {
+            post_reload_count += 1;
+            Ok(make_key(100))
+        })
+        .unwrap();
+    assert_eq!(
+        post_reload_count, 0,
+        "cache must be fresh after reload — if this fails, insert didn't replace the expired entry"
+    );
+}
+
+#[test]
+fn cache_meta_recovers_after_ttl_expiry() {
+    let cache = SimpleKeyCache::new_with_ttl(1);
+    let meta = KeyMeta {
+        id: "k".into(),
+        created: 42,
+    };
+
+    let _ = cache.get_or_load(&meta, &mut || Ok(make_key(42))).unwrap();
+
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+
+    // Reload after expiry
+    let _ = cache.get_or_load(&meta, &mut || Ok(make_key(42))).unwrap();
+
+    // Must be fresh now
+    let mut count = 0;
+    let _ = cache
+        .get_or_load(&meta, &mut || {
+            count += 1;
+            Ok(make_key(42))
+        })
+        .unwrap();
+    assert_eq!(count, 0, "cache must be fresh after reload");
+}
