@@ -352,13 +352,16 @@ pub unsafe extern "C" fn SetEnv(env_json: *const c_char) -> i32 {
         return ERR_NULL_PTR;
     }
 
-    let env_map: HashMap<String, String> = match cobhan_buffer_to_json(env_json) {
+    let env_map: HashMap<String, Option<String>> = match cobhan_buffer_to_json(env_json) {
         Ok(m) => m,
         Err(e) => return e,
     };
 
     for (key, value) in env_map {
-        std::env::set_var(&key, &value);
+        match value {
+            Some(v) => std::env::set_var(&key, &v),
+            None => std::env::remove_var(&key),
+        }
     }
 
     ERR_NONE
@@ -460,11 +463,16 @@ pub extern "C" fn EstimateBuffer(data_len: i32, partition_len: i32) -> i32 {
     let intermediate_key_overhead =
         ESTIMATED_INTERMEDIATE_KEY_OVERHEAD.load(Ordering::Relaxed) as i64;
 
-    (BUFFER_HEADER_SIZE as i64
+    let result = BUFFER_HEADER_SIZE as i64
         + ESTIMATED_ENVELOPE_OVERHEAD as i64
         + intermediate_key_overhead
         + partition_len as i64
-        + estimated_data_len) as i32
+        + estimated_data_len;
+    if result > i32::MAX as i64 {
+        i32::MAX // clamp to max representable; caller should check
+    } else {
+        result as i32
+    }
 }
 
 /// Encrypts data and returns the components separately.

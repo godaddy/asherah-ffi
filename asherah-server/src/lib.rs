@@ -19,13 +19,13 @@ pub mod proto {
 pub fn parse_go_duration(s: &str) -> Result<i64, String> {
     let s = s.trim();
     if let Some(rest) = s.strip_suffix('h') {
-        rest.parse::<i64>()
-            .map(|n| n * 3600)
-            .map_err(|e| e.to_string())
+        let n = rest.parse::<i64>().map_err(|e| e.to_string())?;
+        n.checked_mul(3600)
+            .ok_or_else(|| "duration overflow".to_string())
     } else if let Some(rest) = s.strip_suffix('m') {
-        rest.parse::<i64>()
-            .map(|n| n * 60)
-            .map_err(|e| e.to_string())
+        let n = rest.parse::<i64>().map_err(|e| e.to_string())?;
+        n.checked_mul(60)
+            .ok_or_else(|| "duration overflow".to_string())
     } else if let Some(rest) = s.strip_suffix('s') {
         rest.parse::<i64>().map_err(|e| e.to_string())
     } else {
