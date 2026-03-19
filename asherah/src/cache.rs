@@ -241,6 +241,7 @@ impl SimpleKeyCache {
 
     fn insert_meta(&self, meta: &KeyMeta, key: Arc<CryptoKey>) {
         let interned_id: Arc<str> = Arc::from(meta.id.as_str());
+        let cache_key = (interned_id.clone(), meta.created);
         let entry = CacheEntry {
             key,
             loaded_at_ms: AtomicU64::new(now_ms()),
@@ -249,10 +250,9 @@ impl SimpleKeyCache {
             freq: AtomicU64::new(1),
             segment: AtomicU8::new(SEG_PROBATIONARY),
         };
-        drop(
-            self.by_meta
-                .insert((interned_id.clone(), meta.created), entry),
-        );
+        // upsert replaces existing entries — scc::HashMap::insert does NOT,
+        // which would leave stale entries with old loaded_at forever.
+        self.by_meta.upsert(cache_key, entry);
         // Update latest pointer
         let should_update = self
             .latest
