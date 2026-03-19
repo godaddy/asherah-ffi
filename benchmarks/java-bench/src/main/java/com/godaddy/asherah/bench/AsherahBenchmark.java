@@ -154,7 +154,7 @@ public class AsherahBenchmark {
 
     @Benchmark
     public byte[] encrypt() {
-        if (!benchmarkMode.equals("memory") && !benchmarkMode.equals("hot")) {
+        if (benchmarkMode.equals("cold")) {
             int idx = encryptPoolIndex;
             encryptPoolIndex = (encryptPoolIndex + 1) % partitionPool.length;
             return Asherah.encrypt(partitionPool[idx], payload);
@@ -164,7 +164,7 @@ public class AsherahBenchmark {
 
     @Benchmark
     public byte[] decrypt() {
-        if (!benchmarkMode.equals("memory") && !benchmarkMode.equals("hot")) {
+        if (benchmarkMode.equals("cold")) {
             int idx = decryptPoolIndex;
             decryptPoolIndex = (decryptPoolIndex + 1) % partitionPool.length;
             return Asherah.decrypt(partitionPool[idx], ciphertextPool[idx]);
