@@ -477,9 +477,12 @@ impl JsMetricsSink {
             duration_ns,
             name,
         };
-        let _ = self
+        let status = self
             .tsfn
             .call(Ok(event), ThreadsafeFunctionCallMode::NonBlocking);
+        if status != napi::Status::Ok {
+            log::warn!("metrics hook: failed to enqueue event: {status:?}");
+        }
     }
 }
 
@@ -582,9 +585,12 @@ impl LogSink for JsLogSink {
             message: record.args().to_string(),
             target: record.target().to_string(),
         };
-        let _ = self
+        let status = self
             .tsfn
             .call(Ok(event), ThreadsafeFunctionCallMode::NonBlocking);
+        if status != napi::Status::Ok {
+            log::warn!("log hook: failed to enqueue event: {status:?}");
+        }
     }
 }
 
