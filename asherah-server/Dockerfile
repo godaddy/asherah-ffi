@@ -11,8 +11,7 @@ WORKDIR /src
 RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config perl make protobuf-compiler \
     gcc-aarch64-linux-gnu g++-aarch64-linux-gnu && \
-    rm -rf /var/lib/apt/lists/* && \
-    rustup target add aarch64-unknown-linux-gnu
+    rm -rf /var/lib/apt/lists/*
 
 # Configure cross-compilation for arm64
 ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
@@ -24,12 +23,14 @@ ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc \
 # Copy entire workspace (filtered by .dockerignore)
 COPY . .
 
-# Build release binary, cross-compiling if target is arm64
+# Install the toolchain + targets specified in rust-toolchain.toml,
+# then build release binary, cross-compiling if target is arm64
 RUN if [ "$TARGETARCH" = "arm64" ]; then \
       TARGET=aarch64-unknown-linux-gnu; \
     else \
       TARGET=x86_64-unknown-linux-gnu; \
     fi && \
+    rustup target add $TARGET && \
     cargo build --release -p asherah-server --target $TARGET && \
     mkdir -p /out && \
     cp target/$TARGET/release/asherah-server /out/asherah-server && \
