@@ -220,6 +220,18 @@ async fn main() -> Result<()> {
     }
 
     log::info!("shutting down");
+    // Only remove if it's still a socket (could have been replaced during runtime)
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileTypeExt;
+        if std::fs::symlink_metadata(&cli.socket_file)
+            .map(|m| m.file_type().is_socket())
+            .unwrap_or(false)
+        {
+            drop(std::fs::remove_file(&cli.socket_file));
+        }
+    }
+    #[cfg(not(unix))]
     drop(std::fs::remove_file(&cli.socket_file));
 
     Ok(())
