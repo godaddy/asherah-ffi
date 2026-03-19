@@ -167,7 +167,7 @@ impl ConfigOptions {
             }
             "rdbms" => {
                 if let Some(conn) = &self.connection_string {
-                    apply_rdbms_connection(conn, self.sql_metastore_db_type.as_deref());
+                    apply_rdbms_connection(conn, self.sql_metastore_db_type.as_deref())?;
                 } else {
                     return Err(anyhow!(
                         "ConnectionString is required when Metastore is rdbms"
@@ -244,7 +244,7 @@ fn extract_go_mysql_tls(conn: &str) -> Option<String> {
     None
 }
 
-fn apply_rdbms_connection(conn: &str, db_type_hint: Option<&str>) {
+fn apply_rdbms_connection(conn: &str, db_type_hint: Option<&str>) -> Result<()> {
     use asherah::builders::{classify_connection_string, DbKind};
 
     std::env::remove_var("SQLITE_PATH");
@@ -273,11 +273,25 @@ fn apply_rdbms_connection(conn: &str, db_type_hint: Option<&str>) {
             }
         }
         DbKind::Sqlite(path) => std::env::set_var("SQLITE_PATH", path),
-        DbKind::Unknown(s) => std::env::set_var("SQLITE_PATH", s),
+        DbKind::Unknown(s) => {
+            anyhow::bail!(
+                "Unrecognized RDBMS connection string format: '{s}'. \
+                 Set SQLMetastoreDBType to 'mysql' or 'postgres', or use a \
+                 standard connection URL (mysql://... or postgres://...)"
+            );
+        }
     }
+    Ok(())
 }
 
+/// Mutex to serialize factory_from_config calls, since apply_env uses
+/// process-global env vars as a config transport mechanism.
+static FACTORY_BUILD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn factory_from_config(config: &ConfigOptions) -> Result<(Factory, AppliedConfig)> {
+    let _guard = FACTORY_BUILD_LOCK
+        .lock()
+        .map_err(|_| anyhow!("factory build lock poisoned"))?;
     let applied = config.apply_env()?;
     let factory = asherah::builders::factory_from_env()?;
     Ok((factory, applied))

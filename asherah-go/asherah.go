@@ -10,11 +10,15 @@ import (
 
 // Global (module-level) API — convenience wrappers around Factory/Session.
 
+const defaultSessionCacheMaxSize = 1000
+
 var (
-	globalMu       sync.RWMutex
-	globalFactory  *Factory
-	sessionCache   map[string]*Session
-	sessionCaching bool
+	globalMu             sync.RWMutex
+	globalFactory        *Factory
+	sessionCache         map[string]*Session
+	sessionCacheOrder    []string // insertion order for LRU eviction
+	sessionCacheMaxSize  int
+	sessionCaching       bool
 )
 
 // Setup configures the global Asherah factory using the provided configuration.
@@ -39,10 +43,16 @@ func Setup(cfg Config) error {
 
 	globalFactory = factory
 	sessionCaching = caching
+	sessionCacheMaxSize = defaultSessionCacheMaxSize
+	if cfg.SessionCacheMaxSize != nil && *cfg.SessionCacheMaxSize > 0 {
+		sessionCacheMaxSize = *cfg.SessionCacheMaxSize
+	}
 	if sessionCaching {
 		sessionCache = make(map[string]*Session)
+		sessionCacheOrder = nil
 	} else {
 		sessionCache = nil
+		sessionCacheOrder = nil
 	}
 
 	return nil
@@ -197,6 +207,16 @@ func acquireSession(partition string) (*Session, func(), error) {
 			sessionCache = make(map[string]*Session)
 		}
 		sessionCache[partition] = sess
+		sessionCacheOrder = append(sessionCacheOrder, partition)
+		// Evict oldest entries if cache exceeds max size
+		for len(sessionCache) > sessionCacheMaxSize && len(sessionCacheOrder) > 0 {
+			oldest := sessionCacheOrder[0]
+			sessionCacheOrder = sessionCacheOrder[1:]
+			if evicted, ok := sessionCache[oldest]; ok {
+				delete(sessionCache, oldest)
+				evicted.Close()
+			}
+		}
 		globalMu.Unlock()
 		return sess, nil, nil
 	}
