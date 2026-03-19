@@ -71,17 +71,203 @@ if [ "${1:-}" = "--setup" ]; then
     exit 0
 fi
 
+########################################################################
+# Mode flags
+########################################################################
+
+BENCH_MODE="${BENCH_MODE:-memory}"
+BENCH_MYSQL_URL="${BENCH_MYSQL_URL:-${MYSQL_URL:-}}"
+BENCH_MYSQL_IMAGE="${BENCH_MYSQL_IMAGE:-mysql:8.1}"
+MYSQL_CONTAINER_ID=""
+MYSQL_STARTED_BY_SCRIPT=0
+log() { echo ">>> $1" >&2; }
+skip() { echo "    SKIP: $1" >&2; }
+
+compute_mysql_dsn() {
+    # Canonical Go/Cobhan bindings expect go-sql-driver DSN:
+    #   user[:pass]@tcp(host:port)/db[?params]
+    # Rust FFI bindings use URL form:
+    #   mysql://user[:pass]@host:port/db
+    # Keep BENCH_MYSQL_URL for FFI and derive BENCH_MYSQL_DSN for canonical.
+    if [ -z "${BENCH_MYSQL_URL:-}" ]; then
+        BENCH_MYSQL_DSN=""
+        return
+    fi
+
+    if [[ "$BENCH_MYSQL_URL" != mysql://* ]]; then
+        BENCH_MYSQL_DSN="$BENCH_MYSQL_URL"
+        return
+    fi
+
+    BENCH_MYSQL_DSN="$(
+        python3 - "$BENCH_MYSQL_URL" <<'PY'
+import sys
+from urllib.parse import urlparse, unquote
+
+url = sys.argv[1]
+u = urlparse(url)
+if u.scheme != "mysql":
+    print(url)
+    raise SystemExit(0)
+
+user = unquote(u.username or "root")
+password = unquote(u.password or "")
+host = u.hostname or "127.0.0.1"
+port = u.port or 3306
+db = (u.path or "/test").lstrip("/") or "test"
+auth = user if not password else f"{user}:{password}"
+dsn = f"{auth}@tcp({host}:{port})/{db}"
+if u.query:
+    dsn += f"?{u.query}"
+print(dsn)
+PY
+    )"
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --memory)
+            BENCH_MODE="memory"
+            ;;
+        --hot)
+            BENCH_MODE="hot"
+            ;;
+        --warm)
+            BENCH_MODE="warm"
+            ;;
+        --cold)
+            BENCH_MODE="cold"
+            ;;
+        --mysql-url)
+            shift
+            if [ $# -eq 0 ]; then
+                echo "ERROR: --mysql-url requires a value" >&2
+                exit 2
+            fi
+            BENCH_MYSQL_URL="$1"
+            ;;
+        --mysql-url=*)
+            BENCH_MYSQL_URL="${1#--mysql-url=}"
+            ;;
+        "")
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            echo "Usage: $0 [--memory|--hot|--warm|--cold] [--mysql-url <url>] [--setup|--clean]" >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+start_mysql_container() {
+    log "No MySQL URL provided; starting ephemeral Docker MySQL (${BENCH_MYSQL_IMAGE})..."
+
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "ERROR: docker is required for --$BENCH_MODE when MySQL URL is not provided" >&2
+        exit 2
+    fi
+
+    MYSQL_CONTAINER_ID="$(docker run -d --rm \
+        -e MYSQL_DATABASE=test \
+        -e MYSQL_ALLOW_EMPTY_PASSWORD=yes \
+        -p 127.0.0.1::3306 \
+        "$BENCH_MYSQL_IMAGE" 2>/dev/null || true)"
+    if [ -z "$MYSQL_CONTAINER_ID" ]; then
+        echo "ERROR: failed to start MySQL container from image $BENCH_MYSQL_IMAGE" >&2
+        exit 2
+    fi
+    MYSQL_STARTED_BY_SCRIPT=1
+
+    local host_port=""
+    for _ in $(seq 1 60); do
+        local port_line
+        port_line="$(docker port "$MYSQL_CONTAINER_ID" 3306/tcp 2>/dev/null | head -1 || true)"
+        host_port="${port_line##*:}"
+        if [ -n "$host_port" ]; then
+            break
+        fi
+        sleep 1
+    done
+    if [ -z "$host_port" ]; then
+        echo "ERROR: failed to determine mapped MySQL host port" >&2
+        docker logs "$MYSQL_CONTAINER_ID" 2>/dev/null | tail -20 >&2 || true
+        exit 2
+    fi
+
+    for _ in $(seq 1 90); do
+        if docker exec "$MYSQL_CONTAINER_ID" mysqladmin -h 127.0.0.1 -u root ping --silent >/dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+    done
+    if ! docker exec "$MYSQL_CONTAINER_ID" mysqladmin -h 127.0.0.1 -u root ping --silent >/dev/null 2>&1; then
+        echo "ERROR: MySQL container did not become ready in time" >&2
+        docker logs "$MYSQL_CONTAINER_ID" 2>/dev/null | tail -20 >&2 || true
+        exit 2
+    fi
+
+    if ! docker exec "$MYSQL_CONTAINER_ID" mysql -h 127.0.0.1 -u root test -e \
+        "CREATE TABLE IF NOT EXISTS encryption_key (id VARCHAR(255) NOT NULL, created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, key_record TEXT NOT NULL, PRIMARY KEY(id, created), INDEX(created)) ENGINE=InnoDB" \
+        >/dev/null; then
+        echo "ERROR: failed to create encryption_key table in ephemeral MySQL" >&2
+        docker logs "$MYSQL_CONTAINER_ID" 2>/dev/null | tail -20 >&2 || true
+        exit 2
+    fi
+
+    BENCH_MYSQL_URL="mysql://root@127.0.0.1:${host_port}/test"
+    compute_mysql_dsn
+    log "Using ephemeral MySQL at ${BENCH_MYSQL_URL}"
+}
+
+ensure_mysql_alive() {
+    if [ "$BENCH_MODE" = "memory" ] || [ "$MYSQL_STARTED_BY_SCRIPT" != "1" ]; then
+        return
+    fi
+
+    if [ -n "$MYSQL_CONTAINER_ID" ] &&
+        [ "$(docker inspect -f '{{.State.Running}}' "$MYSQL_CONTAINER_ID" 2>/dev/null || echo false)" = "true" ] &&
+        docker exec "$MYSQL_CONTAINER_ID" mysqladmin -h 127.0.0.1 -u root ping --silent >/dev/null 2>&1; then
+        return
+    fi
+
+    log "Ephemeral MySQL is unhealthy; restarting container..."
+    if [ -n "$MYSQL_CONTAINER_ID" ]; then
+        docker rm -f "$MYSQL_CONTAINER_ID" >/dev/null 2>&1 || true
+    fi
+    MYSQL_CONTAINER_ID=""
+    BENCH_MYSQL_URL=""
+    BENCH_MYSQL_DSN=""
+    start_mysql_container
+    export BENCH_MYSQL_URL
+    export BENCH_MYSQL_DSN
+    export MYSQL_URL="$BENCH_MYSQL_URL"
+}
+
+if [ "$BENCH_MODE" != "memory" ] && [ -z "$BENCH_MYSQL_URL" ]; then
+    start_mysql_container
+fi
+
+export BENCH_MODE
+export BENCH_MYSQL_URL
+compute_mysql_dsn
+export BENCH_MYSQL_DSN
+export MYSQL_URL="$BENCH_MYSQL_URL"
+
 RESULTS_DIR=$(mktemp -d)
-trap 'rm -rf "$RESULTS_DIR"' EXIT
+cleanup() {
+    if [ "$MYSQL_STARTED_BY_SCRIPT" = "1" ] && [ -n "$MYSQL_CONTAINER_ID" ]; then
+        docker rm -f "$MYSQL_CONTAINER_ID" >/dev/null 2>&1 || true
+    fi
+    rm -rf "$RESULTS_DIR"
+}
+trap cleanup EXIT
 
 # Unset CC if set to bare 'gcc' — it breaks Rust's ring/openssl-sys builds on macOS
 # where the system 'gcc' is actually clang and may not behave as expected.
 if [ "${CC:-}" = "gcc" ]; then
     unset CC
 fi
-
-log() { echo ">>> $1" >&2; }
-skip() { echo "    SKIP: $1" >&2; }
 
 # Write result: file per implementation, format: enc_64 enc_1024 enc_8192 dec_64 dec_1024 dec_8192
 write_result() {
@@ -95,6 +281,12 @@ write_result() {
 ########################################################################
 
 log "Checking prerequisites..."
+case "$BENCH_MODE" in
+    memory) log "Benchmark mode: memory (in-memory hot-cache)" ;;
+    hot) log "Benchmark mode: hot (MySQL hot-cache)" ;;
+    warm) log "Benchmark mode: warm (MySQL, SK cached + IK miss)" ;;
+    cold) log "Benchmark mode: cold (MySQL, SK-only cache)" ;;
+esac
 
 HAVE_RUST=0; command -v cargo >/dev/null 2>&1 && HAVE_RUST=1
 HAVE_DOTNET=0; command -v dotnet >/dev/null 2>&1 && HAVE_DOTNET=1
@@ -144,11 +336,13 @@ export ASHERAH_GO_NATIVE="$FFI_LIB_DIR"
 ########################################################################
 
 if [ "$HAVE_RUST" = 1 ]; then
-    log "Running Rust native benchmark (Criterion)..."
-    cargo bench --manifest-path "$BENCH_DIR/asherah-bench/Cargo.toml" --bench native 2>&1 \
-        > "$RESULTS_DIR/criterion_native.log"
-    # Parse: extract "group/rust_native/SIZE\n...\ntime:   [low mid high]"
-    python3 -c "
+    ensure_mysql_alive
+    if [ "$BENCH_MODE" = "memory" ]; then
+        log "Running Rust native benchmark (Criterion)..."
+        cargo bench --manifest-path "$BENCH_DIR/asherah-bench/Cargo.toml" --bench native 2>&1 \
+            > "$RESULTS_DIR/criterion_native.log"
+        # Parse: extract "group/rust_native/SIZE\n...\ntime:   [low mid high]"
+        python3 -c "
 import re, sys
 text = open('$RESULTS_DIR/criterion_native.log').read()
 enc, dec = {}, {}
@@ -159,6 +353,49 @@ for m in re.finditer(r'native_(encrypt|decrypt)/rust_native/(\d+)\s.*?time:\s+\[
     d[size] = int(val)
 print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
 " > "$RESULTS_DIR/01_Rust_native"
+    else
+        RUST_CRITERION_FILTER=""
+        case "$BENCH_MODE" in
+            hot|warm) RUST_CRITERION_FILTER="mysql_hot_" ;;
+            cold) RUST_CRITERION_FILTER="mysql_cold_decrypt" ;;
+        esac
+        if cargo bench --manifest-path "$BENCH_DIR/asherah-bench/Cargo.toml" --features mysql --bench mysql_metastore -- "$RUST_CRITERION_FILTER" 2>&1 \
+            > "$RESULTS_DIR/criterion_native.log"; then
+            case "$BENCH_MODE" in
+                hot|warm)
+                    log "Running Rust MySQL hot-cache benchmark (Criterion)..."
+                    python3 -c "
+import re, sys
+text = open('$RESULTS_DIR/criterion_native.log').read()
+enc, dec = {}, {}
+for m in re.finditer(r'mysql_hot_(encrypt|decrypt)/mysql/(\d+)\s.*?time:\s+\[[\d.]+ \w+ ([\d.]+) (ns|µs|us|ms)', text, re.S):
+    op, size, val, unit = m.group(1), int(m.group(2)), float(m.group(3)), m.group(4)
+    if unit in ('µs', 'us'): val *= 1000
+    elif unit == 'ms': val *= 1_000_000
+    d = enc if op == 'encrypt' else dec
+    d[size] = int(val)
+print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
+" > "$RESULTS_DIR/01_Rust_native"
+                    ;;
+                cold)
+                    log "Running Rust MySQL cold benchmark (Criterion)..."
+                    python3 -c "
+import re, sys
+text = open('$RESULTS_DIR/criterion_native.log').read()
+dec = {}
+for m in re.finditer(r'mysql_cold_decrypt/mysql/(\d+)\s.*?time:\s+\[[\d.]+ \w+ ([\d.]+) (ns|µs|us|ms)', text, re.S):
+    size, val, unit = int(m.group(1)), float(m.group(2)), m.group(3)
+    if unit in ('µs', 'us'): val *= 1000
+    elif unit == 'ms': val *= 1_000_000
+    dec[size] = int(val)
+print(0, 0, 0, dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
+" > "$RESULTS_DIR/01_Rust_native"
+                    ;;
+            esac
+        else
+            skip "Rust MySQL $BENCH_MODE benchmark failed (see log): $(tail -5 "$RESULTS_DIR/criterion_native.log" 2>/dev/null)"
+        fi
+    fi
 fi
 
 ########################################################################
@@ -166,6 +403,7 @@ fi
 ########################################################################
 
 if [ "$HAVE_DOTNET" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
+    ensure_mysql_alive
     log "Running .NET benchmark (BenchmarkDotNet)..."
     if dotnet run --project "$BENCH_DIR/dotnet-bench" -c Release > "$RESULTS_DIR/bdn.log" 2>&1; then
         python3 -c "
@@ -214,6 +452,7 @@ fi
 ########################################################################
 
 if [ "$HAVE_JAVA" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
+    ensure_mysql_alive
     log "Building Java FFI benchmark (JMH)..."
     # Build the asherah-java JAR and install to local Maven repo
     mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package -q 2>&1
@@ -273,6 +512,7 @@ fi
 ########################################################################
 
 if [ "$HAVE_GO" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
+    ensure_mysql_alive
     log "Running Go FFI benchmark (testing.B)..."
     (cd "$BENCH_DIR/go-bench" && go mod tidy 2>&1) || true
     if (cd "$BENCH_DIR/go-bench" && CGO_ENABLED=0 ASHERAH_GO_NATIVE="$FFI_LIB_DIR" \
@@ -350,6 +590,7 @@ fi
 ########################################################################
 
 if [ "$HAVE_PYTHON" = 1 ]; then
+    ensure_mysql_alive
     log "Running Python FFI benchmark (timeit)..."
     python3 "$BENCH_DIR/python-bench/bench.py" > "$RESULTS_DIR/python.log" 2>&1
     python3 -c "
@@ -384,10 +625,14 @@ print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(10
 }
 
 if [ "$HAVE_RUBY" = 1 ]; then
+    ensure_mysql_alive
     log "Running Ruby FFI benchmark (benchmark-ips)..."
-    ASHERAH_RUBY_NATIVE="$FFI_LIB_DIR" $RUBY_CMD -I "$ROOT_DIR/asherah-ruby/lib" \
-        "$BENCH_DIR/ruby-bench/bench_ffi.rb" > "$RESULTS_DIR/ruby_ffi.log"
-    parse_ruby_ips "$RESULTS_DIR/ruby_ffi.log" > "$RESULTS_DIR/06_Ruby_FFI"
+    if ASHERAH_RUBY_NATIVE="$FFI_LIB_DIR" $RUBY_CMD -I "$ROOT_DIR/asherah-ruby/lib" \
+        "$BENCH_DIR/ruby-bench/bench_ffi.rb" > "$RESULTS_DIR/ruby_ffi.log" 2>&1; then
+        parse_ruby_ips "$RESULTS_DIR/ruby_ffi.log" > "$RESULTS_DIR/06_Ruby_FFI"
+    else
+        skip "Ruby FFI benchmark failed (see log): $(tail -5 "$RESULTS_DIR/ruby_ffi.log" 2>/dev/null)"
+    fi
 else
     skip "Ruby benchmark-ips or ffi gem not available"
 fi
@@ -397,9 +642,14 @@ fi
 ########################################################################
 
 if [ "$HAVE_RUBY_CANONICAL" = 1 ]; then
+    ensure_mysql_alive
     log "Running Ruby Canonical benchmark (benchmark-ips)..."
-    $RUBY_CMD "$BENCH_DIR/ruby-bench/bench_canonical.rb" > "$RESULTS_DIR/ruby_canon.log" 2>/dev/null
-    parse_ruby_ips "$RESULTS_DIR/ruby_canon.log" > "$RESULTS_DIR/95_Canon._Ruby_(Cobhan)"
+    if BENCH_MYSQL_URL="$BENCH_MYSQL_DSN" MYSQL_URL="$BENCH_MYSQL_DSN" \
+        $RUBY_CMD "$BENCH_DIR/ruby-bench/bench_canonical.rb" > "$RESULTS_DIR/ruby_canon.log" 2>&1; then
+        parse_ruby_ips "$RESULTS_DIR/ruby_canon.log" > "$RESULTS_DIR/95_Canon._Ruby_(Cobhan)"
+    else
+        skip "Ruby Canonical benchmark failed (see log): $(tail -5 "$RESULTS_DIR/ruby_canon.log" 2>/dev/null)"
+    fi
 fi
 
 ########################################################################
@@ -407,21 +657,77 @@ fi
 ########################################################################
 
 run_node_bench() {
-    local pkg=$1 config=$2
+    local pkg=$1 flavor=$2
     node -e "
 const { Bench } = require('tinybench');
 const asherah = require('$pkg');
-asherah.setup($config);
-const p = 'bench-partition';
+const mode = (process.env.BENCH_MODE || 'memory').toLowerCase();
+const mysqlUrl = process.env.BENCH_MYSQL_URL || process.env.MYSQL_URL || '';
+const partitionPoolSize = Number.parseInt(process.env.BENCH_PARTITION_POOL || '2048', 10);
+const warmSessionCacheMax = Number.parseInt(process.env.BENCH_WARM_SESSION_CACHE_MAX || '4096', 10);
+if (!Number.isFinite(partitionPoolSize) || partitionPoolSize < 1) {
+  throw new Error('BENCH_PARTITION_POOL must be a positive integer');
+}
+if (!Number.isFinite(warmSessionCacheMax) || warmSessionCacheMax < 1) {
+  throw new Error('BENCH_WARM_SESSION_CACHE_MAX must be a positive integer');
+}
+const isFfi = '$flavor' === 'ffi';
+const serviceName = isFfi ? 'bench-svc' : 'bench-canon-svc';
+const productId = isFfi ? 'bench-prod' : 'bench-canon-prod';
+const partitionPrefix = isFfi ? 'bench' : 'bench-canon';
+const config = isFfi
+  ? { serviceName, productId, kms: 'static', enableSessionCaching: true }
+  : { ServiceName: serviceName, ProductID: productId, KMS: 'static', EnableSessionCaching: true };
+if (!['memory', 'hot', 'warm', 'cold'].includes(mode)) {
+  throw new Error('invalid BENCH_MODE=' + mode + ' (expected memory/hot/warm/cold)');
+}
+if (mode !== 'memory') {
+  if (!mysqlUrl) throw new Error(mode + ' mode requires BENCH_MYSQL_URL/MYSQL_URL');
+  if (isFfi) {
+    config.metastore = 'rdbms';
+    config.connectionString = mysqlUrl;
+    if (mode === 'warm') config.sessionCacheMaxSize = warmSessionCacheMax;
+    if (mode === 'cold') config.enableSessionCaching = false;
+  } else {
+    config.Metastore = 'rdbms';
+    config.ConnectionString = mysqlUrl;
+    if (mode === 'warm') config.SessionCacheMaxSize = warmSessionCacheMax;
+    if (mode === 'cold') config.EnableSessionCaching = false;
+  }
+} else {
+  if (isFfi) config.metastore = 'memory';
+  else config.Metastore = 'memory';
+}
+asherah.setup(config);
 async function run() {
   for (const size of [64, 1024, 8192]) {
     const payload = Buffer.alloc(size, 0x41);
-    const ct = asherah.encrypt(p, payload);
-    const pt = asherah.decrypt(p, ct);
-    if (!payload.equals(pt)) throw new Error('verify failed ' + size);
     const bench = new Bench({ warmupIterations: 1000, iterations: 5000 });
-    bench.add('encrypt ' + size, () => { asherah.encrypt(p, payload); });
-    bench.add('decrypt ' + size, () => { asherah.decrypt(p, ct); });
+    if (mode === 'memory' || mode === 'hot' || mode === 'warm') {
+      const partition = partitionPrefix + '-partition';
+      const ct = asherah.encrypt(partition, payload);
+      const pt = asherah.decrypt(partition, ct);
+      if (!payload.equals(pt)) throw new Error('verify failed ' + size);
+      bench.add('encrypt ' + size, () => { asherah.encrypt(partition, payload); });
+      bench.add('decrypt ' + size, () => { asherah.decrypt(partition, ct); });
+    } else {
+      const partitions = Array.from({ length: partitionPoolSize }, (_, i) => partitionPrefix + '-' + mode + '-' + size + '-' + i);
+      const ciphertexts = partitions.map((partition) => asherah.encrypt(partition, payload));
+      const pt = asherah.decrypt(partitions[0], ciphertexts[0]);
+      if (!payload.equals(pt)) throw new Error('verify failed ' + size);
+      let encIdx = 0;
+      let decIdx = 0;
+      bench.add('encrypt ' + size, () => {
+        const idx = encIdx % partitions.length;
+        encIdx += 1;
+        asherah.encrypt(partitions[idx], payload);
+      });
+      bench.add('decrypt ' + size, () => {
+        const idx = decIdx % partitions.length;
+        decIdx += 1;
+        asherah.decrypt(partitions[idx], ciphertexts[idx]);
+      });
+    }
     await bench.run();
     for (const t of bench.tasks) {
       console.log(t.name + ' ' + Math.round(t.result.latency.mean * 1e6));
@@ -435,22 +741,26 @@ run();
 
 parse_node_bench() {
     python3 -c "
+import re
 enc, dec = {}, {}
 for line in open('$1'):
-    parts = line.strip().split()
-    if len(parts) == 3:
-        op, size, val = parts[0], int(parts[1]), int(parts[2])
+    m = re.match(r'^(encrypt|decrypt)\s+(\d+)\s+(\d+)\s*$', line.strip())
+    if m:
+        op, size, val = m.group(1), int(m.group(2)), int(m.group(3))
         (enc if op == 'encrypt' else dec)[size] = val
 print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
 "
 }
 
 if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/asherah-node-bench/node_modules/tinybench" ]; then
+    ensure_mysql_alive
     log "Running Node.js FFI benchmark (tinybench)..."
-    (cd "$BENCH_DIR/asherah-node-bench" && run_node_bench "asherah-node" \
-        "{ serviceName: 'bench-svc', productId: 'bench-prod', metastore: 'memory', kms: 'static', enableSessionCaching: false }") \
-        > "$RESULTS_DIR/node_ffi.log"
-    parse_node_bench "$RESULTS_DIR/node_ffi.log" > "$RESULTS_DIR/07_Node.js_FFI"
+    if (cd "$BENCH_DIR/asherah-node-bench" && run_node_bench "asherah-node" "ffi") \
+        > "$RESULTS_DIR/node_ffi.log" 2>&1; then
+        parse_node_bench "$RESULTS_DIR/node_ffi.log" > "$RESULTS_DIR/07_Node.js_FFI"
+    else
+        skip "Node.js FFI benchmark failed (see log): $(tail -5 "$RESULTS_DIR/node_ffi.log" 2>/dev/null)"
+    fi
 else
     skip "Node.js FFI not available (run: cd benchmarks/asherah-node-bench && npm install tinybench)"
 fi
@@ -460,11 +770,14 @@ fi
 ########################################################################
 
 if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/node-bench-canonical/node_modules/tinybench" ]; then
+    ensure_mysql_alive
     log "Running Node.js Canonical benchmark (tinybench)..."
-    (cd "$BENCH_DIR/node-bench-canonical" && run_node_bench "asherah" \
-        "{ ServiceName: 'bench-svc', ProductID: 'bench-prod', Metastore: 'memory', KMS: 'static', EnableSessionCaching: false }") \
-        2>&1 | grep -v 'asherah-cobhan:' > "$RESULTS_DIR/node_canon.log"
-    parse_node_bench "$RESULTS_DIR/node_canon.log" > "$RESULTS_DIR/96_Canon._Node.js_(Cobhan)"
+    if (cd "$BENCH_DIR/node-bench-canonical" && BENCH_MYSQL_URL="$BENCH_MYSQL_DSN" MYSQL_URL="$BENCH_MYSQL_DSN" \
+        run_node_bench "asherah" "canonical") > "$RESULTS_DIR/node_canon.log" 2>&1; then
+        parse_node_bench "$RESULTS_DIR/node_canon.log" > "$RESULTS_DIR/96_Canon._Node.js_(Cobhan)"
+    else
+        skip "Node.js Canonical benchmark failed (see log): $(tail -5 "$RESULTS_DIR/node_canon.log" 2>/dev/null)"
+    fi
 fi
 
 ########################################################################
