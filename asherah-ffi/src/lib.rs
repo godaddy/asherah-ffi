@@ -135,7 +135,10 @@ pub unsafe extern "C" fn asherah_factory_free(ptr: *mut AsherahFactory) {
     drop(Box::from_raw(ptr));
 }
 
-unsafe fn cstr_to_str<'str>(s: *const c_char) -> Result<&'str str, anyhow::Error> {
+/// # Safety
+/// `s` must point to a valid null-terminated C string that remains valid for the
+/// returned reference's lifetime.
+unsafe fn cstr_to_str<'ptr>(s: *const c_char) -> Result<&'ptr str, anyhow::Error> {
     if s.is_null() {
         return Err(anyhow::anyhow!("null string"));
     }
