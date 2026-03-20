@@ -613,6 +613,8 @@ if [ "$HAVE_RUBY" = 1 ]; then
     log "Running Ruby FFI benchmark (benchmark-ips)..."
     if ASHERAH_RUBY_NATIVE="$FFI_LIB_DIR" $RUBY_CMD -I "$ROOT_DIR/asherah-ruby/lib" \
         "$BENCH_DIR/ruby-bench/bench_ffi.rb" > "$RESULTS_DIR/ruby_ffi.log" 2>/dev/null; then
+        # Debug: show raw result lines
+        grep 'i/s' "$RESULTS_DIR/ruby_ffi.log" | grep -E 'encrypt|decrypt' >&2
         parse_ruby_ips "$RESULTS_DIR/ruby_ffi.log" > "$RESULTS_DIR/06_Ruby_FFI"
     else
         skip "Ruby FFI benchmark failed (see log): $(tail -5 "$RESULTS_DIR/ruby_ffi.log" 2>/dev/null)"
