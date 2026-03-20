@@ -164,7 +164,7 @@ public class AsherahBenchmark {
 
     @Benchmark
     public byte[] decrypt() {
-        if (benchmarkMode.equals("cold")) {
+        if (benchmarkMode.equals("warm") || benchmarkMode.equals("cold")) {
             int idx = decryptPoolIndex;
             decryptPoolIndex = (decryptPoolIndex + 1) % partitionPool.length;
             return Asherah.decrypt(partitionPool[idx], ciphertextPool[idx]);
