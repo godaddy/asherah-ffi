@@ -95,7 +95,7 @@ def main():
 
     for size in SIZES:
         payload = os.urandom(size)
-        if mode == "cold":
+        if mode in ("warm", "cold"):
             partitions = [f"bench-{mode}-{size}-{i}" for i in range(PARTITION_POOL_SIZE)]
             ciphertexts = [asherah.encrypt_bytes(partition, payload) for partition in partitions]
             recovered = asherah.decrypt_bytes(partitions[0], ciphertexts[0])

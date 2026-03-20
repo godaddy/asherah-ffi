@@ -57,7 +57,7 @@ SIZES = [64, 1024, 8192]
 
 SIZES.each do |size|
   payload = Random.bytes(size)
-  if mode == "cold"
+  if mode == "warm" || mode == "cold"
     partitions = Array.new(partition_pool_size) { |i| "bench-#{mode}-#{size}-#{i}" }
     ciphertexts = partitions.map { |partition| Asherah.encrypt(partition, payload) }
     recovered = Asherah.decrypt(partitions[0], ciphertexts[0])

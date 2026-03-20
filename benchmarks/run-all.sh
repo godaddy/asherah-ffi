@@ -676,7 +676,7 @@ async function run() {
   for (const size of [64, 1024, 8192]) {
     const payload = Buffer.alloc(size, 0x41);
     const bench = new Bench({ warmupIterations: 1000, iterations: 5000 });
-    if (mode === 'memory' || mode === 'hot' || mode === 'warm') {
+    if (mode === 'memory' || mode === 'hot') {
       const partition = partitionPrefix + '-partition';
       const ct = asherah.encrypt(partition, payload);
       const pt = asherah.decrypt(partition, ct);

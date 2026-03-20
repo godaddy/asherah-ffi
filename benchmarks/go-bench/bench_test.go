@@ -188,7 +188,7 @@ func BenchmarkEncrypt(b *testing.B) {
 		b.Run(fmt.Sprintf("%dB", size), func(b *testing.B) {
 			b.ReportAllocs()
 			partitions := []string{"bench-partition"}
-			if benchmarkMode == "cold" {
+			if benchmarkMode == "warm" || benchmarkMode == "cold" {
 				partitions = buildPartitions("enc", size)
 				// Pre-encrypt so IKs exist in MySQL; benchmark measures
 				// cache-miss load_latest, not IK creation.
@@ -220,7 +220,7 @@ func BenchmarkDecrypt(b *testing.B) {
 			partitions := []string{"bench-partition"}
 			cts := make([][]byte, 1)
 
-			if benchmarkMode == "cold" {
+			if benchmarkMode == "warm" || benchmarkMode == "cold" {
 				partitions = buildPartitions("dec", size)
 				cts = make([][]byte, len(partitions))
 				for i, partition := range partitions {
