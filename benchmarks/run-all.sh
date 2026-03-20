@@ -401,7 +401,8 @@ if not results:
     lines = open('$RESULTS_DIR/bdn.log').readlines()
     for line in lines[-30:]:
         print('  ' + line.rstrip(), file=sys.stderr)
-for name, fname in [('Rust FFI', '02_.NET_FFI'), ('Canonical C# v0.2.10', '90_Canonical_C#_v0.2.10')]:
+canon_pairs = [('Canonical C# v0.2.10', '90_Canonical_C#_v0.2.10')] if '$BENCH_MODE' != 'cold' else []
+for name, fname in [('Rust FFI', '02_.NET_FFI')] + canon_pairs:
     d = results.get(name, {})
     e, dc = d.get('Encrypt', {}), d.get('Decrypt', {})
     with open('$RESULTS_DIR/' + fname, 'w') as f:
@@ -451,7 +452,7 @@ fi
 # Java Canonical (JMH)
 ########################################################################
 
-if [ "$HAVE_JAVA" = 1 ]; then
+if [ "$HAVE_JAVA" = 1 ] && [ "$BENCH_MODE" != "cold" ]; then
     if [ ! -d /tmp/asherah-canonical/java ]; then
         log "Cloning canonical asherah repo (run --setup to pre-fetch)..."
         git clone --depth 1 https://github.com/godaddy/asherah.git /tmp/asherah-canonical 2>&1 | tail -1
@@ -508,7 +509,7 @@ fi
 # Go Canonical (testing.B)
 ########################################################################
 
-if [ "$HAVE_GO" = 1 ]; then
+if [ "$HAVE_GO" = 1 ] && [ "$BENCH_MODE" != "cold" ]; then
     log "Running Go Canonical benchmark (testing.B)..."
     (cd "$BENCH_DIR/native-bench/go-bench" && go mod tidy 2>&1) || true
     (cd "$BENCH_DIR/native-bench/go-bench" && go test -bench=. -benchmem -count=3 -benchtime=3s ./... 2>&1) \
@@ -613,7 +614,7 @@ fi
 # Ruby Canonical (benchmark-ips)
 ########################################################################
 
-if [ "$HAVE_RUBY_CANONICAL" = 1 ]; then
+if [ "$HAVE_RUBY_CANONICAL" = 1 ] && [ "$BENCH_MODE" != "cold" ]; then
     ensure_mysql_alive
     log "Running Ruby Canonical benchmark (benchmark-ips)..."
     if BENCH_MYSQL_URL="$BENCH_MYSQL_DSN" MYSQL_URL="$BENCH_MYSQL_DSN" \
@@ -741,7 +742,7 @@ fi
 # Node.js Canonical (tinybench)
 ########################################################################
 
-if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/node-bench-canonical/node_modules/tinybench" ]; then
+if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/node-bench-canonical/node_modules/tinybench" ] && [ "$BENCH_MODE" != "cold" ]; then
     ensure_mysql_alive
     log "Running Node.js Canonical benchmark (tinybench)..."
     if (cd "$BENCH_DIR/node-bench-canonical" && BENCH_MYSQL_URL="$BENCH_MYSQL_DSN" MYSQL_URL="$BENCH_MYSQL_DSN" \
