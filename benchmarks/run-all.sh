@@ -208,7 +208,7 @@ start_mysql_container() {
     fi
 
     if ! docker exec "$MYSQL_CONTAINER_ID" mysql -h 127.0.0.1 -u root test -e \
-        "CREATE TABLE IF NOT EXISTS encryption_key (id VARCHAR(255) NOT NULL, created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, key_record TEXT NOT NULL, PRIMARY KEY(id, created), INDEX(created)) ENGINE=InnoDB" \
+        "CREATE TABLE IF NOT EXISTS encryption_key (id VARCHAR(255) NOT NULL, created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, key_record JSON NOT NULL, PRIMARY KEY(id, created), INDEX(created)) ENGINE=InnoDB" \
         >/dev/null; then
         echo "ERROR: failed to create encryption_key table in ephemeral MySQL" >&2
         docker logs "$MYSQL_CONTAINER_ID" 2>/dev/null | tail -20 >&2 || true
