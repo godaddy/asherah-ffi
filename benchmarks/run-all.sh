@@ -254,8 +254,11 @@ compute_mysql_dsn
 export BENCH_MYSQL_DSN
 export MYSQL_URL="$BENCH_MYSQL_URL"
 
-# Cold mode: force IK cache size to 1 so partition rotation guarantees misses
-if [ "$BENCH_MODE" = "cold" ]; then
+# Warm mode: set IK cache to 100 with LRU so ~95% of 2048 partitions miss
+# Cold mode: set IK cache to 1 so every partition access misses
+if [ "$BENCH_MODE" = "warm" ]; then
+    export INTERMEDIATE_KEY_CACHE_MAX_SIZE=100
+elif [ "$BENCH_MODE" = "cold" ]; then
     export INTERMEDIATE_KEY_CACHE_MAX_SIZE=1
 fi
 
