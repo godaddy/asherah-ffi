@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       packages: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v6
@@ -41,6 +42,44 @@ jobs:
           echo "Publishing version: ${VERSION}"
           echo "NUGET_VERSION=${VERSION}" >> "$GITHUB_ENV"
 
+      - name: Download native libraries from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=""
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          else
+            TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+          fi
+          echo "Downloading native libs from release ${TAG}"
+
+          NATIVE_DIR="asherah-dotnet/AsherahDotNet/runtimes"
+
+          mkdir -p "$NATIVE_DIR/linux-x64/native"
+          mkdir -p "$NATIVE_DIR/linux-arm64/native"
+          mkdir -p "$NATIVE_DIR/osx-x64/native"
+          mkdir -p "$NATIVE_DIR/osx-arm64/native"
+          mkdir -p "$NATIVE_DIR/win-x64/native"
+          mkdir -p "$NATIVE_DIR/win-arm64/native"
+
+          gh release download "$TAG" -p 'libasherah-x64.so'    -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-arm64.so'   -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-x64.dylib'  -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-arm64.dylib' -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-x64.dll'    -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-arm64.dll'  -D /tmp/native-dl
+
+          cp /tmp/native-dl/libasherah-x64.so      "$NATIVE_DIR/linux-x64/native/libasherah_ffi.so"
+          cp /tmp/native-dl/libasherah-arm64.so     "$NATIVE_DIR/linux-arm64/native/libasherah_ffi.so"
+          cp /tmp/native-dl/libasherah-x64.dylib    "$NATIVE_DIR/osx-x64/native/libasherah_ffi.dylib"
+          cp /tmp/native-dl/libasherah-arm64.dylib  "$NATIVE_DIR/osx-arm64/native/libasherah_ffi.dylib"
+          cp /tmp/native-dl/libasherah-x64.dll      "$NATIVE_DIR/win-x64/native/asherah_ffi.dll"
+          cp /tmp/native-dl/libasherah-arm64.dll     "$NATIVE_DIR/win-arm64/native/asherah_ffi.dll"
+
+          echo "Native libraries staged:"
+          find "$NATIVE_DIR" -type f
+
       - name: Pack
         working-directory: asherah-dotnet/AsherahDotNet
         run: |
@@ -49,7 +88,13 @@ jobs:
             /p:PackageOutputPath="$GITHUB_WORKSPACE/dist"
 
       - name: List packages
-        run: ls -lh dist/
+        run: |
+          ls -lh dist/
+          echo ""
+          echo "Package contents:"
+          for pkg in dist/*.nupkg; do
+            unzip -l "$pkg" | grep -E 'native|runtimes'
+          done
 
       - name: Publish to GitHub Packages
         if: ${{ github.event_name == 'release' || github.event.inputs.dry_run != 'true' }}
