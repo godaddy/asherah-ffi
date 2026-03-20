@@ -342,69 +342,27 @@ export ASHERAH_GO_NATIVE="$FFI_LIB_DIR"
 
 if [ "$HAVE_RUST" = 1 ]; then
     ensure_mysql_alive
-    if [ "$BENCH_MODE" = "memory" ]; then
-        log "Running Rust native benchmark (Criterion)..."
-        cargo bench --manifest-path "$BENCH_DIR/asherah-bench/Cargo.toml" --bench native 2>&1 \
-            > "$RESULTS_DIR/criterion_native.log"
-        # Parse: extract "group/rust_native/SIZE\n...\ntime:   [low mid high]"
+    log "Running Rust native benchmark (Criterion)..."
+    CRITERION_EXTRA=""
+    if [ "$BENCH_MODE" = "cold" ]; then
+        CRITERION_EXTRA="-- --sample-size 20 --warm-up-time 1"
+    fi
+    if cargo bench --manifest-path "$BENCH_DIR/asherah-bench/Cargo.toml" --bench native $CRITERION_EXTRA 2>&1 \
+        > "$RESULTS_DIR/criterion_native.log"; then
         python3 -c "
 import re, sys
 text = open('$RESULTS_DIR/criterion_native.log').read()
 enc, dec = {}, {}
-for m in re.finditer(r'native_(encrypt|decrypt)/rust_native/(\d+)\s.*?time:\s+\[[\d.]+ \w+ ([\d.]+) (ns|µs)', text, re.S):
+for m in re.finditer(r'native_(encrypt|decrypt)/rust_native/(\d+)\s.*?time:\s+\[[\d.]+ \w+ ([\d.]+) (ns|µs|us|ms)', text, re.S):
     op, size, val, unit = m.group(1), int(m.group(2)), float(m.group(3)), m.group(4)
-    if 'µ' in unit: val *= 1000
+    if unit in ('µs', 'us'): val *= 1000
+    elif unit == 'ms': val *= 1_000_000
     d = enc if op == 'encrypt' else dec
     d[size] = int(val)
 print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
 " > "$RESULTS_DIR/01_Rust_native"
     else
-        RUST_CRITERION_FILTER=""
-        case "$BENCH_MODE" in
-            hot|warm) RUST_CRITERION_FILTER="mysql_hot_" ;;
-            cold)
-                # The Criterion cold benchmark creates a fresh factory per iteration
-                # (including MySQL pool setup ~5ms), not comparable to FFI benchmarks
-                # that keep the factory alive and rotate partitions. Skip.
-                log "Skipping Rust native for cold mode (not comparable to FFI partition-rotation)"
-                ;;
-        esac
-        if [ -n "$RUST_CRITERION_FILTER" ] && cargo bench --manifest-path "$BENCH_DIR/asherah-bench/Cargo.toml" --features mysql --bench mysql_metastore -- "$RUST_CRITERION_FILTER" 2>&1 \
-            > "$RESULTS_DIR/criterion_native.log"; then
-            case "$BENCH_MODE" in
-                hot|warm)
-                    log "Running Rust MySQL hot-cache benchmark (Criterion)..."
-                    python3 -c "
-import re, sys
-text = open('$RESULTS_DIR/criterion_native.log').read()
-enc, dec = {}, {}
-for m in re.finditer(r'mysql_hot_(encrypt|decrypt)/mysql/(\d+)\s.*?time:\s+\[[\d.]+ \w+ ([\d.]+) (ns|µs|us|ms)', text, re.S):
-    op, size, val, unit = m.group(1), int(m.group(2)), float(m.group(3)), m.group(4)
-    if unit in ('µs', 'us'): val *= 1000
-    elif unit == 'ms': val *= 1_000_000
-    d = enc if op == 'encrypt' else dec
-    d[size] = int(val)
-print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
-" > "$RESULTS_DIR/01_Rust_native"
-                    ;;
-                cold)
-                    log "Running Rust MySQL cold benchmark (Criterion)..."
-                    python3 -c "
-import re, sys
-text = open('$RESULTS_DIR/criterion_native.log').read()
-dec = {}
-for m in re.finditer(r'mysql_cold_decrypt/mysql/(\d+)\s.*?time:\s+\[[\d.]+ \w+ ([\d.]+) (ns|µs|us|ms)', text, re.S):
-    size, val, unit = int(m.group(1)), float(m.group(2)), m.group(3)
-    if unit in ('µs', 'us'): val *= 1000
-    elif unit == 'ms': val *= 1_000_000
-    dec[size] = int(val)
-print(0, 0, 0, dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
-" > "$RESULTS_DIR/01_Rust_native"
-                    ;;
-            esac
-        else
-            skip "Rust MySQL $BENCH_MODE benchmark failed (see log): $(tail -5 "$RESULTS_DIR/criterion_native.log" 2>/dev/null)"
-        fi
+        skip "Rust native benchmark failed (see log): $(tail -5 "$RESULTS_DIR/criterion_native.log" 2>/dev/null)"
     fi
 fi
 
