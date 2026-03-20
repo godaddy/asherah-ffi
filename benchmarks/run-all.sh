@@ -596,7 +596,7 @@ if [ "$HAVE_RUBY" = 1 ]; then
     ensure_mysql_alive
     log "Running Ruby FFI benchmark (benchmark-ips)..."
     if ASHERAH_RUBY_NATIVE="$FFI_LIB_DIR" $RUBY_CMD -I "$ROOT_DIR/asherah-ruby/lib" \
-        "$BENCH_DIR/ruby-bench/bench_ffi.rb" > "$RESULTS_DIR/ruby_ffi.log" 2>&1; then
+        "$BENCH_DIR/ruby-bench/bench_ffi.rb" > "$RESULTS_DIR/ruby_ffi.log" 2>/dev/null; then
         parse_ruby_ips "$RESULTS_DIR/ruby_ffi.log" > "$RESULTS_DIR/06_Ruby_FFI"
     else
         skip "Ruby FFI benchmark failed (see log): $(tail -5 "$RESULTS_DIR/ruby_ffi.log" 2>/dev/null)"
