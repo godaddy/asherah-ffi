@@ -190,6 +190,13 @@ func BenchmarkEncrypt(b *testing.B) {
 			partitions := []string{"bench-partition"}
 			if benchmarkMode == "cold" {
 				partitions = buildPartitions("enc", size)
+				// Pre-encrypt so IKs exist in MySQL; benchmark measures
+				// cache-miss load_latest, not IK creation.
+				for _, p := range partitions {
+					if _, err := encryptNonEmpty(p, payload); err != nil {
+						b.Fatal(err)
+					}
+				}
 			}
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
