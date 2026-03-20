@@ -77,7 +77,7 @@ SIZES.each do |size|
     x.stats = :bootstrap
     x.confidence = 95
 
-    if mode == "cold"
+    if mode == "warm" || mode == "cold"
       x.report("encrypt #{size}B") do
         idx = enc_idx % partition_pool_size
         enc_idx += 1
