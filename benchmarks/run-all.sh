@@ -591,15 +591,17 @@ parse_ruby_ips() {
     python3 -c "
 import re
 enc, dec = {}, {}
-for line in open('$1'):
-    m = re.search(r'(encrypt|decrypt) (\d+)B.*\(([\d.]+) (.)s/i\)', line)
-    if m:
-        op, size, val, unit = m.group(1), int(m.group(2)), float(m.group(3)), m.group(4)
-        if unit == 'm':
-            ns = int(val * 1_000_000)
-        else:
-            ns = int(val * 1000)  # µs -> ns
-        (enc if op == 'encrypt' else dec)[size] = ns
+# Read entire file and normalize: remove any non-benchmark text that may have
+# been injected mid-line (e.g. Ruby gem warnings on stderr leaking into stdout).
+text = open('$1').read()
+# Match only the result lines with i/s and (time/i) — not warmup lines
+for m in re.finditer(r'(encrypt|decrypt) (\d+)B\s+[\d.]+k?\s+\([^)]+\)\s+i/s\s+\(([\d.]+)\s+(.)s/i\)', text):
+    op, size, val, unit = m.group(1), int(m.group(2)), float(m.group(3)), m.group(4)
+    if unit == 'm':
+        ns = int(val * 1_000_000)
+    else:
+        ns = int(val * 1000)
+    (enc if op == 'encrypt' else dec)[size] = ns
 print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
 "
 }
