@@ -254,6 +254,11 @@ compute_mysql_dsn
 export BENCH_MYSQL_DSN
 export MYSQL_URL="$BENCH_MYSQL_URL"
 
+# Cold mode: force IK cache size to 1 so partition rotation guarantees misses
+if [ "$BENCH_MODE" = "cold" ]; then
+    export INTERMEDIATE_KEY_CACHE_MAX_SIZE=1
+fi
+
 RESULTS_DIR=$(mktemp -d)
 cleanup() {
     if [ "$MYSQL_STARTED_BY_SCRIPT" = "1" ] && [ -n "$MYSQL_CONTAINER_ID" ]; then
@@ -357,9 +362,14 @@ print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(10
         RUST_CRITERION_FILTER=""
         case "$BENCH_MODE" in
             hot|warm) RUST_CRITERION_FILTER="mysql_hot_" ;;
-            cold) RUST_CRITERION_FILTER="mysql_cold_decrypt" ;;
+            cold)
+                # The Criterion cold benchmark creates a fresh factory per iteration
+                # (including MySQL pool setup ~5ms), not comparable to FFI benchmarks
+                # that keep the factory alive and rotate partitions. Skip.
+                log "Skipping Rust native for cold mode (not comparable to FFI partition-rotation)"
+                ;;
         esac
-        if cargo bench --manifest-path "$BENCH_DIR/asherah-bench/Cargo.toml" --features mysql --bench mysql_metastore -- "$RUST_CRITERION_FILTER" 2>&1 \
+        if [ -n "$RUST_CRITERION_FILTER" ] && cargo bench --manifest-path "$BENCH_DIR/asherah-bench/Cargo.toml" --features mysql --bench mysql_metastore -- "$RUST_CRITERION_FILTER" 2>&1 \
             > "$RESULTS_DIR/criterion_native.log"; then
             case "$BENCH_MODE" in
                 hot|warm)
