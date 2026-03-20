@@ -1,0 +1,10 @@
+name: "Benchmark: Cold (MySQL cold-cache)"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    uses: ./.github/workflows/benchmark-setup.yml
+    with:
+      bench_mode: cold

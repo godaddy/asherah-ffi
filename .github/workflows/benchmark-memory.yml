@@ -1,0 +1,10 @@
+name: "Benchmark: Memory (in-memory hot-cache)"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    uses: ./.github/workflows/benchmark-setup.yml
+    with:
+      bench_mode: memory

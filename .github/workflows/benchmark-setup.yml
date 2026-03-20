@@ -1,11 +1,29 @@
-name: Benchmark
+name: Benchmark Setup
 
 on:
-  workflow_dispatch:
+  workflow_call:
+    inputs:
+      bench_mode:
+        required: true
+        type: string
+        description: "Benchmark mode: memory, hot, warm, or cold"
 
 jobs:
   benchmark:
     runs-on: ubuntu-22.04
+    services:
+      mysql:
+        image: mysql:8.1
+        env:
+          MYSQL_DATABASE: test
+          MYSQL_ALLOW_EMPTY_PASSWORD: yes
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - uses: actions/checkout@v6
 
@@ -75,36 +93,36 @@ jobs:
           cd asherah-node
           npm install
           npx @napi-rs/cli build --release --platform linux-x64-gnu --target x86_64-unknown-linux-gnu
-          # Place the built addon where the loader expects it
           mkdir -p npm/linux-x64-gnu
-          # napi-rs may output to cwd or elsewhere depending on version; search for it
           NODE_FILE=$(find . target -maxdepth 4 -name '*.node' -newer package.json 2>/dev/null | head -1)
           if [ -n "$NODE_FILE" ]; then
             cp "$NODE_FILE" npm/linux-x64-gnu/index.linux-x64-gnu.node
-            echo "Copied $NODE_FILE to npm/linux-x64-gnu/"
           else
             echo "WARNING: No .node file found after napi build"
             find . -name '*.node' 2>/dev/null
           fi
-          ls -la npm/linux-x64-gnu/
 
       - name: Tidy Go modules
-        run: |
-          cd benchmarks/go-bench && go mod tidy
+        run: cd benchmarks/go-bench && go mod tidy
 
-      - name: Verify Go FFI binding
-        env:
-          STATIC_MASTER_KEY_HEX: "2222222222222222222222222222222222222222222222222222222222222222"
-          ASHERAH_GO_NATIVE: ${{ github.workspace }}/target/release
+      - name: Create MySQL schema
+        if: inputs.bench_mode != 'memory'
         run: |
-          cd benchmarks/go-bench
-          CGO_ENABLED=0 go test -v -run TestMain -count=1 ./... || true
-          CGO_ENABLED=0 go test -v -bench=BenchmarkEncrypt/64B -benchtime=1x -count=1 ./... || true
+          mysql -h 127.0.0.1 -u root test -e \
+            "CREATE TABLE IF NOT EXISTS encryption_key (
+              id VARCHAR(255) NOT NULL,
+              created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              key_record TEXT NOT NULL,
+              PRIMARY KEY(id, created),
+              INDEX(created)
+            ) ENGINE=InnoDB"
 
       - name: Run benchmarks
         env:
-          STATIC_MASTER_KEY_HEX: "2222222222222222222222222222222222222222222222222222222222222222"
+          BENCH_MODE: ${{ inputs.bench_mode }}
+          BENCH_MYSQL_URL: ${{ inputs.bench_mode != 'memory' && 'mysql://root@127.0.0.1:3306/test' || '' }}
+          STATIC_MASTER_KEY_HEX: "746869734973415374617469634d61737465724b6579466f7254657374696e67"
           ASHERAH_DOTNET_NATIVE: ${{ github.workspace }}/target/release
           ASHERAH_RUBY_NATIVE: ${{ github.workspace }}/target/release
           ASHERAH_GO_NATIVE: ${{ github.workspace }}/target/release
-        run: benchmarks/run-all.sh
+        run: benchmarks/run-all.sh --${{ inputs.bench_mode }}
