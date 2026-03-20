@@ -27,13 +27,24 @@ fn bench_encrypt(c: &mut Criterion) {
         rng.fill_bytes(&mut data);
 
         if cold {
-            // Cold: unique partition per iteration, IK cache miss every time
+            // Cold: pre-encrypt on pool of partitions so IKs exist in metastore,
+            // then benchmark with IK cache=1 so every access is a cache miss
+            // measuring load_latest cost, not IK creation cost.
+            let pool_size = 2048_usize;
+            let partitions: Vec<String> = (0..pool_size)
+                .map(|i| format!("cold-enc-{size}-{i}"))
+                .collect();
+            for p in &partitions {
+                let session = factory.get_session(p);
+                let _ = session.encrypt(&data).expect("pre-encrypt");
+                session.close().ok();
+            }
+
             let ctr = AtomicUsize::new(0);
             group.bench_function(BenchmarkId::new("rust_native", size), |b| {
                 b.iter(|| {
-                    let i = ctr.fetch_add(1, Ordering::Relaxed);
-                    let partition = format!("cold-enc-{size}-{i}");
-                    let session = factory.get_session(&partition);
+                    let i = ctr.fetch_add(1, Ordering::Relaxed) % pool_size;
+                    let session = factory.get_session(&partitions[i]);
                     let result =
                         black_box(session.encrypt(black_box(&data)).expect("encrypt"));
                     session.close().ok();
