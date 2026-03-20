@@ -252,7 +252,11 @@ export BENCH_MODE
 export BENCH_MYSQL_URL
 compute_mysql_dsn
 export BENCH_MYSQL_DSN
-export MYSQL_URL="$BENCH_MYSQL_URL"
+if [ -n "$BENCH_MYSQL_URL" ]; then
+    export MYSQL_URL="$BENCH_MYSQL_URL"
+else
+    unset MYSQL_URL 2>/dev/null || true
+fi
 
 # Warm mode: set IK cache to 100 with LRU so ~95% of 2048 partitions miss
 # Cold mode: set IK cache to 1 so every partition access misses
