@@ -315,6 +315,8 @@ RUBY_CMD="ruby"
 if [ -x "/opt/homebrew/opt/ruby/bin/ruby" ]; then
     export PATH="/opt/homebrew/opt/ruby/bin:/opt/homebrew/lib/ruby/gems/4.0.0/bin:$PATH"
 fi
+# Auto-fix stale gem extensions that produce "Ignoring" warnings which corrupt benchmark output
+$RUBY_CMD -e 'exit' 2>&1 | grep -q 'Ignoring' && gem pristine --all --no-extensions 2>/dev/null
 HAVE_RUBY=0; $RUBY_CMD -e 'require "benchmark/ips"; require "ffi"' 2>/dev/null && HAVE_RUBY=1
 HAVE_RUBY_CANONICAL=0; $RUBY_CMD -e 'require "asherah"; require "benchmark/ips"' 2>/dev/null && HAVE_RUBY_CANONICAL=1
 
