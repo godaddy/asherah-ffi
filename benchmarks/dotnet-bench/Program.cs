@@ -104,7 +104,7 @@ public class AsherahBenchmark
         _payload = new byte[PayloadSize];
         Random.Shared.NextBytes(_payload);
         _canonicalCiphertext = _canonicalSession.Encrypt(_payload);
-        if (_mode != "cold")
+        if (_mode is "memory" or "hot")
         {
             _ffiCiphertext = GoDaddy.Asherah.Asherah.Encrypt(PartitionId, _payload);
             _ffiPartitionPool = Array.Empty<string>();
@@ -130,7 +130,7 @@ public class AsherahBenchmark
         var canonicalDecrypted = _canonicalSession.Decrypt(_canonicalCiphertext);
         if (!canonicalDecrypted.AsSpan().SequenceEqual(_payload))
             throw new Exception($"Canonical C# round-trip verification failed for {PayloadSize}B");
-        var ffiDecrypted = _mode != "cold"
+        var ffiDecrypted = _mode is "memory" or "hot"
             ? GoDaddy.Asherah.Asherah.Decrypt(PartitionId, _ffiCiphertext)
             : GoDaddy.Asherah.Asherah.Decrypt(_ffiPartitionPool[0], _ffiCiphertextPool[0]);
         if (!ffiDecrypted.AsSpan().SequenceEqual(_payload))
@@ -153,7 +153,7 @@ public class AsherahBenchmark
     [Benchmark(Description = "Rust FFI"), BenchmarkCategory("Encrypt")]
     public byte[] RustFfiEncrypt()
     {
-        if (_mode != "cold")
+        if (_mode is "memory" or "hot")
             return GoDaddy.Asherah.Asherah.Encrypt(PartitionId, _payload);
 
         var idx = _ffiEncryptPoolIndex;
@@ -167,7 +167,7 @@ public class AsherahBenchmark
     [Benchmark(Description = "Rust FFI"), BenchmarkCategory("Decrypt")]
     public byte[] RustFfiDecrypt()
     {
-        if (_mode != "cold")
+        if (_mode is "memory" or "hot")
             return GoDaddy.Asherah.Asherah.Decrypt(PartitionId, _ffiCiphertext);
 
         var idx = _ffiDecryptPoolIndex;

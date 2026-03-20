@@ -3,13 +3,16 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-fn is_cold() -> bool {
-    std::env::var("BENCH_MODE").ok().as_deref() == Some("cold")
+fn uses_partition_rotation() -> bool {
+    matches!(
+        std::env::var("BENCH_MODE").ok().as_deref(),
+        Some("warm" | "cold")
+    )
 }
 
 fn bench_encrypt(c: &mut Criterion) {
     let factory = builders::factory_from_env().expect("factory setup");
-    let cold = is_cold();
+    let cold = uses_partition_rotation();
 
     let mut rng = StdRng::seed_from_u64(12345);
     let sizes = [64, 1024, 8192];
@@ -70,7 +73,7 @@ fn bench_encrypt(c: &mut Criterion) {
 
 fn bench_decrypt(c: &mut Criterion) {
     let factory = builders::factory_from_env().expect("factory setup");
-    let cold = is_cold();
+    let cold = uses_partition_rotation();
 
     let mut rng = StdRng::seed_from_u64(67890);
     let sizes = [64, 1024, 8192];
@@ -132,7 +135,7 @@ fn bench_decrypt(c: &mut Criterion) {
 
 fn bench_decrypt_from_json(c: &mut Criterion) {
     // Only run in non-cold mode
-    if is_cold() {
+    if uses_partition_rotation() {
         return;
     }
     let factory = builders::factory_from_env().expect("factory setup");
