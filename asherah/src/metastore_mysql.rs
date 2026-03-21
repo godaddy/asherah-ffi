@@ -179,9 +179,7 @@ impl Metastore for MySqlMetastore {
         ekr: &EnvelopeKeyRecord,
     ) -> Result<bool, anyhow::Error> {
         log::debug!("mysql store: id={id} created={created}");
-        let rec = serde_json::to_string(ekr).context(format!(
-            "MySQL store: failed to serialize key_record for id={id}"
-        ))?;
+        let rec = ekr.to_json_fast();
         let mut conn = self.conn()?;
         let ts = epoch_to_utc_datetime(created);
         conn.exec_drop(
