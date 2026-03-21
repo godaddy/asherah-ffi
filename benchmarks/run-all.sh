@@ -265,8 +265,8 @@ reset_mysql() {
                     || log "WARNING: could not reset external MySQL table (ensure the mysql CLI is installed)"
                 ;;
             *)
-                log "WARNING: refusing to DROP TABLE on database '$db_name' — name must contain 'test', 'bench', or 'tmp'. Truncating instead."
-                mysql_exec_url "TRUNCATE TABLE encryption_key" || true
+                echo "ERROR: refusing to modify encryption_key in database '$db_name' — name must contain 'test', 'bench', or 'tmp'" >&2
+                exit 2
                 ;;
         esac
         return
