@@ -220,16 +220,42 @@ start_mysql_container() {
     log "Using ephemeral MySQL at ${BENCH_MYSQL_URL}"
 }
 
+mysql_exec_url() {
+    # Execute SQL against BENCH_MYSQL_URL using the mysql CLI client.
+    # Parses mysql://user[:pass]@host:port/db URL format.
+    local sql="$1"
+    local url="${BENCH_MYSQL_URL:-}"
+    if [ -z "$url" ]; then return 1; fi
+    local parts
+    parts="$(python3 -c "
+from urllib.parse import urlparse, unquote
+import sys
+u = urlparse(sys.argv[1])
+print(unquote(u.username or 'root'))
+print(unquote(u.password or ''))
+print(u.hostname or '127.0.0.1')
+print(u.port or 3306)
+print((u.path or '/test').lstrip('/') or 'test')
+" "$url" 2>/dev/null)" || return 1
+    local user host port db
+    user="$(echo "$parts" | sed -n '1p')"
+    local pass
+    pass="$(echo "$parts" | sed -n '2p')"
+    host="$(echo "$parts" | sed -n '3p')"
+    port="$(echo "$parts" | sed -n '4p')"
+    db="$(echo "$parts" | sed -n '5p')"
+    local pass_arg=""
+    if [ -n "$pass" ]; then pass_arg="-p$pass"; fi
+    mysql -h "$host" -P "$port" -u "$user" $pass_arg "$db" -e "$sql" 2>/dev/null
+}
+
 reset_mysql() {
     if [ "$BENCH_MODE" = "memory" ]; then
         return
     fi
     if [ "$MYSQL_STARTED_BY_SCRIPT" != "1" ]; then
-        # External MySQL: just truncate the table
-        if [ -n "$MYSQL_CONTAINER_ID" ]; then
-            docker exec "$MYSQL_CONTAINER_ID" mysql -h 127.0.0.1 -u root test -e \
-                "TRUNCATE TABLE encryption_key" >/dev/null 2>&1 || true
-        fi
+        # External MySQL: drop and recreate the table for clean state
+        mysql_exec_url "DROP TABLE IF EXISTS encryption_key; CREATE TABLE encryption_key (id VARCHAR(255) NOT NULL, created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, key_record JSON NOT NULL, PRIMARY KEY(id, created), INDEX(created)) ENGINE=InnoDB" || true
         return
     fi
     # Ephemeral MySQL: nuke and restart for clean buffer pool state
