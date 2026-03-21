@@ -39,6 +39,40 @@ pub struct EnvelopeKeyRecord {
     pub parent_key_meta: Option<KeyMeta>,
 }
 
+impl EnvelopeKeyRecord {
+    /// Hand-written JSON serializer for metastore storage — avoids serde overhead.
+    pub fn to_json_fast(&self) -> String {
+        use base64::Engine;
+        let key_b64 = base64::engine::general_purpose::STANDARD.encode(&self.encrypted_key);
+        // Pre-calculate capacity
+        let mut cap = 30 + key_b64.len(); // {"Created":,"Key":""}
+        if let Some(ref pm) = self.parent_key_meta {
+            cap += 40 + pm.id.len(); // ,"ParentKeyMeta":{"KeyId":"","Created":}
+        }
+        if let Some(true) = self.revoked {
+            cap += 15; // ,"Revoked":true
+        }
+        let mut out = String::with_capacity(cap);
+        out.push_str("{\"Created\":");
+        out.push_str(&self.created.to_string());
+        out.push_str(",\"Key\":\"");
+        out.push_str(&key_b64);
+        out.push('"');
+        if let Some(ref pm) = self.parent_key_meta {
+            out.push_str(",\"ParentKeyMeta\":{\"KeyId\":\"");
+            out.push_str(&pm.id);
+            out.push_str("\",\"Created\":");
+            out.push_str(&pm.created.to_string());
+            out.push('}');
+        }
+        if let Some(true) = self.revoked {
+            out.push_str(",\"Revoked\":true");
+        }
+        out.push('}');
+        out
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DataRowRecord {
     #[serde(rename = "Key")]
@@ -67,7 +101,10 @@ pub(crate) mod serde_base64 {
     where
         D: Deserializer<'de>,
     {
-        let s = String::deserialize(deserializer)?;
+        // Borrow the str directly from the JSON token when possible,
+        // avoiding an intermediate String allocation.
+        let s: std::borrow::Cow<'de, str> =
+            <std::borrow::Cow<'de, str>>::deserialize(deserializer)?;
         base64::engine::general_purpose::STANDARD
             .decode(s.as_bytes())
             .map_err(Error::custom)

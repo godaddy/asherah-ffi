@@ -269,9 +269,7 @@ impl Metastore for PostgresMetastore {
     ) -> Result<bool, anyhow::Error> {
         log::debug!("postgres store: id={id} created={created}");
         let mut c = self.client()?;
-        let v = serde_json::to_string(ekr).context(format!(
-            "Postgres store: failed to serialize key_record for id={id}"
-        ))?;
+        let v = ekr.to_json_fast();
         let created_f = created as f64;
         let v_json: serde_json::Value = serde_json::from_str(&v).context(format!(
             "Postgres store: failed to re-parse key_record JSON for id={id}"
