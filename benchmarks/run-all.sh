@@ -506,7 +506,7 @@ fi
 # Java Canonical (JMH)
 ########################################################################
 
-if [ "$HAVE_JAVA" = 1 ] && [ "$BENCH_MODE" != "cold" && "$BENCH_MODE" != "warm" ]; then
+if [ "$HAVE_JAVA" = 1 ] && [ "$BENCH_MODE" != "cold" ] && [ "$BENCH_MODE" != "warm" ]; then
     if [ ! -d /tmp/asherah-canonical/java ]; then
         log "Cloning canonical asherah repo (run --setup to pre-fetch)..."
         git clone --depth 1 https://github.com/godaddy/asherah.git /tmp/asherah-canonical 2>&1 | tail -1
@@ -563,7 +563,7 @@ fi
 # Go Canonical (testing.B)
 ########################################################################
 
-if [ "$HAVE_GO" = 1 ] && [ "$BENCH_MODE" != "cold" && "$BENCH_MODE" != "warm" ]; then
+if [ "$HAVE_GO" = 1 ] && [ "$BENCH_MODE" != "cold" ] && [ "$BENCH_MODE" != "warm" ]; then
     log "Running Go Canonical benchmark (testing.B)..."
     (cd "$BENCH_DIR/native-bench/go-bench" && go mod tidy 2>&1) || true
     (cd "$BENCH_DIR/native-bench/go-bench" && go test -bench=. -benchmem -count=3 -benchtime=3s ./... 2>&1) \
@@ -670,7 +670,7 @@ fi
 # Ruby Canonical (benchmark-ips)
 ########################################################################
 
-if [ "$HAVE_RUBY_CANONICAL" = 1 ] && [ "$BENCH_MODE" != "cold" && "$BENCH_MODE" != "warm" ]; then
+if [ "$HAVE_RUBY_CANONICAL" = 1 ] && [ "$BENCH_MODE" != "cold" ] && [ "$BENCH_MODE" != "warm" ]; then
     reset_mysql
     log "Running Ruby Canonical benchmark (benchmark-ips)..."
     if BENCH_MYSQL_URL="$BENCH_MYSQL_DSN" MYSQL_URL="$BENCH_MYSQL_DSN" \
@@ -798,7 +798,7 @@ fi
 # Node.js Canonical (tinybench)
 ########################################################################
 
-if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/node-bench-canonical/node_modules/tinybench" ] && [ "$BENCH_MODE" != "cold" && "$BENCH_MODE" != "warm" ]; then
+if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/node-bench-canonical/node_modules/tinybench" ] && [ "$BENCH_MODE" != "cold" ] && [ "$BENCH_MODE" != "warm" ]; then
     reset_mysql
     log "Running Node.js Canonical benchmark (tinybench)..."
     if (cd "$BENCH_DIR/node-bench-canonical" && BENCH_MYSQL_URL="$BENCH_MYSQL_DSN" MYSQL_URL="$BENCH_MYSQL_DSN" \
