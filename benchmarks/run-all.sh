@@ -255,7 +255,20 @@ reset_mysql() {
     fi
     if [ "$MYSQL_STARTED_BY_SCRIPT" != "1" ]; then
         # External MySQL: drop and recreate the table for clean state
-        mysql_exec_url "DROP TABLE IF EXISTS encryption_key; CREATE TABLE encryption_key (id VARCHAR(255) NOT NULL, created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, key_record JSON NOT NULL, PRIMARY KEY(id, created), INDEX(created)) ENGINE=InnoDB" || true
+        # Safety: only drop+recreate if the database name contains 'test' or 'bench'
+        # to avoid accidentally nuking production encryption_key tables.
+        local db_name
+        db_name="$(python3 -c "from urllib.parse import urlparse; print((urlparse('$BENCH_MYSQL_URL').path or '/').lstrip('/') or 'unknown')" 2>/dev/null)"
+        case "$db_name" in
+            *test*|*bench*|*tmp*)
+                mysql_exec_url "DROP TABLE IF EXISTS encryption_key; CREATE TABLE encryption_key (id VARCHAR(255) NOT NULL, created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, key_record JSON NOT NULL, PRIMARY KEY(id, created), INDEX(created)) ENGINE=InnoDB" \
+                    || log "WARNING: could not reset external MySQL table (ensure the mysql CLI is installed)"
+                ;;
+            *)
+                log "WARNING: refusing to DROP TABLE on database '$db_name' — name must contain 'test', 'bench', or 'tmp'. Truncating instead."
+                mysql_exec_url "TRUNCATE TABLE encryption_key" || true
+                ;;
+        esac
         return
     fi
     # Ephemeral MySQL: nuke and restart for clean buffer pool state
