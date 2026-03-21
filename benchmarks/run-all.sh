@@ -208,7 +208,7 @@ start_mysql_container() {
     fi
 
     if ! docker exec "$MYSQL_CONTAINER_ID" mysql -h 127.0.0.1 -u root test -e \
-        "CREATE TABLE IF NOT EXISTS encryption_key (id VARCHAR(255) NOT NULL, created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, key_record JSON NOT NULL, PRIMARY KEY(id, created), INDEX(created)) ENGINE=InnoDB" \
+        "DROP TABLE IF EXISTS encryption_key; CREATE TABLE encryption_key (id VARCHAR(255) NOT NULL, created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, key_record JSON NOT NULL, PRIMARY KEY(id, created), INDEX(created)) ENGINE=InnoDB" \
         >/dev/null; then
         echo "ERROR: failed to create encryption_key table in ephemeral MySQL" >&2
         docker logs "$MYSQL_CONTAINER_ID" 2>/dev/null | tail -20 >&2 || true
@@ -613,8 +613,6 @@ if [ "$HAVE_RUBY" = 1 ]; then
     log "Running Ruby FFI benchmark (benchmark-ips)..."
     if ASHERAH_RUBY_NATIVE="$FFI_LIB_DIR" $RUBY_CMD -I "$ROOT_DIR/asherah-ruby/lib" \
         "$BENCH_DIR/ruby-bench/bench_ffi.rb" > "$RESULTS_DIR/ruby_ffi.log" 2>/dev/null; then
-        # Debug: show raw result lines
-        grep 'i/s' "$RESULTS_DIR/ruby_ffi.log" | grep -E 'encrypt|decrypt' >&2
         parse_ruby_ips "$RESULTS_DIR/ruby_ffi.log" > "$RESULTS_DIR/06_Ruby_FFI"
     else
         skip "Ruby FFI benchmark failed (see log): $(tail -5 "$RESULTS_DIR/ruby_ffi.log" 2>/dev/null)"
