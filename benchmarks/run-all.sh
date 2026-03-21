@@ -220,18 +220,20 @@ start_mysql_container() {
     log "Using ephemeral MySQL at ${BENCH_MYSQL_URL}"
 }
 
-ensure_mysql_alive() {
-    if [ "$BENCH_MODE" = "memory" ] || [ "$MYSQL_STARTED_BY_SCRIPT" != "1" ]; then
+reset_mysql() {
+    if [ "$BENCH_MODE" = "memory" ]; then
         return
     fi
-
-    if [ -n "$MYSQL_CONTAINER_ID" ] &&
-        [ "$(docker inspect -f '{{.State.Running}}' "$MYSQL_CONTAINER_ID" 2>/dev/null || echo false)" = "true" ] &&
-        docker exec "$MYSQL_CONTAINER_ID" mysqladmin -h 127.0.0.1 -u root ping --silent >/dev/null 2>&1; then
+    if [ "$MYSQL_STARTED_BY_SCRIPT" != "1" ]; then
+        # External MySQL: just truncate the table
+        if [ -n "$MYSQL_CONTAINER_ID" ]; then
+            docker exec "$MYSQL_CONTAINER_ID" mysql -h 127.0.0.1 -u root test -e \
+                "TRUNCATE TABLE encryption_key" >/dev/null 2>&1 || true
+        fi
         return
     fi
-
-    log "Ephemeral MySQL is unhealthy; restarting container..."
+    # Ephemeral MySQL: nuke and restart for clean buffer pool state
+    log "Resetting MySQL container for clean state..."
     if [ -n "$MYSQL_CONTAINER_ID" ]; then
         docker rm -f "$MYSQL_CONTAINER_ID" >/dev/null 2>&1 || true
     fi
@@ -241,7 +243,11 @@ ensure_mysql_alive() {
     start_mysql_container
     export BENCH_MYSQL_URL
     export BENCH_MYSQL_DSN
-    export MYSQL_URL="$BENCH_MYSQL_URL"
+    if [ -n "$BENCH_MYSQL_URL" ]; then
+        export MYSQL_URL="$BENCH_MYSQL_URL"
+    else
+        unset MYSQL_URL 2>/dev/null || true
+    fi
 }
 
 if [ "$BENCH_MODE" != "memory" ] && [ -z "$BENCH_MYSQL_URL" ]; then
@@ -350,7 +356,7 @@ export ASHERAH_GO_NATIVE="$FFI_LIB_DIR"
 ########################################################################
 
 if [ "$HAVE_RUST" = 1 ]; then
-    ensure_mysql_alive
+    reset_mysql
     log "Running Rust native benchmark (Criterion)..."
     CRITERION_EXTRA=""
     if [ "$BENCH_MODE" = "cold" ]; then
@@ -380,7 +386,7 @@ fi
 ########################################################################
 
 if [ "$HAVE_DOTNET" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
-    ensure_mysql_alive
+    reset_mysql
     log "Running .NET benchmark (BenchmarkDotNet)..."
     if dotnet run --project "$BENCH_DIR/dotnet-bench" -c Release > "$RESULTS_DIR/bdn.log" 2>&1; then
         python3 -c "
@@ -430,7 +436,7 @@ fi
 ########################################################################
 
 if [ "$HAVE_JAVA" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
-    ensure_mysql_alive
+    reset_mysql
     log "Building Java FFI benchmark (JMH)..."
     # Build the asherah-java JAR and install to local Maven repo
     mvn -B -f "$ROOT_DIR/asherah-java/java/pom.xml" -Dnative.build.skip=true -DskipTests package -q 2>&1
@@ -490,7 +496,7 @@ fi
 ########################################################################
 
 if [ "$HAVE_GO" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
-    ensure_mysql_alive
+    reset_mysql
     log "Running Go FFI benchmark (testing.B)..."
     (cd "$BENCH_DIR/go-bench" && go mod tidy 2>&1) || true
     if (cd "$BENCH_DIR/go-bench" && CGO_ENABLED=0 ASHERAH_GO_NATIVE="$FFI_LIB_DIR" \
@@ -568,7 +574,7 @@ fi
 ########################################################################
 
 if [ "$HAVE_PYTHON" = 1 ]; then
-    ensure_mysql_alive
+    reset_mysql
     log "Running Python FFI benchmark (timeit)..."
     python3 "$BENCH_DIR/python-bench/bench.py" > "$RESULTS_DIR/python.log" 2>&1
     python3 -c "
@@ -609,7 +615,7 @@ print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(10
 }
 
 if [ "$HAVE_RUBY" = 1 ]; then
-    ensure_mysql_alive
+    reset_mysql
     log "Running Ruby FFI benchmark (benchmark-ips)..."
     if ASHERAH_RUBY_NATIVE="$FFI_LIB_DIR" $RUBY_CMD -I "$ROOT_DIR/asherah-ruby/lib" \
         "$BENCH_DIR/ruby-bench/bench_ffi.rb" > "$RESULTS_DIR/ruby_ffi.log" 2>/dev/null; then
@@ -626,7 +632,7 @@ fi
 ########################################################################
 
 if [ "$HAVE_RUBY_CANONICAL" = 1 ] && [ "$BENCH_MODE" != "cold" ]; then
-    ensure_mysql_alive
+    reset_mysql
     log "Running Ruby Canonical benchmark (benchmark-ips)..."
     if BENCH_MYSQL_URL="$BENCH_MYSQL_DSN" MYSQL_URL="$BENCH_MYSQL_DSN" \
         $RUBY_CMD "$BENCH_DIR/ruby-bench/bench_canonical.rb" > "$RESULTS_DIR/ruby_canon.log" 2>&1; then
@@ -737,7 +743,7 @@ print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(10
 }
 
 if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/asherah-node-bench/node_modules/tinybench" ]; then
-    ensure_mysql_alive
+    reset_mysql
     log "Running Node.js FFI benchmark (tinybench)..."
     if (cd "$BENCH_DIR/asherah-node-bench" && run_node_bench "asherah-node" "ffi") \
         > "$RESULTS_DIR/node_ffi.log" 2>&1; then
@@ -754,7 +760,7 @@ fi
 ########################################################################
 
 if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/node-bench-canonical/node_modules/tinybench" ] && [ "$BENCH_MODE" != "cold" ]; then
-    ensure_mysql_alive
+    reset_mysql
     log "Running Node.js Canonical benchmark (tinybench)..."
     if (cd "$BENCH_DIR/node-bench-canonical" && BENCH_MYSQL_URL="$BENCH_MYSQL_DSN" MYSQL_URL="$BENCH_MYSQL_DSN" \
         run_node_bench "asherah" "canonical") > "$RESULTS_DIR/node_canon.log" 2>&1; then
