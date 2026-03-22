@@ -218,6 +218,9 @@ jobs:
         run: tar xzf /tmp/x86_64-rlib.tar.gz
       - name: Build Python binding (x86_64) - manylinux
         run: |
+          yum install -y openssl-devel pkgconfig 2>/dev/null || true
+          export HOME=/root
+          export OPENSSL_NO_VENDOR=1
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
           export PATH="$CARGO_HOME/bin:$PATH"
           rustup toolchain install 1.91.1 --profile minimal --component rustfmt
@@ -807,7 +810,7 @@ jobs:
         run: |
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
           apt-get update
-          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu python3 python3-pip python3-venv curl
+          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu python3 python3-pip python3-venv curl libssl-dev pkg-config
           pip3 install maturin==1.9.4
           curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
           mv sccache-*/sccache /usr/local/bin/

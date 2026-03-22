@@ -1,4 +1,4 @@
-use crate::memguard::{wipe_bytes, Buffer, Enclave};
+use crate::memguard::{wipe_bytes, Buffer, Enclave, SLOT_SIZE};
 use ring::aead::{LessSafeKey, UnboundKey, AES_256_GCM};
 
 pub struct CryptoKey {
@@ -31,17 +31,28 @@ impl CryptoKey {
         } else {
             None
         };
-        let mut buf = Buffer::new(bytes.len()).map_err(|e| {
-            anyhow::anyhow!(
-                "failed to allocate secure buffer ({} bytes): {:?}",
-                bytes.len(),
-                e
-            )
-        })?;
-        buf.bytes().copy_from_slice(&bytes);
-        wipe_bytes(&mut bytes);
-        let enclave = Enclave::new_from(&mut buf)
-            .map_err(|e| anyhow::anyhow!("failed to seal key into enclave: {:?}", e))?;
+        let enclave = if bytes.len() == SLOT_SIZE {
+            // Fast path for 32-byte keys: seal directly from the Vec without
+            // allocating a page-locked Buffer. The Enclave immediately encrypts
+            // the key and stores it in the SLAB hot cache. This avoids 6 syscalls
+            // (mmap, mlock, 2× mprotect, munlock, munmap) per key.
+            let enc = Enclave::seal_bytes(&bytes)
+                .map_err(|e| anyhow::anyhow!("failed to seal key into enclave: {:?}", e))?;
+            wipe_bytes(&mut bytes);
+            enc
+        } else {
+            let mut buf = Buffer::new(bytes.len()).map_err(|e| {
+                anyhow::anyhow!(
+                    "failed to allocate secure buffer ({} bytes): {:?}",
+                    bytes.len(),
+                    e
+                )
+            })?;
+            buf.bytes().copy_from_slice(&bytes);
+            wipe_bytes(&mut bytes);
+            Enclave::new_from(&mut buf)
+                .map_err(|e| anyhow::anyhow!("failed to seal key into enclave: {:?}", e))?
+        };
         Ok(Self {
             created,
             revoked,

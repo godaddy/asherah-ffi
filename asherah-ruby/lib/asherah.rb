@@ -195,7 +195,11 @@ module Asherah
       # Brief mutex hold for hash lookup only — FFI call happens outside
       @mutex.synchronize do
         raise Error, "Asherah not configured; call setup()" unless @factory
-        @sessions[partition_id] ||= @factory.get_session(partition_id)
+        if @session_cache_enabled
+          @sessions[partition_id] ||= @factory.get_session(partition_id)
+        else
+          @factory.get_session(partition_id)
+        end
       end
     end
   end

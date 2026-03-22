@@ -1,0 +1,13 @@
+name: "Benchmark: Hot (MySQL hot-cache)"
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    uses: ./.github/workflows/benchmark-setup.yml
+    with:
+      bench_mode: hot

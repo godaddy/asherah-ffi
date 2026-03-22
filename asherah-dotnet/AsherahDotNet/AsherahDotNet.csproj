@@ -14,4 +14,15 @@
     <RepositoryUrl>https://github.com/godaddy/asherah-ffi</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
+
+  <!-- Include native libraries for all supported platforms.
+       These are placed by the publish-nuget workflow before dotnet pack. -->
+  <ItemGroup>
+    <None Include="runtimes\linux-x64\native\libasherah_ffi.so" Pack="true" PackagePath="runtimes/linux-x64/native/" Condition="Exists('runtimes\linux-x64\native\libasherah_ffi.so')" />
+    <None Include="runtimes\linux-arm64\native\libasherah_ffi.so" Pack="true" PackagePath="runtimes/linux-arm64/native/" Condition="Exists('runtimes\linux-arm64\native\libasherah_ffi.so')" />
+    <None Include="runtimes\osx-x64\native\libasherah_ffi.dylib" Pack="true" PackagePath="runtimes/osx-x64/native/" Condition="Exists('runtimes\osx-x64\native\libasherah_ffi.dylib')" />
+    <None Include="runtimes\osx-arm64\native\libasherah_ffi.dylib" Pack="true" PackagePath="runtimes/osx-arm64/native/" Condition="Exists('runtimes\osx-arm64\native\libasherah_ffi.dylib')" />
+    <None Include="runtimes\win-x64\native\asherah_ffi.dll" Pack="true" PackagePath="runtimes/win-x64/native/" Condition="Exists('runtimes\win-x64\native\asherah_ffi.dll')" />
+    <None Include="runtimes\win-arm64\native\asherah_ffi.dll" Pack="true" PackagePath="runtimes/win-arm64/native/" Condition="Exists('runtimes\win-arm64\native\asherah_ffi.dll')" />
+  </ItemGroup>
 </Project>

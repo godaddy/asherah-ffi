@@ -3,7 +3,15 @@ use crate::types::EnvelopeKeyRecord;
 use anyhow::Context;
 use mysql::prelude::Queryable;
 use mysql::{Opts, OptsBuilder, Pool, PoolConstraints, PoolOpts, PooledConn, SslOpts};
+use std::cell::RefCell;
 use std::fmt::Write;
+
+thread_local! {
+    /// Thread-local MySQL connection cache. Avoids pool mutex contention
+    /// when multiple metastore calls happen sequentially within one
+    /// encrypt/decrypt operation (typically 2-4 queries per operation).
+    static TL_CONN: RefCell<Option<PooledConn>> = const { RefCell::new(None) };
+}
 
 /// Convert Unix epoch seconds to a "YYYY-MM-DD HH:MM:SS" UTC datetime string.
 ///
@@ -119,10 +127,26 @@ impl MySqlMetastore {
     }
 
     fn conn(&self) -> anyhow::Result<PooledConn> {
+        // Thread-local connection cache: reuse the last connection on this thread
+        // to avoid pool mutex contention on sequential load/store calls within a
+        // single encrypt or decrypt operation (typically 2-4 queries).
+        let reused = TL_CONN.with(|cell| cell.borrow_mut().take());
+        if let Some(conn) = reused {
+            return Ok(conn);
+        }
+
         self.pool.get_conn().map_err(|e| {
             log::error!("MySQL connection pool error: {e:#}");
             anyhow::anyhow!("MySQL connection failed: {e}")
         })
+    }
+
+    /// Return a connection to the thread-local cache for reuse by the next
+    /// metastore call on this thread.
+    fn return_conn(conn: PooledConn) {
+        TL_CONN.with(|cell| {
+            *cell.borrow_mut() = Some(conn);
+        });
     }
 }
 
@@ -139,9 +163,10 @@ impl Metastore for MySqlMetastore {
             .context(format!(
                 "MySQL load query failed for id={id} created={created}"
             ))?;
+        Self::return_conn(conn);
         if let Some((json_str,)) = row {
             log::debug!("mysql load hit: id={id} created={created}");
-            let ekr = serde_json::from_str(&json_str).context(format!(
+            let ekr = EnvelopeKeyRecord::from_json_fast(&json_str).context(format!(
                 "MySQL load: failed to parse key_record JSON for id={id}"
             ))?;
             Ok(Some(ekr))
@@ -160,9 +185,10 @@ impl Metastore for MySqlMetastore {
                 (id,),
             )
             .context(format!("MySQL load_latest query failed for id={id}"))?;
+        Self::return_conn(conn);
         if let Some((json_str,)) = row {
             log::debug!("mysql load_latest hit: id={id}");
-            let ekr = serde_json::from_str(&json_str).context(format!(
+            let ekr = EnvelopeKeyRecord::from_json_fast(&json_str).context(format!(
                 "MySQL load_latest: failed to parse key_record JSON for id={id}"
             ))?;
             Ok(Some(ekr))
@@ -179,9 +205,7 @@ impl Metastore for MySqlMetastore {
         ekr: &EnvelopeKeyRecord,
     ) -> Result<bool, anyhow::Error> {
         log::debug!("mysql store: id={id} created={created}");
-        let rec = serde_json::to_string(ekr).context(format!(
-            "MySQL store: failed to serialize key_record for id={id}"
-        ))?;
+        let rec = ekr.to_json_fast();
         let mut conn = self.conn()?;
         let ts = epoch_to_utc_datetime(created);
         conn.exec_drop(
@@ -189,6 +213,7 @@ impl Metastore for MySqlMetastore {
             (id, &ts, rec),
         ).context(format!("MySQL store insert failed for id={id} created={created}"))?;
         let stored = conn.affected_rows() > 0;
+        Self::return_conn(conn);
         log::debug!("mysql store: id={id} created={created} stored={stored}");
         Ok(stored)
     }

@@ -305,6 +305,27 @@ pub struct Enclave {
     data_len: usize,
 }
 impl Enclave {
+    /// Seal a SLOT_SIZE byte slice directly without allocating a page-locked
+    /// Buffer. The plaintext is encrypted and inserted into the SLAB hot cache.
+    /// This avoids 6 syscalls (mmap/mlock/mprotect/munlock/munmap) per key.
+    pub fn seal_bytes(plaintext: &[u8]) -> Result<Self, Error> {
+        assert_eq!(
+            plaintext.len(),
+            SLOT_SIZE,
+            "seal_bytes requires exactly {SLOT_SIZE} bytes"
+        );
+        let mut key = coffer_view()?;
+        let id = ENCLAVE_ID.fetch_add(1, Ordering::Relaxed);
+        cache_insert(id, plaintext);
+        let ct = encrypt(plaintext, key.bytes())?;
+        pool_release(key);
+        Ok(Self {
+            id,
+            ciphertext: ct,
+            data_len: SLOT_SIZE,
+        })
+    }
+
     pub fn new_from(buf: &mut Buffer) -> Result<Self, Error> {
         let mut key = coffer_view()?;
         let data_len = buf.size();
@@ -363,7 +384,7 @@ impl Enclave {
 // Hot cache entries hold recently-decrypted keys (LRU-evicted).
 // Transient slots are acquired briefly during crypto operations, then released.
 // When no free slots remain, the LRU cache entry is evicted to make room.
-const SLOT_SIZE: usize = 32; // AES-256 key size
+pub const SLOT_SIZE: usize = 32; // AES-256 key size
 const COFFER_LEFT: usize = 0;
 const COFFER_RIGHT: usize = 1;
 const FIRST_SHARED_SLOT: usize = 2;

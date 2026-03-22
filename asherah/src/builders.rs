@@ -309,6 +309,15 @@ pub fn config_from_env() -> crate::Config {
         cfg.policy.shared_intermediate_key_cache = b;
     }
     cfg.policy.enforce_minimums();
+    // Apply explicit IK cache size AFTER enforce_minimums so cold benchmarks
+    // can set it below the minimum (e.g. 1) for cache-miss testing.
+    if let Some(v) = get_usize("INTERMEDIATE_KEY_CACHE_MAX_SIZE") {
+        cfg.policy.intermediate_key_cache_max_size = v;
+        // Simple policy never evicts — switch to LRU so the max is enforced
+        if cfg.policy.intermediate_key_cache_eviction_policy == "simple" {
+            cfg.policy.intermediate_key_cache_eviction_policy = "lru".to_string();
+        }
+    }
     cfg
 }
 
