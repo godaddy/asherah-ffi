@@ -1,5 +1,8 @@
 name: "Benchmark: Hot (MySQL hot-cache)"
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
 

@@ -1,5 +1,8 @@
 name: "Benchmark: Memory (in-memory hot-cache)"
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
 
