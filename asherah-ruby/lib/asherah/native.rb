@@ -9,7 +9,7 @@ module Asherah
     extend FFI::Library
 
     class AsherahBuffer < FFI::Struct
-      layout :data, :pointer, :len, :size_t
+      layout :data, :pointer, :len, :size_t, :capacity, :size_t
     end
 
     class << self

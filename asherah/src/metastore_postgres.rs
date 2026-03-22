@@ -228,7 +228,7 @@ impl Metastore for PostgresMetastore {
             Some(row) => {
                 let txt: String = row.get(0);
                 log::debug!("postgres load hit: id={id} created={created}");
-                let ekr = serde_json::from_str(&txt).context(format!(
+                let ekr = EnvelopeKeyRecord::from_json_fast(&txt).context(format!(
                     "Postgres load: failed to parse key_record JSON for id={id}"
                 ))?;
                 Ok(Some(ekr))
@@ -250,7 +250,7 @@ impl Metastore for PostgresMetastore {
             Some(row) => {
                 let txt: String = row.get(0);
                 log::debug!("postgres load_latest hit: id={id}");
-                let ekr = serde_json::from_str(&txt).context(format!(
+                let ekr = EnvelopeKeyRecord::from_json_fast(&txt).context(format!(
                     "Postgres load_latest: failed to parse key_record JSON for id={id}"
                 ))?;
                 Ok(Some(ekr))
@@ -269,9 +269,7 @@ impl Metastore for PostgresMetastore {
     ) -> Result<bool, anyhow::Error> {
         log::debug!("postgres store: id={id} created={created}");
         let mut c = self.client()?;
-        let v = serde_json::to_string(ekr).context(format!(
-            "Postgres store: failed to serialize key_record for id={id}"
-        ))?;
+        let v = ekr.to_json_fast();
         let created_f = created as f64;
         let v_json: serde_json::Value = serde_json::from_str(&v).context(format!(
             "Postgres store: failed to re-parse key_record JSON for id={id}"

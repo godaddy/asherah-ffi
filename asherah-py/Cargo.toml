@@ -20,7 +20,7 @@ workspace = true
 
 [dependencies]
 pyo3 = { version = "0.28", features = ["extension-module", "abi3-py38", "generate-import-lib", "serde"] }
-asherah = { path = "../asherah", features = ["sqlite"] }
+asherah = { path = "../asherah", features = ["sqlite", "mysql", "postgres", "dynamodb"] }
 asherah-config = { path = "../asherah-config" }
 serde_json = "1.0"
 anyhow = "1.0"
