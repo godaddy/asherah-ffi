@@ -156,7 +156,27 @@ do_lint() {
 
 do_unit() {
     log "=== Unit Tests ==="
-    run_test "cargo test (workspace)" cargo test --workspace --exclude asherah-node
+    # The asherah crate is tested separately to avoid running integration_containers
+    # (104 tests needing Docker + --test-threads=1) during the unit test phase.
+    # Workspace feature unification enables mysql/postgres/dynamodb from binding
+    # crates, which causes cargo to compile and include integration_containers.
+    run_test "cargo test (workspace, excl. asherah core)" \
+        cargo test --workspace --exclude asherah --exclude asherah-node
+
+    # Run asherah crate unit tests: lib tests + all test files except
+    # integration_containers (Docker) and cucumber (BDD framework).
+    local asherah_test_args=(
+        cargo test -p asherah --features sqlite,mysql,postgres,dynamodb --lib
+    )
+    for f in asherah/tests/*.rs; do
+        local name
+        name="$(basename "$f" .rs)"
+        case "$name" in
+            integration_containers|cucumber) continue ;;
+        esac
+        asherah_test_args+=(--test "$name")
+    done
+    run_test "cargo test (asherah unit)" "${asherah_test_args[@]}"
 }
 
 do_integration() {
