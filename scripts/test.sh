@@ -361,6 +361,41 @@ do_fuzz() {
     done
 }
 
+SANITIZER_IMAGE="asherah-sanitizers:latest"
+
+# Build or reuse a Docker image with nightly Rust, clang, valgrind.
+ensure_sanitizer_image() {
+    if docker image inspect "$SANITIZER_IMAGE" >/dev/null 2>&1; then
+        return
+    fi
+    log "Building sanitizer Docker image (one-time)..."
+    docker build -t "$SANITIZER_IMAGE" -f - "$ROOT_DIR" <<'DOCKERFILE'
+FROM rust:1.91-bullseye
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    clang llvm valgrind pkg-config libssl-dev build-essential \
+    && rm -rf /var/lib/apt/lists/*
+RUN rustup install nightly \
+    && rustup component add --toolchain nightly miri rust-src \
+    && rustup target add --toolchain nightly x86_64-unknown-linux-gnu
+WORKDIR /workspace
+DOCKERFILE
+}
+
+# Run a command inside the sanitizer container, mounting the workspace.
+# Uses a persistent volume for the cargo registry so deps aren't re-downloaded,
+# and a separate target dir so ASAN-instrumented builds don't clobber host builds.
+run_in_sanitizer_container() {
+    mkdir -p "$ROOT_DIR/.cache/sanitizer-target"
+    docker run --rm \
+        --memory=8g \
+        -v "$ROOT_DIR:/workspace" \
+        -v "$ROOT_DIR/.cache/sanitizer-target:/workspace/sanitizer-target" \
+        -w /workspace \
+        -e CARGO_TARGET_DIR=/workspace/sanitizer-target \
+        "$SANITIZER_IMAGE" \
+        bash -c "$1"
+}
+
 do_sanitizers() {
     log "=== Sanitizer Tests ==="
 
@@ -405,25 +440,41 @@ do_sanitizers() {
         skip "Miri (rustup not available)"
     fi
 
-    # AddressSanitizer (Linux + nightly only)
+    # AddressSanitizer — needs Linux + nightly. Use Docker on macOS.
     if [ "$(uname)" = "Linux" ] && [ "$has_nightly" = true ]; then
         local asan_target="${PLATFORM}-unknown-linux-gnu"
         run_test "AddressSanitizer (asherah core)" bash -c \
             "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo test -p asherah --lib --target $asan_target -- --test-threads=1"
         run_test "AddressSanitizer (cobhan)" bash -c \
             "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo test -p asherah-cobhan --lib --target $asan_target -- --test-threads=1"
+    elif docker info >/dev/null 2>&1; then
+        ensure_sanitizer_image
+        run_test "AddressSanitizer (asherah core, via Docker)" \
+            run_in_sanitizer_container \
+            'RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly test -p asherah --lib --target x86_64-unknown-linux-gnu -- --test-threads=1'
+        run_test "AddressSanitizer (cobhan, via Docker)" \
+            run_in_sanitizer_container \
+            'RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly test -p asherah-cobhan --lib --target x86_64-unknown-linux-gnu -- --test-threads=1'
     else
-        skip "AddressSanitizer (requires Linux + nightly toolchain)"
+        skip "AddressSanitizer (requires Linux or Docker)"
     fi
 
-    # Valgrind (Linux only)
+    # Valgrind — needs Linux. Use Docker on macOS.
     if command -v valgrind >/dev/null 2>&1; then
         run_test "Valgrind (asherah core)" valgrind --error-exitcode=1 \
             cargo test -p asherah --lib -- --test-threads=1
         run_test "Valgrind (cobhan)" valgrind --error-exitcode=1 \
             cargo test -p asherah-cobhan --lib -- --test-threads=1
+    elif docker info >/dev/null 2>&1; then
+        ensure_sanitizer_image
+        run_test "Valgrind (asherah core, via Docker)" \
+            run_in_sanitizer_container \
+            'valgrind --error-exitcode=1 cargo test -p asherah --lib -- --test-threads=1'
+        run_test "Valgrind (cobhan, via Docker)" \
+            run_in_sanitizer_container \
+            'valgrind --error-exitcode=1 cargo test -p asherah-cobhan --lib -- --test-threads=1'
     else
-        skip "Valgrind (not installed)"
+        skip "Valgrind (not installed and Docker not available)"
     fi
 }
 
