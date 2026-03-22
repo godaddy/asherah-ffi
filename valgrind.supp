@@ -1,0 +1,14 @@
+# Rust test harness false positive: the mpsc channel used by the test runner
+# allocates a Context on the heap that appears "possibly lost" because the
+# pointer is stored in a thread-local Cell that Valgrind can't trace.
+# This is in std::sync::mpmc, not in our code.
+{
+   rust_test_harness_mpsc_context
+   Memcheck:Leak
+   match-leak-kinds: possible
+   fun:malloc
+   ...
+   fun:*mpmc*context*
+   ...
+   fun:*run_tests*
+}
