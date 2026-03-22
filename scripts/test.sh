@@ -448,13 +448,21 @@ do_sanitizers() {
         run_test "AddressSanitizer (cobhan)" bash -c \
             "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo test -p asherah-cobhan --lib --target $asan_target -- --test-threads=1"
     elif docker info >/dev/null 2>&1; then
-        ensure_sanitizer_image
-        run_test "AddressSanitizer (asherah core, via Docker)" \
-            run_in_sanitizer_container \
-            'RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly test -p asherah --lib --target x86_64-unknown-linux-gnu -- --test-threads=1'
-        run_test "AddressSanitizer (cobhan, via Docker)" \
-            run_in_sanitizer_container \
-            'RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly test -p asherah-cobhan --lib --target x86_64-unknown-linux-gnu -- --test-threads=1'
+        # ASAN-instrumented builds of the full dep tree need ~12GB+ RAM.
+        # Check if Docker has enough memory before attempting.
+        local docker_mem_gb
+        docker_mem_gb=$(docker info --format '{{.MemTotal}}' 2>/dev/null | awk '{printf "%.0f", $1/1073741824}')
+        if [ "${docker_mem_gb:-0}" -ge 12 ]; then
+            ensure_sanitizer_image
+            run_test "AddressSanitizer (asherah core, via Docker)" \
+                run_in_sanitizer_container \
+                'RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly test -p asherah --lib --target x86_64-unknown-linux-gnu -- --test-threads=1'
+            run_test "AddressSanitizer (cobhan, via Docker)" \
+                run_in_sanitizer_container \
+                'RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly test -p asherah-cobhan --lib --target x86_64-unknown-linux-gnu -- --test-threads=1'
+        else
+            skip "AddressSanitizer (Docker has ${docker_mem_gb:-?}GB, needs 12GB+; increase in Docker Desktop settings)"
+        fi
     else
         skip "AddressSanitizer (requires Linux or Docker)"
     fi
@@ -466,13 +474,20 @@ do_sanitizers() {
         run_test "Valgrind (cobhan)" valgrind --error-exitcode=1 \
             cargo test -p asherah-cobhan --lib -- --test-threads=1
     elif docker info >/dev/null 2>&1; then
-        ensure_sanitizer_image
-        run_test "Valgrind (asherah core, via Docker)" \
-            run_in_sanitizer_container \
-            'valgrind --error-exitcode=1 cargo test -p asherah --lib -- --test-threads=1'
-        run_test "Valgrind (cobhan, via Docker)" \
-            run_in_sanitizer_container \
-            'valgrind --error-exitcode=1 cargo test -p asherah-cobhan --lib -- --test-threads=1'
+        local docker_mem_gb
+        docker_mem_gb=$(docker info --format '{{.MemTotal}}' 2>/dev/null | awk '{printf "%.0f", $1/1073741824}')
+        if [ "${docker_mem_gb:-0}" -ge 8 ]; then
+            ensure_sanitizer_image
+            # Compile first, then run test binary under Valgrind (not cargo).
+            run_test "Valgrind (asherah core, via Docker)" \
+                run_in_sanitizer_container \
+                'cargo test -p asherah --lib --no-run 2>&1 | tail -1 && BIN=$(cargo test -p asherah --lib --no-run 2>&1 | grep -oP "Executable.*\(\K[^)]+") && valgrind --error-exitcode=1 --leak-check=full "$BIN" --test-threads=1'
+            run_test "Valgrind (cobhan, via Docker)" \
+                run_in_sanitizer_container \
+                'cargo test -p asherah-cobhan --lib --no-run 2>&1 | tail -1 && BIN=$(cargo test -p asherah-cobhan --lib --no-run 2>&1 | grep -oP "Executable.*\(\K[^)]+") && valgrind --error-exitcode=1 --leak-check=full "$BIN" --test-threads=1'
+        else
+            skip "Valgrind (Docker has ${docker_mem_gb:-?}GB, needs 8GB+; increase in Docker Desktop settings)"
+        fi
     else
         skip "Valgrind (not installed and Docker not available)"
     fi
