@@ -470,8 +470,10 @@ do_sanitizers() {
     # Valgrind — needs Linux. Use Docker on macOS.
     if command -v valgrind >/dev/null 2>&1; then
         run_test "Valgrind (asherah core)" valgrind --error-exitcode=1 \
+            --leak-check=full --show-leak-kinds=definite \
             cargo test -p asherah --lib -- --test-threads=1
         run_test "Valgrind (cobhan)" valgrind --error-exitcode=1 \
+            --leak-check=full --show-leak-kinds=definite \
             cargo test -p asherah-cobhan --lib -- --test-threads=1
     elif docker info >/dev/null 2>&1; then
         local docker_mem_gb
@@ -481,10 +483,10 @@ do_sanitizers() {
             # Compile first, then run test binary under Valgrind (not cargo).
             run_test "Valgrind (asherah core, via Docker)" \
                 run_in_sanitizer_container \
-                'cargo test -p asherah --lib --no-run 2>&1 | tail -1 && BIN=$(cargo test -p asherah --lib --no-run 2>&1 | grep -oP "Executable.*\(\K[^)]+") && valgrind --error-exitcode=1 --leak-check=full "$BIN" --test-threads=1'
+                'cargo test -p asherah --lib --no-run 2>&1 | tail -1 && BIN=$(cargo test -p asherah --lib --no-run 2>&1 | grep -oP "Executable.*\(\K[^)]+") && valgrind --error-exitcode=1 --leak-check=full --show-leak-kinds=definite "$BIN" --test-threads=1'
             run_test "Valgrind (cobhan, via Docker)" \
                 run_in_sanitizer_container \
-                'cargo test -p asherah-cobhan --lib --no-run 2>&1 | tail -1 && BIN=$(cargo test -p asherah-cobhan --lib --no-run 2>&1 | grep -oP "Executable.*\(\K[^)]+") && valgrind --error-exitcode=1 --leak-check=full "$BIN" --test-threads=1'
+                'cargo test -p asherah-cobhan --lib --no-run 2>&1 | tail -1 && BIN=$(cargo test -p asherah-cobhan --lib --no-run 2>&1 | grep -oP "Executable.*\(\K[^)]+") && valgrind --error-exitcode=1 --leak-check=full --show-leak-kinds=definite "$BIN" --test-threads=1'
         else
             skip "Valgrind (Docker has ${docker_mem_gb:-?}GB, needs 8GB+; increase in Docker Desktop settings)"
         fi
