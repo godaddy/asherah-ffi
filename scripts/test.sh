@@ -24,8 +24,12 @@ Modes:
   --all           Run everything (unit + integration + bindings + interop + lint)
 
 Options:
-  --binding=NAME  Run only a specific binding test (python, node, ruby, go, java, dotnet)
-  --fuzz-time=N   Fuzz duration per target in seconds (default: 30)
+  --binding=NAME    Run only a specific binding test (python, node, ruby, go, java, dotnet)
+  --platform=ARCH   Target platform: x64, arm64 (default: auto-detect from uname -m)
+  --fuzz-time=N     Fuzz duration per target in seconds (default: 30)
+
+Environment:
+  BINDING_ARTIFACTS_DIR   Path to pre-built CI artifacts (skips local builds)
 
 Examples:
   $(basename "$0") --unit
@@ -58,6 +62,7 @@ run_test() {
         pass "$name"
     else
         fail "$name"
+        summary
     fi
 }
 
@@ -78,13 +83,75 @@ summary() {
 }
 
 ########################################################################
+# CI artifact staging
+########################################################################
+
+# When BINDING_ARTIFACTS_DIR is set (CI), stage pre-built binaries
+# instead of building from source.
+setup_ci_artifacts() {
+    local ad="$BINDING_ARTIFACTS_DIR"
+    log "Using pre-built CI artifacts from $ad"
+
+    # Determine Rust target triple from platform
+    local target_triple
+    case "$PLATFORM" in
+        x86_64)   target_triple="x86_64-unknown-linux-gnu" ;;
+        aarch64)  target_triple="aarch64-unknown-linux-gnu" ;;
+    esac
+
+    # Set up target directories matching what cargo would produce
+    local release_dir="$ROOT_DIR/target/release"
+    if [ -n "$target_triple" ]; then
+        release_dir="$ROOT_DIR/target/$target_triple/release"
+    fi
+    mkdir -p "$release_dir" "$ROOT_DIR/target/release" "$ROOT_DIR/target/debug"
+
+    # Stage FFI shared library
+    for f in "$ad"/ffi/libasherah_ffi.*; do
+        [ -e "$f" ] && cp "$f" "$release_dir/"
+    done
+
+    # Stage Java JNI library
+    for f in "$ad"/java/libasherah_java.*; do
+        [ -e "$f" ] && cp "$f" "$release_dir/" && cp "$f" "$ROOT_DIR/target/debug/"
+    done
+
+    # Stage Node.js addon
+    if [ -d "$ad/node/npm" ]; then
+        rm -rf "$ROOT_DIR/asherah-node/npm"
+        cp -R "$ad/node/npm" "$ROOT_DIR/asherah-node/npm"
+        if ! [ -f "$ROOT_DIR/asherah-node/npm/asherah.node" ]; then
+            local candidate
+            candidate=$(find "$ROOT_DIR/asherah-node/npm" -maxdepth 6 -name '*.node' -print | head -n1 || true)
+            [ -n "$candidate" ] && cp "$candidate" "$ROOT_DIR/asherah-node/npm/asherah.node"
+        fi
+    fi
+
+    # Symlink triple-specific dir to target/release for tools that look there
+    if [ -n "$target_triple" ] && [ "$release_dir" != "$ROOT_DIR/target/release" ]; then
+        ln -snf "$release_dir" "$ROOT_DIR/target/release"
+    fi
+
+    # For safe.directory in CI containers
+    if command -v git >/dev/null 2>&1; then
+        git config --global --add safe.directory "$ROOT_DIR" 2>/dev/null || true
+    fi
+
+    export CARGO_TARGET_DIR="$ROOT_DIR/target${target_triple:+/$target_triple}"
+    export ASHERAH_DOTNET_NATIVE="$release_dir"
+    export ASHERAH_RUBY_NATIVE="$release_dir"
+    export ASHERAH_GO_NATIVE="$release_dir"
+    export LD_LIBRARY_PATH="$release_dir:${LD_LIBRARY_PATH:-}"
+}
+
+########################################################################
 # Test functions
 ########################################################################
 
 do_lint() {
     log "=== Lint ==="
-    run_test "cargo fmt" cargo fmt --check
-    run_test "cargo clippy" cargo clippy --workspace --all-targets -- -D warnings
+    run_test "cargo fmt" cargo fmt --all -- --check
+    run_test "cargo clippy" cargo clippy --workspace --all-targets --all-features -- -D warnings
 }
 
 do_unit() {
@@ -107,18 +174,27 @@ do_bindings() {
     local binding="${BINDING_FILTER:-all}"
     log "=== Binding Tests (${binding}) ==="
 
-    # Build FFI libs
-    log "Building Rust FFI libraries..."
-    cargo build --release -p asherah-ffi -p asherah-java -p asherah-cobhan 2>&1 | tail -1
-    export ASHERAH_DOTNET_NATIVE="$ROOT_DIR/target/release"
-    export ASHERAH_RUBY_NATIVE="$ROOT_DIR/target/release"
-    export ASHERAH_GO_NATIVE="$ROOT_DIR/target/release"
     export STATIC_MASTER_KEY_HEX="746869734973415374617469634d61737465724b6579466f7254657374696e67"
+
+    if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then
+        setup_ci_artifacts
+    else
+        # Local: build FFI libs from source
+        log "Building Rust FFI libraries..."
+        cargo build --release -p asherah-ffi -p asherah-java -p asherah-cobhan 2>&1 | tail -1
+        export ASHERAH_DOTNET_NATIVE="$ROOT_DIR/target/release"
+        export ASHERAH_RUBY_NATIVE="$ROOT_DIR/target/release"
+        export ASHERAH_GO_NATIVE="$ROOT_DIR/target/release"
+    fi
 
     # Python
     if [ "$binding" = "all" ] || [ "$binding" = "python" ]; then
         if command -v python3 >/dev/null 2>&1; then
-            if ! python3 -c "import asherah" 2>/dev/null; then
+            if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then
+                # CI: install pre-built wheel
+                python3 -m pip install -U pytest 2>&1 | tail -1 || true
+                python3 -m pip install --force-reinstall --no-deps "$BINDING_ARTIFACTS_DIR"/python/*.whl 2>&1 | tail -1
+            elif ! python3 -c "import asherah" 2>/dev/null; then
                 log "Installing Python binding (maturin develop)..."
                 if command -v maturin >/dev/null 2>&1; then
                     maturin develop --release --manifest-path asherah-py/Cargo.toml 2>&1 | tail -1
@@ -136,7 +212,10 @@ do_bindings() {
     # Node.js
     if [ "$binding" = "all" ] || [ "$binding" = "node" ]; then
         if command -v node >/dev/null 2>&1; then
-            if [ ! -f asherah-node/index.node ]; then
+            if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then
+                # CI: addon staged by setup_ci_artifacts, just install deps
+                (cd asherah-node && npm install --ignore-scripts 2>&1 | tail -1)
+            elif [ ! -f asherah-node/index.node ]; then
                 log "Building Node.js addon..."
                 (cd asherah-node && npm install 2>&1 | tail -1 && npx @napi-rs/cli build --release 2>&1 | tail -1)
                 # Copy to platform dir
@@ -192,8 +271,11 @@ do_bindings() {
     if [ "$binding" = "all" ] || [ "$binding" = "java" ]; then
         if command -v mvn >/dev/null 2>&1 && command -v java >/dev/null 2>&1; then
             log "Building Java JAR..."
+            local java_native="${ASHERAH_DOTNET_NATIVE:-$ROOT_DIR/target/release}"
             mvn -B -f asherah-java/java/pom.xml -Dnative.build.skip=true -DskipTests package -q 2>&1 | tail -1
-            run_test "Java (JUnit)" mvn -B -f asherah-java/java/pom.xml -Dnative.build.skip=true test
+            run_test "Java (JUnit)" mvn -B -f asherah-java/java/pom.xml -Dnative.build.skip=true \
+                -Dasherah.java.nativeLibraryPath="$java_native" \
+                -DargLine="-Djava.library.path=$java_native" test
         else
             skip "Java tests (maven/java not installed)"
         fi
@@ -223,16 +305,31 @@ do_fuzz() {
     local fuzz_time="${FUZZ_TIME:-30}"
     log "=== Fuzz Tests (${fuzz_time}s per target) ==="
     if ! command -v cargo-fuzz >/dev/null 2>&1; then
-        skip "Fuzz tests (cargo-fuzz not installed — run: cargo install cargo-fuzz)"
+        log "Installing cargo-fuzz..."
+        cargo install cargo-fuzz 2>&1 | tail -1
+    fi
+    if ! command -v cargo-fuzz >/dev/null 2>&1; then
+        skip "Fuzz tests (cargo-fuzz install failed)"
         return
     fi
-    if ! rustup run nightly rustc --version >/dev/null 2>&1; then
-        skip "Fuzz tests (nightly toolchain not installed — run: rustup install nightly)"
+    if command -v rustup >/dev/null 2>&1; then
+        if ! RUSTUP_TOOLCHAIN=nightly rustc --version >/dev/null 2>&1; then
+            log "Installing nightly toolchain for fuzz..."
+            rustup install nightly 2>&1 | tail -1
+        fi
+    fi
+    if ! RUSTUP_TOOLCHAIN=nightly rustc --version >/dev/null 2>&1; then
+        skip "Fuzz tests (nightly toolchain not available)"
         return
     fi
 
+    # Resolve nightly bin dir so sub-processes (cargo-fuzz spawns cargo build)
+    # also use the nightly compiler, even when system cargo isn't the rustup proxy.
+    local nightly_bin
+    nightly_bin="$(dirname "$(rustup which --toolchain nightly cargo 2>/dev/null)")"
+
     local targets
-    targets=$(cd fuzz && cargo +nightly fuzz list 2>/dev/null)
+    targets=$(cd fuzz && PATH="$nightly_bin:$PATH" cargo fuzz list 2>/dev/null)
     if [ -z "$targets" ]; then
         skip "Fuzz tests (no fuzz targets found)"
         return
@@ -240,27 +337,54 @@ do_fuzz() {
 
     for target in $targets; do
         run_test "fuzz: $target (${fuzz_time}s)" \
-            bash -c "cd fuzz && cargo +nightly fuzz run $target -- -max_total_time=$fuzz_time"
+            bash -c "cd fuzz && PATH=\"$nightly_bin:\$PATH\" cargo fuzz run $target -- -max_total_time=$fuzz_time"
     done
 }
 
 do_sanitizers() {
     log "=== Sanitizer Tests ==="
 
-    # Miri
-    if rustup run nightly miri --version >/dev/null 2>&1; then
-        run_test "Miri (undefined behavior)" \
-            cargo +nightly miri test -p asherah-ffi --lib
-    else
-        skip "Miri (not installed — run: rustup +nightly component add miri)"
+    # Ensure nightly toolchain is available (required for miri and ASAN)
+    local has_nightly=false
+    if command -v rustup >/dev/null 2>&1; then
+        if ! RUSTUP_TOOLCHAIN=nightly rustc --version >/dev/null 2>&1; then
+            log "Installing nightly toolchain..."
+            rustup install nightly 2>&1 | tail -1
+        fi
+        if RUSTUP_TOOLCHAIN=nightly rustc --version >/dev/null 2>&1; then
+            has_nightly=true
+        fi
     fi
 
-    # AddressSanitizer (Linux only)
-    if [ "$(uname)" = "Linux" ]; then
-        run_test "AddressSanitizer" bash -c \
-            'RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly test -p asherah-ffi --target x86_64-unknown-linux-gnu -- --test-threads=1'
+    # Resolve nightly bin dir for sub-processes
+    local nightly_bin=""
+    if [ "$has_nightly" = true ]; then
+        nightly_bin="$(dirname "$(rustup which --toolchain nightly cargo 2>/dev/null)")"
+    fi
+
+    # Miri
+    if [ "$has_nightly" = true ]; then
+        if ! PATH="$nightly_bin:$PATH" cargo miri --version >/dev/null 2>&1; then
+            log "Installing miri component..."
+            rustup component add --toolchain nightly miri 2>&1 | tail -1
+        fi
+        if PATH="$nightly_bin:$PATH" cargo miri --version >/dev/null 2>&1; then
+            run_test "Miri (undefined behavior)" \
+                bash -c "PATH=\"$nightly_bin:\$PATH\" cargo miri test -p asherah-ffi --lib"
+        else
+            skip "Miri (miri component install failed)"
+        fi
     else
-        skip "AddressSanitizer (Linux only)"
+        skip "Miri (rustup not available)"
+    fi
+
+    # AddressSanitizer (Linux + nightly only)
+    if [ "$(uname)" = "Linux" ] && [ "$has_nightly" = true ]; then
+        local asan_target="${PLATFORM}-unknown-linux-gnu"
+        run_test "AddressSanitizer" bash -c \
+            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo test -p asherah-ffi --target $asan_target -- --test-threads=1"
+    else
+        skip "AddressSanitizer (requires Linux + nightly toolchain)"
     fi
 
     # Valgrind (Linux only)
@@ -296,6 +420,8 @@ do_all() {
     do_integration
     do_bindings
     do_interop
+    do_fuzz
+    do_sanitizers
 }
 
 ########################################################################
@@ -309,6 +435,7 @@ fi
 MODE=""
 BINDING_FILTER="all"
 FUZZ_TIME=30
+PLATFORM=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -322,6 +449,7 @@ while [ $# -gt 0 ]; do
         --e2e)          MODE="e2e" ;;
         --all)          MODE="all" ;;
         --binding=*)    BINDING_FILTER="${1#--binding=}" ;;
+        --platform=*)   PLATFORM="${1#--platform=}" ;;
         --fuzz-time=*)  FUZZ_TIME="${1#--fuzz-time=}" ;;
         --help|-h)      show_help ;;
         *)
@@ -336,8 +464,23 @@ if [ -z "$MODE" ]; then
     show_help
 fi
 
+# Normalize platform: accept common aliases, default to native arch
+if [ -z "$PLATFORM" ] || [ "$PLATFORM" = "auto" ] || [ "$PLATFORM" = "native" ]; then
+    PLATFORM=$(uname -m)
+fi
+case "$PLATFORM" in
+    x86_64|amd64|x64)    PLATFORM="x86_64" ;;
+    aarch64|arm64)        PLATFORM="aarch64" ;;
+    *)
+        echo "Unknown platform: $PLATFORM (expected x64, arm64, auto, native)" >&2
+        exit 1
+        ;;
+esac
+
 export BINDING_FILTER
 export FUZZ_TIME
+# Note: PLATFORM is intentionally NOT exported — MSBuild interprets it as
+# the build platform, breaking .NET builds on arm64.
 
 case "$MODE" in
     unit)         do_unit ;;
