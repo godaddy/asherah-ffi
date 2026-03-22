@@ -40,7 +40,7 @@ function loadAddon() {
 
 function configFromEnv() {
   const sqlitePath = process.env.SQLITE_PATH;
-  const metastore = sqlitePath ? 'rdbms' : (process.env.Metastore || 'memory');
+  const metastore = process.env.Metastore || (sqlitePath ? 'sqlite' : 'memory');
   return {
     serviceName: process.env.SERVICE_NAME || 'service',
     productId: process.env.PRODUCT_ID || 'product',
