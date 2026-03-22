@@ -382,15 +382,22 @@ do_sanitizers() {
         nightly_bin="$(dirname "$(rustup which --toolchain nightly cargo 2>/dev/null)")"
     fi
 
-    # Miri
+    # Miri — run on all crates with Miri-compatible tests.
+    # Miri can't emulate syscalls (mprotect/mlock), so skip memcall/memguard.
     if [ "$has_nightly" = true ]; then
         if ! PATH="$nightly_bin:$PATH" cargo miri --version >/dev/null 2>&1; then
             log "Installing miri component..."
             rustup component add --toolchain nightly miri 2>&1 | tail -1
         fi
         if PATH="$nightly_bin:$PATH" cargo miri --version >/dev/null 2>&1; then
-            run_test "Miri (undefined behavior)" \
-                bash -c "PATH=\"$nightly_bin:\$PATH\" cargo miri test -p asherah-ffi --lib"
+            run_test "Miri (asherah core lib)" \
+                bash -c "PATH=\"$nightly_bin:\$PATH\" cargo miri test -p asherah --lib -- --skip memcall --skip memguard"
+            run_test "Miri (asherah types + json)" \
+                bash -c "PATH=\"$nightly_bin:\$PATH\" cargo miri test -p asherah --test types_tests --test json_shape"
+            run_test "Miri (cobhan)" \
+                bash -c "PATH=\"$nightly_bin:\$PATH\" cargo miri test -p asherah-cobhan --lib"
+            run_test "Miri (server)" \
+                bash -c "PATH=\"$nightly_bin:\$PATH\" cargo miri test -p asherah-server --lib"
         else
             skip "Miri (miri component install failed)"
         fi
@@ -401,16 +408,20 @@ do_sanitizers() {
     # AddressSanitizer (Linux + nightly only)
     if [ "$(uname)" = "Linux" ] && [ "$has_nightly" = true ]; then
         local asan_target="${PLATFORM}-unknown-linux-gnu"
-        run_test "AddressSanitizer" bash -c \
-            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo test -p asherah-ffi --target $asan_target -- --test-threads=1"
+        run_test "AddressSanitizer (asherah core)" bash -c \
+            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo test -p asherah --lib --target $asan_target -- --test-threads=1"
+        run_test "AddressSanitizer (cobhan)" bash -c \
+            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo test -p asherah-cobhan --lib --target $asan_target -- --test-threads=1"
     else
         skip "AddressSanitizer (requires Linux + nightly toolchain)"
     fi
 
     # Valgrind (Linux only)
     if command -v valgrind >/dev/null 2>&1; then
-        run_test "Valgrind" valgrind --error-exitcode=1 \
-            cargo test -p asherah-ffi --lib -- --test-threads=1
+        run_test "Valgrind (asherah core)" valgrind --error-exitcode=1 \
+            cargo test -p asherah --lib -- --test-threads=1
+        run_test "Valgrind (cobhan)" valgrind --error-exitcode=1 \
+            cargo test -p asherah-cobhan --lib -- --test-threads=1
     else
         skip "Valgrind (not installed)"
     fi
