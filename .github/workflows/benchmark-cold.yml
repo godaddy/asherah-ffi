@@ -1,5 +1,8 @@
 name: "Benchmark: Cold (MySQL cold-cache)"
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
 
