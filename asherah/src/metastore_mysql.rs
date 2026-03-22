@@ -166,7 +166,7 @@ impl Metastore for MySqlMetastore {
         Self::return_conn(conn);
         if let Some((json_str,)) = row {
             log::debug!("mysql load hit: id={id} created={created}");
-            let ekr = serde_json::from_str(&json_str).context(format!(
+            let ekr = EnvelopeKeyRecord::from_json_fast(&json_str).context(format!(
                 "MySQL load: failed to parse key_record JSON for id={id}"
             ))?;
             Ok(Some(ekr))
@@ -188,7 +188,7 @@ impl Metastore for MySqlMetastore {
         Self::return_conn(conn);
         if let Some((json_str,)) = row {
             log::debug!("mysql load_latest hit: id={id}");
-            let ekr = serde_json::from_str(&json_str).context(format!(
+            let ekr = EnvelopeKeyRecord::from_json_fast(&json_str).context(format!(
                 "MySQL load_latest: failed to parse key_record JSON for id={id}"
             ))?;
             Ok(Some(ekr))

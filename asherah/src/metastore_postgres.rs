@@ -228,7 +228,7 @@ impl Metastore for PostgresMetastore {
             Some(row) => {
                 let txt: String = row.get(0);
                 log::debug!("postgres load hit: id={id} created={created}");
-                let ekr = serde_json::from_str(&txt).context(format!(
+                let ekr = EnvelopeKeyRecord::from_json_fast(&txt).context(format!(
                     "Postgres load: failed to parse key_record JSON for id={id}"
                 ))?;
                 Ok(Some(ekr))
@@ -250,7 +250,7 @@ impl Metastore for PostgresMetastore {
             Some(row) => {
                 let txt: String = row.get(0);
                 log::debug!("postgres load_latest hit: id={id}");
-                let ekr = serde_json::from_str(&txt).context(format!(
+                let ekr = EnvelopeKeyRecord::from_json_fast(&txt).context(format!(
                     "Postgres load_latest: failed to parse key_record JSON for id={id}"
                 ))?;
                 Ok(Some(ekr))
