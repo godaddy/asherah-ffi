@@ -314,11 +314,28 @@ class CanonicalCompatTest < Minitest::Test
     config.metastore = "memory"
     config.verbose = true
     h = config.to_h
-    assert_equal "svc", h["ServiceName"]
-    assert_equal "prod", h["ProductID"]
-    assert_equal "static", h["KMS"]
-    assert_equal "memory", h["Metastore"]
-    assert_equal true, h["Verbose"]
-    refute h.key?("ConnectionString") # nil values excluded
+    assert_equal "svc", h[:ServiceName]
+    assert_equal "prod", h[:ProductID]
+    assert_equal "static", h[:KMS]
+    assert_equal "memory", h[:Metastore]
+    assert_equal true, h[:Verbose]
+    refute h.key?(:ConnectionString) # nil values excluded
+  end
+
+  def test_config_validate_raises_on_missing_fields
+    config = Asherah::Config.new
+    assert_raises(Asherah::Error::ConfigError) { config.validate! }
+  end
+
+  def test_config_to_json
+    config = Asherah::Config.new
+    config.service_name = "svc"
+    config.product_id = "prod"
+    config.kms = "static"
+    config.metastore = "memory"
+    json = config.to_json
+    parsed = JSON.parse(json)
+    assert_equal "svc", parsed["ServiceName"]
+    assert_equal "memory", parsed["Metastore"]
   end
 end

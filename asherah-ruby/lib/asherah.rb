@@ -32,10 +32,19 @@ module Asherah
     def configure
       @mutex.synchronize do
         raise Error::AlreadyInitialized if @initialized
+
+        config = Config.new
+        yield config
+        config.validate!
+
+        json = config.to_json
+        pointer = Native.asherah_factory_new_with_config(json)
+        @factory = SessionFactory.new(pointer)
+        @sessions = {}
+        @initialized = true
+        @session_cache_enabled = config.enable_session_caching != false
+        @verbose = config.verbose == true
       end
-      config = Config.new
-      yield config
-      setup(config.to_h)
     end
 
     # Initialize Asherah with a PascalCase config hash.
@@ -106,7 +115,7 @@ module Asherah
       @mutex.synchronize { @initialized }
     end
 
-    def setenv(env)
+    def setenv(env = {})
       data = case env
              when String
                JSON.parse(env)
