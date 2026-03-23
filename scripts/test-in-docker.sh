@@ -60,6 +60,7 @@ run_in_docker() {
   fi
 
   docker run --rm \
+    --entrypoint "" \
     "${platform_args[@]}" \
     "${COMMON_MOUNTS[@]}" \
     "${RUN_ENVS[@]}" \
