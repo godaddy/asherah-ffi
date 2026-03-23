@@ -14,6 +14,7 @@ public final class AsherahConfig {
   private final String replicaReadConsistency;
   private final String dynamoDbEndpoint;
   private final String dynamoDbRegion;
+  private final String dynamoDbSigningRegion;
   private final String dynamoDbTableName;
   private final Integer sessionCacheMaxSize;
   private final Long sessionCacheDuration;
@@ -34,6 +35,7 @@ public final class AsherahConfig {
     this.replicaReadConsistency = builder.replicaReadConsistency;
     this.dynamoDbEndpoint = builder.dynamoDbEndpoint;
     this.dynamoDbRegion = builder.dynamoDbRegion;
+    this.dynamoDbSigningRegion = builder.dynamoDbSigningRegion;
     this.dynamoDbTableName = builder.dynamoDbTableName;
     this.sessionCacheMaxSize = builder.sessionCacheMaxSize;
     this.sessionCacheDuration = builder.sessionCacheDuration;
@@ -56,6 +58,7 @@ public final class AsherahConfig {
     json.put("ReplicaReadConsistency", replicaReadConsistency);
     json.put("DynamoDBEndpoint", dynamoDbEndpoint);
     json.put("DynamoDBRegion", dynamoDbRegion);
+    json.put("DynamoDBSigningRegion", dynamoDbSigningRegion);
     json.put("DynamoDBTableName", dynamoDbTableName);
     json.put("SessionCacheMaxSize", sessionCacheMaxSize);
     json.put("SessionCacheDuration", sessionCacheDuration);
@@ -90,6 +93,7 @@ public final class AsherahConfig {
     private String replicaReadConsistency;
     private String dynamoDbEndpoint;
     private String dynamoDbRegion;
+    private String dynamoDbSigningRegion;
     private String dynamoDbTableName;
     private Integer sessionCacheMaxSize;
     private Long sessionCacheDuration;
@@ -144,6 +148,11 @@ public final class AsherahConfig {
 
     public Builder dynamoDbRegion(final String value) {
       this.dynamoDbRegion = value;
+      return this;
+    }
+
+    public Builder dynamoDbSigningRegion(final String value) {
+      this.dynamoDbSigningRegion = value;
       return this;
     }
 

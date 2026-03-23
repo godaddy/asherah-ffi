@@ -29,6 +29,8 @@ pub struct ConfigOptions {
     pub dynamo_db_endpoint: Option<String>,
     #[serde(rename = "DynamoDBRegion")]
     pub dynamo_db_region: Option<String>,
+    #[serde(rename = "DynamoDBSigningRegion")]
+    pub dynamo_db_signing_region: Option<String>,
     #[serde(rename = "DynamoDBTableName")]
     pub dynamo_db_table_name: Option<String>,
     #[serde(rename = "SessionCacheMaxSize")]
@@ -177,7 +179,14 @@ impl ConfigOptions {
             }
             "dynamodb" => {
                 set_env_opt_str("DDB_TABLE", self.dynamo_db_table_name.as_deref());
-                set_env_opt_str("AWS_REGION", self.dynamo_db_region.as_deref());
+                // When a custom endpoint is used with a separate signing region,
+                // use the signing region as AWS_REGION (the AWS SDK uses the
+                // region for request signing, not service routing).
+                let effective_region = self
+                    .dynamo_db_signing_region
+                    .as_deref()
+                    .or(self.dynamo_db_region.as_deref());
+                set_env_opt_str("AWS_REGION", effective_region);
                 set_env_opt_str("AWS_ENDPOINT_URL", self.dynamo_db_endpoint.as_deref());
                 set_env_opt_bool("DDB_REGION_SUFFIX", self.enable_region_suffix);
                 std::env::remove_var("SQLITE_PATH");

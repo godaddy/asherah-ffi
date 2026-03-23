@@ -56,6 +56,7 @@ public class DynamoDbMetastoreImpl : IMetastore<JObject>
     private readonly string _region;
     private readonly string _tableName;
     private readonly string? _endPoint;
+    private readonly string? _signingRegion;
     private readonly bool _keySuffix;
 
     private DynamoDbMetastoreImpl(Builder builder)
@@ -63,12 +64,14 @@ public class DynamoDbMetastoreImpl : IMetastore<JObject>
         _region = builder.Region;
         _tableName = builder.TableName;
         _endPoint = builder.EndPoint;
+        _signingRegion = builder.SigningRegion;
         _keySuffix = builder.KeySuffix;
     }
 
     internal void ApplyConfig(AsherahConfig.Builder builder)
     {
         builder.WithMetastore("dynamodb").WithDynamoDbRegion(_region);
+        if (_signingRegion != null) builder.WithDynamoDbSigningRegion(_signingRegion);
         if (_tableName != "EncryptionKey") builder.WithDynamoDbTableName(_tableName);
         if (_endPoint != null) builder.WithDynamoDbEndpoint(_endPoint);
         if (_keySuffix) builder.WithEnableRegionSuffix(true);
@@ -86,11 +89,12 @@ public class DynamoDbMetastoreImpl : IMetastore<JObject>
         internal string Region { get; }
         internal string TableName { get; private set; } = "EncryptionKey";
         internal string? EndPoint { get; private set; }
+        internal string? SigningRegion { get; private set; }
         internal bool KeySuffix { get; private set; }
 
         internal Builder(string region) { Region = region; }
         public Builder WithTableName(string tableName) { TableName = tableName; return this; }
-        public Builder WithEndPointConfiguration(string endPoint, string signingRegion) { EndPoint = endPoint; return this; }
+        public Builder WithEndPointConfiguration(string endPoint, string signingRegion) { EndPoint = endPoint; SigningRegion = signingRegion; return this; }
         public Builder WithKeySuffix() { KeySuffix = true; return this; }
         public DynamoDbMetastoreImpl Build() => new(this);
     }

@@ -16,6 +16,7 @@ public sealed class AsherahConfig
     public string? ReplicaReadConsistency { get; }
     public string? DynamoDbEndpoint { get; }
     public string? DynamoDbRegion { get; }
+    public string? DynamoDbSigningRegion { get; }
     public string? DynamoDbTableName { get; }
     public int? SessionCacheMaxSize { get; }
     public long? SessionCacheDuration { get; }
@@ -37,6 +38,7 @@ public sealed class AsherahConfig
         ReplicaReadConsistency = builder.ReplicaReadConsistency;
         DynamoDbEndpoint = builder.DynamoDbEndpoint;
         DynamoDbRegion = builder.DynamoDbRegion;
+        DynamoDbSigningRegion = builder.DynamoDbSigningRegion;
         DynamoDbTableName = builder.DynamoDbTableName;
         SessionCacheMaxSize = builder.SessionCacheMaxSize;
         SessionCacheDuration = builder.SessionCacheDuration;
@@ -65,6 +67,7 @@ public sealed class AsherahConfig
             ["ReplicaReadConsistency"] = ReplicaReadConsistency,
             ["DynamoDBEndpoint"] = DynamoDbEndpoint,
             ["DynamoDBRegion"] = DynamoDbRegion,
+            ["DynamoDBSigningRegion"] = DynamoDbSigningRegion,
             ["DynamoDBTableName"] = DynamoDbTableName,
             ["SessionCacheMaxSize"] = SessionCacheMaxSize,
             ["SessionCacheDuration"] = SessionCacheDuration,
@@ -96,6 +99,7 @@ public sealed class AsherahConfig
         public string? ReplicaReadConsistency { get; private set; }
         public string? DynamoDbEndpoint { get; private set; }
         public string? DynamoDbRegion { get; private set; }
+        public string? DynamoDbSigningRegion { get; private set; }
         public string? DynamoDbTableName { get; private set; }
         public int? SessionCacheMaxSize { get; private set; }
         public long? SessionCacheDuration { get; private set; }
@@ -159,6 +163,12 @@ public sealed class AsherahConfig
         public Builder WithDynamoDbRegion(string? value)
         {
             DynamoDbRegion = value;
+            return this;
+        }
+
+        public Builder WithDynamoDbSigningRegion(string? value)
+        {
+            DynamoDbSigningRegion = value;
             return this;
         }
 

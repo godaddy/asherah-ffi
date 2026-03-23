@@ -17,12 +17,14 @@ public class DynamoDbMetastoreImpl implements Metastore<JSONObject> {
     private final String region;
     private final String tableName;
     private final String endPoint;
+    private final String signingRegion;
     private final boolean keySuffix;
 
     private DynamoDbMetastoreImpl(final Builder builder) {
         this.region = builder.region;
         this.tableName = builder.tableName;
         this.endPoint = builder.endPoint;
+        this.signingRegion = builder.signingRegion;
         this.keySuffix = builder.keySuffix;
     }
 
@@ -30,6 +32,9 @@ public class DynamoDbMetastoreImpl implements Metastore<JSONObject> {
         builder.metastore("dynamodb");
         if (region != null) {
             builder.dynamoDbRegion(region);
+        }
+        if (signingRegion != null) {
+            builder.dynamoDbSigningRegion(signingRegion);
         }
         if (tableName != null && !DEFAULT_TABLE_NAME.equals(tableName)) {
             builder.dynamoDbTableName(tableName);
@@ -76,6 +81,7 @@ public class DynamoDbMetastoreImpl implements Metastore<JSONObject> {
         private final String region;
         private String tableName = DEFAULT_TABLE_NAME;
         private String endPoint;
+        private String signingRegion;
         private boolean keySuffix;
 
         private Builder(final String region) {
@@ -88,9 +94,9 @@ public class DynamoDbMetastoreImpl implements Metastore<JSONObject> {
             return this;
         }
 
-        @SuppressWarnings("unused") // signingRegion kept for canonical API compatibility
         public BuildStep withEndPointConfiguration(final String endPoint, final String signingRegion) {
             this.endPoint = endPoint;
+            this.signingRegion = signingRegion;
             return this;
         }
 
