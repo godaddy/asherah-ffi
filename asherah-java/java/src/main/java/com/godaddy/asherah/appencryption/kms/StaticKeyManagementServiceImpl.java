@@ -27,22 +27,8 @@ public class StaticKeyManagementServiceImpl implements KeyManagementService {
     @Override
     public void applyConfig(final AsherahConfig.Builder builder) {
         builder.kms("static");
-        // Set the hex-encoded master key via environment variable
+        // Set the hex-encoded master key via system property for the native layer
         System.setProperty("STATIC_MASTER_KEY_HEX", masterKeyHex);
-        try {
-            // Also set as env var for the native layer
-            setEnvVar("STATIC_MASTER_KEY_HEX", masterKeyHex);
-        } catch (Exception ignored) {
-            // Fallback: system property is also checked by some paths
-        }
-    }
-
-    private static void setEnvVar(final String key, final String value) {
-        // Use ProcessBuilder-based approach to set env var (Java doesn't have setenv)
-        // The native layer reads STATIC_MASTER_KEY_HEX from the process environment.
-        // Since Java can't set env vars directly, we rely on it being set before JVM start,
-        // or use the AsherahConfig JSON which is passed to the native layer.
-        // For the compat layer, we inject it into the JSON config indirectly.
     }
 
     public String getMasterKeyHex() {

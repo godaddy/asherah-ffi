@@ -88,6 +88,7 @@ public class DynamoDbMetastoreImpl implements Metastore<JSONObject> {
             return this;
         }
 
+        @SuppressWarnings("unused") // signingRegion kept for canonical API compatibility
         public BuildStep withEndPointConfiguration(final String endPoint, final String signingRegion) {
             this.endPoint = endPoint;
             return this;

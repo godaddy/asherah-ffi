@@ -21,6 +21,7 @@ public abstract class Persistence<T> {
         return key;
     }
 
+    @SuppressWarnings("unused") // value available for subclass overrides to generate content-based keys
     public String generateKey(final T value) {
         return UUID.randomUUID().toString();
     }

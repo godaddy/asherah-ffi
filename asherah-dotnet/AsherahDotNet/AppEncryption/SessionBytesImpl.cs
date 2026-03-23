@@ -24,12 +24,9 @@ internal class SessionBytesImpl<TD> : Session<byte[], TD>
 
     public override byte[] Decrypt(TD dataRowRecord)
     {
-        string drrJson;
-        if (dataRowRecord is JObject jobj)
-            drrJson = jobj.ToString(Newtonsoft.Json.Formatting.None);
-        else
-            drrJson = Encoding.UTF8.GetString((byte[])(object)dataRowRecord!);
-
+        var drrJson = dataRowRecord is JObject jobj
+            ? jobj.ToString(Newtonsoft.Json.Formatting.None)
+            : Encoding.UTF8.GetString((byte[])(object)dataRowRecord!);
         return _inner.DecryptBytes(Encoding.UTF8.GetBytes(drrJson));
     }
 

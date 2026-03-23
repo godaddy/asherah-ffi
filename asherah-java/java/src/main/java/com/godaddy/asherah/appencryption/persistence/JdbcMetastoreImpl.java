@@ -37,6 +37,7 @@ public class JdbcMetastoreImpl implements Metastore<JSONObject> {
      * string must be set via the CONNECTION_STRING environment variable.
      */
     public static Builder newBuilder(final DataSource dataSource) {
+        Objects.requireNonNull(dataSource, "dataSource");
         // DataSource doesn't expose a standard URL getter.
         // Users must set CONNECTION_STRING env var or use the String overload.
         return new Builder(null);
