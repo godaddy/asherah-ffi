@@ -84,6 +84,7 @@
         <version>3.1.2</version>
         <configuration>
           <useSystemClassLoader>true</useSystemClassLoader>
+          <argLine>--enable-native-access=ALL-UNNAMED</argLine>
           <systemPropertyVariables>
             <asherah.java.nativeLibraryPath>${env.CARGO_TARGET_DIR}/debug</asherah.java.nativeLibraryPath>
           </systemPropertyVariables>

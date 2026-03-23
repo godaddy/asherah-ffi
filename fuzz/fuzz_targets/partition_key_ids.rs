@@ -73,6 +73,10 @@ fuzz_target!(|input: PartitionInput| {
     let sk1 = p1.system_key_id();
     let sk2 = p2.system_key_id();
 
+    // System key IDs must be non-empty
+    assert!(!sk1.is_empty(), "system key ID must not be empty");
+    assert!(!sk2.is_empty(), "system key ID must not be empty");
+
     // Test validation doesn't accept unrelated IDs
     let _ = p1.is_valid_intermediate_key_id(&ik1);
     let _ = p1.is_valid_intermediate_key_id(&ik2);
@@ -92,6 +96,18 @@ fuzz_target!(|input: PartitionInput| {
         panic!(
             "Cross-partition validation bypass: p1 ({:?},{:?},{:?}) accepts p2's IK {:?}",
             input.id1, input.service1, input.product1, ik2,
+        );
+    }
+
+    // Different service+product pairs must produce different system key IDs
+    // (unless inputs have delimiter collisions)
+    if !has_delimiter
+        && (input.service1 != input.service2 || input.product1 != input.product2)
+        && sk1 == sk2
+    {
+        panic!(
+            "System key collision: ({:?},{:?}) and ({:?},{:?}) both produce {:?}",
+            input.service1, input.product1, input.service2, input.product2, sk1,
         );
     }
 });

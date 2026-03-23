@@ -299,7 +299,7 @@ do_bindings() {
             mvn -B -f asherah-java/java/pom.xml -Dnative.build.skip=true -DskipTests package -q 2>&1 | tail -1
             run_test "Java (JUnit)" mvn -B -f asherah-java/java/pom.xml -Dnative.build.skip=true \
                 -Dasherah.java.nativeLibraryPath="$java_native" \
-                -DargLine="-Djava.library.path=$java_native" test
+                -DargLine="--enable-native-access=ALL-UNNAMED -Djava.library.path=$java_native" test
         else
             skip "Java tests (maven/java not installed)"
         fi
