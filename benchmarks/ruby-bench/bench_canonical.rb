@@ -56,7 +56,7 @@ SIZES = [64, 1024, 8192]
 
 SIZES.each do |size|
   payload = Random.bytes(size)
-  if mode == "cold"
+  if %w[warm cold].include?(mode)
     partitions = Array.new(partition_pool_size) { |i| "bench-canon-#{mode}-#{size}-#{i}" }
     ciphertexts = partitions.map { |partition| Asherah.encrypt(partition, payload) }
     recovered = Asherah.decrypt(partitions[0], ciphertexts[0])
@@ -76,7 +76,7 @@ SIZES.each do |size|
     x.stats = :bootstrap
     x.confidence = 95
 
-    if mode == "cold"
+    if %w[warm cold].include?(mode)
       x.report("encrypt #{size}B") do
         idx = enc_idx % partition_pool_size
         enc_idx += 1
