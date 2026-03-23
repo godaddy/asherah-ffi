@@ -272,7 +272,11 @@ do_bindings() {
         fi
         if ! $RUBY_CMD -e 'require "ffi"' 2>/dev/null; then
             log "Installing Ruby ffi gem..."
-            gem install ffi --no-document 2>&1 | tail -1
+            if gem install ffi --no-document 2>&1 | tail -1; then
+                true
+            elif command -v sudo >/dev/null 2>&1; then
+                sudo gem install ffi --no-document 2>&1 | tail -1
+            fi
         fi
         run_test "Ruby" $RUBY_CMD -I asherah-ruby/lib -I asherah-ruby/test asherah-ruby/test/round_trip_test.rb
     fi

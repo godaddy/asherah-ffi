@@ -32,6 +32,8 @@ jobs:
         run: |
           TOOLCHAIN=$(rustup show active-toolchain | cut -d' ' -f1)
           rustup component add --toolchain "$TOOLCHAIN" rustfmt clippy
+      - name: Install protoc
+        run: sudo apt-get install -y protobuf-compiler
       - name: Lint
         run: scripts/test.sh --lint
 
