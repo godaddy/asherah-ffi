@@ -613,6 +613,11 @@ fi
 ########################################################################
 
 if [ "$HAVE_PYTHON" = 1 ]; then
+    # Ensure release build is installed (interop tests may have installed a debug build)
+    if command -v maturin >/dev/null 2>&1; then
+        log "Building Python binding (release)..."
+        maturin develop --release --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml" 2>&1 | tail -1
+    fi
     reset_mysql
     log "Running Python FFI benchmark (timeit)..."
     python3 "$BENCH_DIR/python-bench/bench.py" > "$RESULTS_DIR/python.log" 2>&1
@@ -782,6 +787,11 @@ print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(10
 }
 
 if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/asherah-node-bench/node_modules/tinybench" ]; then
+    # Ensure release addon is built (interop tests may have built debug)
+    if [ -f "$ROOT_DIR/asherah-node/package.json" ] && command -v npx >/dev/null 2>&1; then
+        log "Building Node.js addon (release)..."
+        (cd "$ROOT_DIR/asherah-node" && npx @napi-rs/cli build --release 2>&1 | tail -1) || true
+    fi
     reset_mysql
     log "Running Node.js FFI benchmark (tinybench)..."
     if (cd "$BENCH_DIR/asherah-node-bench" && run_node_bench "asherah-node" "ffi") \
