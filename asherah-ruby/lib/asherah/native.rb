@@ -28,6 +28,7 @@ module Asherah
         names = library_basenames
         paths = []
 
+        # 1. Explicit override via environment variable
         env = ENV.fetch("ASHERAH_RUBY_NATIVE", "").strip
         unless env.empty?
           if File.directory?(env)
@@ -37,6 +38,11 @@ module Asherah
           end
         end
 
+        # 2. Bundled in gem (platform-specific gem ships it here)
+        native_dir = File.expand_path("native", __dir__)
+        names.each { |name| paths << File.join(native_dir, name) }
+
+        # 3. CARGO_TARGET_DIR (development)
         cargo_target = ENV.fetch("CARGO_TARGET_DIR", "").strip
         unless cargo_target.empty?
           %w[debug release].each do |profile|
@@ -44,11 +50,13 @@ module Asherah
           end
         end
 
+        # 4. Workspace target directory (development)
         root = File.expand_path("../../..", __dir__)
         %w[target/release target/debug].each do |sub|
           names.each { |name| paths << File.join(root, sub, name) }
         end
 
+        # 5. System library path fallback
         names.each { |name| paths << name }
         paths.uniq
       end

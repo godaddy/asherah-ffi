@@ -7,14 +7,14 @@ module Asherah
   class SessionFactory
     def initialize(pointer = nil)
       ptr = pointer || Native.asherah_factory_new_from_env
-      raise Asherah::Error, Native.last_error if ptr.null?
+      raise Asherah::Error::BadConfig, Native.last_error if ptr.null?
       @pointer = ptr
       @closed = false
       ObjectSpace.define_finalizer(self, self.class.make_finalizer(ptr))
     end
 
     def get_session(partition_id)
-      raise Asherah::Error, "factory closed" if @closed
+      raise Asherah::Error::NotInitialized, "factory closed" if @closed
       id = String(partition_id)
       raise ArgumentError, "partition_id cannot be empty" if id.empty?
       Session.new(Native.asherah_factory_get_session(@pointer, id))

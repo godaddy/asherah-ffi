@@ -8,7 +8,7 @@ tmp/
 .yardoc/
 yardoc/
 
-# Native extensions
-*.so
-*.bundle
-*.dylib
+# Native libraries (bundled at build time, not checked in)
+lib/asherah/native/*.so
+lib/asherah/native/*.dylib
+lib/asherah/native/*.dll
