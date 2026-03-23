@@ -30,6 +30,10 @@ RUBY_DIR = ROOT / "asherah-ruby"
 RUBY_SCRIPT = RUBY_DIR / "scripts" / "interop.rb"
 LEGACY_NODE_DIR = ROOT / "interop" / "legacy-node"
 
+# Prefer Homebrew Ruby over macOS system Ruby (2.6, missing gems)
+_HOMEBREW_RUBY = Path("/opt/homebrew/opt/ruby/bin/ruby")
+RUBY_CMD = str(_HOMEBREW_RUBY) if _HOMEBREW_RUBY.exists() else "ruby"
+
 SQLITE_DB: Path | None = None
 
 BASE_ENV = {
@@ -37,7 +41,7 @@ BASE_ENV = {
     "PRODUCT_ID": "product",
     "KMS": "static",
     "STATIC_MASTER_KEY_HEX": "22" * 32,
-    "Metastore": "rdbms",
+    "Metastore": "sqlite",
     "SESSION_CACHE": "0",
 }
 
@@ -211,9 +215,13 @@ def rust_cli(action: str, partition: str, payload: bytes) -> bytes:
 def ruby_cli(action: str, partition: str, payload: bytes) -> bytes:
     payload_b64 = base64.b64encode(payload).decode()
     env = ensure_env({})
+    # Ensure Homebrew Ruby's gem path is on PATH (system Ruby 2.6 lacks gems)
+    if _HOMEBREW_RUBY.exists():
+        ruby_paths = "/opt/homebrew/opt/ruby/bin:/opt/homebrew/lib/ruby/gems/4.0.0/bin"
+        env["PATH"] = ruby_paths + ":" + env.get("PATH", "")
     LOGGER.info("ruby %s partition=%s payload=%d bytes", action, partition, len(payload))
     result = subprocess.run(
-        ["ruby", str(RUBY_SCRIPT), action, partition, payload_b64],
+        [RUBY_CMD, str(RUBY_SCRIPT), action, partition, payload_b64],
         cwd=RUBY_DIR,
         env=env,
         check=True,
@@ -248,7 +256,7 @@ def node_module_cli(flavour: str, action: str, partition: str, payload: bytes) -
 
 
 def python_encrypt(partition: str, data: bytes) -> str:
-    import asherah_py as asherah
+    import asherah
 
     for k, v in BASE_ENV.items():
         os.environ[k] = v
@@ -266,7 +274,7 @@ def python_encrypt(partition: str, data: bytes) -> str:
 
 
 def python_decrypt(partition: str, drr_json: str) -> bytes:
-    import asherah_py as asherah
+    import asherah
 
     for k, v in BASE_ENV.items():
         os.environ[k] = v

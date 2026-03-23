@@ -32,10 +32,10 @@ jobs:
         run: |
           TOOLCHAIN=$(rustup show active-toolchain | cut -d' ' -f1)
           rustup component add --toolchain "$TOOLCHAIN" rustfmt clippy
-      - name: Format check
-        run: cargo fmt --all -- --check
-      - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Install protoc
+        run: sudo apt-get install -y protobuf-compiler
+      - name: Lint
+        run: scripts/test.sh --lint
 
   rust-tests:
     runs-on: ubuntu-latest
@@ -62,8 +62,8 @@ jobs:
           tool: sccache@0.8.1
       - name: Install protoc
         run: sudo apt-get install -y protobuf-compiler
-      - name: Run Rust tests
-        run: cargo test --workspace --exclude asherah-node
+      - name: Unit tests
+        run: scripts/test.sh --unit
 
   integration-tests:
     runs-on: ubuntu-latest
@@ -82,8 +82,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Verify Docker availability
         run: docker version
-      - name: Run integration tests (MySQL, Postgres, DynamoDB, KMS via containers)
-        run: cargo test -p asherah --features mysql,postgres,dynamodb --test integration_containers -- --test-threads=1
+      - name: Integration tests
+        run: scripts/test.sh --integration
 
   build-rlib-x86_64:
     runs-on: ubuntu-22.04
@@ -499,20 +499,15 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        binding: [ffi, python, node, dotnet, java]
+        binding: [python, node, ruby, go, java, dotnet]
     steps:
       - uses: actions/checkout@v6
-      - name: Download x86_64 binding artifact
+      - name: Download all x86_64 binding artifacts
         uses: actions/download-artifact@v8
         with:
-          name: bindings-linux-x86_64-part-${{ matrix.binding }}
-          path: artifacts/x86_64
-      - name: Download x86_64 core FFI artifact
-        if: matrix.binding != 'python' && matrix.binding != 'ffi'
-        uses: actions/download-artifact@v8
-        with:
-          name: bindings-linux-x86_64-part-ffi
-          path: artifacts/x86_64
+          pattern: bindings-linux-x86_64-part-*
+          path: ${{ github.workspace }}/ci-artifacts
+          merge-multiple: true
       - uses: actions/setup-node@v6
         if: matrix.binding == 'node'
         with:
@@ -523,15 +518,56 @@ jobs:
           dotnet-version: |
             8.0.x
             10.0.x
-      - name: Install Ruby FFI gem
-        if: matrix.binding == 'ffi'
-        run: sudo gem install ffi --no-document
+      - uses: actions/setup-go@v5
+        if: matrix.binding == 'go'
+        with:
+          go-version: '1.22'
       - name: Run ${{ matrix.binding }} binding tests (x86_64)
         env:
-          BINDING_ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/x86_64
-          BINDING_TESTS_FAST_ONLY: "1"
-          BINDING_TESTS_BINDING: ${{ matrix.binding }}
-        run: ./scripts/run-binding-tests.sh
+          BINDING_ARTIFACTS_DIR: ${{ github.workspace }}/ci-artifacts
+        run: scripts/test.sh --bindings --binding=${{ matrix.binding }}
+
+  interop-tests:
+    runs-on: ubuntu-22.04
+    needs: build-rlib-x86_64
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
+      SCCACHE_CACHE_SIZE: 2G
+    steps:
+      - uses: actions/checkout@v6
+      - name: Restore workspace caches
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            .cache/sccache
+          key: interop-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            interop-${{ runner.os }}-
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: sccache@0.8.1
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+      - name: Download x86_64 rlib artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: x86_64-rlib-artifacts
+          path: /tmp
+      - name: Extract rlib artifacts
+        run: tar xzf /tmp/x86_64-rlib.tar.gz
+      - name: Install dependencies
+        run: |
+          sudo gem install ffi --no-document
+          pip3 install pytest maturin
+          cd asherah-node && npm install
+      - name: Interop tests
+        run: scripts/test.sh --interop
 
   tests-arm64:
     runs-on: ubuntu-latest
@@ -545,7 +581,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        binding: [ffi, python, node, dotnet, java]
+        binding: [python, node, ruby, go, java, dotnet]
     steps:
       - uses: actions/checkout@v6
       - name: Restore workspace caches
@@ -562,17 +598,12 @@ jobs:
           restore-keys: |
             tests-${{ runner.os }}-arm64-${{ matrix.binding }}-
             tests-${{ runner.os }}-arm64-
-      - name: Download arm64 binding artifact
+      - name: Download all arm64 binding artifacts
         uses: actions/download-artifact@v8
         with:
-          name: bindings-linux-aarch64-part-${{ matrix.binding }}
-          path: artifacts/aarch64
-      - name: Download arm64 core FFI artifact
-        if: matrix.binding != 'python' && matrix.binding != 'ffi'
-        uses: actions/download-artifact@v8
-        with:
-          name: bindings-linux-aarch64-part-ffi
-          path: artifacts/aarch64
+          pattern: bindings-linux-aarch64-part-*
+          path: ${{ github.workspace }}/artifacts/aarch64
+          merge-multiple: true
       - name: Download arm64 test image
         uses: actions/download-artifact@v8
         with:
@@ -582,20 +613,12 @@ jobs:
         uses: docker/setup-qemu-action@v4
         with:
           platforms: linux/arm64
-      - name: Verify Docker availability
-        run: docker version
       - name: Load arm64 test image
         run: docker load --input artifacts/asherah-tests-arm64.tar
-      - name: Debug - List artifacts structure
-        run: |
-          echo "=== Artifacts directory structure ==="
-          find artifacts/aarch64 -type f | head -50 || true
       - name: Run ${{ matrix.binding }} binding tests (Arm64)
         env:
           DOCKER_PLATFORM: linux/arm64
-          BINDING_TESTS_ONLY: "1"
           BINDING_ARTIFACTS_DIR: ${{ github.workspace }}/artifacts/aarch64
-          BINDING_TESTS_FAST_ONLY: "1"
           BINDING_TESTS_BINDING: ${{ matrix.binding }}
           USE_PREBUILT_TEST_IMAGE: "1"
           TESTS_IMAGE_TAG: asherah-tests:arm64
@@ -616,30 +639,15 @@ jobs:
           key: sanitizers-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             sanitizers-${{ runner.os }}-
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
       - name: Install dependencies
         run: |
           echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/80-retries
           sudo apt-get update
           sudo apt-get install -y clang llvm valgrind
-      - name: Install nightly with miri
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: miri
-      - name: Run miri on FFI crate
-        run: |
-          cargo +nightly miri setup
-          cargo +nightly miri test -p asherah-ffi
-      - name: Prepare nightly toolchain target
-        run: rustup +nightly target add x86_64-unknown-linux-gnu
-      - name: Run address sanitizer on FFI crate
-        env:
-          RUSTFLAGS: -Zsanitizer=address
-          RUSTDOCFLAGS: -Zsanitizer=address
-          ASAN_OPTIONS: detect_leaks=1
-        run: cargo +nightly -Zbuild-std test -p asherah-ffi --target x86_64-unknown-linux-gnu -- --test-threads=1
-      - name: Run valgrind on FFI tests
-        run: |
-          valgrind --error-exitcode=1 cargo test -p asherah-ffi --lib
+      - name: Sanitizer tests
+        run: scripts/test.sh --sanitizers --platform=x64
 
   build-rlib-arm64:
     runs-on: ubuntu-latest
