@@ -61,10 +61,11 @@ if [ "${1:-}" = "--setup" ]; then
 
     # Java canonical (clone + install to local maven repo)
     if command -v mvn >/dev/null 2>&1; then
-        if [ ! -d /tmp/asherah-canonical/java ]; then
-            git clone --depth 1 https://github.com/godaddy/asherah.git /tmp/asherah-canonical 2>&1 | tail -1
+        if [ ! -f /tmp/asherah-canonical/java/app-encryption/src/main/java/com/godaddy/asherah/appencryption/SessionFactory.java ]; then
+            rm -rf /tmp/asherah-canonical
+            git clone --depth 1 https://github.com/godaddy/asherah.git /tmp/asherah-canonical
         fi
-        mvn -B -f /tmp/asherah-canonical/java/app-encryption/pom.xml install -DskipTests -q 2>&1
+        mvn -B -f /tmp/asherah-canonical/java/app-encryption/pom.xml install -DskipTests -Dcheckstyle.skip=true -q 2>&1
     fi
 
     echo "Done. Run $0 to execute benchmarks."
@@ -378,8 +379,8 @@ if [ -f "$FFI_LIB_DIR/libasherah_ffi.dylib" ] || [ -f "$FFI_LIB_DIR/libasherah_f
 fi
 
 if [ "$HAVE_RUST" = 1 ] && [ "$FFI_LIB_EXISTS" = 0 ]; then
-    log "Building Rust FFI library..."
-    cargo build --release -p asherah-ffi --manifest-path "$ROOT_DIR/Cargo.toml" -q 2>&1
+    log "Building Rust FFI + Java JNI libraries (release)..."
+    cargo build --release -p asherah-ffi -p asherah-java --manifest-path "$ROOT_DIR/Cargo.toml" -q 2>&1
     FFI_LIB_EXISTS=1
 elif [ "$FFI_LIB_EXISTS" = 1 ]; then
     log "Using existing Rust FFI library in $FFI_LIB_DIR"
@@ -507,13 +508,14 @@ fi
 ########################################################################
 
 if [ "$HAVE_JAVA" = 1 ] && [ "$BENCH_MODE" != "cold" ] && [ "$BENCH_MODE" != "warm" ]; then
-    if [ ! -d /tmp/asherah-canonical/java ]; then
-        log "Cloning canonical asherah repo (run --setup to pre-fetch)..."
-        git clone --depth 1 https://github.com/godaddy/asherah.git /tmp/asherah-canonical 2>&1 | tail -1
-        mvn -B -f /tmp/asherah-canonical/java/app-encryption/pom.xml install -DskipTests -q 2>&1
+    # Validate clone has actual source files (not a corrupt shallow clone)
+    if [ ! -f /tmp/asherah-canonical/java/app-encryption/src/main/java/com/godaddy/asherah/appencryption/SessionFactory.java ]; then
+        log "Cloning canonical asherah repo..."
+        rm -rf /tmp/asherah-canonical
+        git clone --depth 1 https://github.com/godaddy/asherah.git /tmp/asherah-canonical
     fi
     log "Building Java Canonical benchmark (JMH)..."
-    mvn -B -f /tmp/asherah-canonical/java/app-encryption/pom.xml install -DskipTests -q 2>&1
+    mvn -B -f /tmp/asherah-canonical/java/app-encryption/pom.xml install -DskipTests -Dcheckstyle.skip=true -q 2>&1
     mvn -B -f "$BENCH_DIR/java-bench-canonical/pom.xml" clean package -q 2>&1
 
     log "Running Java Canonical benchmark (JMH)..."
@@ -613,6 +615,11 @@ fi
 ########################################################################
 
 if [ "$HAVE_PYTHON" = 1 ]; then
+    # Ensure release build is installed (interop tests may have installed a debug build)
+    if command -v maturin >/dev/null 2>&1; then
+        log "Building Python binding (release)..."
+        maturin develop --release --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml" 2>&1 | tail -1
+    fi
     reset_mysql
     log "Running Python FFI benchmark (timeit)..."
     python3 "$BENCH_DIR/python-bench/bench.py" > "$RESULTS_DIR/python.log" 2>&1
@@ -782,6 +789,11 @@ print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(10
 }
 
 if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/asherah-node-bench/node_modules/tinybench" ]; then
+    # Ensure release addon is built (interop tests may have built debug)
+    if [ -f "$ROOT_DIR/asherah-node/package.json" ] && command -v npx >/dev/null 2>&1; then
+        log "Building Node.js addon (release)..."
+        (cd "$ROOT_DIR/asherah-node" && npx @napi-rs/cli build --release 2>&1 | tail -1) || true
+    fi
     reset_mysql
     log "Running Node.js FFI benchmark (tinybench)..."
     if (cd "$BENCH_DIR/asherah-node-bench" && run_node_bench "asherah-node" "ffi") \
