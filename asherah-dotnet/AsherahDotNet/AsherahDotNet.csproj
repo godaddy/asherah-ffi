@@ -15,6 +15,10 @@
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
   <!-- Include native libraries for all supported platforms.
        These are placed by the publish-nuget workflow before dotnet pack. -->
   <ItemGroup>

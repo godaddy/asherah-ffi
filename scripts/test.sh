@@ -296,10 +296,17 @@ do_bindings() {
         if command -v mvn >/dev/null 2>&1 && command -v java >/dev/null 2>&1; then
             log "Building Java JAR..."
             local java_native="${ASHERAH_DOTNET_NATIVE:-$ROOT_DIR/target/release}"
+            # --enable-native-access requires JDK 16+; skip on older JDKs
+            local java_ver
+            java_ver=$(java -version 2>&1 | head -1 | sed 's/.*version "\([0-9]*\).*/\1/')
+            local native_access_flag=""
+            if [ "${java_ver:-0}" -ge 16 ] 2>/dev/null; then
+                native_access_flag="--enable-native-access=ALL-UNNAMED "
+            fi
             mvn -B -f asherah-java/java/pom.xml -Dnative.build.skip=true -DskipTests package -q 2>&1 | tail -1
             run_test "Java (JUnit)" mvn -B -f asherah-java/java/pom.xml -Dnative.build.skip=true \
                 -Dasherah.java.nativeLibraryPath="$java_native" \
-                -DargLine="-Djava.library.path=$java_native" test
+                -DargLine="${native_access_flag}-Djava.library.path=$java_native" test
         else
             skip "Java tests (maven/java not installed)"
         fi

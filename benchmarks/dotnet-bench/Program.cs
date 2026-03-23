@@ -1,12 +1,13 @@
+extern alias Canonical;
+
 using System;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Running;
-using GoDaddy.Asherah.AppEncryption;
-using GoDaddy.Asherah.AppEncryption.Kms;
-using GoDaddy.Asherah.Crypto;
+
+using CanonicalAppEncryption = Canonical::GoDaddy.Asherah.AppEncryption;
 
 BenchmarkRunner.Run<AsherahBenchmark>(
     DefaultConfig.Instance
@@ -26,8 +27,8 @@ public class AsherahBenchmark
     private const int DefaultPartitionPoolSize = 2048;
     private const int DefaultWarmSessionCacheMaxSize = 4096;
 
-    private SessionFactory _canonicalFactory = null!;
-    private Session<byte[], byte[]> _canonicalSession = null!;
+    private CanonicalAppEncryption.SessionFactory _canonicalFactory = null!;
+    private CanonicalAppEncryption.Session<byte[], byte[]> _canonicalSession = null!;
     private byte[] _payload = null!;
     private byte[] _canonicalCiphertext = null!;
     private byte[] _ffiCiphertext = null!;
@@ -46,7 +47,7 @@ public class AsherahBenchmark
         _mode = ResolveMode();
 
         // Canonical C# (NuGet v0.2.10)
-        _canonicalFactory = SessionFactory
+        _canonicalFactory = CanonicalAppEncryption.SessionFactory
             .NewBuilder(ProductId, ServiceName)
             .WithInMemoryMetastore()
             .WithNeverExpiredCryptoPolicy()
