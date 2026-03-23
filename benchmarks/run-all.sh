@@ -61,10 +61,11 @@ if [ "${1:-}" = "--setup" ]; then
 
     # Java canonical (clone + install to local maven repo)
     if command -v mvn >/dev/null 2>&1; then
-        if [ ! -d /tmp/asherah-canonical/java ]; then
-            git clone --depth 1 https://github.com/godaddy/asherah.git /tmp/asherah-canonical 2>&1 | tail -1
+        if [ ! -f /tmp/asherah-canonical/java/app-encryption/src/main/java/com/godaddy/asherah/appencryption/SessionFactory.java ]; then
+            rm -rf /tmp/asherah-canonical
+            git clone --depth 1 https://github.com/godaddy/asherah.git /tmp/asherah-canonical
         fi
-        mvn -B -f /tmp/asherah-canonical/java/app-encryption/pom.xml install -DskipTests -q 2>&1
+        mvn -B -f /tmp/asherah-canonical/java/app-encryption/pom.xml install -DskipTests -Dcheckstyle.skip=true -q 2>&1
     fi
 
     echo "Done. Run $0 to execute benchmarks."
@@ -507,10 +508,11 @@ fi
 ########################################################################
 
 if [ "$HAVE_JAVA" = 1 ] && [ "$BENCH_MODE" != "cold" ] && [ "$BENCH_MODE" != "warm" ]; then
-    if [ ! -d /tmp/asherah-canonical/java ]; then
-        log "Cloning canonical asherah repo (run --setup to pre-fetch)..."
-        git clone --depth 1 https://github.com/godaddy/asherah.git /tmp/asherah-canonical 2>&1 | tail -1
-        mvn -B -f /tmp/asherah-canonical/java/app-encryption/pom.xml install -DskipTests -q 2>&1
+    # Validate clone has actual source files (not a corrupt shallow clone)
+    if [ ! -f /tmp/asherah-canonical/java/app-encryption/src/main/java/com/godaddy/asherah/appencryption/SessionFactory.java ]; then
+        log "Cloning canonical asherah repo..."
+        rm -rf /tmp/asherah-canonical
+        git clone --depth 1 https://github.com/godaddy/asherah.git /tmp/asherah-canonical
     fi
     log "Building Java Canonical benchmark (JMH)..."
     mvn -B -f /tmp/asherah-canonical/java/app-encryption/pom.xml install -DskipTests -Dcheckstyle.skip=true -q 2>&1
