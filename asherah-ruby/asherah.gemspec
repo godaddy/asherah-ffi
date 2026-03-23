@@ -16,7 +16,17 @@ Gem::Specification.new do |spec|
   spec.metadata["source_code_uri"] = spec.homepage
   spec.metadata["github_repo"] = "ssh://github.com/godaddy/asherah-ffi"
 
-  spec.files = Dir["lib/**/*.rb", "LICENSE", "README.md"]
+  # Platform-specific gems include the precompiled native library.
+  # Set ASHERAH_GEM_PLATFORM to build a platform gem (e.g. x86_64-linux, arm64-darwin).
+  # Without it, the fallback "ruby" platform gem is built (requires ASHERAH_RUBY_NATIVE at runtime).
+  gem_platform = ENV["ASHERAH_GEM_PLATFORM"]
+  if gem_platform
+    spec.platform = Gem::Platform.new(gem_platform)
+    spec.files = Dir["lib/**/*.rb", "lib/asherah/native/libasherah_ffi.*", "lib/asherah/native/asherah_ffi.*", "LICENSE", "README.md"]
+  else
+    spec.files = Dir["lib/**/*.rb", "LICENSE", "README.md"]
+  end
+
   spec.require_paths = ["lib"]
 
   spec.add_dependency "ffi", "~> 1.15"

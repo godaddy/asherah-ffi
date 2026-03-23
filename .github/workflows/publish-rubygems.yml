@@ -1,4 +1,7 @@
-name: Publish to GitHub Packages (RubyGems)
+name: Publish to RubyGems
+
+permissions:
+  contents: read
 
 on:
   release:
@@ -6,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish (e.g. 0.1.0.beta.1)'
+        description: 'Version to publish (e.g. 0.1.0)'
         required: true
         type: string
       dry_run:
@@ -16,19 +19,77 @@ on:
         default: false
 
 jobs:
-  publish:
+  build-native:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            gem_platform: x86_64-linux
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            gem_platform: aarch64-linux
+            cross: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            gem_platform: x86_64-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            gem_platform: arm64-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install cross-compile tools
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: Build asherah-ffi
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.cross && 'aarch64-linux-gnu-gcc' || '' }}
+          CC_aarch64_unknown_linux_gnu: ${{ matrix.cross && 'aarch64-linux-gnu-gcc' || '' }}
+        run: cargo build --release -p asherah-ffi --target ${{ matrix.target }}
+      - name: Strip binary
+        run: |
+          LIB=$(find target/${{ matrix.target }}/release -maxdepth 1 -name 'libasherah_ffi.*' -not -name '*.d' | head -1)
+          if [ -n "$LIB" ]; then
+            if [ "${{ matrix.cross }}" = "true" ]; then
+              aarch64-linux-gnu-strip "$LIB" || true
+            else
+              strip "$LIB" || true
+            fi
+          fi
+      - name: Upload native library
+        uses: actions/upload-artifact@v7
+        with:
+          name: ruby-native-${{ matrix.gem_platform }}
+          retention-days: 1
+          path: |
+            target/${{ matrix.target }}/release/libasherah_ffi.so
+            target/${{ matrix.target }}/release/libasherah_ffi.dylib
+
+  package-and-publish:
+    needs: build-native
     runs-on: ubuntu-latest
     permissions:
       packages: write
-
     steps:
       - uses: actions/checkout@v6
-
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
 
-      - name: Set version and build gem
+      - name: Download all native libraries
+        uses: actions/download-artifact@v8
+        with:
+          path: native-artifacts
+          pattern: ruby-native-*
+
+      - name: Set version
         working-directory: asherah-ruby
         run: |
           if [ "${{ github.event_name }}" = "release" ]; then
@@ -37,9 +98,8 @@ jobs:
           else
             VERSION="${{ github.event.inputs.version }}"
           fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
           echo "Publishing version: ${VERSION}"
-
-          # Update version constant
           cat > lib/asherah/version.rb <<RUBY
           # frozen_string_literal: true
 
@@ -48,23 +108,56 @@ jobs:
           end
           RUBY
 
-          gem build asherah.gemspec
-          ls -lh *.gem
+      - name: Build platform gems
+        working-directory: asherah-ruby
+        run: |
+          mkdir -p pkg
 
-      - name: Publish to GitHub Packages
-        if: ${{ github.event_name == 'release' || github.event.inputs.dry_run != 'true' }}
+          # Build a gem for each platform
+          for dir in ../native-artifacts/ruby-native-*; do
+            platform="${dir##*ruby-native-}"
+            lib=$(find "$dir" -name 'libasherah_ffi.*' -not -name '*.d' | head -1)
+            if [ -z "$lib" ]; then
+              echo "WARNING: No library found for $platform in $dir"
+              continue
+            fi
+
+            echo "=== Building gem for $platform ==="
+            mkdir -p lib/asherah/native
+            cp "$lib" lib/asherah/native/
+            ASHERAH_GEM_PLATFORM="$platform" gem build asherah.gemspec -o pkg/
+            rm -f lib/asherah/native/libasherah_ffi.* lib/asherah/native/asherah_ffi.*
+          done
+
+          # Build fallback ruby-platform gem (no binary)
+          echo "=== Building fallback (ruby platform) gem ==="
+          rm -rf lib/asherah/native
+          gem build asherah.gemspec -o pkg/
+          mkdir -p lib/asherah/native
+
+          echo ""
+          echo "=== Built gems ==="
+          ls -lh pkg/
+
+      - name: Publish gems
+        if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }}
         working-directory: asherah-ruby
         env:
           GEM_HOST_API_KEY: "Bearer ${{ secrets.GITHUB_TOKEN }}"
         run: |
-          gem push --host https://rubygems.pkg.github.com/godaddy *.gem
+          for gem in pkg/*.gem; do
+            echo "Publishing $gem..."
+            gem push --host https://rubygems.pkg.github.com/godaddy "$gem"
+          done
 
-      - name: Dry run
-        if: ${{ github.event_name != 'release' && github.event.inputs.dry_run == 'true' }}
+      - name: Dry run summary
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
         working-directory: asherah-ruby
         run: |
           echo "Dry run complete. Would publish:"
-          ls -lh *.gem
-          echo ""
-          echo "Gem contents:"
-          gem specification *.gem
+          for gem in pkg/*.gem; do
+            echo "  $gem"
+            echo "  Contents:"
+            gem specification "$gem" | grep -E "name:|version:|platform:|files:"
+            echo ""
+          done

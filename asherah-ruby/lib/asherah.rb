@@ -3,6 +3,7 @@
 require "json"
 
 require_relative "asherah/error"
+require_relative "asherah/config"
 require_relative "asherah/native"
 require_relative "asherah/session_factory"
 require_relative "asherah/session"
@@ -11,6 +12,7 @@ module Asherah
   @mutex = Mutex.new
   @factory = nil
   @sessions = {}
+  @initialized = false
   @session_cache_enabled = true
   @log_hook = nil
   @verbose = false
@@ -18,6 +20,35 @@ module Asherah
   @safety_padding_overhead = nil
 
   class << self
+    # Configure Asherah using a block with snake_case accessors.
+    # Compatible with the canonical godaddy/asherah-ruby gem API.
+    #
+    #   Asherah.configure do |config|
+    #     config.service_name = "MyService"
+    #     config.product_id = "MyProduct"
+    #     config.kms = "static"
+    #     config.metastore = "memory"
+    #   end
+    def configure
+      @mutex.synchronize do
+        raise Error::AlreadyInitialized if @initialized
+
+        config = Config.new
+        yield config
+        config.validate!
+
+        json = config.to_json
+        pointer = Native.asherah_factory_new_with_config(json)
+        @factory = SessionFactory.new(pointer)
+        @sessions = {}
+        @initialized = true
+        @session_cache_enabled = config.enable_session_caching != false
+        @verbose = config.verbose == true
+      end
+    end
+
+    # Initialize Asherah with a PascalCase config hash.
+    # Also accepts snake_case string/symbol keys (auto-normalized).
     def setup(config)
       normalized = normalize_config(config)
       json = JSON.generate(normalized)
@@ -26,10 +57,11 @@ module Asherah
       factory = SessionFactory.new(pointer)
 
       @mutex.synchronize do
-        raise Error, "Asherah already configured" if @factory
+        raise Error::AlreadyInitialized if @initialized
 
         @factory = factory
         @sessions = {}
+        @initialized = true
         @session_cache_enabled = truthy(normalized["EnableSessionCaching"], default: true)
         @verbose = truthy(normalized["Verbose"], default: false)
       end
@@ -52,10 +84,13 @@ module Asherah
       factory = nil
       sessions = nil
       @mutex.synchronize do
+        raise Error::NotInitialized unless @initialized
+
         factory = @factory
         sessions = @sessions.values
         @factory = nil
         @sessions = {}
+        @initialized = false
       end
 
       Array(sessions).each do |session|
@@ -77,10 +112,10 @@ module Asherah
     end
 
     def get_setup_status
-      @mutex.synchronize { !@factory.nil? }
+      @mutex.synchronize { @initialized }
     end
 
-    def setenv(env)
+    def setenv(env = {})
       data = case env
              when String
                JSON.parse(env)
@@ -99,6 +134,7 @@ module Asherah
       end
       nil
     end
+    alias_method :set_env, :setenv
 
     def encrypt(partition_id, payload)
       session = resolve_session(partition_id)
@@ -111,7 +147,7 @@ module Asherah
 
     def decrypt(partition_id, data_row_record)
       session = resolve_session(partition_id)
-      session.decrypt_bytes(data_row_record)
+      session.decrypt_bytes(data_row_record).force_encoding(Encoding::UTF_8)
     end
 
     def decrypt_string(partition_id, data_row_record)
@@ -194,7 +230,7 @@ module Asherah
 
       # Brief mutex hold for hash lookup only — FFI call happens outside
       @mutex.synchronize do
-        raise Error, "Asherah not configured; call setup()" unless @factory
+        raise Error::NotInitialized unless @initialized
         if @session_cache_enabled
           @sessions[partition_id] ||= @factory.get_session(partition_id)
         else

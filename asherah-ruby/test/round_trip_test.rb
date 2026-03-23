@@ -21,6 +21,8 @@ class RoundTripTest < Minitest::Test
 
   def teardown
     Asherah.shutdown if Asherah.get_setup_status
+  rescue Asherah::Error::NotInitialized
+    # already shut down
   end
 
   def test_encrypts_and_decrypts_binary_payload
@@ -99,14 +101,14 @@ class RoundTripTest < Minitest::Test
     payload = (0..255).map(&:chr).join.b
     json = Asherah.encrypt("ruby-binary", payload)
     recovered = Asherah.decrypt("ruby-binary", json)
-    assert_equal payload, recovered
+    assert_equal payload.bytes, recovered.bytes
   end
 
   def test_empty_payload
     payload = "".b
     json = Asherah.encrypt("ruby-empty", payload)
     recovered = Asherah.decrypt("ruby-empty", json)
-    assert_equal payload, recovered
+    assert_equal payload.bytes, recovered.bytes
   end
 
   def test_large_payload_1mb
@@ -115,7 +117,7 @@ class RoundTripTest < Minitest::Test
     json = Asherah.encrypt("ruby-large", payload)
     recovered = Asherah.decrypt("ruby-large", json)
     assert_equal payload.bytesize, recovered.bytesize
-    assert_equal payload, recovered
+    assert_equal payload.bytes, recovered.bytes
   end
 
   def test_decrypt_invalid_json
@@ -245,5 +247,95 @@ class FactorySessionTest < Minitest::Test
     ensure
       factory.close
     end
+  end
+end
+
+# Tests for canonical godaddy/asherah-ruby API compatibility
+class CanonicalCompatTest < Minitest::Test
+  def setup
+    ENV["STATIC_MASTER_KEY_HEX"] = "22" * 32
+  end
+
+  def teardown
+    Asherah.shutdown if Asherah.get_setup_status
+  rescue Asherah::Error::NotInitialized
+    # already shut down
+  end
+
+  def test_configure_block_api
+    Asherah.configure do |config|
+      config.service_name = "compat-svc"
+      config.product_id = "compat-prod"
+      config.kms = "static"
+      config.metastore = "memory"
+    end
+    ct = Asherah.encrypt("compat-part", "block config works")
+    pt = Asherah.decrypt("compat-part", ct)
+    assert_equal "block config works", pt
+  end
+
+  def test_configure_with_session_caching
+    Asherah.configure do |config|
+      config.service_name = "cache-svc"
+      config.product_id = "cache-prod"
+      config.kms = "static"
+      config.metastore = "memory"
+      config.enable_session_caching = true
+    end
+    ct = Asherah.encrypt("cache-part", "cached")
+    pt = Asherah.decrypt("cache-part", ct)
+    assert_equal "cached", pt
+  end
+
+  def test_set_env_alias
+    assert Asherah.respond_to?(:set_env), "set_env method should exist"
+    Asherah.set_env("COMPAT_TEST_VAR" => "compat_value")
+    assert_equal "compat_value", ENV["COMPAT_TEST_VAR"]
+  ensure
+    ENV.delete("COMPAT_TEST_VAR")
+  end
+
+  def test_error_class_hierarchy
+    assert Asherah::Error < StandardError
+    assert Asherah::Error::ConfigError < Asherah::Error
+    assert Asherah::Error::NotInitialized < Asherah::Error
+    assert Asherah::Error::AlreadyInitialized < Asherah::Error
+    assert Asherah::Error::GetSessionFailed < Asherah::Error
+    assert Asherah::Error::EncryptFailed < Asherah::Error
+    assert Asherah::Error::DecryptFailed < Asherah::Error
+    assert Asherah::Error::BadConfig < Asherah::Error
+  end
+
+  def test_config_class_to_h
+    config = Asherah::Config.new
+    config.service_name = "svc"
+    config.product_id = "prod"
+    config.kms = "static"
+    config.metastore = "memory"
+    config.verbose = true
+    h = config.to_h
+    assert_equal "svc", h[:ServiceName]
+    assert_equal "prod", h[:ProductID]
+    assert_equal "static", h[:KMS]
+    assert_equal "memory", h[:Metastore]
+    assert_equal true, h[:Verbose]
+    refute h.key?(:ConnectionString) # nil values excluded
+  end
+
+  def test_config_validate_raises_on_missing_fields
+    config = Asherah::Config.new
+    assert_raises(Asherah::Error::ConfigError) { config.validate! }
+  end
+
+  def test_config_to_json
+    config = Asherah::Config.new
+    config.service_name = "svc"
+    config.product_id = "prod"
+    config.kms = "static"
+    config.metastore = "memory"
+    json = config.to_json
+    parsed = JSON.parse(json)
+    assert_equal "svc", parsed["ServiceName"]
+    assert_equal "memory", parsed["Metastore"]
   end
 end
