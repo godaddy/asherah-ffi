@@ -25,9 +25,23 @@ COMMON_MOUNTS=(
   -v "$CACHE_DIR/bun:/root/.bun"
 )
 
-RUN_SCRIPT="/workspace/scripts/run-tests.sh"
-if [ -n "${BINDING_TESTS_ONLY:-}" ]; then
-  RUN_SCRIPT="/workspace/scripts/run-binding-tests.sh"
+# Build the test.sh command line from environment variables
+TEST_CMD="/workspace/scripts/test.sh --bindings"
+
+if [ -n "${BINDING_TESTS_BINDING:-}" ]; then
+  TEST_CMD="$TEST_CMD --binding=$BINDING_TESTS_BINDING"
+fi
+
+# Determine platform from DOCKER_PLATFORM (e.g., linux/arm64 → arm64)
+PLATFORM_FLAG=""
+if [ -n "${DOCKER_PLATFORM:-}" ]; then
+  case "$DOCKER_PLATFORM" in
+    */arm64|*/aarch64)  PLATFORM_FLAG="--platform=arm64" ;;
+    */amd64|*/x86_64)   PLATFORM_FLAG="--platform=x64" ;;
+  esac
+fi
+if [ -n "$PLATFORM_FLAG" ]; then
+  TEST_CMD="$TEST_CMD $PLATFORM_FLAG"
 fi
 
 RUN_ENVS=()
@@ -39,61 +53,30 @@ if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then
   RUN_ENVS+=(-e "BINDING_ARTIFACTS_DIR=$BINDING_PATH")
 fi
 
-if [ -n "${BINDING_TESTS_ONLY:-}" ]; then
-  RUN_ENVS+=(-e "BINDING_TESTS_ONLY=$BINDING_TESTS_ONLY")
-fi
-
-if [ -n "${BINDING_TESTS_FAST_ONLY:-}" ]; then
-  RUN_ENVS+=(-e "BINDING_TESTS_FAST_ONLY=$BINDING_TESTS_FAST_ONLY")
-fi
-
-# Ensure binding selector propagates into the container so that
-# run-binding-tests.sh executes only the requested binding suite.
-if [ -n "${BINDING_TESTS_BINDING:-}" ]; then
-  RUN_ENVS+=(-e "BINDING_TESTS_BINDING=$BINDING_TESTS_BINDING")
-fi
-
-if [ "${SKIP_RUST_CHECKS:-0}" = "1" ]; then
-  RUN_ENVS+=(-e "SKIP_RUST_CHECKS=1")
-fi
-
-if [ -n "${DOCKER_PLATFORM:-}" ]; then
-  if [ "$USE_PREBUILT_IMAGE" = "1" ]; then
-    docker run --rm \
-      --platform "$DOCKER_PLATFORM" \
-      "${COMMON_MOUNTS[@]}" \
-      "${RUN_ENVS[@]}" \
-      "$IMAGE_TAG" \
-      "$RUN_SCRIPT"
-  else
-    docker buildx build \
-      --platform "$DOCKER_PLATFORM" \
-      --file "$ROOT_DIR/docker/tests.Dockerfile" \
-      --tag "$IMAGE_TAG" \
-      --load \
-      "$ROOT_DIR"
-
-    docker run --rm \
-      --platform "$DOCKER_PLATFORM" \
-      "${COMMON_MOUNTS[@]}" \
-      "${RUN_ENVS[@]}" \
-      "$IMAGE_TAG" \
-      "$RUN_SCRIPT"
+run_in_docker() {
+  local platform_args=()
+  if [ -n "${DOCKER_PLATFORM:-}" ]; then
+    platform_args=(--platform "$DOCKER_PLATFORM")
   fi
-else
-  if [ "$USE_PREBUILT_IMAGE" = "1" ]; then
-    docker run --rm \
-      "${COMMON_MOUNTS[@]}" \
-      "${RUN_ENVS[@]}" \
-      "$IMAGE_TAG" \
-      "$RUN_SCRIPT"
-  else
-    docker build -f "$ROOT_DIR/docker/tests.Dockerfile" -t "$IMAGE_TAG" "$ROOT_DIR"
 
-    docker run --rm \
-      "${COMMON_MOUNTS[@]}" \
-      "${RUN_ENVS[@]}" \
-      "$IMAGE_TAG" \
-      "$RUN_SCRIPT"
-  fi
+  docker run --rm \
+    --entrypoint "" \
+    "${platform_args[@]}" \
+    "${COMMON_MOUNTS[@]}" \
+    "${RUN_ENVS[@]}" \
+    "$IMAGE_TAG" \
+    bash -c "$TEST_CMD"
+}
+
+if [ -n "${DOCKER_PLATFORM:-}" ] && [ "$USE_PREBUILT_IMAGE" != "1" ]; then
+  docker buildx build \
+    --platform "$DOCKER_PLATFORM" \
+    --file "$ROOT_DIR/docker/tests.Dockerfile" \
+    --tag "$IMAGE_TAG" \
+    --load \
+    "$ROOT_DIR"
+elif [ "$USE_PREBUILT_IMAGE" != "1" ]; then
+  docker build -f "$ROOT_DIR/docker/tests.Dockerfile" -t "$IMAGE_TAG" "$ROOT_DIR"
 fi
+
+run_in_docker
