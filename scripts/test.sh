@@ -444,9 +444,9 @@ do_sanitizers() {
     if [ "$(uname)" = "Linux" ] && [ "$has_nightly" = true ]; then
         local asan_target="${PLATFORM}-unknown-linux-gnu"
         run_test "AddressSanitizer (asherah core)" bash -c \
-            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo test -p asherah --lib --target $asan_target -- --test-threads=1"
+            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo -Zbuild-std test -p asherah --lib --target $asan_target -- --test-threads=1"
         run_test "AddressSanitizer (cobhan)" bash -c \
-            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo test -p asherah-cobhan --lib --target $asan_target -- --test-threads=1"
+            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo -Zbuild-std test -p asherah-cobhan --lib --target $asan_target -- --test-threads=1"
     elif docker info >/dev/null 2>&1; then
         ensure_sanitizer_image
         # --target must be explicit so cargo separates host (proc-macro) from
@@ -455,10 +455,10 @@ do_sanitizers() {
         # container's native triple, not a hardcoded x86_64 target.
         run_test "AddressSanitizer (asherah core, via Docker)" \
             run_in_sanitizer_container \
-            'TARGET=$(rustc -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly test -p asherah --lib --target "$TARGET" -- --test-threads=1'
+            'TARGET=$(rustc +nightly -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly -Zbuild-std test -p asherah --lib --target "$TARGET" -- --test-threads=1'
         run_test "AddressSanitizer (cobhan, via Docker)" \
             run_in_sanitizer_container \
-            'TARGET=$(rustc -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly test -p asherah-cobhan --lib --target "$TARGET" -- --test-threads=1'
+            'TARGET=$(rustc +nightly -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly -Zbuild-std test -p asherah-cobhan --lib --target "$TARGET" -- --test-threads=1'
     else
         skip "AddressSanitizer (requires Linux or Docker)"
     fi
