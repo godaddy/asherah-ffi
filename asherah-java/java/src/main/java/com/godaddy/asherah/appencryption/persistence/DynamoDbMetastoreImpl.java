@@ -73,6 +73,7 @@ public class DynamoDbMetastoreImpl implements Metastore<JSONObject> {
 
     public interface BuildStep {
         BuildStep withTableName(String tableName);
+        BuildStep withEndPointConfiguration(String endPoint, String signingRegion);
         BuildStep withKeySuffix();
         DynamoDbMetastoreImpl build();
     }
@@ -94,6 +95,7 @@ public class DynamoDbMetastoreImpl implements Metastore<JSONObject> {
             return this;
         }
 
+        @Override
         public BuildStep withEndPointConfiguration(final String endPoint, final String signingRegion) {
             this.endPoint = endPoint;
             this.signingRegion = signingRegion;
