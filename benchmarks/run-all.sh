@@ -378,8 +378,8 @@ if [ -f "$FFI_LIB_DIR/libasherah_ffi.dylib" ] || [ -f "$FFI_LIB_DIR/libasherah_f
 fi
 
 if [ "$HAVE_RUST" = 1 ] && [ "$FFI_LIB_EXISTS" = 0 ]; then
-    log "Building Rust FFI library..."
-    cargo build --release -p asherah-ffi --manifest-path "$ROOT_DIR/Cargo.toml" -q 2>&1
+    log "Building Rust FFI + Java JNI libraries (release)..."
+    cargo build --release -p asherah-ffi -p asherah-java --manifest-path "$ROOT_DIR/Cargo.toml" -q 2>&1
     FFI_LIB_EXISTS=1
 elif [ "$FFI_LIB_EXISTS" = 1 ]; then
     log "Using existing Rust FFI library in $FFI_LIB_DIR"
@@ -513,7 +513,7 @@ if [ "$HAVE_JAVA" = 1 ] && [ "$BENCH_MODE" != "cold" ] && [ "$BENCH_MODE" != "wa
         mvn -B -f /tmp/asherah-canonical/java/app-encryption/pom.xml install -DskipTests -q 2>&1
     fi
     log "Building Java Canonical benchmark (JMH)..."
-    mvn -B -f /tmp/asherah-canonical/java/app-encryption/pom.xml install -DskipTests -q 2>&1
+    mvn -B -f /tmp/asherah-canonical/java/app-encryption/pom.xml install -DskipTests -Dcheckstyle.skip=true -q 2>&1
     mvn -B -f "$BENCH_DIR/java-bench-canonical/pom.xml" clean package -q 2>&1
 
     log "Running Java Canonical benchmark (JMH)..."
