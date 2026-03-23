@@ -449,14 +449,16 @@ do_sanitizers() {
             "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo test -p asherah-cobhan --lib --target $asan_target -- --test-threads=1"
     elif docker info >/dev/null 2>&1; then
         ensure_sanitizer_image
-        # Omit --target: let cargo use the container's native arch.
-        # Explicit --target would cross-compile on arm64 Docker (Apple Silicon).
+        # --target must be explicit so cargo separates host (proc-macro) from
+        # target (ASAN-instrumented) builds. Without it, RUSTFLAGS applies to
+        # proc-macros too, breaking futures_macro/tokio_macros. Use the
+        # container's native triple, not a hardcoded x86_64 target.
         run_test "AddressSanitizer (asherah core, via Docker)" \
             run_in_sanitizer_container \
-            'RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly test -p asherah --lib -- --test-threads=1'
+            'TARGET=$(rustc -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly test -p asherah --lib --target "$TARGET" -- --test-threads=1'
         run_test "AddressSanitizer (cobhan, via Docker)" \
             run_in_sanitizer_container \
-            'RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly test -p asherah-cobhan --lib -- --test-threads=1'
+            'TARGET=$(rustc -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly test -p asherah-cobhan --lib --target "$TARGET" -- --test-threads=1'
     else
         skip "AddressSanitizer (requires Linux or Docker)"
     fi
