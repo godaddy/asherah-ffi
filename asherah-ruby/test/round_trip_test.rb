@@ -21,6 +21,8 @@ class RoundTripTest < Minitest::Test
 
   def teardown
     Asherah.shutdown if Asherah.get_setup_status
+  rescue Asherah::Error::NotInitialized
+    # already shut down
   end
 
   def test_encrypts_and_decrypts_binary_payload
@@ -99,14 +101,14 @@ class RoundTripTest < Minitest::Test
     payload = (0..255).map(&:chr).join.b
     json = Asherah.encrypt("ruby-binary", payload)
     recovered = Asherah.decrypt("ruby-binary", json)
-    assert_equal payload, recovered
+    assert_equal payload.bytes, recovered.bytes
   end
 
   def test_empty_payload
     payload = "".b
     json = Asherah.encrypt("ruby-empty", payload)
     recovered = Asherah.decrypt("ruby-empty", json)
-    assert_equal payload, recovered
+    assert_equal payload.bytes, recovered.bytes
   end
 
   def test_large_payload_1mb
@@ -115,7 +117,7 @@ class RoundTripTest < Minitest::Test
     json = Asherah.encrypt("ruby-large", payload)
     recovered = Asherah.decrypt("ruby-large", json)
     assert_equal payload.bytesize, recovered.bytesize
-    assert_equal payload, recovered
+    assert_equal payload.bytes, recovered.bytes
   end
 
   def test_decrypt_invalid_json
@@ -256,6 +258,8 @@ class CanonicalCompatTest < Minitest::Test
 
   def teardown
     Asherah.shutdown if Asherah.get_setup_status
+  rescue Asherah::Error::NotInitialized
+    # already shut down
   end
 
   def test_configure_block_api
