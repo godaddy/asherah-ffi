@@ -476,10 +476,10 @@ do_sanitizers() {
         # Compile first, then run test binary under Valgrind (not cargo).
         run_test "Valgrind (asherah core, via Docker)" \
             run_in_sanitizer_container \
-            'cargo test -p asherah --lib --no-run 2>&1 | tail -1 && BIN=$(cargo test -p asherah --lib --no-run 2>&1 | grep -oP "Executable.*\(\K[^)]+") && valgrind --error-exitcode=1 --leak-check=full --suppressions=/workspace/valgrind.supp "$BIN" --test-threads=1'
+            'set -eo pipefail && cargo test -p asherah --lib --no-run 2>&1 && BIN=$(cargo test -p asherah --lib --no-run 2>&1 | grep -oP "Executable.*\(\K[^)]+") && valgrind --error-exitcode=1 --leak-check=full --suppressions=/workspace/valgrind.supp "$BIN" --test-threads=1'
         run_test "Valgrind (cobhan, via Docker)" \
             run_in_sanitizer_container \
-            'cargo test -p asherah-cobhan --lib --no-run 2>&1 | tail -1 && BIN=$(cargo test -p asherah-cobhan --lib --no-run 2>&1 | grep -oP "Executable.*\(\K[^)]+") && valgrind --error-exitcode=1 --leak-check=full --suppressions=/workspace/valgrind.supp "$BIN" --test-threads=1'
+            'set -eo pipefail && cargo test -p asherah-cobhan --lib --no-run 2>&1 && BIN=$(cargo test -p asherah-cobhan --lib --no-run 2>&1 | grep -oP "Executable.*\(\K[^)]+") && valgrind --error-exitcode=1 --leak-check=full --suppressions=/workspace/valgrind.supp "$BIN" --test-threads=1'
     else
         skip "Valgrind (not installed and Docker not available)"
     fi
