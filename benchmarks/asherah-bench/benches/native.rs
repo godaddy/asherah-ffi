@@ -1,13 +1,18 @@
 use asherah::builders;
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use rand::{rngs::StdRng, RngCore, SeedableRng};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+fn bench_mode() -> String {
+    std::env::var("BENCH_MODE")
+        .ok()
+        .unwrap_or_else(|| "memory".to_string())
+        .to_lowercase()
+}
+
 fn uses_partition_rotation() -> bool {
-    matches!(
-        std::env::var("BENCH_MODE").ok().as_deref(),
-        Some("warm" | "cold")
-    )
+    matches!(bench_mode().as_str(), "warm" | "cold")
 }
 
 fn bench_encrypt(c: &mut Criterion) {
@@ -33,25 +38,33 @@ fn bench_encrypt(c: &mut Criterion) {
             // Cold: pre-encrypt on pool of partitions so IKs exist in metastore,
             // then benchmark with IK cache=1 so every access is a cache miss
             // measuring load_latest cost, not IK creation cost.
+            // Sessions are cached in a HashMap to match what FFI bindings do
+            // (their stateless APIs keep sessions alive internally).
+            let mode = bench_mode();
             let pool_size = 2048_usize;
             let partitions: Vec<String> = (0..pool_size)
-                .map(|i| format!("cold-enc-{size}-{i}"))
+                .map(|i| format!("bench-{mode}-{size}-{i}"))
                 .collect();
+            let mut sessions: HashMap<&str, _> = HashMap::new();
             for p in &partitions {
                 let session = factory.get_session(p);
                 let _ = session.encrypt(&data).expect("pre-encrypt");
-                session.close().ok();
+                sessions.insert(p.as_str(), session);
+            }
+
+            // Warmup: 1000 iterations to stabilize MySQL connection pool,
+            // branch predictor, etc. — matches FFI binding benchmarks.
+            for w in 0..1000 {
+                let session = &sessions[partitions[w % pool_size].as_str()];
+                let _ = black_box(session.encrypt(&data).expect("warmup"));
             }
 
             let ctr = AtomicUsize::new(0);
             group.bench_function(BenchmarkId::new("rust_native", size), |b| {
                 b.iter(|| {
                     let i = ctr.fetch_add(1, Ordering::Relaxed) % pool_size;
-                    let session = factory.get_session(&partitions[i]);
-                    let result =
-                        black_box(session.encrypt(black_box(&data)).expect("encrypt"));
-                    session.close().ok();
-                    result
+                    let session = &sessions[partitions[i].as_str()];
+                    black_box(session.encrypt(black_box(&data)).expect("encrypt"))
                 })
             });
         } else {
@@ -84,37 +97,39 @@ fn bench_decrypt(c: &mut Criterion) {
         rng.fill_bytes(&mut data);
 
         if cold {
-            // Cold: pre-encrypt on many partitions, rotate to force IK miss
+            // Cold: pre-encrypt on many partitions, rotate to force IK miss.
+            // Sessions cached in a HashMap to match FFI binding behavior.
+            let mode = bench_mode();
             let pool_size = 2048_usize;
             let mut partitions = Vec::with_capacity(pool_size);
             let mut ciphertexts = Vec::with_capacity(pool_size);
+            let mut sessions: HashMap<String, _> = HashMap::new();
             for i in 0..pool_size {
-                let partition = format!("cold-dec-{size}-{i}");
+                let partition = format!("bench-{mode}-{size}-{i}");
                 let session = factory.get_session(&partition);
                 let drr = session.encrypt(&data).expect("pre-encrypt");
                 ciphertexts.push(drr);
+                sessions.insert(partition.clone(), session);
                 partitions.push(partition);
-                session.close().ok();
             }
-            // Warm SK cache
-            {
-                let session = factory.get_session(&partitions[0]);
-                let _ = session.decrypt(ciphertexts[0].clone()).expect("warm SK");
-                session.close().ok();
+            // Warmup: 1000 iterations to stabilize MySQL connection pool,
+            // branch predictor, and SK cache — matches FFI binding benchmarks.
+            for w in 0..1000 {
+                let i = w % pool_size;
+                let session = &sessions[&partitions[i]];
+                let _ = black_box(session.decrypt(ciphertexts[i].clone()).expect("warmup"));
             }
 
             let ctr = AtomicUsize::new(0);
             group.bench_function(BenchmarkId::new("rust_native", size), |b| {
                 b.iter(|| {
                     let i = ctr.fetch_add(1, Ordering::Relaxed) % pool_size;
-                    let session = factory.get_session(&partitions[i]);
-                    let result = black_box(
+                    let session = &sessions[&partitions[i]];
+                    black_box(
                         session
                             .decrypt(black_box(ciphertexts[i].clone()))
                             .expect("cold decrypt"),
-                    );
-                    session.close().ok();
-                    result
+                    )
                 })
             });
         } else {

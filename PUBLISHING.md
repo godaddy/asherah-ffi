@@ -8,30 +8,6 @@
 
 ### Publishing Process
 
-**Note:** The GitHub Actions publish workflow is currently blocked due to org billing issues. Use the local build method instead.
-
-#### Local Build (Current Method)
-```bash
-# Build for your current platform
-./scripts/build-npm-package.sh
-
-# Test the package
-cd asherah-node
-node test/roundtrip.js
-
-# Publish (requires npm login first)
-npm publish --access public
-```
-
-**Supported platforms for local builds:**
-- macOS ARM64 (Apple Silicon)
-- macOS x64 (Intel)
-- Linux x64 (glibc)
-- Linux ARM64 (via cross-compilation with aarch64-linux-gnu tools)
-
-**Note:** The current napi-rs configuration builds a single universal package (`npm = { default = true }`), not platform-specific packages. The output `index.node` contains the native binary for the current platform.
-
-#### GitHub Actions (When Billing Resolved)
 1. Go to Actions → "Publish to npm"
 2. Click "Run workflow"
 3. Optional: Enter specific tag (e.g., v4.0.0)
