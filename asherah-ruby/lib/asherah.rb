@@ -3,6 +3,7 @@
 require "json"
 
 require_relative "asherah/error"
+require_relative "asherah/config"
 require_relative "asherah/native"
 require_relative "asherah/session_factory"
 require_relative "asherah/session"
@@ -18,6 +19,23 @@ module Asherah
   @safety_padding_overhead = nil
 
   class << self
+    # Configure Asherah using a block with snake_case accessors.
+    # Compatible with the canonical godaddy/asherah-ruby gem API.
+    #
+    #   Asherah.configure do |config|
+    #     config.service_name = "MyService"
+    #     config.product_id = "MyProduct"
+    #     config.kms = "static"
+    #     config.metastore = "memory"
+    #   end
+    def configure
+      config = Config.new
+      yield config
+      setup(config.to_h)
+    end
+
+    # Initialize Asherah with a PascalCase config hash.
+    # Also accepts snake_case string/symbol keys (auto-normalized).
     def setup(config)
       normalized = normalize_config(config)
       json = JSON.generate(normalized)
@@ -99,6 +117,7 @@ module Asherah
       end
       nil
     end
+    alias_method :set_env, :setenv
 
     def encrypt(partition_id, payload)
       session = resolve_session(partition_id)

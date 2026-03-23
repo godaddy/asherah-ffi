@@ -247,3 +247,74 @@ class FactorySessionTest < Minitest::Test
     end
   end
 end
+
+# Tests for canonical godaddy/asherah-ruby API compatibility
+class CanonicalCompatTest < Minitest::Test
+  def setup
+    ENV["STATIC_MASTER_KEY_HEX"] = "22" * 32
+  end
+
+  def teardown
+    Asherah.shutdown if Asherah.get_setup_status
+  end
+
+  def test_configure_block_api
+    Asherah.configure do |config|
+      config.service_name = "compat-svc"
+      config.product_id = "compat-prod"
+      config.kms = "static"
+      config.metastore = "memory"
+    end
+    ct = Asherah.encrypt("compat-part", "block config works")
+    pt = Asherah.decrypt("compat-part", ct)
+    assert_equal "block config works", pt
+  end
+
+  def test_configure_with_session_caching
+    Asherah.configure do |config|
+      config.service_name = "cache-svc"
+      config.product_id = "cache-prod"
+      config.kms = "static"
+      config.metastore = "memory"
+      config.enable_session_caching = true
+    end
+    ct = Asherah.encrypt("cache-part", "cached")
+    pt = Asherah.decrypt("cache-part", ct)
+    assert_equal "cached", pt
+  end
+
+  def test_set_env_alias
+    assert Asherah.respond_to?(:set_env), "set_env method should exist"
+    Asherah.set_env("COMPAT_TEST_VAR" => "compat_value")
+    assert_equal "compat_value", ENV["COMPAT_TEST_VAR"]
+  ensure
+    ENV.delete("COMPAT_TEST_VAR")
+  end
+
+  def test_error_class_hierarchy
+    assert Asherah::Error < StandardError
+    assert Asherah::Error::ConfigError < Asherah::Error
+    assert Asherah::Error::NotInitialized < Asherah::Error
+    assert Asherah::Error::AlreadyInitialized < Asherah::Error
+    assert Asherah::Error::GetSessionFailed < Asherah::Error
+    assert Asherah::Error::EncryptFailed < Asherah::Error
+    assert Asherah::Error::DecryptFailed < Asherah::Error
+    assert Asherah::Error::BadConfig < Asherah::Error
+  end
+
+  def test_config_class_to_h
+    config = Asherah::Config.new
+    config.service_name = "svc"
+    config.product_id = "prod"
+    config.kms = "static"
+    config.metastore = "memory"
+    config.verbose = true
+    h = config.to_h
+    assert_equal "svc", h["ServiceName"]
+    assert_equal "prod", h["ProductID"]
+    assert_equal "static", h["KMS"]
+    assert_equal "memory", h["Metastore"]
+    assert_equal true, h["Verbose"]
+    refute h.key?("ConnectionString") # nil values excluded
+  end
+end
