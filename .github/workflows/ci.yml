@@ -1277,8 +1277,27 @@ jobs:
           ls dist/*.whl
           echo "manylinux arm64 wheel succeeded"
 
-  # macOS + Windows: verified by build-ffi-macos-x64 and build-ffi-windows-x64
-  # (they build asherah-ffi + asherah-java and upload artifacts)
+  publish-dry-run-pypi-macos:
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+      - name: Build universal2 wheel
+        uses: PyO3/maturin-action@04ac600d27cdf7a9a280dadf7147097c42b757ad # v1
+        with:
+          target: universal2-apple-darwin
+          args: --release --manifest-path asherah-py/Cargo.toml --out dist/
+      - name: Verify wheel
+        run: |
+          ls dist/*.whl
+          echo "macOS universal2 wheel succeeded"
 
   publish-dry-run-rubygem:
     runs-on: ubuntu-latest

@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text;
+using System.Threading.Tasks;
 using GoDaddy.Asherah;
 using GoDaddy.Asherah.AppEncryption;
 using GoDaddy.Asherah.AppEncryption.Crypto;
@@ -221,7 +222,7 @@ public class SessionFactoryCompatTests : IDisposable
     }
 
     [Fact]
-    public void AsyncSessionMethods()
+    public async Task AsyncSessionMethods()
     {
         _factory = SessionFactory.NewBuilder("product", "service")
             .WithInMemoryMetastore()
@@ -231,8 +232,8 @@ public class SessionFactoryCompatTests : IDisposable
 
         using var session = _factory.GetSessionBytes("async-test");
         var payload = Encoding.UTF8.GetBytes("async test");
-        var ct = session.EncryptAsync(payload).Result;
-        var pt = session.DecryptAsync(ct).Result;
+        var ct = await session.EncryptAsync(payload);
+        var pt = await session.DecryptAsync(ct);
         Assert.Equal(payload, pt);
     }
 
