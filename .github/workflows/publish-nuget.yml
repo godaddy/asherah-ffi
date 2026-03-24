@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish (e.g. 0.1.0-beta.1)'
+        description: 'Version to publish (e.g. 0.1.0)'
         required: true
         type: string
       dry_run:
@@ -17,6 +17,8 @@ on:
 
 jobs:
   publish:
+    # Runs AFTER release-cobhan.yml has uploaded the native libs to the release.
+    # On workflow_dispatch, downloads from the latest release.
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -63,22 +65,24 @@ jobs:
           mkdir -p "$NATIVE_DIR/win-x64/native"
           mkdir -p "$NATIVE_DIR/win-arm64/native"
 
-          gh release download "$TAG" -p 'libasherah-x64.so'    -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-arm64.so'   -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-x64.dylib'  -D /tmp/native-dl
+          # Download cobhan-named assets from release, rename to _ffi naming for .NET
+          gh release download "$TAG" -p 'libasherah-x64.so'     -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-arm64.so'    -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-x64.dylib'   -D /tmp/native-dl
           gh release download "$TAG" -p 'libasherah-arm64.dylib' -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-x64.dll'    -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-arm64.dll'  -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-x64.dll'     -D /tmp/native-dl || true
+          gh release download "$TAG" -p 'libasherah-arm64.dll'   -D /tmp/native-dl || true
 
           cp /tmp/native-dl/libasherah-x64.so      "$NATIVE_DIR/linux-x64/native/libasherah_ffi.so"
           cp /tmp/native-dl/libasherah-arm64.so     "$NATIVE_DIR/linux-arm64/native/libasherah_ffi.so"
           cp /tmp/native-dl/libasherah-x64.dylib    "$NATIVE_DIR/osx-x64/native/libasherah_ffi.dylib"
           cp /tmp/native-dl/libasherah-arm64.dylib  "$NATIVE_DIR/osx-arm64/native/libasherah_ffi.dylib"
-          cp /tmp/native-dl/libasherah-x64.dll      "$NATIVE_DIR/win-x64/native/asherah_ffi.dll"
-          cp /tmp/native-dl/libasherah-arm64.dll     "$NATIVE_DIR/win-arm64/native/asherah_ffi.dll"
+          # Windows binaries may not exist yet — skip if missing
+          [ -f /tmp/native-dl/libasherah-x64.dll ]  && cp /tmp/native-dl/libasherah-x64.dll   "$NATIVE_DIR/win-x64/native/asherah_ffi.dll"
+          [ -f /tmp/native-dl/libasherah-arm64.dll ] && cp /tmp/native-dl/libasherah-arm64.dll "$NATIVE_DIR/win-arm64/native/asherah_ffi.dll"
 
           echo "Native libraries staged:"
-          find "$NATIVE_DIR" -type f
+          find "$NATIVE_DIR" -type f | sort
 
       - name: Pack
         working-directory: asherah-dotnet/AsherahDotNet
@@ -87,29 +91,28 @@ jobs:
             /p:Version="${NUGET_VERSION}" \
             /p:PackageOutputPath="$GITHUB_WORKSPACE/dist"
 
-      - name: List packages
+      - name: Verify native libraries in package
         run: |
-          ls -lh dist/
-          echo ""
-          echo "Package contents:"
           for pkg in dist/*.nupkg; do
-            unzip -l "$pkg" | grep -E 'native|runtimes'
+            echo "=== $pkg ==="
+            unzip -l "$pkg" | grep -E 'native|runtimes' | sort
+            COUNT=$(unzip -l "$pkg" | grep -c "runtimes/.*/native/.*\.\(so\|dylib\|dll\)$" || true)
+            if [ "$COUNT" -eq 0 ]; then
+              echo "ERROR: No native libraries found in package"
+              exit 1
+            fi
+            echo "$COUNT native libraries bundled"
           done
 
       - name: Publish to GitHub Packages
-        if: ${{ github.event_name == 'release' || github.event.inputs.dry_run != 'true' }}
+        if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }}
         run: |
           dotnet nuget push dist/*.nupkg \
             --source "https://nuget.pkg.github.com/godaddy/index.json" \
             --api-key "${{ secrets.GITHUB_TOKEN }}"
 
       - name: Dry run
-        if: ${{ github.event_name != 'release' && github.event.inputs.dry_run == 'true' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
         run: |
           echo "Dry run complete. Would publish:"
           ls -lh dist/
-          echo ""
-          echo "Package contents:"
-          for pkg in dist/*.nupkg; do
-            unzip -l "$pkg"
-          done

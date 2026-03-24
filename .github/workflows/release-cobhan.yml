@@ -37,8 +37,8 @@ jobs:
             asset_name: libasherah-arm64.so
             arch: arm64
             cross: true
-          # macOS x86_64 (cross-compile from arm64)
-          - os: macos-latest
+          # macOS x86_64 — use macos-13 (last Intel runner)
+          - os: macos-13
             target: x86_64-apple-darwin
             artifact_name: libasherah_ffi.dylib
             asset_name: libasherah-x64.dylib
@@ -103,7 +103,7 @@ jobs:
           CXX_aarch64_unknown_linux_gnu: ${{ matrix.cross && 'aarch64-linux-gnu-g++' || '' }}
           AR_aarch64_unknown_linux_gnu: ${{ matrix.cross && 'aarch64-linux-gnu-ar' || '' }}
         run: |
-          cargo build --release -p asherah-ffi --target ${{ matrix.target }}
+          cargo build --release -p asherah-ffi -p asherah-java --target ${{ matrix.target }}
 
       - name: Strip binary (Linux/macOS)
         if: matrix.os != 'windows-latest'
@@ -119,6 +119,12 @@ jobs:
         run: |
           mkdir -p artifacts
           cp target/${{ matrix.target }}/release/${{ matrix.artifact_name }} artifacts/${{ matrix.asset_name }}
+          # Also include the Java JNI library (same extension, different name)
+          JAVA_LIB="target/${{ matrix.target }}/release/$(echo '${{ matrix.artifact_name }}' | sed 's/asherah_ffi/asherah_java/')"
+          if [ -f "$JAVA_LIB" ]; then
+            JAVA_ASSET="$(echo '${{ matrix.asset_name }}' | sed 's/libasherah-/libasherah_java-/')"
+            cp "$JAVA_LIB" "artifacts/$JAVA_ASSET"
+          fi
 
       - name: Generate header file
         shell: bash
@@ -278,6 +284,12 @@ jobs:
             artifacts/libasherah-arm64.dylib
             artifacts/libasherah-x64.dll
             artifacts/libasherah-arm64.dll
+            artifacts/libasherah_java-x64.so
+            artifacts/libasherah_java-arm64.so
+            artifacts/libasherah_java-x64.dylib
+            artifacts/libasherah_java-arm64.dylib
+            artifacts/libasherah_java-x64.dll
+            artifacts/libasherah_java-arm64.dll
             artifacts/libasherah-x64.h
             artifacts/libasherah-arm64.h
             artifacts/SHA256SUMS
