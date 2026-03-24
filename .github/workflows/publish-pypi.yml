@@ -118,6 +118,15 @@ jobs:
           fi
           rm -f asherah-py/Cargo.toml.bak
 
+      - name: Install OpenSSL (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          vcpkg install openssl:x64-windows-static-md
+          echo "OPENSSL_DIR=C:/vcpkg/installed/x64-windows-static-md" >> "$GITHUB_ENV"
+          echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
+          echo "OPENSSL_NO_VENDOR=1" >> "$GITHUB_ENV"
+
       - name: Build wheel
         uses: PyO3/maturin-action@04ac600d27cdf7a9a280dadf7147097c42b757ad # v1
         env:
