@@ -48,6 +48,7 @@ jobs:
 
           NATIVE_DIR=asherah-java/java/src/main/resources/native
           mkdir -p /tmp/native-dl
+          mkdir -p "$NATIVE_DIR"/{linux-x86_64,linux-aarch64,darwin-x86_64,darwin-aarch64,windows-x86_64,windows-aarch64}
 
           # Download Java JNI libraries (libasherah_java-<arch>.*)
           gh release download "$TAG" -p 'libasherah_java-x64.so'     -D /tmp/native-dl
