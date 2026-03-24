@@ -128,12 +128,14 @@ jobs:
           rust-toolchain: "1.91.1"
           before-script-linux: |
             # aws-lc-sys requires cmake; openssl-sys needs headers + OPENSSL_NO_VENDOR
+            export OPENSSL_NO_VENDOR=1
             if command -v yum &>/dev/null; then
               yum install -y cmake3 perl-IPC-Cmd openssl-devel pkgconfig || yum install -y cmake perl-IPC-Cmd openssl-devel pkgconfig || true
               ln -sf cmake3 /usr/local/bin/cmake 2>/dev/null || true
             elif command -v apk &>/dev/null; then
               apk add --no-cache cmake make perl openssl-dev pkgconf
             fi
+          container-options: -e OPENSSL_NO_VENDOR=1
           args: >-
             --release
             --manifest-path asherah-py/Cargo.toml

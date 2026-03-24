@@ -4,8 +4,9 @@ permissions:
   contents: read
 
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Release Asherah Native Library"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
@@ -20,6 +21,7 @@ on:
 
 jobs:
   package-and-publish:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -33,11 +35,11 @@ jobs:
       - name: Download native libraries from release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          TAG=""
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
-          else
+          # Get the release tag — from workflow_run's head branch or latest release
+          TAG="$WORKFLOW_RUN_BRANCH"
+          if [ -z "$TAG" ]; then
             TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
           fi
           echo "Downloading native libs from release ${TAG}"
@@ -57,12 +59,18 @@ jobs:
 
       - name: Set version
         working-directory: asherah-ruby
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            VERSION="${{ github.event.release.tag_name }}"
-            VERSION="${VERSION#v}"
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          elif [ -n "$WORKFLOW_RUN_BRANCH" ]; then
+            VERSION="${WORKFLOW_RUN_BRANCH#v}"
           else
-            VERSION="${{ github.event.inputs.version }}"
+            VERSION="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+            VERSION="${VERSION#v}"
           fi
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
           echo "Publishing version: ${VERSION}"
