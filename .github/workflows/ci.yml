@@ -1084,6 +1084,8 @@ jobs:
   # Alpine package downloads, etc. before a release is cut.
   publish-dry-run-musl:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: build-rlib-x86_64
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -1123,6 +1125,8 @@ jobs:
 
   publish-dry-run-windows:
     runs-on: windows-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
