@@ -411,7 +411,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
       - name: Build FFI for macOS x86_64 + arm64
@@ -438,7 +438,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
       - name: Install OpenSSL via vcpkg
         shell: bash
         run: |
@@ -1144,7 +1144,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: x86_64-unknown-linux-musl
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
@@ -1183,7 +1183,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
         with:
           node-version: 20
@@ -1238,10 +1238,10 @@ jobs:
               [ -x /usr/bin/cmake3 ] && ln -sf /usr/bin/cmake3 /usr/local/bin/cmake 2>/dev/null || true
             fi
           docker-options: -e OPENSSL_NO_VENDOR=1
-          args: --release --manifest-path asherah-py/Cargo.toml --out /tmp/dist/
+          args: --release --manifest-path asherah-py/Cargo.toml --out dist/
       - name: Verify wheel
         run: |
-          ls /tmp/dist/*.whl
+          ls dist/*.whl
           echo "manylinux x64 wheel succeeded"
 
   publish-dry-run-pypi-manylinux-arm64:
@@ -1258,23 +1258,23 @@ jobs:
           targets: aarch64-unknown-linux-gnu
       - name: Build manylinux aarch64 wheel
         uses: PyO3/maturin-action@04ac600d27cdf7a9a280dadf7147097c42b757ad # v1
-        env:
-          OPENSSL_NO_VENDOR: "1"
         with:
           target: aarch64-unknown-linux-gnu
           manylinux: "2_28"
           rust-toolchain: "1.91.1"
           before-script-linux: |
-            if command -v yum &>/dev/null; then
+            # Cross-compile container is Debian-based; install cmake for openssl-src
+            if command -v apt-get &>/dev/null; then
+              apt-get update && apt-get install -y cmake perl pkg-config
+            elif command -v yum &>/dev/null; then
               yum install -y cmake3 perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || \
               yum install -y cmake perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || true
               [ -x /usr/bin/cmake3 ] && ln -sf /usr/bin/cmake3 /usr/local/bin/cmake 2>/dev/null || true
             fi
-          docker-options: -e OPENSSL_NO_VENDOR=1
-          args: --release --manifest-path asherah-py/Cargo.toml --out /tmp/dist/
+          args: --release --manifest-path asherah-py/Cargo.toml --out dist/
       - name: Verify wheel
         run: |
-          ls /tmp/dist/*.whl
+          ls dist/*.whl
           echo "manylinux arm64 wheel succeeded"
 
   # macOS + Windows: verified by build-ffi-macos-x64 and build-ffi-windows-x64
