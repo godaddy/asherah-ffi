@@ -61,13 +61,13 @@ SIZES.each do |size|
     partitions = Array.new(partition_pool_size) { |i| "bench-#{mode}-#{size}-#{i}" }
     ciphertexts = partitions.map { |partition| Asherah.encrypt(partition, payload) }
     recovered = Asherah.decrypt(partitions[0], ciphertexts[0])
-    raise "Round-trip verification failed for #{size}B" unless recovered == payload
+    raise "Round-trip verification failed for #{size}B" unless recovered.b == payload.b
     enc_idx = 0
     dec_idx = 0
   else
     ct = Asherah.encrypt(PARTITION, payload)
     recovered = Asherah.decrypt(PARTITION, ct)
-    raise "Round-trip verification failed for #{size}B" unless recovered == payload
+    raise "Round-trip verification failed for #{size}B" unless recovered.b == payload.b
   end
 
   puts "\n=== #{size}B payload ==="
