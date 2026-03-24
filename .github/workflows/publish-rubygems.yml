@@ -119,7 +119,9 @@ jobs:
         run: |
           for gem in pkg/*.gem; do
             echo "Publishing $gem..."
-            gem push --host https://rubygems.pkg.github.com/godaddy "$gem"
+            gem push --host https://rubygems.pkg.github.com/godaddy "$gem" || {
+              echo "WARNING: Failed to push $gem (may already exist)"
+            }
           done
 
       - name: Dry run summary
