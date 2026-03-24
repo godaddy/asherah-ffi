@@ -120,17 +120,19 @@ jobs:
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
+        env:
+          OPENSSL_NO_VENDOR: "1"
         with:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux || 'auto' }}
           rust-toolchain: "1.91.1"
           before-script-linux: |
-            # aws-lc-sys requires cmake; install it if missing
+            # aws-lc-sys requires cmake; openssl-sys needs headers + OPENSSL_NO_VENDOR
             if command -v yum &>/dev/null; then
-              yum install -y cmake3 perl-IPC-Cmd || yum install -y cmake perl-IPC-Cmd || true
+              yum install -y cmake3 perl-IPC-Cmd openssl-devel pkgconfig || yum install -y cmake perl-IPC-Cmd openssl-devel pkgconfig || true
               ln -sf cmake3 /usr/local/bin/cmake 2>/dev/null || true
             elif command -v apk &>/dev/null; then
-              apk add --no-cache cmake make perl
+              apk add --no-cache cmake make perl openssl-dev pkgconf
             fi
           args: >-
             --release

@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish (e.g. 0.1.0-beta.1)'
+        description: 'Version to publish (e.g. 0.1.0)'
         required: true
         type: string
       dry_run:
@@ -16,7 +16,63 @@ on:
         default: false
 
 jobs:
+  build-native:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            rid: linux-x64
+            lib: libasherah_ffi.so
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-gnu
+            rid: linux-arm64
+            lib: libasherah_ffi.so
+            cross: true
+          - os: macos-13
+            target: x86_64-apple-darwin
+            rid: osx-x64
+            lib: libasherah_ffi.dylib
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            rid: osx-arm64
+            lib: libasherah_ffi.dylib
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install cross-compile tools
+        if: matrix.cross
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+      - name: Build asherah-ffi
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.cross && 'aarch64-linux-gnu-gcc' || '' }}
+          CC_aarch64_unknown_linux_gnu: ${{ matrix.cross && 'aarch64-linux-gnu-gcc' || '' }}
+        run: cargo build --release -p asherah-ffi --target ${{ matrix.target }}
+      - name: Strip binary
+        run: |
+          LIB="target/${{ matrix.target }}/release/${{ matrix.lib }}"
+          if [ -f "$LIB" ]; then
+            if [ "${{ matrix.cross }}" = "true" ]; then
+              aarch64-linux-gnu-strip "$LIB" || true
+            else
+              strip "$LIB" || true
+            fi
+          fi
+      - name: Upload native library
+        uses: actions/upload-artifact@v7
+        with:
+          name: nuget-native-${{ matrix.rid }}
+          retention-days: 1
+          path: target/${{ matrix.target }}/release/${{ matrix.lib }}
+
   publish:
+    needs: build-native
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -31,6 +87,27 @@ jobs:
             8.0.x
             10.0.x
 
+      - name: Download all native libraries
+        uses: actions/download-artifact@v8
+        with:
+          path: native-artifacts
+          pattern: nuget-native-*
+
+      - name: Stage native libraries
+        run: |
+          NATIVE_DIR="asherah-dotnet/AsherahDotNet/runtimes"
+          for dir in native-artifacts/nuget-native-*; do
+            rid="${dir##*nuget-native-}"
+            lib=$(find "$dir" -name 'libasherah_ffi.*' -o -name 'asherah_ffi.*' | head -1)
+            if [ -n "$lib" ]; then
+              mkdir -p "$NATIVE_DIR/$rid/native"
+              cp "$lib" "$NATIVE_DIR/$rid/native/"
+              echo "Staged: $lib → $NATIVE_DIR/$rid/native/"
+            fi
+          done
+          echo "=== Staged native libraries ==="
+          find "$NATIVE_DIR" -type f | sort
+
       - name: Set version
         run: |
           if [ "${{ github.event_name }}" = "release" ]; then
@@ -42,44 +119,6 @@ jobs:
           echo "Publishing version: ${VERSION}"
           echo "NUGET_VERSION=${VERSION}" >> "$GITHUB_ENV"
 
-      - name: Download native libraries from release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG=""
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
-          else
-            TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
-          fi
-          echo "Downloading native libs from release ${TAG}"
-
-          NATIVE_DIR="asherah-dotnet/AsherahDotNet/runtimes"
-
-          mkdir -p "$NATIVE_DIR/linux-x64/native"
-          mkdir -p "$NATIVE_DIR/linux-arm64/native"
-          mkdir -p "$NATIVE_DIR/osx-x64/native"
-          mkdir -p "$NATIVE_DIR/osx-arm64/native"
-          mkdir -p "$NATIVE_DIR/win-x64/native"
-          mkdir -p "$NATIVE_DIR/win-arm64/native"
-
-          gh release download "$TAG" -p 'libasherah-x64.so'    -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-arm64.so'   -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-x64.dylib'  -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-arm64.dylib' -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-x64.dll'    -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-arm64.dll'  -D /tmp/native-dl
-
-          cp /tmp/native-dl/libasherah-x64.so      "$NATIVE_DIR/linux-x64/native/libasherah_ffi.so"
-          cp /tmp/native-dl/libasherah-arm64.so     "$NATIVE_DIR/linux-arm64/native/libasherah_ffi.so"
-          cp /tmp/native-dl/libasherah-x64.dylib    "$NATIVE_DIR/osx-x64/native/libasherah_ffi.dylib"
-          cp /tmp/native-dl/libasherah-arm64.dylib  "$NATIVE_DIR/osx-arm64/native/libasherah_ffi.dylib"
-          cp /tmp/native-dl/libasherah-x64.dll      "$NATIVE_DIR/win-x64/native/asherah_ffi.dll"
-          cp /tmp/native-dl/libasherah-arm64.dll     "$NATIVE_DIR/win-arm64/native/asherah_ffi.dll"
-
-          echo "Native libraries staged:"
-          find "$NATIVE_DIR" -type f
-
       - name: Pack
         working-directory: asherah-dotnet/AsherahDotNet
         run: |
@@ -87,29 +126,28 @@ jobs:
             /p:Version="${NUGET_VERSION}" \
             /p:PackageOutputPath="$GITHUB_WORKSPACE/dist"
 
-      - name: List packages
+      - name: Verify native libraries in package
         run: |
-          ls -lh dist/
-          echo ""
-          echo "Package contents:"
           for pkg in dist/*.nupkg; do
-            unzip -l "$pkg" | grep -E 'native|runtimes'
+            echo "=== $pkg ==="
+            unzip -l "$pkg" | grep -E 'native|runtimes' | sort
+            COUNT=$(unzip -l "$pkg" | grep -c "runtimes/.*/native/.*\.\(so\|dylib\|dll\)$" || true)
+            if [ "$COUNT" -eq 0 ]; then
+              echo "ERROR: No native libraries found in package"
+              exit 1
+            fi
+            echo "$COUNT native libraries bundled"
           done
 
       - name: Publish to GitHub Packages
-        if: ${{ github.event_name == 'release' || github.event.inputs.dry_run != 'true' }}
+        if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }}
         run: |
           dotnet nuget push dist/*.nupkg \
             --source "https://nuget.pkg.github.com/godaddy/index.json" \
             --api-key "${{ secrets.GITHUB_TOKEN }}"
 
       - name: Dry run
-        if: ${{ github.event_name != 'release' && github.event.inputs.dry_run == 'true' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
         run: |
           echo "Dry run complete. Would publish:"
           ls -lh dist/
-          echo ""
-          echo "Package contents:"
-          for pkg in dist/*.nupkg; do
-            unzip -l "$pkg"
-          done
