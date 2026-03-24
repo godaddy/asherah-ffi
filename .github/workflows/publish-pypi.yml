@@ -138,17 +138,30 @@ jobs:
           before-script-linux: |
             # aws-lc-sys requires cmake; openssl-sys needs system OpenSSL headers
             if command -v yum &>/dev/null; then
+              # manylinux (CentOS/RHEL based)
               yum install -y cmake3 perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || \
               yum install -y cmake perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || true
               [ -x /usr/bin/cmake3 ] && ln -sf /usr/bin/cmake3 /usr/local/bin/cmake 2>/dev/null || true
             elif command -v apk &>/dev/null; then
+              # musllinux (Alpine based)
               apk add --no-cache cmake make perl openssl-dev openssl-libs-static pkgconf musl-dev
             elif command -v apt-get &>/dev/null; then
-              apt-get update && apt-get install -y cmake libssl-dev pkg-config
+              # rust-musl-cross (Debian based, for musl cross-compilation)
+              apt-get update && apt-get install -y cmake pkg-config curl
+              # Download musl OpenSSL from Alpine since apt's libssl-dev is glibc
+              MUSL_ARCH=$(uname -m)
+              if [ "$MUSL_ARCH" = "x86_64" ]; then ALPINE_ARCH=x86_64; else ALPINE_ARCH=aarch64; fi
+              mkdir -p /tmp/musl-ssl && cd /tmp/musl-ssl
+              OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1)
+              OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1)
+              curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/$OPENSSL_DEV"
+              curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/$OPENSSL_STATIC"
+              for f in *.apk; do tar xf "$f" 2>/dev/null || true; done
+              export OPENSSL_DIR=/tmp/musl-ssl/usr
+              export OPENSSL_STATIC=1
             fi
-            # Verify pkg-config can find openssl
-            pkg-config --libs openssl 2>/dev/null || echo "WARNING: pkg-config cannot find openssl"
-          docker-options: -e OPENSSL_NO_VENDOR=1
+            pkg-config --libs openssl 2>/dev/null || echo "INFO: pkg-config openssl not found, using OPENSSL_DIR"
+          docker-options: -e OPENSSL_NO_VENDOR=1 -e OPENSSL_DIR=/tmp/musl-ssl/usr -e OPENSSL_STATIC=1
           args: >-
             --release
             --manifest-path asherah-py/Cargo.toml
