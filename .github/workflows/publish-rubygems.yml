@@ -19,75 +19,41 @@ on:
         default: false
 
 jobs:
-  build-native:
-    strategy:
-      fail-fast: true
-      matrix:
-        include:
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            gem_platform: x86_64-linux
-          - os: ubuntu-22.04
-            target: aarch64-unknown-linux-gnu
-            gem_platform: aarch64-linux
-            cross: true
-          - os: macos-13
-            target: x86_64-apple-darwin
-            gem_platform: x86_64-darwin
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            gem_platform: arm64-darwin
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v6
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - name: Install cross-compile tools
-        if: matrix.cross
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-      - name: Build asherah-ffi
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.cross && 'aarch64-linux-gnu-gcc' || '' }}
-          CC_aarch64_unknown_linux_gnu: ${{ matrix.cross && 'aarch64-linux-gnu-gcc' || '' }}
-        run: cargo build --release -p asherah-ffi --target ${{ matrix.target }}
-      - name: Strip binary
-        run: |
-          LIB=$(find target/${{ matrix.target }}/release -maxdepth 1 -name 'libasherah_ffi.*' -not -name '*.d' | head -1)
-          if [ -n "$LIB" ]; then
-            if [ "${{ matrix.cross }}" = "true" ]; then
-              aarch64-linux-gnu-strip "$LIB" || true
-            else
-              strip "$LIB" || true
-            fi
-          fi
-      - name: Upload native library
-        uses: actions/upload-artifact@v7
-        with:
-          name: ruby-native-${{ matrix.gem_platform }}
-          retention-days: 1
-          path: |
-            target/${{ matrix.target }}/release/libasherah_ffi.so
-            target/${{ matrix.target }}/release/libasherah_ffi.dylib
-
   package-and-publish:
-    needs: build-native
     runs-on: ubuntu-latest
     permissions:
       packages: write
+      contents: read
     steps:
       - uses: actions/checkout@v6
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
 
-      - name: Download all native libraries
-        uses: actions/download-artifact@v8
-        with:
-          path: native-artifacts
-          pattern: ruby-native-*
+      - name: Download native libraries from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=""
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          else
+            TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+          fi
+          echo "Downloading native libs from release ${TAG}"
+
+          mkdir -p /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-x64.so'     -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-arm64.so'    -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-x64.dylib'   -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-arm64.dylib' -D /tmp/native-dl
+
+          # Stage for gem packaging (rename to libasherah_ffi.*)
+          mkdir -p /tmp/staged/{x86_64-linux,aarch64-linux,x86_64-darwin,arm64-darwin}
+          cp /tmp/native-dl/libasherah-x64.so     /tmp/staged/x86_64-linux/libasherah_ffi.so
+          cp /tmp/native-dl/libasherah-arm64.so    /tmp/staged/aarch64-linux/libasherah_ffi.so
+          cp /tmp/native-dl/libasherah-x64.dylib   /tmp/staged/x86_64-darwin/libasherah_ffi.dylib
+          cp /tmp/native-dl/libasherah-arm64.dylib /tmp/staged/arm64-darwin/libasherah_ffi.dylib
 
       - name: Set version
         working-directory: asherah-ruby
@@ -113,12 +79,10 @@ jobs:
         run: |
           mkdir -p pkg
 
-          # Build a gem for each platform
-          for dir in ../native-artifacts/ruby-native-*; do
-            platform="${dir##*ruby-native-}"
-            lib=$(find "$dir" -name 'libasherah_ffi.*' -not -name '*.d' | head -1)
+          for platform in x86_64-linux aarch64-linux x86_64-darwin arm64-darwin; do
+            lib=$(find "/tmp/staged/$platform" -name 'libasherah_ffi.*' | head -1)
             if [ -z "$lib" ]; then
-              echo "WARNING: No library found for $platform in $dir"
+              echo "WARNING: No library for $platform"
               continue
             fi
 
@@ -157,7 +121,4 @@ jobs:
           echo "Dry run complete. Would publish:"
           for gem in pkg/*.gem; do
             echo "  $gem"
-            echo "  Contents:"
-            gem specification "$gem" | grep -E "name:|version:|platform:|files:"
-            echo ""
           done

@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish (e.g. 0.1.0-beta.1)'
+        description: 'Version to publish (e.g. 0.1.0)'
         required: true
         type: string
       dry_run:
@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       packages: write
+      contents: read
 
     steps:
       - uses: actions/checkout@v6
@@ -31,6 +32,36 @@ jobs:
           server-id: github
           server-username: GITHUB_ACTOR
           server-password: GITHUB_TOKEN
+
+      - name: Download native libraries from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=""
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          else
+            TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+          fi
+          echo "Downloading Java JNI native libs from release ${TAG}"
+
+          NATIVE_DIR=asherah-java/java/src/main/resources/native
+          mkdir -p /tmp/native-dl
+
+          # Download Java JNI libraries (libasherah_java-<arch>.*)
+          gh release download "$TAG" -p 'libasherah_java-x64.so'     -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah_java-arm64.so'    -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah_java-x64.dylib'   -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah_java-arm64.dylib' -D /tmp/native-dl
+
+          # Stage into JAR resource directories
+          cp /tmp/native-dl/libasherah_java-x64.so     "$NATIVE_DIR/linux-x86_64/libasherah_java.so"
+          cp /tmp/native-dl/libasherah_java-arm64.so    "$NATIVE_DIR/linux-aarch64/libasherah_java.so"
+          cp /tmp/native-dl/libasherah_java-x64.dylib   "$NATIVE_DIR/darwin-x86_64/libasherah_java.dylib"
+          cp /tmp/native-dl/libasherah_java-arm64.dylib "$NATIVE_DIR/darwin-aarch64/libasherah_java.dylib"
+
+          echo "Native libraries staged:"
+          find "$NATIVE_DIR" -type f -not -name '.git*' | sort
 
       - name: Set version
         run: |
@@ -44,18 +75,27 @@ jobs:
           mvn -B -f asherah-java/java/pom.xml versions:set -DnewVersion="${VERSION}"
           echo "MAVEN_VERSION=${VERSION}" >> "$GITHUB_ENV"
 
-      - name: Build JAR (skip native build and tests)
+      - name: Build JAR with native libraries
         run: |
           mvn -B -f asherah-java/java/pom.xml \
             -Dnative.build.skip=true \
             -DskipTests \
             package
 
-      - name: List packages
-        run: ls -lh asherah-java/java/target/*.jar
+      - name: Verify native libraries in JAR
+        run: |
+          JAR=$(find asherah-java/java/target -name 'asherah-java-*.jar' -not -name '*sources*' -not -name '*javadoc*' | head -1)
+          echo "=== Native libs in $JAR ==="
+          jar tf "$JAR" | grep native/ | sort
+          COUNT=$(jar tf "$JAR" | grep -c "native/.*\.\(so\|dylib\|dll\)$" || true)
+          if [ "$COUNT" -eq 0 ]; then
+            echo "ERROR: No native libraries found in JAR"
+            exit 1
+          fi
+          echo "$COUNT native libraries bundled"
 
       - name: Deploy to GitHub Packages
-        if: ${{ github.event_name == 'release' || github.event.inputs.dry_run != 'true' }}
+        if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }}
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -66,7 +106,7 @@ jobs:
             deploy
 
       - name: Dry run
-        if: ${{ github.event_name != 'release' && github.event.inputs.dry_run == 'true' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
         run: |
           echo "Dry run complete. Would publish:"
           ls -lh asherah-java/java/target/*.jar
