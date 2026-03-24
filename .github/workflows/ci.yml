@@ -1225,19 +1225,11 @@ jobs:
           targets: x86_64-unknown-linux-gnu
       - name: Build manylinux x86_64 wheel
         uses: PyO3/maturin-action@04ac600d27cdf7a9a280dadf7147097c42b757ad # v1
-        env:
-          OPENSSL_NO_VENDOR: "1"
         with:
           target: x86_64-unknown-linux-gnu
           manylinux: "2_28"
           rust-toolchain: "1.91.1"
-          before-script-linux: |
-            if command -v yum &>/dev/null; then
-              yum install -y cmake3 perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || \
-              yum install -y cmake perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || true
-              [ -x /usr/bin/cmake3 ] && ln -sf /usr/bin/cmake3 /usr/local/bin/cmake 2>/dev/null || true
-            fi
-          docker-options: -e OPENSSL_NO_VENDOR=1
+          before-script-linux: source scripts/maturin-before-script-linux.sh
           args: --release --manifest-path asherah-py/Cargo.toml --out dist/
       - name: Verify wheel
         run: |
@@ -1262,15 +1254,7 @@ jobs:
           target: aarch64-unknown-linux-gnu
           manylinux: "2_28"
           rust-toolchain: "1.91.1"
-          before-script-linux: |
-            # Cross-compile container is Debian-based; install cmake for openssl-src
-            if command -v apt-get &>/dev/null; then
-              apt-get update && apt-get install -y cmake perl pkg-config
-            elif command -v yum &>/dev/null; then
-              yum install -y cmake3 perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || \
-              yum install -y cmake perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || true
-              [ -x /usr/bin/cmake3 ] && ln -sf /usr/bin/cmake3 /usr/local/bin/cmake 2>/dev/null || true
-            fi
+          before-script-linux: source scripts/maturin-before-script-linux.sh
           args: --release --manifest-path asherah-py/Cargo.toml --out dist/
       - name: Verify wheel
         run: |
@@ -1317,22 +1301,7 @@ jobs:
           target: x86_64-unknown-linux-musl
           manylinux: musllinux_1_2
           rust-toolchain: "1.91.1"
-          before-script-linux: |
-            if command -v apk &>/dev/null; then
-              apk add --no-cache cmake make perl openssl-dev openssl-libs-static pkgconf musl-dev
-            elif command -v apt-get &>/dev/null; then
-              apt-get update && apt-get install -y cmake perl pkg-config curl
-              ARCH=x86_64
-              mkdir -p /tmp/musl-ssl
-              (cd /tmp/musl-ssl && \
-                OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1) && \
-                OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1) && \
-                curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_DEV" && \
-                curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_STATIC" && \
-                for f in *.apk; do tar xf "$f" 2>/dev/null || true; done)
-              export OPENSSL_DIR=/tmp/musl-ssl/usr
-              export OPENSSL_STATIC=1
-            fi
+          before-script-linux: source scripts/maturin-before-script-linux.sh
           args: --release --manifest-path asherah-py/Cargo.toml --out dist/
       - name: Verify wheel
         run: |
@@ -1357,24 +1326,7 @@ jobs:
           target: aarch64-unknown-linux-musl
           manylinux: musllinux_1_2
           rust-toolchain: "1.91.1"
-          before-script-linux: |
-            if command -v apk &>/dev/null; then
-              apk add --no-cache cmake make perl openssl-dev openssl-libs-static pkgconf musl-dev
-            elif command -v apt-get &>/dev/null; then
-              apt-get update && apt-get install -y cmake perl pkg-config curl
-              if ls /usr/bin/*musl* 2>/dev/null; then
-                ARCH=aarch64
-                mkdir -p /tmp/musl-ssl
-                (cd /tmp/musl-ssl && \
-                  OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1) && \
-                  OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1) && \
-                  curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_DEV" && \
-                  curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_STATIC" && \
-                  for f in *.apk; do tar xf "$f" 2>/dev/null || true; done)
-                export OPENSSL_DIR=/tmp/musl-ssl/usr
-                export OPENSSL_STATIC=1
-              fi
-            fi
+          before-script-linux: source scripts/maturin-before-script-linux.sh
           args: --release --manifest-path asherah-py/Cargo.toml --out dist/
       - name: Verify wheel
         run: |

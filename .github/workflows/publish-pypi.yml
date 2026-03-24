@@ -133,36 +133,7 @@ jobs:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux || 'auto' }}
           rust-toolchain: "1.91.1"
-          before-script-linux: |
-            # aws-lc-sys requires cmake; openssl-sys needs system OpenSSL headers
-            if command -v yum &>/dev/null; then
-              # manylinux native (CentOS/RHEL based) — system OpenSSL for target arch
-              yum install -y cmake3 perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || \
-              yum install -y cmake perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || true
-              [ -x /usr/bin/cmake3 ] && ln -sf /usr/bin/cmake3 /usr/local/bin/cmake 2>/dev/null || true
-            elif command -v apk &>/dev/null; then
-              # musllinux native (Alpine based)
-              apk add --no-cache cmake make perl openssl-dev openssl-libs-static pkgconf musl-dev
-            elif command -v apt-get &>/dev/null; then
-              # Cross-compile container (Debian based)
-              apt-get update && apt-get install -y cmake perl pkg-config curl
-              if ls /usr/bin/*musl* 2>/dev/null; then
-                # rust-musl-cross: download musl OpenSSL from Alpine
-                MUSL_ARCH=$(uname -m)
-                if [ "$MUSL_ARCH" = "x86_64" ]; then ALPINE_ARCH=x86_64; else ALPINE_ARCH=aarch64; fi
-                mkdir -p /tmp/musl-ssl
-                (cd /tmp/musl-ssl && \
-                  OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1) && \
-                  OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1) && \
-                  curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/$OPENSSL_DEV" && \
-                  curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/$OPENSSL_STATIC" && \
-                  for f in *.apk; do tar xf "$f" 2>/dev/null || true; done)
-                export OPENSSL_DIR=/tmp/musl-ssl/usr
-                export OPENSSL_STATIC=1
-              fi
-              # glibc cross-compile (manylinux-cross): openssl-sys vendors OpenSSL
-            fi
-            pkg-config --libs openssl 2>/dev/null || echo "INFO: pkg-config openssl not found, will vendor or use OPENSSL_DIR"
+          before-script-linux: source scripts/maturin-before-script-linux.sh
           args: >-
             --release
             --manifest-path asherah-py/Cargo.toml
