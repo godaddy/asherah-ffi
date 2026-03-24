@@ -433,7 +433,7 @@ do_sanitizers() {
     if [ "$has_nightly" = true ]; then
         if ! PATH="$nightly_bin:$PATH" cargo miri --version >/dev/null 2>&1; then
             log "Installing miri component..."
-            rustup component add --toolchain nightly miri 2>&1 | tail -1
+            rustup component add --toolchain nightly miri rust-src 2>&1 | tail -1
         fi
         if PATH="$nightly_bin:$PATH" cargo miri --version >/dev/null 2>&1; then
             run_test "Miri (asherah core lib)" \
