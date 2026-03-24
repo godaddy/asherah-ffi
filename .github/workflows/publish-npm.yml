@@ -65,12 +65,16 @@ jobs:
             target: x86_64-unknown-linux-musl
             build: |
               set -e
-              sudo apt-get update && sudo apt-get install -y musl-tools
-              # Install x86_64 musl OpenSSL headers from Alpine packages
+              # Download x86_64 musl OpenSSL from Alpine (auto-discover latest version)
+              ARCH=x86_64
               mkdir -p /tmp/musl-ssl && cd /tmp/musl-ssl
-              wget -q https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/openssl-dev-3.3.3-r0.apk
-              wget -q https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/openssl-libs-static-3.3.3-r0.apk
-              for f in *.apk; do tar xf "$f" 2>/dev/null; done
+              OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1)
+              OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1)
+              echo "Downloading $OPENSSL_DEV and $OPENSSL_STATIC"
+              curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_DEV"
+              curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_STATIC"
+              for f in *.apk; do tar xf "$f" 2>/dev/null || true; done
+              ls usr/include/openssl/ssl.h || { echo "ERROR: OpenSSL headers not found"; exit 1; }
               export OPENSSL_DIR=/tmp/musl-ssl/usr
               export OPENSSL_STATIC=1
               export OPENSSL_NO_VENDOR=1
@@ -83,11 +87,16 @@ jobs:
             target: aarch64-unknown-linux-musl
             build: |
               set -e
-              # Install aarch64 musl OpenSSL headers from Alpine packages
+              # Download aarch64 musl OpenSSL from Alpine (auto-discover latest version)
+              ARCH=aarch64
               mkdir -p /tmp/musl-ssl && cd /tmp/musl-ssl
-              wget -q https://dl-cdn.alpinelinux.org/alpine/v3.20/main/aarch64/openssl-dev-3.3.3-r0.apk
-              wget -q https://dl-cdn.alpinelinux.org/alpine/v3.20/main/aarch64/openssl-libs-static-3.3.3-r0.apk
-              for f in *.apk; do tar xf "$f" 2>/dev/null; done
+              OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1)
+              OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1)
+              echo "Downloading $OPENSSL_DEV and $OPENSSL_STATIC"
+              curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_DEV"
+              curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_STATIC"
+              for f in *.apk; do tar xf "$f" 2>/dev/null || true; done
+              ls usr/include/openssl/ssl.h || { echo "ERROR: OpenSSL headers not found"; exit 1; }
               export OPENSSL_DIR=/tmp/musl-ssl/usr
               export OPENSSL_STATIC=1
               export OPENSSL_NO_VENDOR=1

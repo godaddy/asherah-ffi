@@ -1078,3 +1078,83 @@ jobs:
           name: bindings-linux-aarch64
           retention-days: 1
           path: artifacts/aarch64
+
+  # Dry-run publish validation: verify that the build steps used by publish
+  # workflows actually work. Catches OpenSSL cross-compilation, vcpkg, musl
+  # Alpine package downloads, etc. before a release is cut.
+  publish-dry-run-musl:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: build-rlib-x86_64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+      - uses: taiki-e/install-action@0d865d5cc6d507df4765f1f866bfae8bab4e2a73 # v2
+        with:
+          tool: cargo-zigbuild
+      - name: Download Alpine musl OpenSSL
+        run: |
+          ARCH=x86_64
+          mkdir -p /tmp/musl-ssl && cd /tmp/musl-ssl
+          OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1)
+          OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1)
+          echo "Downloading $OPENSSL_DEV and $OPENSSL_STATIC"
+          curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_DEV"
+          curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_STATIC"
+          for f in *.apk; do tar xf "$f" 2>/dev/null || true; done
+          ls usr/include/openssl/ssl.h || { echo "ERROR: OpenSSL headers not found"; exit 1; }
+          ls usr/lib/libssl.a || { echo "ERROR: OpenSSL static lib not found"; exit 1; }
+          echo "musl OpenSSL ready at /tmp/musl-ssl/usr"
+      - name: Build asherah-node for x86_64-musl (dry-run)
+        working-directory: asherah-node
+        env:
+          OPENSSL_DIR: /tmp/musl-ssl/usr
+          OPENSSL_STATIC: "1"
+          OPENSSL_NO_VENDOR: "1"
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          rustup target list --installed | grep musl
+          npm ci
+          npm run build -- --target x86_64-unknown-linux-musl --zig
+          ls *.node || { echo "ERROR: No .node file produced"; exit 1; }
+          echo "musl build succeeded"
+
+  publish-dry-run-windows:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: 20
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+      - name: Install OpenSSL via vcpkg
+        shell: bash
+        run: |
+          vcpkg install openssl:x64-windows-static-md
+          echo "OPENSSL_DIR=C:/vcpkg/installed/x64-windows-static-md" >> "$GITHUB_ENV"
+          echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
+          echo "OPENSSL_NO_VENDOR=1" >> "$GITHUB_ENV"
+      - name: Build asherah-node for Windows (dry-run)
+        working-directory: asherah-node
+        shell: bash
+        run: |
+          npm ci
+          npm run build -- --target x86_64-pc-windows-msvc
+          ls *.node || { echo "ERROR: No .node file produced"; exit 1; }
+          echo "Windows npm build succeeded"
+      - name: Build asherah-py wheel for Windows (dry-run)
+        shell: bash
+        run: |
+          pip install maturin
+          maturin build --release --manifest-path asherah-py/Cargo.toml --out dist/
+          ls dist/*.whl || { echo "ERROR: No wheel produced"; exit 1; }
+          echo "Windows PyPI build succeeded"
