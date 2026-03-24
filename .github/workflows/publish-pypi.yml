@@ -150,12 +150,13 @@ jobs:
                 # rust-musl-cross: download musl OpenSSL from Alpine
                 MUSL_ARCH=$(uname -m)
                 if [ "$MUSL_ARCH" = "x86_64" ]; then ALPINE_ARCH=x86_64; else ALPINE_ARCH=aarch64; fi
-                mkdir -p /tmp/musl-ssl && cd /tmp/musl-ssl
-                OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1)
-                OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1)
-                curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/$OPENSSL_DEV"
-                curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/$OPENSSL_STATIC"
-                for f in *.apk; do tar xf "$f" 2>/dev/null || true; done
+                mkdir -p /tmp/musl-ssl
+                (cd /tmp/musl-ssl && \
+                  OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1) && \
+                  OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1) && \
+                  curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/$OPENSSL_DEV" && \
+                  curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/$OPENSSL_STATIC" && \
+                  for f in *.apk; do tar xf "$f" 2>/dev/null || true; done)
                 export OPENSSL_DIR=/tmp/musl-ssl/usr
                 export OPENSSL_STATIC=1
               fi
