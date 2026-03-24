@@ -31,7 +31,7 @@ jobs:
             target: aarch64-unknown-linux-gnu
             gem_platform: aarch64-linux
             cross: true
-          - os: macos-latest
+          - os: macos-13
             target: x86_64-apple-darwin
             gem_platform: x86_64-darwin
           - os: macos-latest
