@@ -127,13 +127,16 @@ jobs:
           manylinux: ${{ matrix.manylinux || 'auto' }}
           rust-toolchain: "1.91.1"
           before-script-linux: |
-            # aws-lc-sys requires cmake; openssl-sys needs headers + OPENSSL_NO_VENDOR
+            # aws-lc-sys requires cmake; openssl-sys needs system headers
             export OPENSSL_NO_VENDOR=1
             if command -v yum &>/dev/null; then
-              yum install -y cmake3 perl-IPC-Cmd openssl-devel pkgconfig || yum install -y cmake perl-IPC-Cmd openssl-devel pkgconfig || true
-              ln -sf cmake3 /usr/local/bin/cmake 2>/dev/null || true
+              yum install -y cmake3 perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || \
+              yum install -y cmake perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || true
+              [ -x /usr/bin/cmake3 ] && ln -sf /usr/bin/cmake3 /usr/local/bin/cmake 2>/dev/null || true
             elif command -v apk &>/dev/null; then
               apk add --no-cache cmake make perl openssl-dev pkgconf
+            elif command -v apt-get &>/dev/null; then
+              apt-get update && apt-get install -y cmake libssl-dev pkg-config
             fi
           container-options: -e OPENSSL_NO_VENDOR=1
           args: >-
