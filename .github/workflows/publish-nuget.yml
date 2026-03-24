@@ -110,7 +110,7 @@ jobs:
           done
 
       - name: Publish to GitHub Packages
-        if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }}
+        if: ${{ github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }}
         run: |
           dotnet nuget push dist/*.nupkg \
             --source "https://nuget.pkg.github.com/godaddy/index.json" \
