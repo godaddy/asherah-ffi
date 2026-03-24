@@ -37,8 +37,8 @@ jobs:
             asset_name: libasherah-arm64.so
             arch: arm64
             cross: true
-          # macOS x86_64 — use macos-13 (last Intel runner)
-          - os: macos-13
+          # macOS x86_64 — use macos-latest (last Intel runner)
+          - os: macos-latest
             target: x86_64-apple-darwin
             artifact_name: libasherah_ffi.dylib
             asset_name: libasherah-x64.dylib
