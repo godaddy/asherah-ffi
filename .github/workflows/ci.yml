@@ -1138,7 +1138,7 @@ jobs:
   # If any fail, the PR blocks. No release can go out broken.
   # ==========================================================================
 
-  publish-dry-run-npm-musl:
+  publish-dry-run-npm-musl-x64:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1177,7 +1177,7 @@ jobs:
           npm run build -- --target x86_64-unknown-linux-musl --zig
           ls *.node || { echo "ERROR: No .node file produced"; exit 1; }
 
-  publish-dry-run-windows:
+  publish-dry-run-windows-x64:
     runs-on: windows-latest
     permissions:
       contents: read
@@ -1298,6 +1298,161 @@ jobs:
         run: |
           ls dist/*.whl
           echo "macOS universal2 wheel succeeded"
+
+  publish-dry-run-pypi-musl-x64:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        with:
+          targets: x86_64-unknown-linux-musl
+      - name: Build musllinux x86_64 wheel
+        uses: PyO3/maturin-action@04ac600d27cdf7a9a280dadf7147097c42b757ad # v1
+        with:
+          target: x86_64-unknown-linux-musl
+          manylinux: musllinux_1_2
+          rust-toolchain: "1.91.1"
+          before-script-linux: |
+            if command -v apk &>/dev/null; then
+              apk add --no-cache cmake make perl openssl-dev openssl-libs-static pkgconf musl-dev
+            elif command -v apt-get &>/dev/null; then
+              apt-get update && apt-get install -y cmake perl pkg-config curl
+              ARCH=x86_64
+              mkdir -p /tmp/musl-ssl && cd /tmp/musl-ssl
+              OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1)
+              OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1)
+              curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_DEV"
+              curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_STATIC"
+              for f in *.apk; do tar xf "$f" 2>/dev/null || true; done
+              export OPENSSL_DIR=/tmp/musl-ssl/usr
+              export OPENSSL_STATIC=1
+            fi
+          args: --release --manifest-path asherah-py/Cargo.toml --out dist/
+      - name: Verify wheel
+        run: |
+          ls dist/*.whl
+          echo "musllinux x64 wheel succeeded"
+
+  publish-dry-run-pypi-musl-arm64:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        with:
+          targets: aarch64-unknown-linux-musl
+      - name: Build musllinux aarch64 wheel
+        uses: PyO3/maturin-action@04ac600d27cdf7a9a280dadf7147097c42b757ad # v1
+        with:
+          target: aarch64-unknown-linux-musl
+          manylinux: musllinux_1_2
+          rust-toolchain: "1.91.1"
+          before-script-linux: |
+            if command -v apk &>/dev/null; then
+              apk add --no-cache cmake make perl openssl-dev openssl-libs-static pkgconf musl-dev
+            elif command -v apt-get &>/dev/null; then
+              apt-get update && apt-get install -y cmake perl pkg-config curl
+              if ls /usr/bin/*musl* 2>/dev/null; then
+                ARCH=aarch64
+                mkdir -p /tmp/musl-ssl && cd /tmp/musl-ssl
+                OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1)
+                OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1)
+                curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_DEV"
+                curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_STATIC"
+                for f in *.apk; do tar xf "$f" 2>/dev/null || true; done
+                export OPENSSL_DIR=/tmp/musl-ssl/usr
+                export OPENSSL_STATIC=1
+              fi
+            fi
+          args: --release --manifest-path asherah-py/Cargo.toml --out dist/
+      - name: Verify wheel
+        run: |
+          ls dist/*.whl
+          echo "musllinux arm64 wheel succeeded"
+
+  publish-dry-run-npm-musl-arm64:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        with:
+          targets: aarch64-unknown-linux-musl
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: 20
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+      - uses: taiki-e/install-action@0d865d5cc6d507df4765f1f866bfae8bab4e2a73 # v2
+        with:
+          tool: cargo-zigbuild
+      - name: Download Alpine aarch64 musl OpenSSL
+        run: |
+          ARCH=aarch64
+          mkdir -p /tmp/musl-ssl && cd /tmp/musl-ssl
+          OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1)
+          OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1)
+          echo "Downloading $OPENSSL_DEV and $OPENSSL_STATIC"
+          curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_DEV"
+          curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_STATIC"
+          for f in *.apk; do tar xf "$f" 2>/dev/null || true; done
+          ls usr/include/openssl/ssl.h || { echo "ERROR: OpenSSL headers not found"; exit 1; }
+      - name: Build asherah-node for aarch64-musl
+        working-directory: asherah-node
+        env:
+          OPENSSL_DIR: /tmp/musl-ssl/usr
+          OPENSSL_STATIC: "1"
+          OPENSSL_NO_VENDOR: "1"
+        run: |
+          rustup target add aarch64-unknown-linux-musl
+          npm ci
+          npm run build -- --target aarch64-unknown-linux-musl --zig
+          ls *.node || { echo "ERROR: No .node file produced"; exit 1; }
+
+  publish-dry-run-windows-arm64:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        with:
+          targets: aarch64-pc-windows-msvc
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: 20
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+      - name: Install OpenSSL via vcpkg (arm64)
+        shell: bash
+        run: |
+          vcpkg install openssl:arm64-windows-static-md
+          echo "OPENSSL_DIR=C:/vcpkg/installed/arm64-windows-static-md" >> "$GITHUB_ENV"
+          echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
+          echo "OPENSSL_NO_VENDOR=1" >> "$GITHUB_ENV"
+      - name: Build asherah-node for Windows arm64
+        working-directory: asherah-node
+        shell: bash
+        run: |
+          npm ci
+          npm run build -- --target aarch64-pc-windows-msvc
+          ls *.node || { echo "ERROR: No .node file produced"; exit 1; }
+      - name: Build asherah-py wheel for Windows arm64
+        shell: bash
+        run: |
+          pip install maturin
+          maturin build --release --manifest-path asherah-py/Cargo.toml --target aarch64-pc-windows-msvc --out dist/
+          ls dist/*.whl || { echo "ERROR: No wheel produced"; exit 1; }
 
   publish-dry-run-rubygem:
     runs-on: ubuntu-latest
