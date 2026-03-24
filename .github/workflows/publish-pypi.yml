@@ -161,7 +161,7 @@ jobs:
               export OPENSSL_STATIC=1
             fi
             pkg-config --libs openssl 2>/dev/null || echo "INFO: pkg-config openssl not found, using OPENSSL_DIR"
-          docker-options: -e OPENSSL_NO_VENDOR=1 -e OPENSSL_DIR=/tmp/musl-ssl/usr -e OPENSSL_STATIC=1
+          docker-options: -e OPENSSL_NO_VENDOR=1
           args: >-
             --release
             --manifest-path asherah-py/Cargo.toml

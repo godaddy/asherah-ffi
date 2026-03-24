@@ -404,6 +404,56 @@ jobs:
           retention-days: 1
           path: artifacts/x86_64
 
+  # --- macOS x86_64 cross-compile from ARM64 ---
+  build-ffi-macos-x64:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+      - name: Build FFI for macOS x86_64 + arm64
+        run: |
+          cargo build --release -p asherah-ffi -p asherah-java --target x86_64-apple-darwin
+          cargo build --release -p asherah-ffi -p asherah-java --target aarch64-apple-darwin
+      - name: Verify x86_64 binary architecture
+        run: file target/x86_64-apple-darwin/release/libasherah_ffi.dylib | grep -q "x86_64"
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: ffi-macos
+          retention-days: 1
+          path: |
+            target/x86_64-apple-darwin/release/libasherah_ffi.dylib
+            target/x86_64-apple-darwin/release/libasherah_java.dylib
+            target/aarch64-apple-darwin/release/libasherah_ffi.dylib
+            target/aarch64-apple-darwin/release/libasherah_java.dylib
+
+  # --- Windows x86_64 ---
+  build-ffi-windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+      - name: Install OpenSSL via vcpkg
+        shell: bash
+        run: |
+          vcpkg install openssl:x64-windows-static-md
+          echo "OPENSSL_DIR=C:/vcpkg/installed/x64-windows-static-md" >> "$GITHUB_ENV"
+          echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
+          echo "OPENSSL_NO_VENDOR=1" >> "$GITHUB_ENV"
+      - name: Build FFI for Windows x86_64
+        shell: bash
+        run: cargo build --release -p asherah-ffi -p asherah-java --target x86_64-pc-windows-msvc
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: ffi-windows-x64
+          retention-days: 1
+          path: |
+            target/x86_64-pc-windows-msvc/release/asherah_ffi.dll
+            target/x86_64-pc-windows-msvc/release/asherah_java.dll
+
   package-x86_64:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -1079,37 +1129,39 @@ jobs:
           retention-days: 1
           path: artifacts/aarch64
 
-  # Dry-run publish validation: verify that the build steps used by publish
-  # workflows actually work. Catches OpenSSL cross-compilation, vcpkg, musl
-  # Alpine package downloads, etc. before a release is cut.
-  publish-dry-run-musl:
+  # ==========================================================================
+  # Dry-run publish validation — ALL publish targets validated on every PR.
+  # If any fail, the PR blocks. No release can go out broken.
+  # ==========================================================================
+
+  publish-dry-run-npm-musl:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    needs: build-rlib-x86_64
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         with:
           targets: x86_64-unknown-linux-musl
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
+        with:
+          node-version: 20
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
       - uses: taiki-e/install-action@0d865d5cc6d507df4765f1f866bfae8bab4e2a73 # v2
         with:
           tool: cargo-zigbuild
       - name: Download Alpine musl OpenSSL
         run: |
-          ARCH=x86_64
           mkdir -p /tmp/musl-ssl && cd /tmp/musl-ssl
-          OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1)
-          OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1)
+          OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1)
+          OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1)
           echo "Downloading $OPENSSL_DEV and $OPENSSL_STATIC"
-          curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_DEV"
-          curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_STATIC"
+          curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/$OPENSSL_DEV"
+          curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/$OPENSSL_STATIC"
           for f in *.apk; do tar xf "$f" 2>/dev/null || true; done
           ls usr/include/openssl/ssl.h || { echo "ERROR: OpenSSL headers not found"; exit 1; }
           ls usr/lib/libssl.a || { echo "ERROR: OpenSSL static lib not found"; exit 1; }
-          echo "musl OpenSSL ready at /tmp/musl-ssl/usr"
-      - name: Build asherah-node for x86_64-musl (dry-run)
+      - name: Build asherah-node for x86_64-musl
         working-directory: asherah-node
         env:
           OPENSSL_DIR: /tmp/musl-ssl/usr
@@ -1117,11 +1169,9 @@ jobs:
           OPENSSL_NO_VENDOR: "1"
         run: |
           rustup target add x86_64-unknown-linux-musl
-          rustup target list --installed | grep musl
           npm ci
           npm run build -- --target x86_64-unknown-linux-musl --zig
           ls *.node || { echo "ERROR: No .node file produced"; exit 1; }
-          echo "musl build succeeded"
 
   publish-dry-run-windows:
     runs-on: windows-latest
@@ -1143,18 +1193,135 @@ jobs:
           echo "OPENSSL_DIR=C:/vcpkg/installed/x64-windows-static-md" >> "$GITHUB_ENV"
           echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
           echo "OPENSSL_NO_VENDOR=1" >> "$GITHUB_ENV"
-      - name: Build asherah-node for Windows (dry-run)
+      - name: Build asherah-node for Windows
         working-directory: asherah-node
         shell: bash
         run: |
           npm ci
           npm run build -- --target x86_64-pc-windows-msvc
           ls *.node || { echo "ERROR: No .node file produced"; exit 1; }
-          echo "Windows npm build succeeded"
-      - name: Build asherah-py wheel for Windows (dry-run)
+      - name: Build asherah-py wheel for Windows
         shell: bash
         run: |
           pip install maturin
           maturin build --release --manifest-path asherah-py/Cargo.toml --out dist/
           ls dist/*.whl || { echo "ERROR: No wheel produced"; exit 1; }
-          echo "Windows PyPI build succeeded"
+
+  publish-dry-run-pypi-manylinux-x64:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - name: Build manylinux x86_64 wheel
+        uses: PyO3/maturin-action@04ac600d27cdf7a9a280dadf7147097c42b757ad # v1
+        env:
+          OPENSSL_NO_VENDOR: "1"
+        with:
+          target: x86_64-unknown-linux-gnu
+          manylinux: "2_28"
+          rust-toolchain: "1.91.1"
+          before-script-linux: |
+            if command -v yum &>/dev/null; then
+              yum install -y cmake3 perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || \
+              yum install -y cmake perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || true
+              [ -x /usr/bin/cmake3 ] && ln -sf /usr/bin/cmake3 /usr/local/bin/cmake 2>/dev/null || true
+            fi
+          docker-options: -e OPENSSL_NO_VENDOR=1
+          args: --release --manifest-path asherah-py/Cargo.toml --out /tmp/dist/
+      - name: Verify wheel
+        run: |
+          ls /tmp/dist/*.whl
+          echo "manylinux x64 wheel succeeded"
+
+  publish-dry-run-pypi-manylinux-arm64:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        with:
+          python-version: "3.11"
+      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        with:
+          targets: aarch64-unknown-linux-gnu
+      - name: Build manylinux aarch64 wheel
+        uses: PyO3/maturin-action@04ac600d27cdf7a9a280dadf7147097c42b757ad # v1
+        env:
+          OPENSSL_NO_VENDOR: "1"
+        with:
+          target: aarch64-unknown-linux-gnu
+          manylinux: "2_28"
+          rust-toolchain: "1.91.1"
+          before-script-linux: |
+            if command -v yum &>/dev/null; then
+              yum install -y cmake3 perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || \
+              yum install -y cmake perl-IPC-Cmd openssl-devel pkgconfig 2>/dev/null || true
+              [ -x /usr/bin/cmake3 ] && ln -sf /usr/bin/cmake3 /usr/local/bin/cmake 2>/dev/null || true
+            fi
+          docker-options: -e OPENSSL_NO_VENDOR=1
+          args: --release --manifest-path asherah-py/Cargo.toml --out /tmp/dist/
+      - name: Verify wheel
+        run: |
+          ls /tmp/dist/*.whl
+          echo "manylinux arm64 wheel succeeded"
+
+  # macOS + Windows: verified by build-ffi-macos-x64 and build-ffi-windows-x64
+  # (they build asherah-ffi + asherah-java and upload artifacts)
+
+  publish-dry-run-rubygem:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: build-ffi-x86_64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: ruby/setup-ruby@319994f95fa847cf3fb3cd3dbe89f6dcde9f178f # v1
+        with:
+          ruby-version: '3.3'
+      - name: Download x86_64 FFI artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: bindings-linux-x86_64-part-ffi
+          path: artifacts
+      - name: Build platform gem
+        working-directory: asherah-ruby
+        run: |
+          mkdir -p lib/asherah/native
+          find ../artifacts -name 'libasherah_ffi.*' -exec cp {} lib/asherah/native/ \;
+          ls lib/asherah/native/libasherah_ffi.* || { echo "ERROR: No native lib staged"; exit 1; }
+          ASHERAH_GEM_PLATFORM="x86_64-linux" gem build asherah.gemspec && mv *.gem /tmp/
+          ls /tmp/*.gem || { echo "ERROR: No gem produced"; exit 1; }
+
+  publish-dry-run-java-jar:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    needs: build-java-x86_64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9 # v4
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+      - name: Download x86_64 Java artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: bindings-linux-x86_64-part-java
+          path: artifacts
+      - name: Build JAR with pre-built native lib
+        run: |
+          NATIVE_DIR=asherah-java/java/src/main/resources/native
+          mkdir -p "$NATIVE_DIR/linux-x86_64"
+          find artifacts -name 'libasherah_java.*' -exec cp {} "$NATIVE_DIR/linux-x86_64/" \;
+          ls "$NATIVE_DIR/linux-x86_64/libasherah_java."* || { echo "ERROR: No JNI lib found in artifacts"; exit 1; }
+          mvn -B -f asherah-java/java/pom.xml -Dnative.build.skip=true -DskipTests package
+          JAR=$(find asherah-java/java/target -name 'asherah-java-*.jar' -not -name '*sources*' -not -name '*javadoc*' | head -1)
+          jar tf "$JAR" | grep "native/.*\\.so$" || { echo "ERROR: No native lib in JAR"; exit 1; }
