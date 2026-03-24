@@ -138,7 +138,7 @@ jobs:
             elif command -v apt-get &>/dev/null; then
               apt-get update && apt-get install -y cmake libssl-dev pkg-config
             fi
-          container-options: -e OPENSSL_NO_VENDOR=1
+          docker-options: -e OPENSSL_NO_VENDOR=1
           args: >-
             --release
             --manifest-path asherah-py/Cargo.toml
