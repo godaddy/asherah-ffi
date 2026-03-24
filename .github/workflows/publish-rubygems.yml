@@ -97,14 +97,14 @@ jobs:
             echo "=== Building gem for $platform ==="
             mkdir -p lib/asherah/native
             cp "$lib" lib/asherah/native/
-            ASHERAH_GEM_PLATFORM="$platform" gem build asherah.gemspec -o pkg/
+            ASHERAH_GEM_PLATFORM="$platform" gem build asherah.gemspec && mv *.gem pkg/
             rm -f lib/asherah/native/libasherah_ffi.* lib/asherah/native/asherah_ffi.*
           done
 
           # Build fallback ruby-platform gem (no binary)
           echo "=== Building fallback (ruby platform) gem ==="
           rm -rf lib/asherah/native
-          gem build asherah.gemspec -o pkg/
+          gem build asherah.gemspec && mv *.gem pkg/
           mkdir -p lib/asherah/native
 
           echo ""
