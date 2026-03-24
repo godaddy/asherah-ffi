@@ -1,8 +1,9 @@
 name: Publish to GitHub Packages (NuGet)
 
 on:
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["Release Asherah Native Library"]
+    types: [completed]
   workflow_dispatch:
     inputs:
       version:
@@ -17,8 +18,7 @@ on:
 
 jobs:
   publish:
-    # Runs AFTER release-cobhan.yml has uploaded the native libs to the release.
-    # On workflow_dispatch, downloads from the latest release.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -35,11 +35,15 @@ jobs:
 
       - name: Set version
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            VERSION="${{ github.event.release.tag_name }}"
-            VERSION="${VERSION#v}"
-          else
+          if [ -n "${{ github.event.inputs.version }}" ]; then
             VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${{ github.event.workflow_run.head_branch }}"
+            VERSION="${VERSION#v}"
+          fi
+          if [ -z "$VERSION" ]; then
+            VERSION="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+            VERSION="${VERSION#v}"
           fi
           echo "Publishing version: ${VERSION}"
           echo "NUGET_VERSION=${VERSION}" >> "$GITHUB_ENV"
@@ -48,10 +52,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=""
-          if [ "${{ github.event_name }}" = "release" ]; then
-            TAG="${{ github.event.release.tag_name }}"
-          else
+          TAG="${{ github.event.workflow_run.head_branch }}"
+          if [ -z "$TAG" ]; then
             TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
           fi
           echo "Downloading native libs from release ${TAG}"
