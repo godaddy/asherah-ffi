@@ -1,4 +1,4 @@
-FROM rust:1.91-bullseye
+FROM rust:1.91-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -23,7 +23,7 @@ RUN echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries \
 # Ruby FFI gem (native extension requires libffi-dev)
 RUN gem install ffi --no-document
 
-# Install Go 1.23 (Bullseye's packaged Go is too old for purego)
+# Install Go 1.23 (Bookworm's packaged Go is too old for purego)
 RUN curl -fsSL https://go.dev/dl/go1.23.0.linux-$(dpkg --print-architecture).tar.gz | tar -C /usr/local -xzf - \
     && ln -sf /usr/local/go/bin/go /usr/local/bin/go
 
@@ -44,7 +44,7 @@ RUN curl -fsSL https://bun.sh/install | bash \
     && ln -s /root/.bun/bin/bun /usr/local/bin/bun
 
 # Python tooling
-RUN pip3 install --no-cache-dir maturin==1.9.4 pytest==8.4.1
+RUN pip3 install --break-system-packages --no-cache-dir maturin==1.9.4 pytest==8.4.1
 
 RUN rustup component add rustfmt clippy
 

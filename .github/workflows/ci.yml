@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -224,9 +227,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
           export PATH="$CARGO_HOME/bin:$PATH"
           rustup toolchain install 1.91.1 --profile minimal --component rustfmt
-          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
-          mv sccache-*/sccache /usr/local/bin/
-          chmod +x /usr/local/bin/sccache
+          bash scripts/install-sccache.sh
           python3.11 -m pip install maturin==1.9.4
           rm -rf artifacts/x86_64/python || true
           mkdir -p artifacts/x86_64/python
@@ -705,7 +706,7 @@ jobs:
 
   build-rlib-arm64:
     runs-on: ubuntu-latest
-    container: rust:1.86-bullseye
+    container: rust:1.91-bookworm
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -731,9 +732,7 @@ jobs:
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
           apt-get update
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu curl
-          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
-          mv sccache-*/sccache /usr/local/bin/
-          chmod +x /usr/local/bin/sccache
+          bash scripts/install-sccache.sh
       - name: Build FFI rlib (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -774,7 +773,7 @@ jobs:
   build-node-arm64:
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
-    container: rust:1.86-bullseye
+    container: rust:1.91-bookworm
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -811,9 +810,7 @@ jobs:
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu curl
           curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
           apt-get install -y nodejs
-          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
-          mv sccache-*/sccache /usr/local/bin/
-          chmod +x /usr/local/bin/sccache
+          bash scripts/install-sccache.sh
       - name: Build Node.js binding (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -826,7 +823,7 @@ jobs:
           SKIP_CORE_BUILD: "1"
         run: |
           rustup target add aarch64-unknown-linux-gnu
-          rustup default 1.86.0
+          rustup default 1.91.1
           ./scripts/build-bindings.sh
       - name: Upload arm64 node binding artifact
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
@@ -838,7 +835,7 @@ jobs:
   build-python-arm64:
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
-    container: rust:1.86-bullseye
+    container: rust:1.91-bookworm
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -873,10 +870,8 @@ jobs:
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
           apt-get update
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu python3 python3-pip python3-venv curl libssl-dev pkg-config
-          pip3 install maturin==1.9.4
-          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
-          mv sccache-*/sccache /usr/local/bin/
-          chmod +x /usr/local/bin/sccache
+          pip3 install --break-system-packages maturin==1.9.4
+          bash scripts/install-sccache.sh
       - name: Build Python binding (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -905,7 +900,7 @@ jobs:
   build-java-arm64:
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
-    container: rust:1.86-bullseye
+    container: rust:1.91-bookworm
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -939,9 +934,7 @@ jobs:
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
           apt-get update
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu maven curl
-          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
-          mv sccache-*/sccache /usr/local/bin/
-          chmod +x /usr/local/bin/sccache
+          bash scripts/install-sccache.sh
       - name: Build Java binding (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -953,7 +946,7 @@ jobs:
           SKIP_CORE_BUILD: "1"
         run: |
           rustup target add aarch64-unknown-linux-gnu
-          rustup default 1.86.0
+          rustup default 1.91.1
           ./scripts/build-bindings.sh
       - name: Upload Java binding artifact
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
@@ -965,7 +958,7 @@ jobs:
   build-dotnet-arm64:
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
-    container: rust:1.86-bullseye
+    container: rust:1.91-bookworm
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -1004,9 +997,7 @@ jobs:
           ./dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet
           ./dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet
           ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet
-          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
-          mv sccache-*/sccache /usr/local/bin/
-          chmod +x /usr/local/bin/sccache
+          bash scripts/install-sccache.sh
       - name: Build .NET binding (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -1018,7 +1009,7 @@ jobs:
           SKIP_CORE_BUILD: "1"
         run: |
           rustup target add aarch64-unknown-linux-gnu
-          rustup default 1.86.0
+          rustup default 1.91.1
           ./scripts/build-bindings.sh
       - name: Upload .NET binding artifact
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
@@ -1054,7 +1045,7 @@ jobs:
   build-cobhan-arm64:
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
-    container: rust:1.86-bullseye
+    container: rust:1.91-bookworm
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -1087,9 +1078,7 @@ jobs:
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
           apt-get update
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu curl
-          curl -fL --retry 5 --retry-delay 5 https://github.com/mozilla/sccache/releases/download/v0.8.1/sccache-v0.8.1-x86_64-unknown-linux-musl.tar.gz | tar xz
-          mv sccache-*/sccache /usr/local/bin/
-          chmod +x /usr/local/bin/sccache
+          bash scripts/install-sccache.sh
       - name: Build asherah-cobhan (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -1102,7 +1091,7 @@ jobs:
           SKIP_CORE_BUILD: "1"
         run: |
           rustup target add aarch64-unknown-linux-gnu
-          rustup default 1.86.0
+          rustup default 1.91.1
           ./scripts/build-bindings.sh
       - name: Upload arm64 cobhan artifact
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
@@ -1155,16 +1144,7 @@ jobs:
         with:
           tool: cargo-zigbuild
       - name: Download Alpine musl OpenSSL
-        run: |
-          mkdir -p /tmp/musl-ssl && cd /tmp/musl-ssl
-          OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1)
-          OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1)
-          echo "Downloading $OPENSSL_DEV and $OPENSSL_STATIC"
-          curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/$OPENSSL_DEV"
-          curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/x86_64/$OPENSSL_STATIC"
-          for f in *.apk; do tar xf "$f" 2>/dev/null || true; done
-          ls usr/include/openssl/ssl.h || { echo "ERROR: OpenSSL headers not found"; exit 1; }
-          ls usr/lib/libssl.a || { echo "ERROR: OpenSSL static lib not found"; exit 1; }
+        run: ARCH=x86_64 source scripts/download-musl-openssl.sh
       - name: Build asherah-node for x86_64-musl
         working-directory: asherah-node
         env:
@@ -1207,7 +1187,7 @@ jobs:
       - name: Build asherah-py wheel for Windows
         shell: bash
         run: |
-          pip install maturin
+          pip install maturin==1.9.4
           maturin build --release --manifest-path asherah-py/Cargo.toml --out dist/
           ls dist/*.whl || { echo "ERROR: No wheel produced"; exit 1; }
 
@@ -1350,16 +1330,7 @@ jobs:
         with:
           tool: cargo-zigbuild
       - name: Download Alpine aarch64 musl OpenSSL
-        run: |
-          ARCH=aarch64
-          mkdir -p /tmp/musl-ssl && cd /tmp/musl-ssl
-          OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1)
-          OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1)
-          echo "Downloading $OPENSSL_DEV and $OPENSSL_STATIC"
-          curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_DEV"
-          curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ARCH/$OPENSSL_STATIC"
-          for f in *.apk; do tar xf "$f" 2>/dev/null || true; done
-          ls usr/include/openssl/ssl.h || { echo "ERROR: OpenSSL headers not found"; exit 1; }
+        run: ARCH=aarch64 source scripts/download-musl-openssl.sh
       - name: Build asherah-node for aarch64-musl
         working-directory: asherah-node
         env:
@@ -1404,7 +1375,7 @@ jobs:
       - name: Build asherah-py wheel for Windows arm64
         shell: bash
         run: |
-          pip install maturin
+          pip install maturin==1.9.4
           maturin build --release --manifest-path asherah-py/Cargo.toml --target aarch64-pc-windows-msvc --out dist/
           ls dist/*.whl || { echo "ERROR: No wheel produced"; exit 1; }
 

@@ -1,5 +1,9 @@
 name: Publish to GitHub Packages (NuGet)
 
+concurrency:
+  group: publish-nuget
+  cancel-in-progress: false
+
 on:
   workflow_run:
     workflows: ["Release Asherah Native Library"]
@@ -36,16 +40,13 @@ jobs:
       - name: Set version
         env:
           INPUT_VERSION: ${{ github.event.inputs.version }}
-          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -n "$INPUT_VERSION" ]; then
             VERSION="$INPUT_VERSION"
-          elif [ -n "$WORKFLOW_RUN_BRANCH" ]; then
-            VERSION="${WORKFLOW_RUN_BRANCH#v}"
           else
-            VERSION="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
-            VERSION="${VERSION#v}"
+            TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+            VERSION="${TAG#v}"
           fi
           echo "Publishing version: ${VERSION}"
           echo "NUGET_VERSION=${VERSION}" >> "$GITHUB_ENV"
@@ -53,12 +54,8 @@ jobs:
       - name: Download native libraries from release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          TAG="$WORKFLOW_RUN_BRANCH"
-          if [ -z "$TAG" ]; then
-            TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
-          fi
+          TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
           echo "Downloading native libs from release ${TAG}"
 
           NATIVE_DIR="asherah-dotnet/AsherahDotNet/runtimes"
@@ -101,12 +98,15 @@ jobs:
           for pkg in dist/*.nupkg; do
             echo "=== $pkg ==="
             unzip -l "$pkg" | grep -E 'native|runtimes' | sort
+            # Verify required platforms (Linux + macOS = 4 minimum)
+            for required in linux-x64 linux-arm64 osx-x64 osx-arm64; do
+              if ! unzip -l "$pkg" | grep -q "runtimes/${required}/native/"; then
+                echo "ERROR: Missing required native library for ${required}"
+                exit 1
+              fi
+            done
             COUNT=$(unzip -l "$pkg" | grep -c "runtimes/.*/native/.*\.\(so\|dylib\|dll\)$" || true)
-            if [ "$COUNT" -eq 0 ]; then
-              echo "ERROR: No native libraries found in package"
-              exit 1
-            fi
-            echo "$COUNT native libraries bundled"
+            echo "$COUNT native libraries bundled (4 required, Windows optional)"
           done
 
       - name: Publish to GitHub Packages
