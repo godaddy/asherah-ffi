@@ -1,8 +1,57 @@
-# CodeQL Findings
+# Security & Quality Findings
 
-Captured from GitHub CodeQL scan and Copilot AI findings. Some may not be
-appropriate to fix due to interop compatibility requirements with the canonical
-GoDaddy Asherah SDK.
+All open findings from GitHub security tooling as of 2026-03-25. Includes
+CodeQL code scanning, Dependabot vulnerability alerts, and Copilot AI findings.
+Some may not be appropriate to fix due to interop compatibility requirements
+with the canonical GoDaddy Asherah SDK.
+
+No secret scanning alerts. No security advisories.
+
+---
+
+## Dependabot Vulnerability Alerts — 7 open
+
+### CRITICAL
+
+1. **Alert #44** — `google.golang.org/grpc` in `benchmarks/grpc-bench/go.mod`
+   - **gRPC-Go authorization bypass via missing leading slash in :path**
+   - Vulnerable: < 1.79.3
+   - Fix: update grpc dependency
+
+### HIGH
+
+2. **Alert #34** — `aws-lc-sys` in `Cargo.lock`
+   - **AWS-LC X.509 Name Constraints Bypass via Wildcard/Unicode CN**
+   - Vulnerable: >= 0.32.0, < 0.39.0
+   - Fix: `cargo update -p aws-lc-sys`
+
+3. **Alert #37** — `aws-lc-sys` in `Cargo.lock`
+   - **CRL Distribution Point Scope Check Logic Error in AWS-LC**
+   - Vulnerable: >= 0.15.0, < 0.39.0
+   - Fix: `cargo update -p aws-lc-sys`
+
+4. **Alert #45** — `aws-lc-sys` in `fuzz/Cargo.lock`
+   - Same as #34 but in fuzz lockfile
+   - Fix: `cd fuzz && cargo update -p aws-lc-sys`
+
+5. **Alert #46** — `aws-lc-sys` in `fuzz/Cargo.lock`
+   - Same as #37 but in fuzz lockfile
+   - Fix: `cd fuzz && cargo update -p aws-lc-sys`
+
+### MEDIUM
+
+6. **Alert #40** — `rustls-webpki` in `Cargo.lock`
+   - **webpki: CRLs not considered authoritative by Distribution Point due to faulty matching logic**
+   - Vulnerable: >= 0.101.0, < 0.103.10
+   - Fix: `cargo update -p rustls-webpki`
+
+7. **Alert #47** — `rustls-webpki` in `fuzz/Cargo.lock`
+   - Same as #40 but in fuzz lockfile
+   - Fix: `cd fuzz && cargo update -p rustls-webpki`
+
+**Notes:** Alerts #34, #37, #40 can likely all be fixed with a single `cargo update`. The fuzz lockfile needs a separate update. The gRPC alert (#44) is in a benchmark project only — not production code — but should still be updated.
+
+---
 
 ## ACCESS OF INVALID POINTER (Rust) — 2 findings — SEVERITY: ERROR
 
