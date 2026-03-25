@@ -310,6 +310,13 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
+      - name: Update dist-tags
+        if: ${{ github.event.inputs.dry_run != 'true' && env.NPM_TAG == 'latest' }}
+        working-directory: asherah-node
+        run: npm dist-tag add "asherah@${NPM_VERSION}" next
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
       - name: Update version variable
         if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
