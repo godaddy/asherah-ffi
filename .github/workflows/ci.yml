@@ -227,7 +227,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
           export PATH="$CARGO_HOME/bin:$PATH"
           rustup toolchain install 1.91.1 --profile minimal --component rustfmt
-          bash scripts/install-sccache.sh
+          bash "${GITHUB_WORKSPACE:-$(pwd)}/scripts/install-sccache.sh"
           python3.11 -m pip install maturin==1.9.4
           rm -rf artifacts/x86_64/python || true
           mkdir -p artifacts/x86_64/python
@@ -732,7 +732,7 @@ jobs:
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
           apt-get update
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu curl
-          bash scripts/install-sccache.sh
+          bash "${GITHUB_WORKSPACE:-$(pwd)}/scripts/install-sccache.sh"
       - name: Build FFI rlib (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -810,7 +810,7 @@ jobs:
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu curl
           curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
           apt-get install -y nodejs
-          bash scripts/install-sccache.sh
+          bash "${GITHUB_WORKSPACE:-$(pwd)}/scripts/install-sccache.sh"
       - name: Build Node.js binding (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -871,7 +871,7 @@ jobs:
           apt-get update
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu python3 python3-pip python3-venv curl libssl-dev pkg-config
           pip3 install --break-system-packages maturin==1.9.4
-          bash scripts/install-sccache.sh
+          bash "${GITHUB_WORKSPACE:-$(pwd)}/scripts/install-sccache.sh"
       - name: Build Python binding (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -934,7 +934,7 @@ jobs:
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
           apt-get update
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu maven curl
-          bash scripts/install-sccache.sh
+          bash "${GITHUB_WORKSPACE:-$(pwd)}/scripts/install-sccache.sh"
       - name: Build Java binding (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -997,7 +997,7 @@ jobs:
           ./dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet
           ./dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet
           ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet
-          bash scripts/install-sccache.sh
+          bash "${GITHUB_WORKSPACE:-$(pwd)}/scripts/install-sccache.sh"
       - name: Build .NET binding (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -1078,7 +1078,7 @@ jobs:
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
           apt-get update
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu curl
-          bash scripts/install-sccache.sh
+          bash "${GITHUB_WORKSPACE:-$(pwd)}/scripts/install-sccache.sh"
       - name: Build asherah-cobhan (arm64)
         env:
           CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
@@ -1143,15 +1143,12 @@ jobs:
       - uses: taiki-e/install-action@0d865d5cc6d507df4765f1f866bfae8bab4e2a73 # v2
         with:
           tool: cargo-zigbuild
-      - name: Download Alpine musl OpenSSL
-        run: ARCH=x86_64 source scripts/download-musl-openssl.sh
       - name: Build asherah-node for x86_64-musl
         working-directory: asherah-node
-        env:
-          OPENSSL_DIR: /tmp/musl-ssl/usr
-          OPENSSL_STATIC: "1"
-          OPENSSL_NO_VENDOR: "1"
+        shell: bash
         run: |
+          set -e
+          ARCH=x86_64 source "$GITHUB_WORKSPACE/scripts/download-musl-openssl.sh"
           rustup target add x86_64-unknown-linux-musl
           npm ci
           npm run build -- --target x86_64-unknown-linux-musl --zig
@@ -1329,15 +1326,12 @@ jobs:
       - uses: taiki-e/install-action@0d865d5cc6d507df4765f1f866bfae8bab4e2a73 # v2
         with:
           tool: cargo-zigbuild
-      - name: Download Alpine aarch64 musl OpenSSL
-        run: ARCH=aarch64 source scripts/download-musl-openssl.sh
       - name: Build asherah-node for aarch64-musl
         working-directory: asherah-node
-        env:
-          OPENSSL_DIR: /tmp/musl-ssl/usr
-          OPENSSL_STATIC: "1"
-          OPENSSL_NO_VENDOR: "1"
+        shell: bash
         run: |
+          set -e
+          ARCH=aarch64 source "$GITHUB_WORKSPACE/scripts/download-musl-openssl.sh"
           rustup target add aarch64-unknown-linux-musl
           npm ci
           npm run build -- --target aarch64-unknown-linux-musl --zig

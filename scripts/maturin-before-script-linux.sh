@@ -21,7 +21,7 @@ elif command -v apt-get &>/dev/null; then
     # rust-musl-cross: download musl OpenSSL from Alpine via shared script
     MUSL_ARCH=$(uname -m)
     if [ "$MUSL_ARCH" = "x86_64" ]; then ARCH=x86_64; else ARCH=aarch64; fi
-    source scripts/download-musl-openssl.sh
+    source "${GITHUB_WORKSPACE:-$(pwd)}/scripts/download-musl-openssl.sh"
   fi
   # glibc cross-compile (manylinux-cross): openssl-sys vendors OpenSSL
 fi
