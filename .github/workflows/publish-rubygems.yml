@@ -3,6 +3,10 @@ name: Publish to RubyGems
 permissions:
   contents: read
 
+concurrency:
+  group: publish-rubygems
+  cancel-in-progress: false
+
 on:
   workflow_run:
     workflows: ["Release Asherah Native Library"]
@@ -35,13 +39,8 @@ jobs:
       - name: Download native libraries from release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          # Get the release tag — from workflow_run's head branch or latest release
-          TAG="$WORKFLOW_RUN_BRANCH"
-          if [ -z "$TAG" ]; then
-            TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
-          fi
+          TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
           echo "Downloading native libs from release ${TAG}"
 
           mkdir -p /tmp/native-dl
@@ -66,11 +65,11 @@ jobs:
         run: |
           if [ -n "$INPUT_VERSION" ]; then
             VERSION="$INPUT_VERSION"
-          elif [ -n "$WORKFLOW_RUN_BRANCH" ]; then
-            VERSION="${WORKFLOW_RUN_BRANCH#v}"
           else
-            VERSION="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
-            VERSION="${VERSION#v}"
+            # Always derive from the latest release tag, not head_branch
+            # (head_branch can be "main" when release-cobhan is triggered via workflow_dispatch)
+            TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+            VERSION="${TAG#v}"
           fi
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
           echo "Publishing version: ${VERSION}"

@@ -212,8 +212,9 @@ do_bindings() {
         if command -v python3 >/dev/null 2>&1; then
             if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then
                 # CI: install pre-built wheel
-                python3 -m pip install -U pytest 2>&1 | tail -1 || true
-                python3 -m pip install --force-reinstall --no-deps "$BINDING_ARTIFACTS_DIR"/python/*.whl 2>&1 | tail -1
+                PIP_BSP=""; python3 -m pip install --break-system-packages --help &>/dev/null && PIP_BSP="--break-system-packages"
+                python3 -m pip install $PIP_BSP -U pytest 2>&1 | tail -1 || true
+                python3 -m pip install $PIP_BSP --force-reinstall --no-deps "$BINDING_ARTIFACTS_DIR"/python/*.whl 2>&1 | tail -1
             elif ! python3 -c "import asherah" 2>/dev/null; then
                 log "Installing Python binding (maturin develop)..."
                 if command -v maturin >/dev/null 2>&1; then

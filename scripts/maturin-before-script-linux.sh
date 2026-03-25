@@ -18,18 +18,10 @@ elif command -v apt-get &>/dev/null; then
   # Cross-compile container (Debian based)
   apt-get update && apt-get install -y cmake perl pkg-config curl
   if ls /usr/bin/*musl* 2>/dev/null; then
-    # rust-musl-cross: download musl OpenSSL from Alpine
+    # rust-musl-cross: download musl OpenSSL from Alpine via shared script
     MUSL_ARCH=$(uname -m)
-    if [ "$MUSL_ARCH" = "x86_64" ]; then ALPINE_ARCH=x86_64; else ALPINE_ARCH=aarch64; fi
-    mkdir -p /tmp/musl-ssl
-    (cd /tmp/musl-ssl && \
-      OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1) && \
-      OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1) && \
-      curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/$OPENSSL_DEV" && \
-      curl -sLO "https://dl-cdn.alpinelinux.org/alpine/v3.20/main/$ALPINE_ARCH/$OPENSSL_STATIC" && \
-      for f in *.apk; do tar xf "$f" 2>/dev/null || true; done)
-    export OPENSSL_DIR=/tmp/musl-ssl/usr
-    export OPENSSL_STATIC=1
+    if [ "$MUSL_ARCH" = "x86_64" ]; then ARCH=x86_64; else ARCH=aarch64; fi
+    source scripts/download-musl-openssl.sh
   fi
   # glibc cross-compile (manylinux-cross): openssl-sys vendors OpenSSL
 fi

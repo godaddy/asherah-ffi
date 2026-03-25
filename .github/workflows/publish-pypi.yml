@@ -1,5 +1,12 @@
 name: Publish to PyPI
 
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-pypi
+  cancel-in-progress: false
+
 on:
   release:
     types: [published]
@@ -56,6 +63,7 @@ jobs:
   build-wheels:
     needs: resolve-version
     strategy:
+      fail-fast: false
       matrix:
         include:
           # Linux x86_64 — manylinux_2_28 (glibc 2.28, RHEL 8+/Ubuntu 20.04+)
@@ -107,23 +115,19 @@ jobs:
           PYPI_VERSION: ${{ needs.resolve-version.outputs.version }}
           PYPI_STABLE: ${{ needs.resolve-version.outputs.stable }}
           PYPI_BETA: ${{ needs.resolve-version.outputs.beta }}
-        run: |
-          echo "Publishing version: ${PYPI_VERSION}"
-          sed -i.bak 's/^version = ".*"/version = "'"${PYPI_VERSION}"'"/' asherah-py/pyproject.toml
-          rm -f asherah-py/pyproject.toml.bak
-          if [ "$PYPI_STABLE" = "true" ]; then
-            sed -i.bak 's/^version = ".*"/version = "'"${PYPI_VERSION}"'"/' asherah-py/Cargo.toml
-          else
-            sed -i.bak 's/^version = ".*"/version = "0.5.0-beta.'"${PYPI_BETA}"'"/' asherah-py/Cargo.toml
-          fi
-          rm -f asherah-py/Cargo.toml.bak
+        run: bash scripts/set-pypi-version.sh
 
       - name: Install OpenSSL (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          vcpkg install openssl:x64-windows-static-md
-          echo "OPENSSL_DIR=C:/vcpkg/installed/x64-windows-static-md" >> "$GITHUB_ENV"
+          if [[ "${{ matrix.target }}" == *aarch64* ]]; then
+            VCPKG_TRIPLET="arm64-windows-static-md"
+          else
+            VCPKG_TRIPLET="x64-windows-static-md"
+          fi
+          vcpkg install "openssl:${VCPKG_TRIPLET}"
+          echo "OPENSSL_DIR=C:/vcpkg/installed/${VCPKG_TRIPLET}" >> "$GITHUB_ENV"
           echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
           echo "OPENSSL_NO_VENDOR=1" >> "$GITHUB_ENV"
 
@@ -172,13 +176,7 @@ jobs:
           PYPI_VERSION: ${{ needs.resolve-version.outputs.version }}
           PYPI_STABLE: ${{ needs.resolve-version.outputs.stable }}
           PYPI_BETA: ${{ needs.resolve-version.outputs.beta }}
-        run: |
-          sed -i 's/^version = ".*"/version = "'"${PYPI_VERSION}"'"/' asherah-py/pyproject.toml
-          if [ "$PYPI_STABLE" = "true" ]; then
-            sed -i 's/^version = ".*"/version = "'"${PYPI_VERSION}"'"/' asherah-py/Cargo.toml
-          else
-            sed -i 's/^version = ".*"/version = "0.5.0-beta.'"${PYPI_BETA}"'"/' asherah-py/Cargo.toml
-          fi
+        run: bash scripts/set-pypi-version.sh
 
       - name: Build sdist
         uses: PyO3/maturin-action@04ac600d27cdf7a9a280dadf7147097c42b757ad # v1
