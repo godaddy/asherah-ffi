@@ -73,7 +73,7 @@ jobs:
             target: x86_64-unknown-linux-musl
             build: |
               set -e
-              ARCH=x86_64 source scripts/download-musl-openssl.sh
+              ARCH=x86_64 source "$GITHUB_WORKSPACE/scripts/download-musl-openssl.sh"
               cd "$GITHUB_WORKSPACE/asherah-node"
               rustup target add x86_64-unknown-linux-musl
               npm ci
@@ -83,7 +83,7 @@ jobs:
             target: aarch64-unknown-linux-musl
             build: |
               set -e
-              ARCH=aarch64 source scripts/download-musl-openssl.sh
+              ARCH=aarch64 source "$GITHUB_WORKSPACE/scripts/download-musl-openssl.sh"
               cd "$GITHUB_WORKSPACE/asherah-node"
               rustup target add aarch64-unknown-linux-musl
               npm ci
