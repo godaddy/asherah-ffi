@@ -63,6 +63,76 @@ cargo run -p asherah --features sqlite --example sqlite
 KMS_KEY_ID=... AWS_REGION=... cargo run -p asherah --example aws_kms
 ```
 
+## CI/CD Architecture
+
+### Release flow
+1. Create a GitHub Release (tag like `v0.6.64`)
+2. This triggers simultaneously: `release-cobhan.yml`, `publish-pypi.yml`, `publish-npm.yml`, `publish-server.yml`
+3. `release-cobhan.yml` builds native FFI + JNI libraries for 6 platforms and uploads to the release
+4. When release-cobhan completes, `workflow_run` triggers: `publish-rubygems.yml`, `publish-nuget.yml`, `publish-maven.yml`
+5. These downstream workflows download pre-built binaries from the release and package them
+
+### Publish dry-runs
+CI runs 11 `publish-dry-run-*` jobs on every PR that replicate every unique compilation
+path in the publish workflows. These MUST exactly match the publish workflows — if they
+diverge, they won't catch failures. Specific rules:
+
+- All PyPI dry-runs use `source scripts/maturin-before-script-linux.sh` — the same
+  shared script as `publish-pypi.yml`. Never inline the logic.
+- All npm musl dry-runs use `source "$GITHUB_WORKSPACE/scripts/download-musl-openssl.sh"` —
+  same shared script as `publish-npm.yml`. Always use `$GITHUB_WORKSPACE` prefix since
+  build steps may run with `working-directory: asherah-node`.
+- The dry-run for a target must use the same `working-directory`, `env`, `docker-options`,
+  and `before-script-linux` as the publish workflow. No shortcuts.
+
+### Shared CI scripts (single source of truth)
+- `scripts/maturin-before-script-linux.sh` — OpenSSL setup for maturin Docker builds
+- `scripts/download-musl-openssl.sh` — Alpine OpenSSL packages for musl builds
+- `scripts/install-sccache.sh` — sccache install for container jobs
+- `scripts/set-pypi-version.sh` — version patching for PyPI builds
+
+Changing any of these affects all publish workflows AND dry-runs simultaneously.
+That's the point — they can't drift.
+
+### Rust toolchain
+- `rust-toolchain.toml` pins the workspace to 1.91.1 with Linux targets only
+- `dtolnay/rust-toolchain` in CI MUST use the `@1.91.1` SHA (`32a995a99d743b9c19db6838def362cd715afeb6`),
+  not `@stable`. Using `@stable` installs cross-compile targets for the wrong toolchain
+  since `rust-toolchain.toml` overrides which toolchain cargo actually uses.
+- arm64 container jobs use `rust:1.91-bookworm` image
+- Fuzz and sanitizer jobs use `nightly` (independent of the pinned version)
+
+## CI/CD Rules (hard-won, do not violate)
+
+### OpenSSL configuration
+- **Native manylinux (yum)**: install `openssl-devel`, export `OPENSSL_NO_VENDOR=1`
+- **Native musllinux (apk)**: install `openssl-dev`, export `OPENSSL_NO_VENDOR=1`
+- **Cross-compile glibc (apt-get, manylinux-cross)**: let openssl-sys vendor from source
+- **Cross-compile musl (apt-get, rust-musl-cross)**: download Alpine OpenSSL packages via shared script
+- **macOS**: let openssl-sys vendor (no `OPENSSL_NO_VENDOR` — it breaks x86_64 cross-compile)
+- **Windows**: install via vcpkg, set `OPENSSL_DIR` + `OPENSSL_NO_VENDOR=1`
+- **Windows arm64**: use `openssl:arm64-windows-static-md` triplet (NOT x64)
+- NEVER set `OPENSSL_NO_VENDOR` globally via `env:` or `docker-options:` — it applies to
+  platforms where system OpenSSL isn't available. Set it inside `before-script-linux` only.
+
+### GitHub Actions workflow rules
+- Every job MUST have `permissions:` block (top-level `contents: read` + per-job escalation)
+- Publish workflow matrices MUST use `fail-fast: false`
+- All publish workflows MUST have `concurrency:` groups to prevent races
+- Pin tool versions everywhere: `maturin==1.9.4`, `sccache v0.8.1`, action SHAs
+- Use `$GITHUB_WORKSPACE/scripts/` (absolute paths) for all shared script references
+- Pip in Bookworm containers needs `--break-system-packages` — detect support first:
+  `PIP_BSP=""; python3 -m pip install --break-system-packages --help &>/dev/null && PIP_BSP="--break-system-packages"`
+
+### Cross-compilation gotchas
+- macOS runners (`macos-latest`) are ARM64; x86_64 builds are cross-compiled
+- arm64 Linux builds use cross-compilation containers (`manylinux-cross`, `rust-musl-cross`),
+  NOT QEMU emulation. These are Debian-based (apt-get), not yum/apk.
+- The `before-script-linux` in maturin-action handles 3 container types:
+  yum (native manylinux), apk (native musllinux), apt-get (cross-compile)
+- `docker/tests.Dockerfile` must use the same Debian version as build containers
+  (currently bookworm) or binaries will fail with glibc version mismatch
+
 ## Coding Conventions
 
 - Rust edition 2021; minimum supported version 1.88.0 (toolchain pinned to 1.91.1)
