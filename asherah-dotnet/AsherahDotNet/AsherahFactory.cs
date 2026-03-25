@@ -5,7 +5,7 @@ namespace GoDaddy.Asherah;
 
 public sealed class AsherahFactory : IAsherahFactory
 {
-    private SafeFactoryHandle _handle;
+    private readonly SafeFactoryHandle _handle;
     private bool _disposed;
 
     internal AsherahFactory(SafeFactoryHandle handle)

@@ -186,9 +186,9 @@ class SessionFactoryCompatTest {
         assertThrows(UnsupportedOperationException.class, () -> {
             SessionFactory.newBuilder("product", "service")
                     .withMetastore(new Metastore<JSONObject>() {
-                        public Optional<JSONObject> load(String k, java.time.Instant c) { return Optional.empty(); }
-                        public Optional<JSONObject> loadLatest(String k) { return Optional.empty(); }
-                        public boolean store(String k, java.time.Instant c, JSONObject v) { return false; }
+                        @Override public Optional<JSONObject> load(String k, java.time.Instant c) { return Optional.empty(); }
+                        @Override public Optional<JSONObject> loadLatest(String k) { return Optional.empty(); }
+                        @Override public boolean store(String k, java.time.Instant c, JSONObject v) { return false; }
                     });
         });
     }

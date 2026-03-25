@@ -6,8 +6,6 @@
 //  node gen.js decrypt <service> <product> <partition> <masterHex>  (reads bundle JSON on stdin)
 //    -> prints plaintext base64
 
-const fs = require('fs');
-
 function loadAsherah(masterHex) {
   let asherah;
   try { asherah = require('asherah'); } catch (e) {
@@ -31,12 +29,6 @@ function loadAsherah(masterHex) {
     try { asherah.setenv(JSON.stringify(env)); } catch (e) {}
   }
   return asherah;
-}
-
-function hexToBytes(hex) {
-  const arr = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) arr[i/2] = parseInt(hex.slice(i, i+2), 16);
-  return Buffer.from(arr);
 }
 
 async function encrypt(service, product, partition, masterHex, payloadB64) {

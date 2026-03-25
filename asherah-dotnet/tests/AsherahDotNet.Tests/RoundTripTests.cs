@@ -131,25 +131,11 @@ public class RoundTripTests
     [Fact]
     public void AsherahFactory_ImplementsIAsherahFactory()
     {
-        IAsherahFactory factory = Asherah.FactoryFromEnv();
-        try
-        {
-            IAsherahSession session = factory.GetSession("iface-factory-test");
-            try
-            {
-                var ciphertext = session.EncryptString("factory interface payload");
-                var recovered = session.DecryptString(ciphertext);
-                Assert.Equal("factory interface payload", recovered);
-            }
-            finally
-            {
-                session.Dispose();
-            }
-        }
-        finally
-        {
-            factory.Dispose();
-        }
+        using IAsherahFactory factory = Asherah.FactoryFromEnv();
+        using IAsherahSession session = factory.GetSession("iface-factory-test");
+        var ciphertext = session.EncryptString("factory interface payload");
+        var recovered = session.DecryptString(ciphertext);
+        Assert.Equal("factory interface payload", recovered);
     }
 
     // --- FFI Boundary Tests ---

@@ -22,23 +22,13 @@ config = {
   "EnableSessionCaching" => true
 }
 
-if mode == "hot"
+if %w[hot warm cold].include?(mode)
   mysql_url = ENV["BENCH_MYSQL_URL"] || ENV["MYSQL_URL"]
-  raise "hot mode requires BENCH_MYSQL_URL or MYSQL_URL" if mysql_url.nil? || mysql_url.empty?
+  raise "#{mode} mode requires BENCH_MYSQL_URL or MYSQL_URL" if mysql_url.nil? || mysql_url.empty?
   config["Metastore"] = "rdbms"
   config["ConnectionString"] = mysql_url
-elsif mode == "warm"
-  mysql_url = ENV["BENCH_MYSQL_URL"] || ENV["MYSQL_URL"]
-  raise "warm mode requires BENCH_MYSQL_URL or MYSQL_URL" if mysql_url.nil? || mysql_url.empty?
-  config["Metastore"] = "rdbms"
-  config["ConnectionString"] = mysql_url
-  config["SessionCacheMaxSize"] = warm_session_cache_max
-elsif mode == "cold"
-  mysql_url = ENV["BENCH_MYSQL_URL"] || ENV["MYSQL_URL"]
-  raise "cold mode requires BENCH_MYSQL_URL or MYSQL_URL" if mysql_url.nil? || mysql_url.empty?
-  config["Metastore"] = "rdbms"
-  config["ConnectionString"] = mysql_url
-  config["EnableSessionCaching"] = false
+  config["SessionCacheMaxSize"] = warm_session_cache_max if mode == "warm"
+  config["EnableSessionCaching"] = false if mode == "cold"
 else
   config["Metastore"] = "memory"
 end
