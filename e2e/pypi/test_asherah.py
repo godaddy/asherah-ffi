@@ -10,7 +10,7 @@ def main():
     os.environ["STATIC_MASTER_KEY_HEX"] = "22" * 32
     os.environ["Metastore"] = "memory"
 
-    import asherah_py as asherah
+    import asherah
 
     print(f"asherah_py module: {asherah}")
     print(f"Python: {sys.version}")

@@ -8,7 +8,6 @@ This repository contains:
   - Language bindings under `asherah-node/`, `asherah-py/`, `asherah-java/`, `asherah-dotnet/`, and `asherah-ruby/`
 
 ## Project Structure & Module Organization
-- Go memcall reference implementation now lives under `memcall-go/`.
 - Go bindings targeting the Rust FFI live under `asherah-go/`.
 - Rust crates:
   - `asherah/` (primary Rust crate)

@@ -7,7 +7,7 @@ easy to review.
 
 ## Getting Started
 
-- Install the Rust toolchain (Rust 1.75+ recommended) and enable the `rustfmt`
+- Install the Rust toolchain (Rust 1.88+ required, 1.91+ recommended) and enable the `rustfmt`
   and `clippy` components.
 - Install language toolchains required for the bindings you plan to touch:
   Node 18+, Python 3.9+, Go 1.21+, Ruby 3.1+, .NET 8, and Java 17.

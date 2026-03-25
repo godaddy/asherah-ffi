@@ -13,6 +13,13 @@ __pycache__/
 *.nupkg
 BenchmarkDotNet.Artifacts/
 **/Gemfile.lock
+**/go.sum
+**/*.pb.go
+
+# Go compiled binaries (extensionless)
+benchmarks/go-bench/go-bench.test
+benchmarks/go-wrapper/go-wrapper
+benchmarks/grpc-bench/grpc-bench
 
 # Build outputs
 /target/

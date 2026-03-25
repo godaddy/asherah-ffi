@@ -4,7 +4,7 @@ import os
 # In production, use KMS: "aws" with a proper region map.
 os.environ["STATIC_MASTER_KEY_HEX"] = "22" * 32
 
-import asherah_py as asherah
+import asherah
 
 asherah.setup({
     "ServiceName": "sample-service",
