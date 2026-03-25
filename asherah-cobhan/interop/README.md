@@ -69,5 +69,5 @@ cargo test -p asherah-cobhan --test interop_tests
 
 ## Test Vectors
 
-Pre-generated test vectors are stored in `test_vectors/` directory. These vectors
-were generated using known inputs and can be decrypted by any compatible implementation.
+Test vectors are generated at runtime during interop tests using known inputs
+and can be decrypted by any compatible implementation.

@@ -30,7 +30,7 @@ if (fs.existsSync(npmLoader)) {
 
 // Ensure both use same static master key
 if (!process.env.STATIC_MASTER_KEY_HEX) {
-  process.env.STATIC_MASTER_KEY_HEX = '11'.repeat(32); // 32-byte key (hex)
+  process.env.STATIC_MASTER_KEY_HEX = '22'.repeat(32); // 32-byte key (hex)
 }
 
 const cfgNew = {

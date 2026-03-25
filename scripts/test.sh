@@ -501,15 +501,15 @@ do_e2e() {
     log "=== E2E Tests ==="
 
     # npm package
-    if [ -d e2e-npm-test ] && command -v node >/dev/null 2>&1; then
-        run_test "E2E npm" bash -c "cd e2e-npm-test && npm install && node test.js"
+    if [ -d e2e/npm ] && command -v node >/dev/null 2>&1; then
+        run_test "E2E npm" bash -c "cd e2e/npm && npm install && node test.js"
     else
         skip "E2E npm (directory or node not available)"
     fi
 
     # PyPI package
-    if [ -d e2e-pypi-test ] && command -v python3 >/dev/null 2>&1; then
-        run_test "E2E PyPI" bash -c "cd e2e-pypi-test && python3 -m pytest -vv"
+    if [ -d e2e/pypi ] && command -v python3 >/dev/null 2>&1; then
+        run_test "E2E PyPI" bash -c "cd e2e/pypi && python3 test_asherah.py"
     else
         skip "E2E PyPI (directory or python3 not available)"
     fi

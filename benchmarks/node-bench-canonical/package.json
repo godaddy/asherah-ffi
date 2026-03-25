@@ -1,14 +1,10 @@
 {
   "name": "bench-canonical",
   "version": "1.0.0",
-  "description": "",
+  "description": "Benchmark comparing canonical (Go) asherah-node against Rust asherah-node",
   "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "private": true,
+  "license": "Apache-2.0",
   "type": "commonjs",
   "dependencies": {
     "asherah": "^3.0.16",
