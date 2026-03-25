@@ -1,8 +1,0 @@
-{
-  "name": "e2e-npm-test-beta6",
-  "version": "1.0.0",
-  "private": true,
-  "dependencies": {
-    "asherah": "4.0.0-beta.6"
-  }
-}

@@ -6,6 +6,13 @@
 .vscode/
 .pytest_cache/
 __pycache__/
+.tool-versions
+
+# Generated artifacts that should never be committed
+*.tgz
+*.nupkg
+BenchmarkDotNet.Artifacts/
+**/Gemfile.lock
 
 # Build outputs
 /target/
