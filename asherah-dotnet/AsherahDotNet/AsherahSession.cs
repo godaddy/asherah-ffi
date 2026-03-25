@@ -6,7 +6,7 @@ namespace GoDaddy.Asherah;
 
 public sealed class AsherahSession : IAsherahSession
 {
-    private SafeSessionHandle _handle;
+    private readonly SafeSessionHandle _handle;
     private bool _disposed;
 
     internal AsherahSession(SafeSessionHandle handle)

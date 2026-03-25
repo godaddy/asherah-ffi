@@ -20,8 +20,17 @@ elif command -v apt-get &>/dev/null; then
   if ls /usr/bin/*musl* 2>/dev/null; then
     # rust-musl-cross: download musl OpenSSL from Alpine via shared script
     MUSL_ARCH=$(uname -m)
-    if [ "$MUSL_ARCH" = "x86_64" ]; then ARCH=x86_64; else ARCH=aarch64; fi
-    source "${GITHUB_WORKSPACE:-$(pwd)}/scripts/download-musl-openssl.sh"
+    case "$MUSL_ARCH" in
+      x86_64)       ARCH=x86_64 ;;
+      aarch64|arm64) ARCH=aarch64 ;;
+      *) echo "ERROR: Unsupported musl architecture '$MUSL_ARCH'" >&2; exit 1 ;;
+    esac
+    DOWNLOAD_SCRIPT="${GITHUB_WORKSPACE:-$(pwd)}/scripts/download-musl-openssl.sh"
+    if [ ! -f "$DOWNLOAD_SCRIPT" ]; then
+      echo "ERROR: Expected helper script not found: $DOWNLOAD_SCRIPT" >&2
+      exit 1
+    fi
+    source "$DOWNLOAD_SCRIPT"
   fi
   # glibc cross-compile (manylinux-cross): openssl-sys vendors OpenSSL
 fi

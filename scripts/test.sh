@@ -17,11 +17,11 @@ Modes:
   --integration   Integration tests with MySQL, Postgres, DynamoDB (Docker required)
   --bindings      All language binding tests (Python, Node, Ruby, Go, Java, .NET)
   --interop       Cross-language interop tests
-  --fuzz          Fuzz tests (requires cargo-fuzz + nightly)
+  --fuzz          Fuzz tests (requires cargo-fuzz + nightly; time-intensive)
   --sanitizers    Miri + AddressSanitizer + Valgrind
   --lint          Format check + clippy
   --e2e           E2E tests against published packages
-  --all           Run everything (unit + integration + bindings + interop + lint)
+  --all           Run everything (unit + integration + bindings + interop + fuzz + lint; includes time-intensive fuzz)
 
 Options:
   --binding=NAME    Run only a specific binding test (python, node, ruby, go, java, dotnet)
@@ -62,7 +62,6 @@ run_test() {
         pass "$name"
     else
         fail "$name"
-        summary
     fi
 }
 
@@ -201,7 +200,7 @@ do_bindings() {
     else
         # Local: build FFI libs from source
         log "Building Rust FFI libraries..."
-        cargo build --release -p asherah-ffi -p asherah-java -p asherah-cobhan 2>&1 | tail -1
+        cargo build --release -p asherah-ffi -p asherah-java -p asherah-cobhan
         export ASHERAH_DOTNET_NATIVE="$ROOT_DIR/target/release"
         export ASHERAH_RUBY_NATIVE="$ROOT_DIR/target/release"
         export ASHERAH_GO_NATIVE="$ROOT_DIR/target/release"
@@ -409,6 +408,7 @@ run_in_sanitizer_container() {
 }
 
 do_sanitizers() {
+    local platform="${PLATFORM:?PLATFORM must be set}"
     log "=== Sanitizer Tests ==="
 
     # Ensure nightly toolchain is available (required for miri and ASAN)
@@ -454,7 +454,7 @@ do_sanitizers() {
 
     # AddressSanitizer — needs Linux + nightly. Use Docker on macOS.
     if [ "$(uname)" = "Linux" ] && [ "$has_nightly" = true ]; then
-        local asan_target="${PLATFORM}-unknown-linux-gnu"
+        local asan_target="${platform}-unknown-linux-gnu"
         run_test "AddressSanitizer (asherah core)" bash -c \
             "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo -Zbuild-std test -p asherah --lib --target $asan_target -- --test-threads=1"
         run_test "AddressSanitizer (cobhan)" bash -c \

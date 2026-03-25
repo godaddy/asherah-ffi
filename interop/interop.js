@@ -50,8 +50,6 @@ const cfgOld = {
 
 function assert(cond, msg) { if (!cond) { throw new Error(msg || 'assertion failed'); } }
 
-function toHex(buf) { return Buffer.from(buf).toString('hex'); }
-
 function main() {
   console.log('Setting up old (npm) asherah...');
   oldAsherah.setup(cfgOld);
