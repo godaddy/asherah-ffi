@@ -109,9 +109,9 @@ jobs:
         if: matrix.os != 'windows-latest'
         run: |
           if [ "${{ matrix.cross }}" = "true" ]; then
-            aarch64-linux-gnu-strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }} || true
+            aarch64-linux-gnu-strip -x target/${{ matrix.target }}/release/${{ matrix.artifact_name }} || true
           else
-            strip target/${{ matrix.target }}/release/${{ matrix.artifact_name }} || true
+            strip -x target/${{ matrix.target }}/release/${{ matrix.artifact_name }} || true
           fi
 
       - name: Prepare artifact
