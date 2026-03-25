@@ -12,7 +12,7 @@ module Asherah
 
     def encrypt_bytes(data)
       raise Asherah::Error::EncryptFailed, "session closed" if @closed
-      buf = Native::AsherahBuffer.new
+      buf = thread_local_buffer
       status = Native.asherah_encrypt_to_json(@pointer, data, data.bytesize, buf.pointer)
       raise Asherah::Error::EncryptFailed, Native.last_error unless status.zero?
       result = buf[:data].read_bytes(buf[:len])
@@ -22,7 +22,7 @@ module Asherah
 
     def decrypt_bytes(json)
       raise Asherah::Error::DecryptFailed, "session closed" if @closed
-      buf = Native::AsherahBuffer.new
+      buf = thread_local_buffer
       status = Native.asherah_decrypt_from_json(@pointer, json, json.bytesize, buf.pointer)
       raise Asherah::Error::DecryptFailed, Native.last_error unless status.zero?
       result = buf[:data].read_bytes(buf[:len])
@@ -42,6 +42,12 @@ module Asherah
 
     def closed?
       @closed
+    end
+
+    private
+
+    def thread_local_buffer
+      Thread.current[:asherah_buffer] ||= Native::AsherahBuffer.new
     end
   end
 end
