@@ -10,7 +10,6 @@ module Asherah
       raise Asherah::Error::BadConfig, Native.last_error if ptr.null?
       @pointer = ptr
       @closed = false
-      ObjectSpace.define_finalizer(self, self.class.make_finalizer(ptr))
     end
 
     def get_session(partition_id)
@@ -22,7 +21,6 @@ module Asherah
 
     def close
       return if @closed
-      ObjectSpace.undefine_finalizer(self)
       begin
         Native.asherah_factory_free(@pointer)
       ensure
@@ -33,15 +31,6 @@ module Asherah
 
     def closed?
       @closed
-    end
-
-    def self.make_finalizer(pointer)
-      proc do
-        begin
-          Native.asherah_factory_free(pointer) unless pointer.null?
-        rescue StandardError
-        end
-      end
     end
   end
 end

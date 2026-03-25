@@ -8,13 +8,11 @@ module Asherah
       raise Asherah::Error::GetSessionFailed, Native.last_error if pointer.null?
       @pointer = pointer
       @closed = false
-      @buffer = Native::AsherahBuffer.new
-      ObjectSpace.define_finalizer(self, self.class.make_finalizer(pointer))
     end
 
     def encrypt_bytes(data)
       raise Asherah::Error::EncryptFailed, "session closed" if @closed
-      buf = @buffer
+      buf = thread_local_buffer
       status = Native.asherah_encrypt_to_json(@pointer, data, data.bytesize, buf.pointer)
       raise Asherah::Error::EncryptFailed, Native.last_error unless status.zero?
       result = buf[:data].read_bytes(buf[:len])
@@ -24,7 +22,7 @@ module Asherah
 
     def decrypt_bytes(json)
       raise Asherah::Error::DecryptFailed, "session closed" if @closed
-      buf = @buffer
+      buf = thread_local_buffer
       status = Native.asherah_decrypt_from_json(@pointer, json, json.bytesize, buf.pointer)
       raise Asherah::Error::DecryptFailed, Native.last_error unless status.zero?
       result = buf[:data].read_bytes(buf[:len])
@@ -34,7 +32,6 @@ module Asherah
 
     def close
       return if @closed
-      ObjectSpace.undefine_finalizer(self)
       begin
         Native.asherah_session_free(@pointer)
       ensure
@@ -47,13 +44,10 @@ module Asherah
       @closed
     end
 
-    def self.make_finalizer(pointer)
-      proc do
-        begin
-          Native.asherah_session_free(pointer) unless pointer.null?
-        rescue StandardError
-        end
-      end
+    private
+
+    def thread_local_buffer
+      Thread.current[:asherah_buffer] ||= Native::AsherahBuffer.new
     end
   end
 end
