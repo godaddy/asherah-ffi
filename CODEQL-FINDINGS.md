@@ -1,7 +1,48 @@
 # CodeQL Findings
 
-Captured from GitHub CodeQL scan. Some may not be appropriate to fix due to
-interop compatibility requirements with the canonical GoDaddy Asherah SDK.
+Captured from GitHub CodeQL scan and Copilot AI findings. Some may not be
+appropriate to fix due to interop compatibility requirements with the canonical
+GoDaddy Asherah SDK.
+
+## ACCESS OF INVALID POINTER (Rust) — 2 findings — SEVERITY: ERROR
+
+> Dereferencing a pointer that may be invalid.
+
+### asherah-node/src/lib.rs
+
+1. **Alert #34, Line 321** — Access of invalid pointer
+2. **Alert #35, Line 380** — Access of invalid pointer
+
+**Notes:** These are severity ERROR — the highest priority findings. Need to inspect the actual code to understand if these are real unsafe pointer bugs or false positives from CodeQL's Rust analysis.
+
+## Disabled TLS certificate check (Rust) — 3 findings — SEVERITY: WARNING
+
+> TLS certificate verification is disabled, allowing man-in-the-middle attacks.
+
+### asherah/src/metastore_postgres.rs
+
+1. **Alert #36, Line 107** — Disabled TLS certificate check
+2. **Alert #37, Line 106** — Disabled TLS certificate check
+3. **Alert #38, Line 115** — Disabled TLS certificate check
+
+**Notes:** This is the Postgres metastore TLS configuration. May be intentional for dev/test environments or when using custom CAs. Should at minimum be behind a config flag, not unconditional.
+
+## Missing workflow permissions (Actions) — 6 findings — SEVERITY: WARNING
+
+> Workflow does not contain permissions.
+
+1. **Alert #11** — `release-cobhan.yml` line 23 (build job)
+2. **Alert #13** — `test-runner.yml` line 8
+3. **Alert #14** — `test-runner.yml` line 13
+4. **Alert #20** — `release-cobhan.yml` line 302 (show-urls job)
+5. **Alert #46** — `benchmark-setup.yml` line 13
+6. **Alert #50** — `release-cobhan.yml` line 217 (package job)
+
+**Notes:** Add `permissions: contents: read` to these jobs/workflows. Same issue we've fixed elsewhere.
+
+---
+
+## Standard CodeQL Findings (from web UI)
 
 ## Useless parameter (Java) — 7 findings
 
