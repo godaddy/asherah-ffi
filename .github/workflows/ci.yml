@@ -228,7 +228,7 @@ jobs:
           export PATH="$CARGO_HOME/bin:$PATH"
           rustup toolchain install 1.91.1 --profile minimal --component rustfmt
           bash scripts/install-sccache.sh
-          python3.11 -m pip install maturin==1.9.4==1.9.4
+          python3.11 -m pip install maturin==1.9.4
           rm -rf artifacts/x86_64/python || true
           mkdir -p artifacts/x86_64/python
           python3.11 -m maturin build --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 -i python3.11 --out artifacts/x86_64/python
