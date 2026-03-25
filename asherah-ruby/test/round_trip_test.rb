@@ -248,6 +248,29 @@ class FactorySessionTest < Minitest::Test
       factory.close
     end
   end
+
+  def test_concurrent_same_partition_encrypt_decrypt
+    factory = make_factory
+    begin
+      partition_id = "concurrent-shared"
+      threads = 8.times.map do |i|
+        Thread.new do
+          session = factory.get_session(partition_id)
+          begin
+            plaintext = "shared-thread-#{i}-payload".b
+            json = session.encrypt_bytes(plaintext)
+            recovered = session.decrypt_bytes(json)
+            assert_equal plaintext, recovered
+          ensure
+            session.close
+          end
+        end
+      end
+      threads.each(&:join)
+    ensure
+      factory.close
+    end
+  end
 end
 
 # Tests for canonical godaddy/asherah-ruby API compatibility

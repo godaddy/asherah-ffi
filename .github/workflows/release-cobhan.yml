@@ -1,5 +1,8 @@
 name: Release Asherah Native Library
 
+permissions:
+  contents: read
+
 on:
   release:
     types: [published]
