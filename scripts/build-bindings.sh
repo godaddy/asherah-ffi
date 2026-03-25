@@ -221,8 +221,8 @@ fi
 
 if should_build python || should_build all; then
   echo "[build-bindings] Building Python wheel"
-  python3 -m pip install --upgrade pip >/dev/null
-  python3 -m pip install --upgrade maturin==1.9.4 >/dev/null
+  python3 -m pip install --break-system-packages --upgrade pip >/dev/null
+  python3 -m pip install --break-system-packages --upgrade maturin==1.9.4 >/dev/null
   rm -rf "$ROOT_DIR/target/wheels" "$ROOT_DIR/target/$CARGO_TRIPLE/wheels"
   # Build manylinux-compatible wheel (glibc 2.28)
   maturin build --release --manifest-path "$ROOT_DIR/asherah-py/Cargo.toml" --target "$CARGO_TRIPLE" --compatibility manylinux_2_28
