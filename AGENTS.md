@@ -1,58 +1,162 @@
 # Repository Guidelines
 
-This repository contains:
-- Go wrapper over the Rust FFI (`asherah-go/`)
-- Rust ports:
-  - `asherah`: primary Rust crate with Go-compatible JSON shapes, API, and KMS/metastore integrations
-  - `asherah-ffi`: C ABI wrapper over `asherah` for language bindings
-  - Language bindings under `asherah-node/`, `asherah-py/`, `asherah-java/`, `asherah-dotnet/`, and `asherah-ruby/`
+## Project Overview
 
-## Project Structure & Module Organization
-- Go memcall reference implementation now lives under `memcall-go/`.
-- Go bindings targeting the Rust FFI live under `asherah-go/`.
-- Rust crates:
-  - `asherah/` (primary Rust crate)
-  - `asherah-ffi/` (C ABI wrapper over `asherah`)
-  - `asherah/` (workspace member)
-    - Feature‑gated adapters: `sqlite`, `mysql`, `postgres`, `dynamodb`
-    - Examples in `examples/`
-    - Tests in `tests/`
+Asherah is an envelope encryption library with automatic key rotation. This
+repository contains the Rust implementation plus language bindings for Node.js,
+Python, Java, .NET, Ruby, and Go.
+
+## Directory Structure
+
+- `asherah/` — Core Rust crate: encryption engine, key management, metastore adapters, memguard
+- `asherah-config/` — Configuration types shared across crates
+- `asherah-ffi/` — C ABI (cobhan buffer format) for language bindings
+- `asherah-cobhan/` — Cobhan compatibility layer (drop-in for Go cobhan library)
+- `asherah-server/` — gRPC sidecar server
+- `asherah-node/` — Node.js bindings (napi-rs)
+- `asherah-py/` — Python bindings (PyO3/maturin)
+- `asherah-java/` — Java bindings (JNI)
+- `asherah-dotnet/` — .NET bindings (P/Invoke)
+- `asherah-ruby/` — Ruby bindings (FFI gem)
+- `asherah-go/` — Go bindings (purego, no cgo)
+- `benchmarks/` — Cross-language benchmarks
+- `samples/` — Usage examples for each language
+- `e2e/` — End-to-end tests against published packages
+- `interop/` — Cross-language interoperability tests
+- `scripts/` — CI and development scripts
+- `docker/` — Dockerfiles for CI test environments
+- `fuzz/` — Cargo-fuzz targets
 
 ## Build & Test
-- Build all Rust crates:
-- Build workspace: `cargo build`
-- `cd asherah && cargo build`
-- Run tests:
-- Test workspace: `cargo test`
-- `cd asherah && cargo test`
-- Adapter features:
-  - SQLite: `cargo test --features sqlite`
-  - MySQL: `cargo test --features mysql` (requires `MYSQL_URL` env for integration tests)
-  - Postgres: `cargo test --features postgres` (requires `POSTGRES_URL` env)
-  - DynamoDB: `cargo test --features dynamodb` (requires AWS creds and `DDB_TABLE`, optionally `AWS_REGION`)
 
-## Examples
-- In‑memory + StaticKMS: `cd asherah && cargo run --example simple`
-- SQLite metastore: `cargo run --features sqlite --example sqlite`
-- AWS KMS: `KMS_KEY_ID=... AWS_REGION=... cargo run --example aws_kms`
+```bash
+# Build workspace
+cargo build
 
-## Coding Style & Conventions (Rust)
-- Edition 2021; keep changes minimal and focused.
-- Use existing types and JSON field names in `types.rs` for cross‑language compatibility.
-- Avoid logging sensitive material; locked buffers scrub on free.
-- Keep async AWS SDK calls behind an internal `tokio::runtime::Runtime` to present a sync KMS/Metastore API, mirroring Go.
+# Run all tests (unit, integration, bindings, lint)
+scripts/test.sh --all
+
+# Individual test modes
+scripts/test.sh --unit
+scripts/test.sh --integration    # requires Docker (MySQL, Postgres, DynamoDB)
+scripts/test.sh --bindings       # requires language toolchains
+scripts/test.sh --interop
+scripts/test.sh --lint
+scripts/test.sh --sanitizers     # Miri, AddressSanitizer, Valgrind
+scripts/test.sh --fuzz           # requires nightly
+```
+
+### Feature-gated adapters
+
+```bash
+cargo test -p asherah --features sqlite
+cargo test -p asherah --features mysql      # requires MYSQL_URL
+cargo test -p asherah --features postgres   # requires POSTGRES_URL
+cargo test -p asherah --features dynamodb   # requires AWS creds + DDB_TABLE
+```
+
+### Examples
+
+```bash
+cargo run -p asherah --example simple
+cargo run -p asherah --features sqlite --example sqlite
+KMS_KEY_ID=... AWS_REGION=... cargo run -p asherah --example aws_kms
+```
+
+## CI/CD Architecture
+
+### Release flow
+1. Create a GitHub Release (tag like `v0.6.64`)
+2. This triggers simultaneously: `release-cobhan.yml`, `publish-pypi.yml`, `publish-npm.yml`, `publish-server.yml`
+3. `release-cobhan.yml` builds native FFI + JNI libraries for 6 platforms and uploads to the release
+4. When release-cobhan completes, `workflow_run` triggers: `publish-rubygems.yml`, `publish-nuget.yml`, `publish-maven.yml`
+5. These downstream workflows download pre-built binaries from the release and package them
+
+### Publish dry-runs
+CI runs 11 `publish-dry-run-*` jobs on every PR that replicate every unique compilation
+path in the publish workflows. These MUST exactly match the publish workflows — if they
+diverge, they won't catch failures. Specific rules:
+
+- All PyPI dry-runs use `source scripts/maturin-before-script-linux.sh` — the same
+  shared script as `publish-pypi.yml`. Never inline the logic.
+- All npm musl dry-runs use `source "$GITHUB_WORKSPACE/scripts/download-musl-openssl.sh"` —
+  same shared script as `publish-npm.yml`. Always use `$GITHUB_WORKSPACE` prefix since
+  build steps may run with `working-directory: asherah-node`.
+- The dry-run for a target must use the same `working-directory`, `env`, `docker-options`,
+  and `before-script-linux` as the publish workflow. No shortcuts.
+
+### Shared CI scripts (single source of truth)
+- `scripts/maturin-before-script-linux.sh` — OpenSSL setup for maturin Docker builds
+- `scripts/download-musl-openssl.sh` — Alpine OpenSSL packages for musl builds
+- `scripts/install-sccache.sh` — sccache install for container jobs
+- `scripts/set-pypi-version.sh` — version patching for PyPI builds
+
+Changing any of these affects all publish workflows AND dry-runs simultaneously.
+That's the point — they can't drift.
+
+### Rust toolchain
+- `rust-toolchain.toml` pins the workspace to 1.91.1 with Linux targets only
+- `dtolnay/rust-toolchain` in CI MUST use the `@1.91.1` SHA (`32a995a99d743b9c19db6838def362cd715afeb6`),
+  not `@stable`. Using `@stable` installs cross-compile targets for the wrong toolchain
+  since `rust-toolchain.toml` overrides which toolchain cargo actually uses.
+- arm64 container jobs use `rust:1.91-bookworm` image
+- Fuzz and sanitizer jobs use `nightly` (independent of the pinned version)
+
+## CI/CD Rules (hard-won, do not violate)
+
+### OpenSSL configuration
+- **Native manylinux (yum)**: install `openssl-devel`, export `OPENSSL_NO_VENDOR=1`
+- **Native musllinux (apk)**: install `openssl-dev`, export `OPENSSL_NO_VENDOR=1`
+- **Cross-compile glibc (apt-get, manylinux-cross)**: let openssl-sys vendor from source
+- **Cross-compile musl (apt-get, rust-musl-cross)**: download Alpine OpenSSL packages via shared script
+- **macOS**: let openssl-sys vendor (no `OPENSSL_NO_VENDOR` — it breaks x86_64 cross-compile)
+- **Windows**: install via vcpkg, set `OPENSSL_DIR` + `OPENSSL_NO_VENDOR=1`
+- **Windows arm64**: use `openssl:arm64-windows-static-md` triplet (NOT x64)
+- NEVER set `OPENSSL_NO_VENDOR` globally via `env:` or `docker-options:` — it applies to
+  platforms where system OpenSSL isn't available. Set it inside `before-script-linux` only.
+
+### GitHub Actions workflow rules
+- Every job MUST have `permissions:` block (top-level `contents: read` + per-job escalation)
+- Publish workflow matrices MUST use `fail-fast: false`
+- All publish workflows MUST have `concurrency:` groups to prevent races
+- Pin tool versions everywhere: `maturin==1.9.4`, `sccache v0.8.1`, action SHAs
+- Use `$GITHUB_WORKSPACE/scripts/` (absolute paths) for all shared script references
+- Pip in Bookworm containers needs `--break-system-packages` — detect support first:
+  `PIP_BSP=""; python3 -m pip install --break-system-packages --help &>/dev/null && PIP_BSP="--break-system-packages"`
+
+### Cross-compilation gotchas
+- macOS runners (`macos-latest`) are ARM64; x86_64 builds are cross-compiled
+- arm64 Linux builds use cross-compilation containers (`manylinux-cross`, `rust-musl-cross`),
+  NOT QEMU emulation. These are Debian-based (apt-get), not yum/apk.
+- The `before-script-linux` in maturin-action handles 3 container types:
+  yum (native manylinux), apk (native musllinux), apt-get (cross-compile)
+- `docker/tests.Dockerfile` must use the same Debian version as build containers
+  (currently bookworm) or binaries will fail with glibc version mismatch
+
+## Coding Conventions
+
+- Rust edition 2021; minimum supported version 1.88.0 (toolchain pinned to 1.91.1)
+- Keep changes minimal and focused
+- Use existing types and JSON field names in `types.rs` for cross-language compatibility
+- Never log sensitive material; locked buffers scrub on free
+- Async AWS SDK calls are behind an internal `tokio::runtime::Runtime` to present a sync API
 
 ## Testing Guidelines
-- memcall‑rs: validate allocate/lock/protect/unlock/free cycles and flags.
-- memguard‑rs: buffer guards (canary), freeze/melt/destroy, enclave open/close, streaming.
-- appencryption: JSON shape tests, session roundtrips, region suffix precedence, cache behavior, and metastore contract tests.
-- DB/AWS integration tests are opt‑in via feature flags and environment variables; tests will skip when config is absent.
 
-## Security & Configuration Tips
-- Treat all secret buffers as sensitive; rely on embedded `memguard` to lock/protect/wipe.
-- Consider disabling core dumps at process start; embedded `memguard` attempts to do so on init.
+- `memcall` / `memguard` modules: validate allocate/lock/protect/unlock/free cycles, buffer guards, canaries, enclave open/close
+- Core: JSON shape tests, session roundtrips, region suffix precedence, cache behavior, metastore contract tests
+- DB/AWS integration tests are opt-in via feature flags and environment variables; tests skip when config is absent
+- All CI dry-run jobs must match publish workflow configuration exactly
+
+## Security Notes
+
+- All secret buffers use embedded memguard to lock/protect/wipe
+- memguard attempts to disable core dumps on init
+- Static master keys are for testing only — production must use AWS KMS
 
 ## PR Guidelines
-- Concise, imperative commit messages.
-- Describe scope, rationale, and any behavioral changes.
-- Ensure `cargo test` (with relevant features) passes.
+
+- Concise, imperative commit messages
+- Describe scope, rationale, and any behavioral changes
+- Run `scripts/test.sh --lint` and `scripts/test.sh --unit` before pushing
+- CI must pass before merge — no exceptions
