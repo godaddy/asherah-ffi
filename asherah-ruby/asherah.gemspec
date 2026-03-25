@@ -21,10 +21,14 @@ Gem::Specification.new do |spec|
   # Without it, the fallback "ruby" platform gem is built (requires ASHERAH_RUBY_NATIVE at runtime).
   gem_platform = ENV["ASHERAH_GEM_PLATFORM"]
   if gem_platform
+    # Platform-specific gem: ships the precompiled native library directly.
     spec.platform = Gem::Platform.new(gem_platform)
     spec.files = Dir["lib/**/*.rb", "lib/asherah/native/libasherah_ffi.*", "lib/asherah/native/asherah_ffi.*", "LICENSE", "README.md"]
   else
-    spec.files = Dir["lib/**/*.rb", "LICENSE", "README.md"]
+    # Fallback gem: no binary bundled. Downloads the native library at install
+    # time from GitHub Releases via ext/asherah/extconf.rb.
+    spec.files = Dir["lib/**/*.rb", "ext/**/*.rb", "ext/**/*.c", "LICENSE", "README.md"]
+    spec.extensions = ["ext/asherah/extconf.rb"]
   end
 
   spec.require_paths = ["lib"]

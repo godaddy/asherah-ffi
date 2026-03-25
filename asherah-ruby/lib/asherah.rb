@@ -14,10 +14,7 @@ module Asherah
   @sessions = {}
   @initialized = false
   @session_cache_enabled = true
-  @log_hook = nil
   @verbose = false
-  @max_stack_alloc_item_size = nil
-  @safety_padding_overhead = nil
 
   class << self
     # Configure Asherah using a block with snake_case accessors.
@@ -168,32 +165,6 @@ module Asherah
         block&.call(result)
         result
       end
-    end
-
-    def set_max_stack_alloc_item_size(bytes)
-      @mutex.synchronize do
-        @max_stack_alloc_item_size = Integer(bytes)
-      end
-      nil
-    end
-
-    def set_safety_padding_overhead(bytes)
-      @mutex.synchronize do
-        @safety_padding_overhead = Integer(bytes)
-      end
-      nil
-    rescue ArgumentError, TypeError
-      @safety_padding_overhead = nil
-      nil
-    end
-
-    def set_log_hook(&block)
-      raise ArgumentError, "log hook block required" unless block
-
-      @mutex.synchronize do
-        @log_hook = block
-      end
-      nil
     end
 
     private
