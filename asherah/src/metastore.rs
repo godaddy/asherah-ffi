@@ -1,3 +1,5 @@
+use async_trait::async_trait;
+
 use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
 use std::sync::Arc;
@@ -40,6 +42,7 @@ impl Default for InMemoryMetastore {
     }
 }
 
+#[async_trait]
 impl Metastore for InMemoryMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         let key: Arc<str> = Arc::from(id);

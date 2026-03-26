@@ -1,3 +1,5 @@
+use async_trait::async_trait;
+
 use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
 use anyhow::Context;
@@ -150,6 +152,7 @@ impl MySqlMetastore {
     }
 }
 
+#[async_trait]
 impl Metastore for MySqlMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         log::debug!("mysql load: id={id} created={created}");

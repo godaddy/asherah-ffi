@@ -1,3 +1,5 @@
+use async_trait::async_trait;
+
 use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
 use anyhow::Context;
@@ -33,6 +35,7 @@ impl SqliteMetastore {
 }
 
 #[cfg(feature = "sqlite")]
+#[async_trait]
 impl Metastore for SqliteMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         log::debug!("sqlite load: id={id} created={created}");
