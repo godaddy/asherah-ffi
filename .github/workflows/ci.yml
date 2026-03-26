@@ -28,13 +28,9 @@ jobs:
           restore-keys: |
             lint-${{ runner.os }}-
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           components: rustfmt, clippy
-      - name: Ensure pinned toolchain components
-        run: |
-          TOOLCHAIN=$(rustup show active-toolchain | cut -d' ' -f1)
-          rustup component add --toolchain "$TOOLCHAIN" rustfmt clippy
       - name: Install protoc
         run: sudo apt-get install -y protobuf-compiler
       - name: Lint
@@ -59,7 +55,7 @@ jobs:
           restore-keys: |
             rust-tests-${{ runner.os }}-
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
       - uses: taiki-e/install-action@0d865d5cc6d507df4765f1f866bfae8bab4e2a73 # v2
         with:
           tool: sccache@0.8.1
@@ -82,7 +78,7 @@ jobs:
           restore-keys: |
             integration-${{ runner.os }}-
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
       - name: Verify Docker availability
         run: docker version
       - name: Integration tests
@@ -602,7 +598,7 @@ jobs:
           restore-keys: |
             interop-${{ runner.os }}-
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
       - uses: taiki-e/install-action@0d865d5cc6d507df4765f1f866bfae8bab4e2a73 # v2
         with:
           tool: sccache@0.8.1
@@ -695,7 +691,7 @@ jobs:
           restore-keys: |
             sanitizers-${{ runner.os }}-
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
+        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
       - name: Install dependencies
         run: |
           echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/80-retries
