@@ -465,4 +465,52 @@ function testFactorySessionApi() {
 main();
 testCompatApi();
 testFactorySessionApi();
-testNullConfigAsync().catch(err => { console.error('FAIL:', err); process.exit(1); });
+
+// Async tests — these run on the event loop / tokio runtime and must not
+// panic with "Cannot start a runtime from within a runtime"
+Promise.resolve()
+  .then(() => testNullConfigAsync())
+  .then(() => testAsyncFromAsyncContext())
+  .catch(err => { console.error('FAIL:', err); process.exit(1); });
+
+// Test that setupAsync/shutdownAsync/encryptAsync/decryptAsync work when
+// called from an async context (the real-world usage pattern that caused
+// "Cannot start a runtime from within a runtime" panic)
+async function testAsyncFromAsyncContext() {
+  // setupAsync from async context
+  await addon.setupAsync({
+    serviceName: 'async-ctx-svc',
+    productId: 'async-ctx-prod',
+    metastore: 'memory',
+    kms: 'static',
+    enableSessionCaching: false,
+  });
+
+  // encryptAsync from async context
+  const drr = await addon.encryptStringAsync('async-ctx', 'async-context-payload');
+  assert.ok(typeof drr === 'string' && drr.includes('"Key"'));
+
+  // decryptAsync from async context
+  const recovered = await addon.decryptStringAsync('async-ctx', drr);
+  assert.strictEqual(recovered, 'async-context-payload');
+
+  // shutdownAsync from async context
+  await addon.shutdownAsync();
+
+  console.log('asherah-node async-from-async-context OK');
+
+  // Second cycle: setupAsync → encrypt → decrypt → shutdownAsync
+  // (tests that setup/shutdown cycle works from async)
+  await addon.setupAsync({
+    ServiceName: 'async-cycle',
+    ProductID: 'async-prod',
+    Metastore: 'memory',
+    KMS: 'static',
+  });
+  const drr2 = await addon.encryptAsync('cycle', Buffer.from('async-cycle-test'));
+  const buf = await addon.decryptAsync('cycle', drr2);
+  assert.strictEqual(buf.toString(), 'async-cycle-test');
+  await addon.shutdownAsync();
+
+  console.log('asherah-node async setup/shutdown cycle OK');
+}

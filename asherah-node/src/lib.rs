@@ -141,8 +141,12 @@ pub fn setup(config: AsherahConfig) -> Result<()> {
 
 #[napi]
 pub async fn setup_async(config: AsherahConfig) -> Result<()> {
-    // For simplicity, do the same work async (config env and create)
-    setup(config)
+    // Run setup on a blocking thread to avoid "Cannot start a runtime from
+    // within a runtime" panic when AWS KMS init tries block_on from napi's
+    // tokio runtime.
+    tokio::task::spawn_blocking(move || setup(config))
+        .await
+        .map_err(|e| Error::from_reason(format!("setup task failed: {e}")))?
 }
 
 #[napi]
@@ -163,7 +167,9 @@ pub fn shutdown() -> Result<()> {
 
 #[napi]
 pub async fn shutdown_async() -> Result<()> {
-    shutdown()
+    tokio::task::spawn_blocking(shutdown)
+        .await
+        .map_err(|e| Error::from_reason(format!("shutdown task failed: {e}")))?
 }
 
 fn with_session<R>(partition_id: &str, fcall: impl FnOnce(&Session) -> Result<R>) -> Result<R> {
