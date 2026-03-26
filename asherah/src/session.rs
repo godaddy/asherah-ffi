@@ -494,7 +494,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             shared_sk_cache: shared_sk,
             shared_ik_cache: shared,
             session_cache: sess_cache,
-            metrics_enabled: true,
+            metrics_enabled: false,
         }
     }
 
@@ -758,7 +758,11 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
 
     pub fn encrypt(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
         self.ensure_valid_partition()?;
-        let start = std::time::Instant::now();
+        let start = if self.metrics_enabled {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         log::debug!(
             "PublicSession::encrypt: loading IK id={}",
             self.cached_ik_id
@@ -805,7 +809,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             }),
             data: enc_data,
         };
-        if self.metrics_enabled {
+        if let Some(start) = start {
             metrics::record_encrypt(start);
         }
         Ok(result)
@@ -813,7 +817,11 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
 
     pub fn decrypt(&self, drr: crate::types::DataRowRecord) -> anyhow::Result<Vec<u8>> {
         self.ensure_valid_partition()?;
-        let start = std::time::Instant::now();
+        let start = if self.metrics_enabled {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let key = drr
             .key
             .ok_or_else(|| anyhow::anyhow!("decrypt: DRR missing key envelope"))?;
@@ -859,7 +867,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         let pt = crate::aead::decrypt_with_lsk(&drr.data, &drk_lsk)
             .context("decrypt: failed to decrypt data with DRK")?;
         drk.fill(0);
-        if self.metrics_enabled {
+        if let Some(start) = start {
             metrics::record_decrypt(start);
         }
         Ok(pt)

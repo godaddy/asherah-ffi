@@ -25,7 +25,7 @@ impl Default for Timers {
 
 pub static ENCRYPT_TIMER: Timers = Timers::new();
 pub static DECRYPT_TIMER: Timers = Timers::new();
-static ENABLED: AtomicBool = AtomicBool::new(true);
+static ENABLED: AtomicBool = AtomicBool::new(false);
 
 pub trait MetricsSink: Send + Sync + 'static {
     fn encrypt(&self, _dur: std::time::Duration) {}
@@ -58,6 +58,7 @@ pub fn set_enabled(enabled: bool) {
     ENABLED.store(enabled, Ordering::Relaxed);
 }
 
+#[inline(always)]
 fn is_enabled() -> bool {
     ENABLED.load(Ordering::Relaxed)
 }
@@ -68,6 +69,7 @@ fn with_sink<R>(f: impl FnOnce(&dyn MetricsSink) -> R) -> R {
     }
 }
 
+#[inline(always)]
 pub fn record_encrypt(start: std::time::Instant) {
     if !is_enabled() {
         return;
@@ -79,6 +81,7 @@ pub fn record_encrypt(start: std::time::Instant) {
         .fetch_add(d.as_nanos() as u64, Ordering::Relaxed);
     with_sink(|sink| sink.encrypt(d));
 }
+#[inline(always)]
 pub fn record_decrypt(start: std::time::Instant) {
     if !is_enabled() {
         return;
@@ -91,6 +94,7 @@ pub fn record_decrypt(start: std::time::Instant) {
     with_sink(|sink| sink.decrypt(d));
 }
 
+#[inline(always)]
 pub fn record_store(start: std::time::Instant) {
     if !is_enabled() {
         return;
@@ -98,6 +102,7 @@ pub fn record_store(start: std::time::Instant) {
     let d = start.elapsed();
     with_sink(|sink| sink.store(d));
 }
+#[inline(always)]
 pub fn record_load(start: std::time::Instant) {
     if !is_enabled() {
         return;
@@ -105,18 +110,21 @@ pub fn record_load(start: std::time::Instant) {
     let d = start.elapsed();
     with_sink(|sink| sink.load(d));
 }
+#[inline(always)]
 pub fn record_cache_hit(name: &str) {
     if !is_enabled() {
         return;
     }
     with_sink(|sink| sink.cache_hit(name));
 }
+#[inline(always)]
 pub fn record_cache_miss(name: &str) {
     if !is_enabled() {
         return;
     }
     with_sink(|sink| sink.cache_miss(name));
 }
+#[inline(always)]
 pub fn record_cache_stale(name: &str) {
     if !is_enabled() {
         return;
