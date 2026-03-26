@@ -43,11 +43,13 @@ thread_local! {
 }
 
 /// Use the thread-local fast CSPRNG.
+#[inline(always)]
 pub fn fast_rng<R>(f: impl FnOnce(&mut ChaCha20Rng) -> R) -> R {
     FAST_RNG.with(|cell| f(&mut cell.borrow_mut()))
 }
 
 /// Fill a buffer with random bytes using the thread-local CSPRNG.
+#[inline(always)]
 pub fn fast_random_bytes(buf: &mut [u8]) {
     fast_rng(|rng| rng.fill_bytes(buf));
 }
@@ -89,6 +91,7 @@ impl AeadTrait for AES256GCM {
 }
 
 /// Encrypt using a pre-expanded LessSafeKey (skips key schedule).
+#[inline(always)]
 pub fn encrypt_with_lsk(data: &[u8], key: &LessSafeKey) -> Result<Vec<u8>, anyhow::Error> {
     let mut nonce = [0_u8; GCM_NONCE_SIZE];
     fast_random_bytes(&mut nonce);
@@ -103,6 +106,7 @@ pub fn encrypt_with_lsk(data: &[u8], key: &LessSafeKey) -> Result<Vec<u8>, anyho
 }
 
 /// Decrypt using a pre-expanded LessSafeKey (skips key schedule).
+#[inline(always)]
 pub fn decrypt_with_lsk(data: &[u8], key: &LessSafeKey) -> Result<Vec<u8>, anyhow::Error> {
     if data.len() < GCM_NONCE_SIZE + AES256GCM::TAG_SIZE {
         return Err(anyhow::anyhow!("ciphertext too short"));
@@ -130,6 +134,7 @@ pub fn decrypt_with_lsk(data: &[u8], key: &LessSafeKey) -> Result<Vec<u8>, anyho
 }
 
 /// Make a LessSafeKey from raw 32-byte key material.
+#[inline(always)]
 pub fn make_lsk(key: &[u8]) -> Result<LessSafeKey, anyhow::Error> {
     let unbound = UnboundKey::new(&AES_256_GCM, key)
         .map_err(|_| anyhow::anyhow!("invalid AES-256-GCM key"))?;

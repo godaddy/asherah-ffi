@@ -418,6 +418,7 @@ impl<
     }
 }
 
+#[inline(always)]
 pub(crate) fn now_s() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -623,6 +624,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         }
     }
 
+    #[inline(always)]
     fn ensure_valid_partition(&self) -> anyhow::Result<()> {
         if self.invalid_partition {
             return Err(anyhow::anyhow!("partition id cannot be empty"));
