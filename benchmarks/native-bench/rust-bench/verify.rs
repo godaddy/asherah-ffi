@@ -32,8 +32,8 @@ fn main() -> anyhow::Result<()> {
     // 1. Verify every encrypt produces DIFFERENT ciphertext (nonce is random)
     let drr1 = session.encrypt(payload)?;
     let drr2 = session.encrypt(payload)?;
-    let json1 = serde_json::to_string(&drr1).expect("serialization");
-    let json2 = serde_json::to_string(&drr2).expect("serialization");
+    let json1 = drr1.to_json_fast();
+    let json2 = drr2.to_json_fast();
     assert_ne!(json1, json2, "Two encrypts should produce different ciphertext");
     println!("PASS: Each encrypt produces unique ciphertext");
     println!("  drr1: {}...  ({} bytes)", &json1[..80], json1.len());
@@ -47,7 +47,7 @@ fn main() -> anyhow::Result<()> {
 
     // 3. Verify the DRR has real structure (Key + Data fields with base64)
     let drr = session.encrypt(payload)?;
-    let json = serde_json::to_string(&drr).expect("serialization");
+    let json = drr.to_json_fast();
     assert!(json.contains("\"Key\":{"), "DRR must contain Key object");
     assert!(json.contains("\"Data\":\""), "DRR must contain Data field");
     println!("PASS: DRR JSON has real Key and Data fields");

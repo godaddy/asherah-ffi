@@ -76,6 +76,7 @@ dependencies = [
  "aws-sdk-kms",
  "base64 0.22.1",
  "blake2",
+ "itoa",
  "libc",
  "log",
  "mysql 27.0.0",

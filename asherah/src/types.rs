@@ -39,12 +39,6 @@ pub struct EnvelopeKeyRecord {
     pub parent_key_meta: Option<KeyMeta>,
 }
 
-// Hand-written JSON parsers (to_json_fast / from_json_fast) were removed after
-// end-to-end benchmarking showed no measurable improvement over serde_json.
-// Serde's SIMD-optimized tokenizer matches or beats hand-written parsers at all
-// payload sizes, and is strictly faster for large payloads (100MB+).
-// See CLAUDE.md "Performance Notes" for full details.
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DataRowRecord {
     #[serde(rename = "Key")]
@@ -80,6 +74,79 @@ pub(crate) mod serde_base64 {
         base64::engine::general_purpose::STANDARD
             .decode(s.as_bytes())
             .map_err(Error::custom)
+    }
+}
+
+impl DataRowRecord {
+    /// Hand-written JSON serializer — avoids serde overhead and intermediate allocations.
+    #[inline]
+    pub fn to_json_fast(&self) -> String {
+        use base64::Engine;
+        let b64 = &base64::engine::general_purpose::STANDARD;
+
+        let data_b64_len = self.data.len().div_ceil(3) * 4;
+        let mut cap = 10 + data_b64_len;
+        if let Some(ref ekr) = self.key {
+            let key_b64_len = ekr.encrypted_key.len().div_ceil(3) * 4;
+            cap += 30 + key_b64_len;
+            if ekr.revoked.is_some() {
+                cap += 20;
+            }
+            if let Some(ref pm) = ekr.parent_key_meta {
+                cap += 40 + pm.id.len();
+            }
+        }
+
+        let mut out = String::with_capacity(cap);
+        out.push('{');
+
+        if let Some(ref ekr) = self.key {
+            out.push_str("\"Key\":{");
+            if let Some(rev) = ekr.revoked {
+                out.push_str("\"Revoked\":");
+                out.push_str(if rev { "true" } else { "false" });
+                out.push(',');
+            }
+            out.push_str("\"Created\":");
+            out.push_str(itoa::Buffer::new().format(ekr.created));
+            out.push_str(",\"Key\":\"");
+            b64.encode_string(&ekr.encrypted_key, &mut out);
+            out.push('"');
+            if let Some(ref pm) = ekr.parent_key_meta {
+                out.push_str(",\"ParentKeyMeta\":{\"KeyId\":\"");
+                json_escape_into(&pm.id, &mut out);
+                out.push_str("\",\"Created\":");
+                out.push_str(itoa::Buffer::new().format(pm.created));
+                out.push('}');
+            }
+            out.push('}');
+        } else {
+            out.push_str("\"Key\":null");
+        }
+        out.push(',');
+
+        out.push_str("\"Data\":\"");
+        b64.encode_string(&self.data, &mut out);
+        out.push_str("\"}");
+
+        out
+    }
+}
+
+/// Escape a string for JSON output (handles the minimal set: \ " and control chars).
+fn json_escape_into(s: &str, out: &mut String) {
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c < '\x20' => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
     }
 }
 

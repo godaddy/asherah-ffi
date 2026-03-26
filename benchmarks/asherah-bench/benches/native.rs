@@ -181,7 +181,7 @@ fn bench_decrypt_from_json(c: &mut Criterion) {
         let mut data = vec![0u8; size];
         rng.fill_bytes(&mut data);
         let drr = session.encrypt(&data).expect("encrypt for decrypt setup");
-        let json = serde_json::to_string(&drr).expect("DRR serialization");
+        let json = drr.to_json_fast();
 
         let drr_parsed: asherah::types::DataRowRecord =
             serde_json::from_str(&json).expect("verify json parse");
