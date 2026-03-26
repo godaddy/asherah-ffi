@@ -5,32 +5,31 @@ require_relative "session"
 
 module Asherah
   class SessionFactory
-    def initialize(pointer = nil)
-      ptr = pointer || Native.asherah_factory_new_from_env
-      raise Asherah::Error::BadConfig, Native.last_error if ptr.null?
-      @pointer = ptr
-      @closed = false
+    def initialize(pointer)
+      raise Asherah::Error::BadConfig, Native.last_error if pointer.null?
+      @pointer = pointer
+      @close_mu = Mutex.new
     end
 
     def get_session(partition_id)
-      raise Asherah::Error::NotInitialized, "factory closed" if @closed
+      raise Asherah::Error::NotInitialized, "factory closed" if @pointer.null?
       id = String(partition_id)
       raise ArgumentError, "partition_id cannot be empty" if id.empty?
       Session.new(Native.asherah_factory_get_session(@pointer, id))
     end
 
     def close
-      return if @closed
-      begin
-        Native.asherah_factory_free(@pointer)
-      ensure
+      ptr = @close_mu.synchronize do
+        return if @pointer.null?
+        p = @pointer
         @pointer = FFI::Pointer::NULL
-        @closed = true
+        p
       end
+      Native.asherah_factory_free(ptr)
     end
 
     def closed?
-      @closed
+      @pointer.null?
     end
   end
 end
