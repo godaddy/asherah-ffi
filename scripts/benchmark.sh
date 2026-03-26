@@ -799,6 +799,80 @@ print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(10
 "
 }
 
+run_node_bench_async() {
+    local pkg=$1 flavor=$2
+    node -e "
+const { Bench } = require('tinybench');
+const asherah = require('$pkg');
+const mode = (process.env.BENCH_MODE || 'memory').toLowerCase();
+const mysqlUrl = process.env.BENCH_MYSQL_URL || process.env.MYSQL_URL || '';
+const partitionPoolSize = Number.parseInt(process.env.BENCH_PARTITION_POOL || '2048', 10);
+const warmSessionCacheMax = Number.parseInt(process.env.BENCH_WARM_SESSION_CACHE_MAX || '4096', 10);
+const isFfi = '$flavor' === 'ffi';
+const serviceName = isFfi ? 'bench-async-svc' : 'bench-async-canon-svc';
+const productId = isFfi ? 'bench-async-prod' : 'bench-async-canon-prod';
+const partitionPrefix = isFfi ? 'bench-async' : 'bench-async-canon';
+const config = isFfi
+  ? { serviceName, productId, kms: 'static', enableSessionCaching: true }
+  : { ServiceName: serviceName, ProductID: productId, KMS: 'static', EnableSessionCaching: true };
+if (mode !== 'memory') {
+  if (!mysqlUrl) throw new Error(mode + ' mode requires BENCH_MYSQL_URL/MYSQL_URL');
+  if (isFfi) {
+    config.metastore = 'rdbms';
+    config.connectionString = mysqlUrl;
+    if (mode === 'warm') config.sessionCacheMaxSize = warmSessionCacheMax;
+    if (mode === 'cold') config.enableSessionCaching = false;
+  } else {
+    config.Metastore = 'rdbms';
+    config.ConnectionString = mysqlUrl;
+    if (mode === 'warm') config.SessionCacheMaxSize = warmSessionCacheMax;
+    if (mode === 'cold') config.EnableSessionCaching = false;
+  }
+} else {
+  if (isFfi) config.metastore = 'memory';
+  else config.Metastore = 'memory';
+}
+asherah.setup(config);
+async function run() {
+  for (const size of [64, 1024, 8192]) {
+    const payload = Buffer.alloc(size, 0x41);
+    const bench = new Bench({ warmupIterations: 1000, iterations: 5000 });
+    if (mode === 'memory' || mode === 'hot') {
+      const partition = partitionPrefix + '-partition';
+      const ct = asherah.encrypt(partition, payload);
+      const pt = asherah.decrypt(partition, ct);
+      if (!payload.equals(pt)) throw new Error('verify failed ' + size);
+      bench.add('encrypt ' + size, async () => { await asherah.encryptAsync(partition, payload); });
+      bench.add('decrypt ' + size, async () => { await asherah.decryptAsync(partition, ct); });
+    } else {
+      const partitions = Array.from({ length: partitionPoolSize }, (_, i) => partitionPrefix + '-' + mode + '-' + size + '-' + i);
+      const ciphertexts = partitions.map((partition) => asherah.encrypt(partition, payload));
+      const pt = asherah.decrypt(partitions[0], ciphertexts[0]);
+      if (!payload.equals(pt)) throw new Error('verify failed ' + size);
+      let encIdx = 0;
+      let decIdx = 0;
+      bench.add('encrypt ' + size, async () => {
+        const idx = encIdx % partitions.length;
+        encIdx += 1;
+        await asherah.encryptAsync(partitions[idx], payload);
+      });
+      bench.add('decrypt ' + size, async () => {
+        const idx = decIdx % partitions.length;
+        decIdx += 1;
+        await asherah.decryptAsync(partitions[idx], ciphertexts[idx]);
+      });
+    }
+    await bench.run();
+    for (const t of bench.tasks) {
+      console.log(t.name + ' ' + Math.round(t.result.latency.mean * 1e6));
+    }
+  }
+  asherah.shutdown();
+}
+run();
+"
+}
+
 if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/asherah-node-bench/node_modules/tinybench" ]; then
     # Ensure release addon is built (interop tests may have built debug)
     if [ -f "$ROOT_DIR/asherah-node/package.json" ] && command -v npx >/dev/null 2>&1; then
@@ -806,12 +880,20 @@ if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/asherah-node-bench/node_modules/tiny
         (cd "$ROOT_DIR/asherah-node" && npx @napi-rs/cli build --release 2>&1 | tail -1) || true
     fi
     reset_mysql
-    log "Running Node.js FFI benchmark (tinybench)..."
+    log "Running Node.js FFI benchmark (tinybench, sync)..."
     if (cd "$BENCH_DIR/asherah-node-bench" && run_node_bench "asherah-node" "ffi") \
         > "$RESULTS_DIR/node_ffi.log" 2>&1; then
-        parse_node_bench "$RESULTS_DIR/node_ffi.log" > "$RESULTS_DIR/07_Node.js_FFI"
+        parse_node_bench "$RESULTS_DIR/node_ffi.log" > "$RESULTS_DIR/07_Node.js_FFI_(sync)"
     else
-        skip "Node.js FFI benchmark failed (see log): $(tail -5 "$RESULTS_DIR/node_ffi.log" 2>/dev/null)"
+        skip "Node.js FFI sync benchmark failed (see log): $(tail -5 "$RESULTS_DIR/node_ffi.log" 2>/dev/null)"
+    fi
+    reset_mysql
+    log "Running Node.js FFI benchmark (tinybench, async)..."
+    if (cd "$BENCH_DIR/asherah-node-bench" && run_node_bench_async "asherah-node" "ffi") \
+        > "$RESULTS_DIR/node_ffi_async.log" 2>&1; then
+        parse_node_bench "$RESULTS_DIR/node_ffi_async.log" > "$RESULTS_DIR/08_Node.js_FFI_(async)"
+    else
+        skip "Node.js FFI async benchmark failed (see log): $(tail -5 "$RESULTS_DIR/node_ffi_async.log" 2>/dev/null)"
     fi
 else
     skip "Node.js FFI not available (run: cd benchmarks/asherah-node-bench && npm install tinybench)"
