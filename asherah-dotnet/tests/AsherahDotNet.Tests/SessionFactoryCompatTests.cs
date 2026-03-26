@@ -6,6 +6,7 @@ using GoDaddy.Asherah.AppEncryption;
 using GoDaddy.Asherah.AppEncryption.Crypto;
 using GoDaddy.Asherah.AppEncryption.Kms;
 using GoDaddy.Asherah.AppEncryption.Persistence;
+using LanguageExt;
 using Newtonsoft.Json.Linq;
 using Xunit;
 
@@ -149,7 +150,7 @@ public class SessionFactoryCompatTests : IDisposable
 
         var storage = new ConcurrentDictionary<string, byte[]>();
         var persistence = new AdhocPersistence<byte[]>(
-            key => storage.TryGetValue(key, out var v) ? Option<byte[]>.Some(v) : Option<byte[]>.Empty,
+            key => storage.TryGetValue(key, out var v) ? Option<byte[]>.Some(v) : Option<byte[]>.None,
             (key, value) => storage[key] = value);
 
         using var session = _factory.GetSessionBytes("persist-test");
@@ -160,8 +161,8 @@ public class SessionFactoryCompatTests : IDisposable
         Assert.True(storage.ContainsKey(key));
 
         var loaded = session.Load(key, persistence);
-        Assert.True(loaded.HasValue);
-        Assert.Equal(payload, loaded.Value);
+        Assert.True(loaded.IsSome);
+        loaded.IfSome(v => Assert.Equal(payload, v));
     }
 
     [Fact]

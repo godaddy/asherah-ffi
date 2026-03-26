@@ -6,7 +6,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
 
     <!-- NuGet package metadata -->
-    <PackageId>AsherahDotNet</PackageId>
+    <PackageId>GoDaddy.Asherah.AppEncryption</PackageId>
     <Version>0.1.0</Version>
     <Authors>GoDaddy</Authors>
     <Description>Asherah application-layer encryption for .NET, powered by the native Rust implementation.</Description>
@@ -14,10 +14,6 @@
     <RepositoryUrl>https://github.com/godaddy/asherah-ffi</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-  </ItemGroup>
 
   <!-- Include native libraries for all supported platforms.
        These are placed by the publish-nuget workflow before dotnet pack. -->

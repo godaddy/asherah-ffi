@@ -1,3 +1,4 @@
+using LanguageExt;
 using Newtonsoft.Json.Linq;
 
 namespace GoDaddy.Asherah.AppEncryption.Persistence;
