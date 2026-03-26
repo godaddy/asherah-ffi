@@ -43,6 +43,7 @@ artifacts/
 # Language-specific
 **/bin/
 !asherah/src/bin/
+!asherah-ruby/bin/
 **/obj/
 **/*.py[cod]
 **/*.pyo
