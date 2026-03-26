@@ -1,0 +1,89 @@
+AllCops:
+  TargetRubyVersion: 3.0
+  NewCops: enable
+  SuggestExtensions: false
+  Exclude:
+    - 'vendor/**/*'
+    - 'tmp/**/*'
+    - 'pkg/**/*'
+
+Layout/LineLength:
+  Max: 120
+
+Metrics/BlockLength:
+  Max: 25
+  Exclude:
+    - 'test/**/*'
+    - '*.gemspec'
+
+Metrics/MethodLength:
+  Max: 20
+  Exclude:
+    - 'test/**/*'
+
+Metrics/AbcSize:
+  Max: 20
+  Exclude:
+    - 'test/**/*'
+
+Metrics/CyclomaticComplexity:
+  Max: 10
+  Exclude:
+    - 'test/**/*'
+
+Metrics/PerceivedComplexity:
+  Max: 10
+  Exclude:
+    - 'test/**/*'
+
+Metrics/ClassLength:
+  Max: 150
+  Exclude:
+    - 'test/**/*'
+
+Metrics/ModuleLength:
+  Max: 150
+  Exclude:
+    - 'test/**/*'
+
+Style/FrozenStringLiteralComment:
+  Enabled: true
+
+Style/Documentation:
+  Enabled: false
+
+Style/WordArray:
+  MinSize: 3
+  EnforcedStyle: brackets
+
+Style/SymbolArray:
+  MinSize: 3
+  EnforcedStyle: brackets
+
+Style/TrailingCommaInArguments:
+  EnforcedStyleForMultiline: comma
+
+Style/TrailingCommaInArrayLiteral:
+  EnforcedStyleForMultiline: comma
+
+Style/TrailingCommaInHashLiteral:
+  EnforcedStyleForMultiline: comma
+
+Style/GuardClause:
+  MinBodyLength: 3
+
+Naming/AccessorMethodName:
+  Exclude:
+    - 'lib/asherah.rb'
+
+Lint/UnusedMethodArgument:
+  Enabled: true
+
+Lint/UnusedBlockArgument:
+  Enabled: true
+
+Security/Eval:
+  Enabled: true
+
+Security/JSONLoad:
+  Enabled: true

@@ -65,9 +65,10 @@ jobs:
         run: |
           if [ -n "$INPUT_VERSION" ]; then
             VERSION="$INPUT_VERSION"
+          elif [ -n "${{ vars.RUBYGEMS_VERSION }}" ]; then
+            VERSION="${{ vars.RUBYGEMS_VERSION }}"
           else
-            # Always derive from the latest release tag, not head_branch
-            # (head_branch can be "main" when release-cobhan is triggered via workflow_dispatch)
+            # Fallback: derive from latest release tag
             TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
             VERSION="${TAG#v}"
           fi
@@ -122,6 +123,20 @@ jobs:
               echo "WARNING: Failed to push $gem (may already exist)"
             }
           done
+
+      - name: Update version variable
+        if: ${{ github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }}
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          if [ -n "${{ vars.RUBYGEMS_VERSION }}" ]; then
+            MAJOR=$(echo "$VERSION" | cut -d. -f1)
+            MINOR=$(echo "$VERSION" | cut -d. -f2)
+            PATCH=$(echo "$VERSION" | cut -d. -f3)
+            NEXT_PATCH=$(( PATCH + 1 ))
+            gh variable set RUBYGEMS_VERSION --body "${MAJOR}.${MINOR}.${NEXT_PATCH}"
+            echo "Set RUBYGEMS_VERSION to ${MAJOR}.${MINOR}.${NEXT_PATCH}"
+          fi
 
       - name: Dry run summary
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}

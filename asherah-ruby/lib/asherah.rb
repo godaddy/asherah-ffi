@@ -2,6 +2,7 @@
 
 require "json"
 
+require_relative "asherah/version"
 require_relative "asherah/error"
 require_relative "asherah/config"
 require_relative "asherah/native"
@@ -93,7 +94,8 @@ module Asherah
       Array(sessions).each do |session|
         begin
           session.close unless session.closed?
-        rescue StandardError
+        rescue StandardError => e
+          warn "asherah: error closing session during shutdown: #{e.message}"
         end
       end
       factory&.close unless factory&.closed?
