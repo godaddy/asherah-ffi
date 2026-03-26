@@ -164,11 +164,9 @@ impl Metastore for MySqlMetastore {
         Self::return_conn(conn);
         if let Some((json_str,)) = row {
             log::debug!("mysql load hit: id={id} created={created}");
-            let ekr = serde_json::from_str(&json_str)
-                .map_err(anyhow::Error::from)
-                .with_context(|| {
-                    format!("MySQL load: failed to parse key_record JSON for id={id}")
-                })?;
+            let ekr = EnvelopeKeyRecord::from_json_fast(&json_str).with_context(|| {
+                format!("MySQL load: failed to parse key_record JSON for id={id}")
+            })?;
             Ok(Some(ekr))
         } else {
             log::debug!("mysql load miss: id={id} created={created}");
@@ -188,11 +186,9 @@ impl Metastore for MySqlMetastore {
         Self::return_conn(conn);
         if let Some((json_str,)) = row {
             log::debug!("mysql load_latest hit: id={id}");
-            let ekr = serde_json::from_str(&json_str)
-                .map_err(anyhow::Error::from)
-                .with_context(|| {
-                    format!("MySQL load_latest: failed to parse key_record JSON for id={id}")
-                })?;
+            let ekr = EnvelopeKeyRecord::from_json_fast(&json_str).with_context(|| {
+                format!("MySQL load_latest: failed to parse key_record JSON for id={id}")
+            })?;
             Ok(Some(ekr))
         } else {
             log::debug!("mysql load_latest miss: id={id}");
@@ -207,7 +203,7 @@ impl Metastore for MySqlMetastore {
         ekr: &EnvelopeKeyRecord,
     ) -> Result<bool, anyhow::Error> {
         log::debug!("mysql store: id={id} created={created}");
-        let rec = serde_json::to_string(ekr)?;
+        let rec = ekr.to_json_fast();
         let mut conn = self.conn()?;
         let ts = epoch_to_utc_datetime(created);
         conn.exec_drop(
