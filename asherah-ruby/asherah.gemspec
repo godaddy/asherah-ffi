@@ -15,6 +15,7 @@ Gem::Specification.new do |spec|
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = spec.homepage
   spec.metadata["github_repo"] = "ssh://github.com/godaddy/asherah-ffi"
+  spec.metadata["rubygems_mfa_required"] = "true"
 
   # Platform-specific gems include the precompiled native library.
   # Set ASHERAH_GEM_PLATFORM to build a platform gem (e.g. x86_64-linux, arm64-darwin).

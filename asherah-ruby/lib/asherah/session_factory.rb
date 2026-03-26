@@ -5,10 +5,9 @@ require_relative "session"
 
 module Asherah
   class SessionFactory
-    def initialize(pointer = nil)
-      ptr = pointer || Native.asherah_factory_new_from_env
-      raise Asherah::Error::BadConfig, Native.last_error if ptr.null?
-      @pointer = ptr
+    def initialize(pointer)
+      raise Asherah::Error::BadConfig, Native.last_error if pointer.null?
+      @pointer = pointer
       @closed = false
     end
 
@@ -21,12 +20,9 @@ module Asherah
 
     def close
       return if @closed
-      begin
-        Native.asherah_factory_free(@pointer)
-      ensure
-        @pointer = FFI::Pointer::NULL
-        @closed = true
-      end
+      Native.asherah_factory_free(@pointer)
+      @pointer = FFI::Pointer::NULL
+      @closed = true
     end
 
     def closed?
