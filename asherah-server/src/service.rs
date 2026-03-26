@@ -67,7 +67,7 @@ impl AppEncryption for AppEncryptionService {
                     }
                 };
 
-                let response = process_request(&factory, &mut session, req);
+                let response = process_request(&factory, &mut session, req).await;
                 if tx.send(Ok(response)).await.is_err() {
                     break;
                 }
@@ -84,7 +84,7 @@ impl AppEncryption for AppEncryptionService {
     }
 }
 
-fn process_request(
+async fn process_request(
     factory: &Factory,
     session: &mut Option<Session>,
     req: proto::SessionRequest,
@@ -102,7 +102,7 @@ fn process_request(
             let Some(s) = session.as_ref() else {
                 return error_response("session not yet initialized");
             };
-            match s.encrypt(&enc.data) {
+            match s.encrypt_async(&enc.data).await {
                 Ok(drr) => proto::SessionResponse {
                     response: Some(proto::session_response::Response::EncryptResponse(
                         proto::EncryptResponse {
@@ -120,7 +120,7 @@ fn process_request(
             match dec.data_row_record {
                 Some(proto_drr) => {
                     let drr = proto_to_drr(proto_drr);
-                    match s.decrypt(drr) {
+                    match s.decrypt_async(drr).await {
                         Ok(data) => proto::SessionResponse {
                             response: Some(proto::session_response::Response::DecryptResponse(
                                 proto::DecryptResponse { data },
