@@ -7,7 +7,7 @@
 
     <!-- NuGet package metadata -->
     <PackageId>GoDaddy.Asherah.AppEncryption</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.50.0</Version>
     <Authors>GoDaddy</Authors>
     <Description>Asherah application-layer encryption for .NET, powered by the native Rust implementation.</Description>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>

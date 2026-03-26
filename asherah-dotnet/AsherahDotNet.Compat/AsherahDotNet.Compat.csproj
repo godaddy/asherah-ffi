@@ -6,7 +6,7 @@
 
     <!-- NuGet package metadata -->
     <PackageId>GoDaddy.Asherah.AppEncryption.Compat</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.50.0</Version>
     <Authors>GoDaddy</Authors>
     <Description>Drop-in compatibility layer for migrating from the canonical godaddy/asherah C# SDK to the Rust-backed implementation. Provides SessionFactory builder, Session&lt;TP,TD&gt; generics, Persistence&lt;T&gt;, LanguageExt.Option&lt;T&gt; shim, and Newtonsoft.Json JObject support.</Description>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
