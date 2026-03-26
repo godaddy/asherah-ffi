@@ -220,11 +220,11 @@ impl Metastore for PostgresMetastore {
         log::debug!("postgres load: id={id} created={created}");
         let mut c = self.client()?;
         let created_f = created as f64;
-        let rows = c.query(
+        let row = c.query_opt(
             "SELECT key_record::text FROM encryption_key WHERE id=$1 AND created=to_timestamp($2)",
             &[&id, &created_f],
         ).with_context(|| format!("Postgres load query failed for id={id} created={created}"))?;
-        match rows.into_iter().next() {
+        match row {
             Some(row) => {
                 let txt: String = row.get(0);
                 log::debug!("postgres load hit: id={id} created={created}");
@@ -242,11 +242,11 @@ impl Metastore for PostgresMetastore {
     fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         log::debug!("postgres load_latest: id={id}");
         let mut c = self.client()?;
-        let rows = c.query(
+        let row = c.query_opt(
             "SELECT key_record::text FROM encryption_key WHERE id=$1 ORDER BY created DESC LIMIT 1",
             &[&id],
         ).with_context(|| format!("Postgres load_latest query failed for id={id}"))?;
-        match rows.into_iter().next() {
+        match row {
             Some(row) => {
                 let txt: String = row.get(0);
                 log::debug!("postgres load_latest hit: id={id}");
