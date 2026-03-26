@@ -84,10 +84,12 @@ impl Metastore for DynamoDbMetastore {
                     .send()
                     .await
             })
-            .context(format!(
-                "DynamoDB GetItem failed for table={} id={id} created={created}",
-                self.table
-            ))?;
+            .with_context(|| {
+                format!(
+                    "DynamoDB GetItem failed for table={} id={id} created={created}",
+                    self.table
+                )
+            })?;
         if let Some(item) = out.item() {
             if let Some(kr) = item.get("KeyRecord") {
                 if let Ok(m) = kr.as_m() {
@@ -158,10 +160,7 @@ impl Metastore for DynamoDbMetastore {
                     .send()
                     .await
             })
-            .context(format!(
-                "DynamoDB Query failed for table={} id={id}",
-                self.table
-            ))?;
+            .with_context(|| format!("DynamoDB Query failed for table={} id={id}", self.table))?;
         let items = out.items();
         if let Some(item) = items.first() {
             if let Some(kr) = item.get("KeyRecord").and_then(|v| v.as_m().ok()) {

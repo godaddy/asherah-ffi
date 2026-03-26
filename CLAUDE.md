@@ -133,6 +133,42 @@ That's the point — they can't drift.
 - `docker/tests.Dockerfile` must use the same Debian version as build containers
   (currently bookworm) or binaries will fail with glibc version mismatch
 
+## Performance Notes
+
+### Benchmarking requirements
+- **Apple Silicon**: Set System Settings → Energy → High Performance mode. Without
+  this, the scheduler may run benchmarks on E-cores (40% slower) giving misleading
+  results. All earlier benchmarking conclusions were tainted by variable power states.
+- **ALL Rust optimizations MUST be verified with
+  `scripts/benchmark.sh --rust-only --memory`** before and after the change.
+  Run at least 2x and compare. If numbers don't improve, revert.
+- For metastore/DB changes, also run `scripts/benchmark.sh --rust-only --warm`.
+- Do not rely on microbenchmarks alone — they can show 20%+ improvements that
+  disappear or regress in end-to-end benchmarks due to code layout effects.
+
+### Verified optimizations (keep these)
+- `#[inline(always)]` on AEAD hot-path functions: ~6% encrypt improvement
+- Metrics disabled by default + `Instant::now()` gated: ~6% encrypt, ~10% decrypt
+- `DataRowRecord::to_json_fast`: ~2% faster than serde at 64B for FFI encrypt path
+- `EnvelopeKeyRecord::to_json_fast` / `from_json_fast`: used in metastore paths
+  (MySQL/Postgres load/store), 19-24% faster than serde in microbenchmarks —
+  awaiting --warm re-validation
+
+### Confirmed regressions (do NOT re-attempt)
+- Lazy `.with_context(|| format!(...))` in session.rs: +5% encrypt regression.
+  The closure setup across 10 call sites perturbs inlining. Keep eager `.context()`.
+- Adding fields to `SessionFactory` struct: causes massive regression (~40%) due
+  to cache line / struct layout changes. Use global atomics instead.
+- `#[inline]` on `PublicSession::encrypt/decrypt`: these are too large to inline;
+  bloats the caller's instruction cache.
+
+### Untested (need --warm with DB containers)
+- Postgres `$3::jsonb` text cast (eliminates double serialization)
+- Postgres `query_opt` (avoids Vec<Row> allocation)
+- Lazy `.with_context()` in metastore files
+- Stack-allocated epoch formatting for MySQL
+- Cobhan zero-copy borrows (Go/Ruby FFI only)
+
 ## Coding Conventions
 
 - Rust edition 2021; minimum supported version 1.88.0 (toolchain pinned to 1.91.1)

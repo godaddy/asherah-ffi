@@ -187,7 +187,7 @@ fn metrics_disabled_does_not_call_sink() {
 
     // Restore global state.
     metrics::clear_sink();
-    metrics::set_enabled(true);
+    metrics::set_enabled(false); // default is disabled
 }
 
 // ---------------------------------------------------------------------------
@@ -393,7 +393,7 @@ fn make_test_factory() -> asherah::SessionFactory<
     );
     let metastore = Arc::new(asherah::metastore::InMemoryMetastore::new());
     let cfg = asherah::Config::new("obs_test_svc", "obs_test_prod");
-    asherah::api::new_session_factory(cfg, metastore, kms, crypto)
+    asherah::api::new_session_factory(cfg, metastore, kms, crypto).with_metrics(true)
 }
 
 // ---------------------------------------------------------------------------

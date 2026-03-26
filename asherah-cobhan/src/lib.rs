@@ -249,7 +249,31 @@ unsafe fn cobhan_buffer_to_bytes(buf: *const c_char) -> Result<Vec<u8>, i32> {
     Ok(slice.to_vec())
 }
 
-/// Reads a UTF-8 string from a cobhan buffer.
+/// Borrows bytes from a cobhan buffer without copying.
+#[inline(always)]
+unsafe fn cobhan_buffer_borrow<'a>(buf: *const c_char) -> Result<&'a [u8], i32> {
+    if buf.is_null() {
+        return Err(ERR_NULL_PTR);
+    }
+    let len = cobhan_buffer_get_length(buf);
+    if len < 0 {
+        return Err(ERR_BUFFER_TOO_SMALL);
+    }
+    if len == 0 {
+        return Ok(&[]);
+    }
+    let data_ptr = cobhan_buffer_get_data_ptr(buf);
+    Ok(std::slice::from_raw_parts(data_ptr, len as usize))
+}
+
+/// Borrows a UTF-8 string from a cobhan buffer without copying.
+#[inline(always)]
+unsafe fn cobhan_buffer_borrow_str<'a>(buf: *const c_char) -> Result<&'a str, i32> {
+    let bytes = cobhan_buffer_borrow(buf)?;
+    std::str::from_utf8(bytes).map_err(|_| ERR_JSON_DECODE_FAILED)
+}
+
+/// Reads a UTF-8 string from a cobhan buffer (copies).
 unsafe fn cobhan_buffer_to_string(buf: *const c_char) -> Result<String, i32> {
     let bytes = cobhan_buffer_to_bytes(buf)?;
     String::from_utf8(bytes).map_err(|_| ERR_JSON_DECODE_FAILED)
@@ -529,19 +553,19 @@ pub unsafe extern "C" fn Encrypt(
     };
 
     // Read inputs
-    let partition_id = match cobhan_buffer_to_string(partition_id_ptr) {
+    let partition_id = match cobhan_buffer_borrow_str(partition_id_ptr) {
         Ok(s) => s,
         Err(e) => return e,
     };
 
-    let data = match cobhan_buffer_to_bytes(data_ptr) {
+    let data = match cobhan_buffer_borrow(data_ptr) {
         Ok(d) => d,
         Err(e) => return e,
     };
 
     // Get session and encrypt
-    let session = factory.get_session(&partition_id);
-    let drr = match session.encrypt(&data) {
+    let session = factory.get_session(partition_id);
+    let drr = match session.encrypt(data) {
         Ok(d) => d,
         Err(e) => {
             log::error!("Encrypt failed: {e:#}");
@@ -646,7 +670,7 @@ pub unsafe extern "C" fn Decrypt(
     };
 
     // Read inputs - raw bytes, no base64 (matching Go cobhan.BufferToBytes)
-    let partition_id = match cobhan_buffer_to_string(partition_id_ptr) {
+    let partition_id = match cobhan_buffer_borrow_str(partition_id_ptr) {
         Ok(s) => s,
         Err(e) => return e,
     };
@@ -685,7 +709,7 @@ pub unsafe extern "C" fn Decrypt(
     };
 
     // Get session and decrypt
-    let session = factory.get_session(&partition_id);
+    let session = factory.get_session(partition_id);
     let plaintext = match session.decrypt(drr) {
         Ok(p) => p,
         Err(e) => {
@@ -734,19 +758,19 @@ pub unsafe extern "C" fn EncryptToJson(
     };
 
     // Read inputs
-    let partition_id = match cobhan_buffer_to_string(partition_id_ptr) {
+    let partition_id = match cobhan_buffer_borrow_str(partition_id_ptr) {
         Ok(s) => s,
         Err(e) => return e,
     };
 
-    let data = match cobhan_buffer_to_bytes(data_ptr) {
+    let data = match cobhan_buffer_borrow(data_ptr) {
         Ok(d) => d,
         Err(e) => return e,
     };
 
     // Get session and encrypt
-    let session = factory.get_session(&partition_id);
-    let drr = match session.encrypt(&data) {
+    let session = factory.get_session(partition_id);
+    let drr = match session.encrypt(data) {
         Ok(d) => d,
         Err(e) => {
             log::error!("EncryptToJson failed: {e:#}");
@@ -754,8 +778,9 @@ pub unsafe extern "C" fn EncryptToJson(
         }
     };
 
-    // Serialize to JSON and write to output buffer
-    cobhan_json_to_buffer(&drr, json_ptr)
+    // Serialize using hand-written serializer (avoids serde overhead)
+    let json = drr.to_json_fast();
+    cobhan_bytes_to_buffer(json.as_bytes(), json_ptr)
 }
 
 /// Decrypts data from a JSON DataRowRecord.
@@ -794,18 +819,22 @@ pub unsafe extern "C" fn DecryptFromJson(
     };
 
     // Read inputs
-    let partition_id = match cobhan_buffer_to_string(partition_id_ptr) {
+    let partition_id = match cobhan_buffer_borrow_str(partition_id_ptr) {
         Ok(s) => s,
         Err(e) => return e,
     };
 
-    let drr: DataRowRecord = match cobhan_buffer_to_json(json_ptr) {
-        Ok(d) => d,
+    let json_bytes = match cobhan_buffer_borrow(json_ptr) {
+        Ok(b) => b,
         Err(e) => return e,
+    };
+    let drr: DataRowRecord = match serde_json::from_slice(json_bytes) {
+        Ok(d) => d,
+        Err(_) => return ERR_JSON_DECODE_FAILED,
     };
 
     // Get session and decrypt
-    let session = factory.get_session(&partition_id);
+    let session = factory.get_session(partition_id);
     let plaintext = match session.decrypt(drr) {
         Ok(p) => p,
         Err(e) => {
