@@ -112,8 +112,110 @@ function main() {
   addon.set_safety_padding_overhead(256);
   console.log('asherah-node compat stubs OK');
 
+  // --- Null/minimal config tests ---
+  testNullConfig();
+
   // --- FFI boundary tests ---
   testFfiBoundary();
+}
+
+function testNullConfig() {
+  // Minimal camelCase config — only required fields, everything else undefined
+  addon.setup({
+    serviceName: 'minimal-svc',
+    productId: 'minimal-prod',
+    metastore: 'memory',
+  });
+  const drr = addon.encryptString('p1', 'minimal-config');
+  assert.strictEqual(addon.decryptString('p1', drr), 'minimal-config');
+  addon.shutdown();
+  console.log('asherah-node minimal camelCase config OK');
+
+  // Minimal PascalCase config — only required fields
+  addon.setup({
+    ServiceName: 'minimal-pascal',
+    ProductID: 'minimal-prod',
+    Metastore: 'memory',
+    KMS: 'static',
+  });
+  const drr2 = addon.encryptString('p1', 'pascal-minimal');
+  assert.strictEqual(addon.decryptString('p1', drr2), 'pascal-minimal');
+  addon.shutdown();
+  console.log('asherah-node minimal PascalCase config OK');
+
+  // Config with explicit null values for all optional fields
+  addon.setup({
+    serviceName: 'null-svc',
+    productId: 'null-prod',
+    metastore: 'memory',
+    kms: null,
+    expireAfter: null,
+    checkInterval: null,
+    connectionString: null,
+    dynamoDbEndpoint: null,
+    dynamoDbRegion: null,
+    dynamoDbSigningRegion: null,
+    dynamoDbTableName: null,
+    sessionCacheMaxSize: null,
+    sessionCacheDuration: null,
+    regionMap: null,
+    preferredRegion: null,
+    enableRegionSuffix: null,
+    enableSessionCaching: null,
+    replicaReadConsistency: null,
+    verbose: null,
+    sqlMetastoreDbType: null,
+    disableZeroCopy: null,
+    nullDataCheck: null,
+    enableCanaries: null,
+  });
+  const drr3 = addon.encryptString('p1', 'null-config');
+  assert.strictEqual(addon.decryptString('p1', drr3), 'null-config');
+  addon.shutdown();
+  console.log('asherah-node explicit null config OK');
+
+  // PascalCase config with explicit null values
+  addon.setup({
+    ServiceName: 'null-pascal',
+    ProductID: 'null-prod',
+    Metastore: 'memory',
+    KMS: null,
+    ExpireAfter: null,
+    CheckInterval: null,
+    ConnectionString: null,
+    DynamoDBEndpoint: null,
+    DynamoDBRegion: null,
+    DynamoDBTableName: null,
+    SessionCacheMaxSize: null,
+    SessionCacheDuration: null,
+    RegionMap: null,
+    PreferredRegion: null,
+    EnableRegionSuffix: null,
+    EnableSessionCaching: null,
+    ReplicaReadConsistency: null,
+    Verbose: null,
+  });
+  const drr4 = addon.encryptString('p1', 'null-pascal');
+  assert.strictEqual(addon.decryptString('p1', drr4), 'null-pascal');
+  addon.shutdown();
+  console.log('asherah-node PascalCase null config OK');
+
+}
+
+async function testNullConfigAsync() {
+  // Async setup with null values
+  await addon.setupAsync({
+    serviceName: 'async-null',
+    productId: 'async-prod',
+    metastore: 'memory',
+    expireAfter: null,
+    sessionCacheDuration: null,
+    enableSessionCaching: null,
+  });
+  const drr = addon.encryptString('p1', 'async-null');
+  assert.strictEqual(addon.decryptString('p1', drr), 'async-null');
+  addon.shutdown();
+  console.log('asherah-node async null config OK');
 }
 
 function testFfiBoundary() {
@@ -363,3 +465,4 @@ function testFactorySessionApi() {
 main();
 testCompatApi();
 testFactorySessionApi();
+testNullConfigAsync().catch(err => { console.error('FAIL:', err); process.exit(1); });
