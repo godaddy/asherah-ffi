@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
 
 use crate::traits::Metastore;
@@ -325,6 +326,7 @@ pub fn config_from_env() -> crate::Config {
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
 pub struct DynKms(pub Arc<dyn crate::traits::KeyManagementService>);
+#[async_trait]
 impl crate::traits::KeyManagementService for DynKms {
     fn encrypt_key(&self, ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
         self.0.encrypt_key(ctx, key_bytes)
@@ -332,11 +334,22 @@ impl crate::traits::KeyManagementService for DynKms {
     fn decrypt_key(&self, ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
         self.0.decrypt_key(ctx, blob)
     }
+    async fn encrypt_key_async(
+        &self,
+        ctx: &(),
+        key_bytes: &[u8],
+    ) -> Result<Vec<u8>, anyhow::Error> {
+        self.0.encrypt_key_async(ctx, key_bytes).await
+    }
+    async fn decrypt_key_async(&self, ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+        self.0.decrypt_key_async(ctx, blob).await
+    }
 }
 
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
 pub struct DynMetastore(pub Arc<dyn Metastore>);
+#[async_trait]
 impl Metastore for DynMetastore {
     fn load(
         &self,
@@ -361,6 +374,27 @@ impl Metastore for DynMetastore {
     }
     fn region_suffix(&self) -> Option<String> {
         self.0.region_suffix()
+    }
+    async fn load_async(
+        &self,
+        id: &str,
+        created: i64,
+    ) -> Result<Option<crate::types::EnvelopeKeyRecord>, anyhow::Error> {
+        self.0.load_async(id, created).await
+    }
+    async fn load_latest_async(
+        &self,
+        id: &str,
+    ) -> Result<Option<crate::types::EnvelopeKeyRecord>, anyhow::Error> {
+        self.0.load_latest_async(id).await
+    }
+    async fn store_async(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &crate::types::EnvelopeKeyRecord,
+    ) -> Result<bool, anyhow::Error> {
+        self.0.store_async(id, created, ekr).await
     }
 }
 

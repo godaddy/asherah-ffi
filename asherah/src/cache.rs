@@ -57,6 +57,20 @@ struct CacheEntry {
 // Use Arc<str> keys to avoid String clones on cache lookups.
 type CacheKey = (Arc<str>, i64);
 
+/// Result of a cache check (no loader call).
+#[derive(Debug)]
+pub enum CacheCheck {
+    /// Fresh hit — use this key directly.
+    Hit(Arc<CryptoKey>),
+    /// Stale entry and we claimed the reload — caller should reload and insert.
+    /// Contains the stale key as fallback if reload fails.
+    StaleReload(Arc<CryptoKey>),
+    /// Stale entry but another thread is reloading — use this stale key.
+    StaleOther(Arc<CryptoKey>),
+    /// Cache miss — caller must load from metastore and insert.
+    Miss,
+}
+
 pub trait KeyCacher: Send + Sync {
     fn get_or_load_latest(
         &self,
@@ -71,6 +85,20 @@ pub trait KeyCacher: Send + Sync {
     fn close(&self) -> anyhow::Result<()> {
         Ok(())
     }
+
+    /// Check the cache without calling a loader.
+    fn check_latest(&self, id: &str) -> CacheCheck {
+        // Default for NeverCache: always miss
+        let _ = id;
+        CacheCheck::Miss
+    }
+    fn check_meta(&self, meta: &KeyMeta) -> CacheCheck {
+        let _ = meta;
+        CacheCheck::Miss
+    }
+    /// Insert a key into the cache after an async load.
+    fn insert_latest_key(&self, _id: &str, _key: Arc<CryptoKey>) {}
+    fn insert_meta_key(&self, _meta: &KeyMeta, _key: Arc<CryptoKey>) {}
 }
 
 #[derive(Debug)]
@@ -542,5 +570,62 @@ impl KeyCacher for SimpleKeyCache {
         let v = loader()?;
         self.insert_meta(meta, v.clone());
         Ok(v)
+    }
+
+    fn check_latest(&self, id: &str) -> CacheCheck {
+        if let Some((v, expired, invalid)) = self.get_latest_if_fresh(id) {
+            if !expired && !invalid {
+                if crate::metrics::is_enabled() {
+                    crate::metrics::record_cache_hit("latest");
+                }
+                return CacheCheck::Hit(v);
+            }
+            if expired && !invalid {
+                if self.try_claim_reload_latest(id) {
+                    if crate::metrics::is_enabled() {
+                        crate::metrics::record_cache_stale("latest");
+                    }
+                    return CacheCheck::StaleReload(v);
+                }
+                if crate::metrics::is_enabled() {
+                    crate::metrics::record_cache_stale("latest");
+                }
+                return CacheCheck::StaleOther(v);
+            }
+            // invalid — fall through to Miss
+        }
+        if crate::metrics::is_enabled() {
+            crate::metrics::record_cache_miss("latest");
+        }
+        CacheCheck::Miss
+    }
+
+    fn check_meta(&self, meta: &KeyMeta) -> CacheCheck {
+        if let Some((v, expired)) = self.get_meta_if_fresh(meta) {
+            if !expired {
+                if crate::metrics::is_enabled() {
+                    crate::metrics::record_cache_hit("meta");
+                }
+                return CacheCheck::Hit(v);
+            }
+            // Stale-while-revalidate for meta: just bump loaded_at, no reload needed
+            let _ = self.try_claim_reload_meta(meta);
+            if crate::metrics::is_enabled() {
+                crate::metrics::record_cache_stale("meta");
+            }
+            return CacheCheck::Hit(v); // Always return stale value for meta (decrypt path)
+        }
+        if crate::metrics::is_enabled() {
+            crate::metrics::record_cache_miss("meta");
+        }
+        CacheCheck::Miss
+    }
+
+    fn insert_latest_key(&self, id: &str, key: Arc<CryptoKey>) {
+        self.insert_latest(id, key);
+    }
+
+    fn insert_meta_key(&self, meta: &KeyMeta, key: Arc<CryptoKey>) {
+        self.insert_meta(meta, key);
     }
 }

@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
+
 use crate::traits::KeyManagementService;
 
 // A composite KMS that routes Encrypt to a preferred region KMS and Decrypt tries all KMSs until success.
@@ -30,6 +32,7 @@ impl MultiKms {
     }
 }
 
+#[async_trait]
 impl KeyManagementService for MultiKms {
     fn encrypt_key(&self, ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
         self.backends[self.preferred]
@@ -84,6 +87,7 @@ mod tests {
 
     #[derive(Clone)]
     struct DummyKms(&'static AtomicUsize, usize); // (counter, id)
+    #[async_trait]
     impl KeyManagementService for DummyKms {
         fn encrypt_key(&self, _ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
             self.0.fetch_add(1, Ordering::Relaxed);

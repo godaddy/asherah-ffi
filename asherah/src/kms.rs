@@ -1,3 +1,5 @@
+use async_trait::async_trait;
+
 use crate::traits::KeyManagementService;
 use crate::traits::AEAD;
 use std::sync::Arc;
@@ -21,6 +23,7 @@ impl<A: AEAD + Send + Sync + 'static> StaticKMS<A> {
     }
 }
 
+#[async_trait]
 impl<A: AEAD + Send + Sync + 'static> KeyManagementService for StaticKMS<A> {
     fn encrypt_key(&self, _ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
         self.aead.encrypt(key_bytes, &self.master_key).map_err(|e| {

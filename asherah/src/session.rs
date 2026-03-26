@@ -1,4 +1,4 @@
-use crate::cache::{CachePolicy, KeyCacher, NeverCache, SimpleKeyCache};
+use crate::cache::{CacheCheck, CachePolicy, KeyCacher, NeverCache, SimpleKeyCache};
 use crate::config::Config;
 use crate::internal::crypto_key::{generate_key, is_key_expired};
 use crate::internal::CryptoKey;
@@ -941,5 +941,280 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             .load_ctx(ctx, key)?
             .ok_or_else(|| anyhow::anyhow!("not found"))?;
         self.decrypt_ctx(ctx, drr)
+    }
+}
+
+// ── Async methods for PublicSession ──────────────────────────────────
+// These use async metastore/KMS methods and the cache check+insert pattern
+// so they never need spawn_blocking or block_on.
+#[allow(clippy::same_name_method, clippy::multiple_inherent_impl)]
+impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
+    PublicSession<A, K, M>
+{
+    async fn get_or_load_system_key_async(&self, meta: KeyMeta) -> anyhow::Result<Arc<CryptoKey>> {
+        if meta.created == 0 {
+            let id = self.inner.f.partition.system_key_id();
+            let mut loader_latest = || -> anyhow::Result<Arc<CryptoKey>> {
+                Ok(Arc::new(self.inner.load_latest_or_create_system_key()?))
+            };
+            // SK cache is always sync (system keys are rare, not worth async caching)
+            self.sk_cache.get_or_load_latest(&id, &mut loader_latest)
+        } else {
+            let mut loader = || -> anyhow::Result<Arc<CryptoKey>> {
+                Ok(Arc::new(self.inner.load_system_key(meta.clone())?))
+            };
+            self.sk_cache.get_or_load(&meta, &mut loader)
+        }
+    }
+
+    async fn load_intermediate_key_async(&self, meta: KeyMeta) -> anyhow::Result<Arc<CryptoKey>> {
+        log::debug!(
+            "load_intermediate_key_async: id={} created={}",
+            meta.id,
+            meta.created
+        );
+        let ekr = self
+            .metastore
+            .load_async(&meta.id, meta.created)
+            .await
+            .context(format!(
+                "failed to load intermediate key id={} created={}",
+                meta.id, meta.created
+            ))?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "intermediate key not found: id={} created={}",
+                    meta.id,
+                    meta.created
+                )
+            })?;
+        let sk_meta = ekr.parent_key_meta.clone().unwrap_or(KeyMeta {
+            id: self.inner.f.partition.system_key_id(),
+            created: 0,
+        });
+        let sk = self.get_or_load_system_key_async(sk_meta).await?;
+        let ik = self.inner.intermediate_key_from_ekr(&sk, &ekr)?;
+        Ok(Arc::new(ik))
+    }
+
+    async fn load_latest_or_create_intermediate_key_async(&self) -> anyhow::Result<Arc<CryptoKey>> {
+        if let Some(ekr) = self
+            .metastore
+            .load_latest_async(&self.inner.f.partition.intermediate_key_id())
+            .await?
+        {
+            if !self.inner.is_envelope_invalid(&ekr) {
+                let sk_meta = ekr.parent_key_meta.clone().unwrap_or(KeyMeta {
+                    id: self.inner.f.partition.system_key_id(),
+                    created: 0,
+                });
+                let sk = self.get_or_load_system_key_async(sk_meta).await?;
+                let ik = self.inner.intermediate_key_from_ekr(&sk, &ekr)?;
+                return Ok(Arc::new(ik));
+            }
+        }
+        self.create_intermediate_key_async().await
+    }
+
+    async fn create_intermediate_key_async(&self) -> anyhow::Result<Arc<CryptoKey>> {
+        let ik_id = self.inner.f.partition.intermediate_key_id();
+        log::debug!("create_intermediate_key_async: id={ik_id}");
+        let sk_meta = KeyMeta {
+            id: self.inner.f.partition.system_key_id(),
+            created: 0,
+        };
+        let sk = self
+            .get_or_load_system_key_async(sk_meta)
+            .await
+            .context("create_intermediate_key_async: failed to get/load system key")?;
+        let ik = generate_key(self.inner.new_key_timestamp())?;
+        let enc_ik = ik
+            .with_key_func(|ikb| sk.with_key_func(|skb| self.crypto.encrypt(ikb, skb)))
+            .context("create_intermediate_key_async: failed to encrypt IK under SK")??;
+        let ekr = EnvelopeKeyRecord {
+            id: ik_id.clone(),
+            created: ik.created(),
+            encrypted_key: enc_ik?,
+            revoked: None,
+            parent_key_meta: Some(KeyMeta {
+                id: self.inner.f.partition.system_key_id(),
+                created: sk.created(),
+            }),
+        };
+        let stored = self
+            .metastore
+            .store_async(&ekr.id, ekr.created, &ekr)
+            .await
+            .unwrap_or_else(|e| {
+                log::warn!("create_intermediate_key_async: store failed for id={ik_id}: {e:#}");
+                false
+            });
+        if stored {
+            return Ok(Arc::new(ik));
+        }
+        log::debug!(
+            "create_intermediate_key_async: store returned false, loading latest for id={ik_id}"
+        );
+        if let Some(latest) = self
+            .metastore
+            .load_latest_async(&ik_id)
+            .await
+            .context(format!(
+                "create_intermediate_key_async: fallback load_latest failed for id={ik_id}"
+            ))?
+        {
+            if !self.inner.is_envelope_invalid(&latest) {
+                let sk_meta = latest.parent_key_meta.clone().unwrap_or(KeyMeta {
+                    id: self.inner.f.partition.system_key_id(),
+                    created: 0,
+                });
+                let sk2 = self.get_or_load_system_key_async(sk_meta).await?;
+                let ik2 = self.inner.intermediate_key_from_ekr(&sk2, &latest)?;
+                return Ok(Arc::new(ik2));
+            }
+        }
+        Err(anyhow::anyhow!(
+            "failed to create or load intermediate key id={ik_id} after retry"
+        ))
+    }
+
+    /// Async encrypt — uses async metastore methods, no spawn_blocking needed.
+    pub async fn encrypt_async(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
+        self.ensure_valid_partition()?;
+        let start = if self.metrics_enabled {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
+        log::debug!(
+            "PublicSession::encrypt_async: loading IK id={}",
+            self.cached_ik_id
+        );
+        let ik = match self.ik_cache.check_latest(&self.cached_ik_id) {
+            CacheCheck::Hit(v) | CacheCheck::StaleOther(v) => v,
+            CacheCheck::StaleReload(stale) => {
+                match self.load_latest_or_create_intermediate_key_async().await {
+                    Ok(new) => {
+                        self.ik_cache
+                            .insert_latest_key(&self.cached_ik_id, new.clone());
+                        new
+                    }
+                    Err(_) => stale,
+                }
+            }
+            CacheCheck::Miss => {
+                let v = self
+                    .load_latest_or_create_intermediate_key_async()
+                    .await
+                    .context("encrypt_async: failed to get or create intermediate key")?;
+                self.ik_cache
+                    .insert_latest_key(&self.cached_ik_id, v.clone());
+                v
+            }
+        };
+        // DRK and encrypt — all CPU, no async needed
+        let created = now_s();
+        struct DrkGuard([u8; 32]);
+        impl Drop for DrkGuard {
+            fn drop(&mut self) {
+                self.0.fill(0);
+            }
+        }
+        let mut drk = DrkGuard([0_u8; 32]);
+        crate::aead::fast_random_bytes(&mut drk.0);
+        let drk_lsk =
+            crate::aead::make_lsk(&drk.0).context("encrypt_async: failed to create DRK key")?;
+        let enc_data = crate::aead::encrypt_with_lsk(data, &drk_lsk)
+            .context("encrypt_async: failed to encrypt data with DRK")?;
+        let enc_drk = if let Some(ik_lsk) = ik.less_safe_key() {
+            crate::aead::encrypt_with_lsk(&drk.0, ik_lsk)
+                .context("encrypt_async: failed to encrypt DRK with IK")?
+        } else {
+            ik.with_key_func(|ikb| self.crypto.encrypt(&drk.0, ikb))
+                .context("encrypt_async: failed to encrypt DRK with IK")??
+        };
+        drop(drk);
+        let result = crate::types::DataRowRecord {
+            key: Some(EnvelopeKeyRecord {
+                id: String::new(),
+                created,
+                encrypted_key: enc_drk,
+                revoked: None,
+                parent_key_meta: Some(KeyMeta {
+                    id: self.cached_ik_id.clone(),
+                    created: ik.created(),
+                }),
+            }),
+            data: enc_data,
+        };
+        if let Some(start) = start {
+            metrics::record_encrypt(start);
+        }
+        Ok(result)
+    }
+
+    /// Async decrypt — uses async metastore methods, no spawn_blocking needed.
+    pub async fn decrypt_async(&self, drr: crate::types::DataRowRecord) -> anyhow::Result<Vec<u8>> {
+        self.ensure_valid_partition()?;
+        let start = if self.metrics_enabled {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
+        let key = drr
+            .key
+            .ok_or_else(|| anyhow::anyhow!("decrypt_async: DRR missing key envelope"))?;
+        let pmeta = key
+            .parent_key_meta
+            .ok_or_else(|| anyhow::anyhow!("decrypt_async: DRR key missing parent_key_meta"))?;
+        let valid_ik = pmeta.id == self.cached_ik_id
+            || self
+                .cached_ik_prefix
+                .as_ref()
+                .is_some_and(|p| pmeta.id.starts_with(p));
+        if !valid_ik {
+            return Err(anyhow::anyhow!(
+                "decrypt_async: invalid IK id={} for partition",
+                pmeta.id
+            ));
+        }
+        log::debug!(
+            "PublicSession::decrypt_async: loading IK id={} created={}",
+            pmeta.id,
+            pmeta.created
+        );
+        let ik = match self.ik_cache.check_meta(&pmeta) {
+            CacheCheck::Hit(v) | CacheCheck::StaleOther(v) | CacheCheck::StaleReload(v) => v,
+            CacheCheck::Miss => {
+                let v = self
+                    .load_intermediate_key_async(pmeta.clone())
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "decrypt_async: failed to load IK id={} created={}",
+                            pmeta.id, pmeta.created
+                        )
+                    })?;
+                self.ik_cache.insert_meta_key(&pmeta, v.clone());
+                v
+            }
+        };
+        // Decrypt DRK under IK, then decrypt data — all CPU
+        let mut drk = if let Some(ik_lsk) = ik.less_safe_key() {
+            crate::aead::decrypt_with_lsk(&key.encrypted_key, ik_lsk)
+                .context("decrypt_async: failed to decrypt DRK with IK")?
+        } else {
+            ik.with_key_func(|ikb| self.crypto.decrypt(&key.encrypted_key, ikb))
+                .context("decrypt_async: failed to decrypt DRK with IK")??
+        };
+        let drk_lsk =
+            crate::aead::make_lsk(&drk).context("decrypt_async: failed to create DRK key")?;
+        let pt = crate::aead::decrypt_with_lsk(&drr.data, &drk_lsk)
+            .context("decrypt_async: failed to decrypt data with DRK")?;
+        drk.fill(0);
+        if let Some(start) = start {
+            metrics::record_decrypt(start);
+        }
+        Ok(pt)
     }
 }

@@ -99,7 +99,8 @@ fn metrics_sink_receives_events() {
     metrics::set_enabled(true);
     metrics::set_sink(SharedMetricsSink(Arc::clone(&sink)));
 
-    let start = Instant::now();
+    // Use a start time in the past to guarantee non-zero duration
+    let start = Instant::now() - Duration::from_micros(1);
     metrics::record_encrypt(start);
     metrics::record_cache_hit("factory");
     metrics::clear_sink();

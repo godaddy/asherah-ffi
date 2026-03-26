@@ -679,3 +679,77 @@ async fn test_same_plaintext_produces_different_ciphertexts() {
     drop(tx);
     drop(std::fs::remove_file(&sock));
 }
+
+// ============================================================
+// Async path stress tests
+// ============================================================
+
+/// 50 concurrent sessions each doing 10 encrypt/decrypt roundtrips.
+/// This exercises the async encrypt_async/decrypt_async path under
+/// heavy concurrency — verifies no tokio worker starvation.
+#[tokio::test]
+#[serial]
+async fn test_heavy_concurrent_async_roundtrips() {
+    let sock = socket_path();
+    let _server = start_server(&sock).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let mut handles = Vec::new();
+    for i in 0_u32..50 {
+        let sock = sock.clone();
+        handles.push(tokio::spawn(async move {
+            let mut client = connect(sock).await;
+            let (tx, mut resp) = open_session(&mut client).await;
+            do_get_session(&tx, &mut resp, &format!("heavy-async-{i}")).await;
+
+            for j in 0..10 {
+                let plaintext = format!("heavy-{i}-op-{j}");
+                let drr = do_encrypt(&tx, &mut resp, plaintext.as_bytes()).await;
+                let decrypted = do_decrypt(&tx, &mut resp, drr).await;
+                assert_eq!(decrypted, plaintext.as_bytes());
+            }
+
+            drop(tx);
+        }));
+    }
+
+    for h in handles {
+        h.await.unwrap();
+    }
+    drop(std::fs::remove_file(&sock));
+}
+
+/// Multiple sessions sharing partitions with interleaved operations.
+/// Verifies async encrypt/decrypt produces correct results when
+/// different sessions operate on overlapping partitions concurrently.
+#[tokio::test]
+#[serial]
+async fn test_concurrent_shared_partition_async() {
+    let sock = socket_path();
+    let _server = start_server(&sock).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let mut handles = Vec::new();
+    // 20 sessions all using 4 shared partitions
+    for i in 0_u32..20 {
+        let sock = sock.clone();
+        handles.push(tokio::spawn(async move {
+            let partition = format!("shared-{}", i % 4);
+            let mut client = connect(sock).await;
+            let (tx, mut resp) = open_session(&mut client).await;
+            do_get_session(&tx, &mut resp, &partition).await;
+
+            let plaintext = format!("shared-data-{i}");
+            let drr = do_encrypt(&tx, &mut resp, plaintext.as_bytes()).await;
+            let decrypted = do_decrypt(&tx, &mut resp, drr).await;
+            assert_eq!(decrypted, plaintext.as_bytes());
+
+            drop(tx);
+        }));
+    }
+
+    for h in handles {
+        h.await.unwrap();
+    }
+    drop(std::fs::remove_file(&sock));
+}

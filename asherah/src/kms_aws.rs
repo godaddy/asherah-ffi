@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_kms::{config::Region, primitives::Blob, Client};
 
@@ -58,82 +59,93 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
             rt,
         })
     }
-}
 
-impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKms<A> {
-    fn encrypt_key(&self, _ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+    fn block_on_maybe<F: std::future::Future>(&self, f: F) -> F::Output {
+        match &self.rt {
+            Some(rt) => {
+                if tokio::runtime::Handle::try_current().is_ok() {
+                    tokio::task::block_in_place(|| rt.block_on(f))
+                } else {
+                    rt.block_on(f)
+                }
+            }
+            None => match tokio::runtime::Handle::try_current() {
+                Ok(h) => tokio::task::block_in_place(|| h.block_on(f)),
+                Err(_) => tokio::runtime::Runtime::new()
+                    .expect("failed to create temporary tokio runtime")
+                    .block_on(f),
+            },
+        }
+    }
+
+    async fn encrypt_key_impl(&self, key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
         log::debug!("AwsKms encrypt_key: key_id={}", self.key_id);
-        let fut = async {
-            self.client
-                .encrypt()
-                .key_id(&self.key_id)
-                .plaintext(Blob::new(key_bytes.to_vec()))
-                .send()
-                .await
-        };
-        let resp = match &self.rt {
-            Some(rt) => rt.block_on(fut).map_err(|e| {
+        let resp = self
+            .client
+            .encrypt()
+            .key_id(&self.key_id)
+            .plaintext(Blob::new(key_bytes.to_vec()))
+            .send()
+            .await
+            .map_err(|e| {
                 log::error!(
                     "AwsKms encrypt_key failed: key_id={}, error={e:#}",
                     self.key_id
                 );
                 anyhow::anyhow!("KMS Encrypt call failed for key {}: {e}", self.key_id)
-            })?,
-            None => tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(fut)
-                    .map_err(|e| {
-                        log::error!(
-                            "AwsKms encrypt_key failed: key_id={}, error={e:#}",
-                            self.key_id
-                        );
-                        anyhow::anyhow!("KMS Encrypt call failed for key {}: {e}", self.key_id)
-                    })
-            })?,
-        };
+            })?;
         let ct = resp.ciphertext_blob().ok_or_else(|| {
             anyhow::anyhow!("KMS Encrypt returned no ciphertext for key {}", self.key_id)
         })?;
         Ok(ct.as_ref().to_vec())
     }
 
-    fn decrypt_key(&self, _ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+    async fn decrypt_key_impl(&self, blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
         log::debug!(
             "AwsKms decrypt_key: key_id={}, blob_len={}",
             self.key_id,
             blob.len()
         );
-        let fut = async {
-            self.client
-                .decrypt()
-                .key_id(&self.key_id)
-                .ciphertext_blob(Blob::new(blob.to_vec()))
-                .send()
-                .await
-        };
-        let resp = match &self.rt {
-            Some(rt) => rt.block_on(fut).map_err(|e| {
+        let resp = self
+            .client
+            .decrypt()
+            .key_id(&self.key_id)
+            .ciphertext_blob(Blob::new(blob.to_vec()))
+            .send()
+            .await
+            .map_err(|e| {
                 log::error!(
                     "AwsKms decrypt_key failed: key_id={}, error={e:#}",
                     self.key_id
                 );
                 anyhow::anyhow!("KMS Decrypt call failed for key {}: {e}", self.key_id)
-            })?,
-            None => tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(fut)
-                    .map_err(|e| {
-                        log::error!(
-                            "AwsKms decrypt_key failed: key_id={}, error={e:#}",
-                            self.key_id
-                        );
-                        anyhow::anyhow!("KMS Decrypt call failed for key {}: {e}", self.key_id)
-                    })
-            })?,
-        };
+            })?;
         let pt = resp.plaintext().ok_or_else(|| {
             anyhow::anyhow!("KMS Decrypt returned no plaintext for key {}", self.key_id)
         })?;
         Ok(pt.as_ref().to_vec())
+    }
+}
+
+#[async_trait]
+impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKms<A> {
+    fn encrypt_key(&self, _ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+        self.block_on_maybe(self.encrypt_key_impl(key_bytes))
+    }
+
+    fn decrypt_key(&self, _ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+        self.block_on_maybe(self.decrypt_key_impl(blob))
+    }
+
+    async fn encrypt_key_async(
+        &self,
+        _ctx: &(),
+        key_bytes: &[u8],
+    ) -> Result<Vec<u8>, anyhow::Error> {
+        self.encrypt_key_impl(key_bytes).await
+    }
+
+    async fn decrypt_key_async(&self, _ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+        self.decrypt_key_impl(blob).await
     }
 }
