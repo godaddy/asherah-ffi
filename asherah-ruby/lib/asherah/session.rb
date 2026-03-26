@@ -32,9 +32,10 @@ module Asherah
 
     def close
       return if @closed
-      Native.asherah_session_free(@pointer)
+      ptr = @pointer
       @pointer = FFI::Pointer::NULL
       @closed = true
+      Native.asherah_session_free(ptr)
     end
 
     def closed?
