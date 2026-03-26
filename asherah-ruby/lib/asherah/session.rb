@@ -8,6 +8,7 @@ module Asherah
       raise Asherah::Error::GetSessionFailed, Native.last_error if pointer.null?
       @pointer = pointer
       @closed = false
+      @mu = Mutex.new
     end
 
     def encrypt_bytes(data)
@@ -31,10 +32,13 @@ module Asherah
     end
 
     def close
-      return if @closed
-      ptr = @pointer
-      @pointer = FFI::Pointer::NULL
-      @closed = true
+      ptr = @mu.synchronize do
+        return if @closed
+        p = @pointer
+        @pointer = FFI::Pointer::NULL
+        @closed = true
+        p
+      end
       Native.asherah_session_free(ptr)
     end
 

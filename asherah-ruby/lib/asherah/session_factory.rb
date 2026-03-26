@@ -9,6 +9,7 @@ module Asherah
       raise Asherah::Error::BadConfig, Native.last_error if pointer.null?
       @pointer = pointer
       @closed = false
+      @mu = Mutex.new
     end
 
     def get_session(partition_id)
@@ -19,10 +20,13 @@ module Asherah
     end
 
     def close
-      return if @closed
-      ptr = @pointer
-      @pointer = FFI::Pointer::NULL
-      @closed = true
+      ptr = @mu.synchronize do
+        return if @closed
+        p = @pointer
+        @pointer = FFI::Pointer::NULL
+        @closed = true
+        p
+      end
       Native.asherah_factory_free(ptr)
     end
 
