@@ -139,21 +139,28 @@ const KMS_ALIASES = {
 };
 
 function normalizeConfig(config) {
-  // Detect PascalCase format by checking for ServiceName (capital S)
-  if (!config || typeof config !== 'object' || !('ServiceName' in config)) {
+  if (!config || typeof config !== 'object') {
     return config;
   }
 
+  // Detect PascalCase format by checking for ServiceName (capital S)
+  const isPascal = 'ServiceName' in config;
   const out = {};
   for (const [key, value] of Object.entries(config)) {
-    const mapped = CONFIG_MAP[key];
-    if (mapped === undefined) {
-      // Unknown field — pass through as-is (may be a camelCase field mixed in)
-      out[key] = value;
-    } else if (mapped !== null) {
-      out[mapped] = value;
+    if (isPascal) {
+      const mapped = CONFIG_MAP[key];
+      if (mapped === undefined) {
+        // Unknown field — pass through as-is (may be a camelCase field mixed in)
+        if (value != null) out[key] = value;
+      } else if (mapped !== null) {
+        if (value != null) out[mapped] = value;
+      }
+      // mapped === null means ignored (Go-specific)
+    } else {
+      // camelCase input — strip null/undefined values so napi-rs sees
+      // undefined (maps to Option::None) instead of null (type error)
+      if (value != null) out[key] = value;
     }
-    // mapped === null means ignored (Go-specific)
   }
 
   // Normalize metastore aliases
