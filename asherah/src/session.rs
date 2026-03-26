@@ -397,10 +397,16 @@ impl<
         payload: &[u8],
         storer: &T,
     ) -> anyhow::Result<serde_json::Value> {
-        let start = std::time::Instant::now();
+        let start = if metrics::is_enabled() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let drr = self.encrypt(payload)?;
         let res = storer.store(&drr);
-        metrics::record_store(start);
+        if let Some(start) = start {
+            metrics::record_store(start);
+        }
         res
     }
     pub fn load<T: crate::traits::Loader>(
@@ -408,16 +414,23 @@ impl<
         key: &serde_json::Value,
         loader: &T,
     ) -> anyhow::Result<Vec<u8>> {
-        let start = std::time::Instant::now();
+        let start = if metrics::is_enabled() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let drr = loader
             .load(key)?
             .ok_or_else(|| anyhow::anyhow!("not found"))?;
         let res = self.decrypt(drr);
-        metrics::record_load(start);
+        if let Some(start) = start {
+            metrics::record_load(start);
+        }
         res
     }
 }
 
+#[inline(always)]
 pub(crate) fn now_s() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     match SystemTime::now().duration_since(UNIX_EPOCH) {
@@ -493,7 +506,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             shared_sk_cache: shared_sk,
             shared_ik_cache: shared,
             session_cache: sess_cache,
-            metrics_enabled: true,
+            metrics_enabled: false,
         }
     }
 
@@ -623,6 +636,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         }
     }
 
+    #[inline(always)]
     fn ensure_valid_partition(&self) -> anyhow::Result<()> {
         if self.invalid_partition {
             return Err(anyhow::anyhow!("partition id cannot be empty"));
@@ -756,7 +770,11 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
 
     pub fn encrypt(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
         self.ensure_valid_partition()?;
-        let start = std::time::Instant::now();
+        let start = if self.metrics_enabled {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         log::debug!(
             "PublicSession::encrypt: loading IK id={}",
             self.cached_ik_id
@@ -803,7 +821,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             }),
             data: enc_data,
         };
-        if self.metrics_enabled {
+        if let Some(start) = start {
             metrics::record_encrypt(start);
         }
         Ok(result)
@@ -811,7 +829,11 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
 
     pub fn decrypt(&self, drr: crate::types::DataRowRecord) -> anyhow::Result<Vec<u8>> {
         self.ensure_valid_partition()?;
-        let start = std::time::Instant::now();
+        let start = if self.metrics_enabled {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let key = drr
             .key
             .ok_or_else(|| anyhow::anyhow!("decrypt: DRR missing key envelope"))?;
@@ -857,7 +879,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         let pt = crate::aead::decrypt_with_lsk(&drr.data, &drk_lsk)
             .context("decrypt: failed to decrypt data with DRK")?;
         drk.fill(0);
-        if self.metrics_enabled {
+        if let Some(start) = start {
             metrics::record_decrypt(start);
         }
         Ok(pt)

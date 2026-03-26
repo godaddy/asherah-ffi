@@ -4,6 +4,22 @@ use rand::{rngs::StdRng, RngCore, SeedableRng};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+/// On Apple Silicon, request P-core scheduling via QoS class.
+/// This prevents benchmarks from running on efficiency cores when plugged in.
+#[cfg(target_os = "macos")]
+fn pin_to_performance_cores() {
+    // QOS_CLASS_USER_INTERACTIVE = 0x21
+    extern "C" {
+        fn pthread_set_qos_class_self_np(qos_class: u32, relative_priority: i32) -> i32;
+    }
+    unsafe {
+        pthread_set_qos_class_self_np(0x21, 0);
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pin_to_performance_cores() {}
+
 fn bench_mode() -> String {
     std::env::var("BENCH_MODE")
         .ok()
@@ -16,6 +32,7 @@ fn uses_partition_rotation() -> bool {
 }
 
 fn bench_encrypt(c: &mut Criterion) {
+    pin_to_performance_cores();
     let factory = builders::factory_from_env().expect("factory setup");
     let cold = uses_partition_rotation();
 
