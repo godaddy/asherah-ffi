@@ -7,12 +7,11 @@ module Asherah
     def initialize(pointer)
       raise Asherah::Error::GetSessionFailed, Native.last_error if pointer.null?
       @pointer = pointer
-      @closed = false
-      @mu = Mutex.new
+      @close_mu = Mutex.new
     end
 
     def encrypt_bytes(data)
-      raise Asherah::Error::EncryptFailed, "session closed" if @closed
+      raise Asherah::Error::EncryptFailed, "session closed" if @pointer.null?
       buf = thread_local_buffer
       status = Native.asherah_encrypt_to_json(@pointer, data, data.bytesize, buf.pointer)
       raise Asherah::Error::EncryptFailed, Native.last_error unless status.zero?
@@ -22,7 +21,7 @@ module Asherah
     end
 
     def decrypt_bytes(json)
-      raise Asherah::Error::DecryptFailed, "session closed" if @closed
+      raise Asherah::Error::DecryptFailed, "session closed" if @pointer.null?
       buf = thread_local_buffer
       status = Native.asherah_decrypt_from_json(@pointer, json, json.bytesize, buf.pointer)
       raise Asherah::Error::DecryptFailed, Native.last_error unless status.zero?
@@ -32,18 +31,17 @@ module Asherah
     end
 
     def close
-      ptr = @mu.synchronize do
-        return if @closed
+      ptr = @close_mu.synchronize do
+        return if @pointer.null?
         p = @pointer
         @pointer = FFI::Pointer::NULL
-        @closed = true
         p
       end
       Native.asherah_session_free(ptr)
     end
 
     def closed?
-      @closed
+      @pointer.null?
     end
 
     private
