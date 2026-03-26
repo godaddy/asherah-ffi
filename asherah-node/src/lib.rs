@@ -141,12 +141,9 @@ pub fn setup(config: AsherahConfig) -> Result<()> {
 
 #[napi]
 pub async fn setup_async(config: AsherahConfig) -> Result<()> {
-    // Run setup on a blocking thread to avoid "Cannot start a runtime from
-    // within a runtime" panic when AWS KMS init tries block_on from napi's
-    // tokio runtime.
-    tokio::task::spawn_blocking(move || setup(config))
-        .await
-        .map_err(|e| Error::from_reason(format!("setup task failed: {e}")))?
+    // DynamoDB/KMS constructors use block_in_place internally when called from
+    // a tokio context, so this is safe to call directly without spawn_blocking.
+    setup(config)
 }
 
 #[napi]
@@ -167,9 +164,7 @@ pub fn shutdown() -> Result<()> {
 
 #[napi]
 pub async fn shutdown_async() -> Result<()> {
-    tokio::task::spawn_blocking(shutdown)
-        .await
-        .map_err(|e| Error::from_reason(format!("shutdown task failed: {e}")))?
+    shutdown()
 }
 
 fn with_session<R>(partition_id: &str, fcall: impl FnOnce(&Session) -> Result<R>) -> Result<R> {
@@ -214,6 +209,31 @@ fn with_session<R>(partition_id: &str, fcall: impl FnOnce(&Session) -> Result<R>
     }
     // Lock dropped — run crypto outside the lock
     fcall(&session_arc)
+}
+
+/// Get a session for async operations. Returns an owned Arc so the lock is dropped before await.
+fn get_session_arc(partition_id: &str) -> Result<(Arc<Session>, bool)> {
+    let mut guard = STATE.lock();
+    let state = guard
+        .as_mut()
+        .ok_or_else(|| Error::from_reason("asherah not configured; call setup() first"))?;
+
+    if state.session_caching {
+        let session = state
+            .sessions
+            .entry(partition_id.to_string())
+            .or_insert_with(|| Arc::new(state.factory.get_session(partition_id)))
+            .clone();
+        while state.sessions.len() > state.session_cache_max {
+            if let Some(key) = state.sessions.keys().next().cloned() {
+                state.sessions.remove(&key);
+            }
+        }
+        Ok((session, true))
+    } else {
+        let session = Arc::new(state.factory.get_session(partition_id));
+        Ok((session, false))
+    }
 }
 
 #[napi]
@@ -262,9 +282,15 @@ pub fn encrypt(partition_id: String, data: Buffer) -> Result<String> {
 
 #[napi]
 pub async fn encrypt_async(partition_id: String, data: Buffer) -> Result<String> {
-    tokio::task::spawn_blocking(move || encrypt(partition_id, data))
+    let (session, cached) = get_session_arc(&partition_id)?;
+    let drr = session
+        .encrypt_async(&data)
         .await
-        .map_err(|e| Error::from_reason(format!("join error: {e}")))?
+        .map_err(|e| Error::from_reason(format!("encrypt error: {e}")))?;
+    if !cached {
+        drop(session.close());
+    }
+    Ok(drr.to_json_fast())
 }
 
 #[napi]
@@ -294,9 +320,17 @@ pub fn decrypt(partition_id: String, data_row_record: String) -> Result<Buffer> 
 
 #[napi]
 pub async fn decrypt_async(partition_id: String, data_row_record: String) -> Result<Buffer> {
-    tokio::task::spawn_blocking(move || decrypt(partition_id, data_row_record))
+    let drr: asherah::types::DataRowRecord = serde_json::from_str(&data_row_record)
+        .map_err(|e| Error::from_reason(format!("invalid DataRowRecord JSON: {e}")))?;
+    let (session, cached) = get_session_arc(&partition_id)?;
+    let pt = session
+        .decrypt_async(drr)
         .await
-        .map_err(|e| Error::from_reason(format!("join error: {e}")))?
+        .map_err(|e| Error::from_reason(format!("decrypt error: {e}")))?;
+    if !cached {
+        drop(session.close());
+    }
+    Ok(Buffer::from(pt))
 }
 
 #[napi]
