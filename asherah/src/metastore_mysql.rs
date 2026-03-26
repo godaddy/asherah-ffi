@@ -160,17 +160,15 @@ impl Metastore for MySqlMetastore {
                 "SELECT key_record FROM encryption_key WHERE id=? AND created=?",
                 (id, &ts),
             )
-            .context(format!(
-                "MySQL load query failed for id={id} created={created}"
-            ))?;
+            .with_context(|| format!("MySQL load query failed for id={id} created={created}"))?;
         Self::return_conn(conn);
         if let Some((json_str,)) = row {
             log::debug!("mysql load hit: id={id} created={created}");
             let ekr = serde_json::from_str(&json_str)
                 .map_err(anyhow::Error::from)
-                .context(format!(
-                    "MySQL load: failed to parse key_record JSON for id={id}"
-                ))?;
+                .with_context(|| {
+                    format!("MySQL load: failed to parse key_record JSON for id={id}")
+                })?;
             Ok(Some(ekr))
         } else {
             log::debug!("mysql load miss: id={id} created={created}");
@@ -186,15 +184,15 @@ impl Metastore for MySqlMetastore {
                 "SELECT key_record FROM encryption_key WHERE id=? ORDER BY created DESC LIMIT 1",
                 (id,),
             )
-            .context(format!("MySQL load_latest query failed for id={id}"))?;
+            .with_context(|| format!("MySQL load_latest query failed for id={id}"))?;
         Self::return_conn(conn);
         if let Some((json_str,)) = row {
             log::debug!("mysql load_latest hit: id={id}");
             let ekr = serde_json::from_str(&json_str)
                 .map_err(anyhow::Error::from)
-                .context(format!(
-                    "MySQL load_latest: failed to parse key_record JSON for id={id}"
-                ))?;
+                .with_context(|| {
+                    format!("MySQL load_latest: failed to parse key_record JSON for id={id}")
+                })?;
             Ok(Some(ekr))
         } else {
             log::debug!("mysql load_latest miss: id={id}");
@@ -215,7 +213,7 @@ impl Metastore for MySqlMetastore {
         conn.exec_drop(
             "INSERT IGNORE INTO encryption_key(id, created, key_record) VALUES(?, ?, CAST(? AS JSON))",
             (id, &ts, rec),
-        ).context(format!("MySQL store insert failed for id={id} created={created}"))?;
+        ).with_context(|| format!("MySQL store insert failed for id={id} created={created}"))?;
         let stored = conn.affected_rows() > 0;
         Self::return_conn(conn);
         log::debug!("mysql store: id={id} created={created} stored={stored}");

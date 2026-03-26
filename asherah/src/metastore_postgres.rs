@@ -220,19 +220,19 @@ impl Metastore for PostgresMetastore {
         log::debug!("postgres load: id={id} created={created}");
         let mut c = self.client()?;
         let created_f = created as f64;
-        let rows = c.query(
+        let row = c.query_opt(
             "SELECT key_record::text FROM encryption_key WHERE id=$1 AND created=to_timestamp($2)",
             &[&id, &created_f],
-        ).context(format!("Postgres load query failed for id={id} created={created}"))?;
-        match rows.into_iter().next() {
+        ).with_context(|| format!("Postgres load query failed for id={id} created={created}"))?;
+        match row {
             Some(row) => {
                 let txt: String = row.get(0);
                 log::debug!("postgres load hit: id={id} created={created}");
                 let ekr = serde_json::from_str(&txt)
                     .map_err(anyhow::Error::from)
-                    .context(format!(
-                        "Postgres load: failed to parse key_record JSON for id={id}"
-                    ))?;
+                    .with_context(|| {
+                        format!("Postgres load: failed to parse key_record JSON for id={id}")
+                    })?;
                 Ok(Some(ekr))
             }
             None => {
@@ -244,19 +244,19 @@ impl Metastore for PostgresMetastore {
     fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         log::debug!("postgres load_latest: id={id}");
         let mut c = self.client()?;
-        let rows = c.query(
+        let row = c.query_opt(
             "SELECT key_record::text FROM encryption_key WHERE id=$1 ORDER BY created DESC LIMIT 1",
             &[&id],
-        ).context(format!("Postgres load_latest query failed for id={id}"))?;
-        match rows.into_iter().next() {
+        ).with_context(|| format!("Postgres load_latest query failed for id={id}"))?;
+        match row {
             Some(row) => {
                 let txt: String = row.get(0);
                 log::debug!("postgres load_latest hit: id={id}");
                 let ekr = serde_json::from_str(&txt)
                     .map_err(anyhow::Error::from)
-                    .context(format!(
-                        "Postgres load_latest: failed to parse key_record JSON for id={id}"
-                    ))?;
+                    .with_context(|| {
+                        format!("Postgres load_latest: failed to parse key_record JSON for id={id}")
+                    })?;
                 Ok(Some(ekr))
             }
             None => {
@@ -275,13 +275,11 @@ impl Metastore for PostgresMetastore {
         let mut c = self.client()?;
         let v = serde_json::to_string(ekr)?;
         let created_f = created as f64;
-        let v_json: serde_json::Value = serde_json::from_str(&v).context(format!(
-            "Postgres store: failed to re-parse key_record JSON for id={id}"
-        ))?;
+        // Pass JSON as text and cast in SQL — avoids double serialization
         let res = c.execute(
-            "INSERT INTO encryption_key(id, created, key_record) VALUES ($1, to_timestamp($2), $3) ON CONFLICT DO NOTHING",
-            &[&id, &created_f, &v_json],
-        ).context(format!("Postgres store insert failed for id={id} created={created}"))?;
+            "INSERT INTO encryption_key(id, created, key_record) VALUES ($1, to_timestamp($2), $3::jsonb) ON CONFLICT DO NOTHING",
+            &[&id, &created_f, &v],
+        ).with_context(|| format!("Postgres store insert failed for id={id} created={created}"))?;
         let stored = res > 0;
         log::debug!("postgres store: id={id} created={created} stored={stored}");
         Ok(stored)
