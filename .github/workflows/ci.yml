@@ -599,6 +599,8 @@ jobs:
             interop-${{ runner.os }}-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        with:
+          components: rustfmt
       - uses: taiki-e/install-action@0d865d5cc6d507df4765f1f866bfae8bab4e2a73 # v2
         with:
           tool: sccache@0.8.1
