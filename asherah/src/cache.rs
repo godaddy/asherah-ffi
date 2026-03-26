@@ -496,10 +496,8 @@ impl KeyCacher for SimpleKeyCache {
                             // since the metastore is unreachable anyway.
                         }
                     }
-                } else {
-                    if crate::metrics::is_enabled() {
-                        crate::metrics::record_cache_stale("latest");
-                    }
+                } else if crate::metrics::is_enabled() {
+                    crate::metrics::record_cache_stale("latest");
                 }
                 return Ok(v);
             }
