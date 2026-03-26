@@ -59,7 +59,7 @@ pub fn set_enabled(enabled: bool) {
 }
 
 #[inline(always)]
-fn is_enabled() -> bool {
+pub fn is_enabled() -> bool {
     ENABLED.load(Ordering::Relaxed)
 }
 fn with_sink<R>(f: impl FnOnce(&dyn MetricsSink) -> R) -> R {

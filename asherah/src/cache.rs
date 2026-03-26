@@ -467,7 +467,9 @@ impl KeyCacher for SimpleKeyCache {
     ) -> anyhow::Result<Arc<CryptoKey>> {
         if let Some((v, expired, invalid)) = self.get_latest_if_fresh(id) {
             if !expired && !invalid {
-                crate::metrics::record_cache_hit("latest");
+                if crate::metrics::is_enabled() {
+                    crate::metrics::record_cache_hit("latest");
+                }
                 return Ok(v);
             }
             // Stale-while-revalidate: stale but not invalid (not revoked, not policy-expired).
@@ -477,7 +479,9 @@ impl KeyCacher for SimpleKeyCache {
                 if self.try_claim_reload_latest(id) {
                     // We claimed the reload. Do the metastore query.
                     // Other threads now see fresh loaded_at and won't reload.
-                    crate::metrics::record_cache_stale("latest");
+                    if crate::metrics::is_enabled() {
+                        crate::metrics::record_cache_stale("latest");
+                    }
                     match loader() {
                         Ok(new_key) => {
                             self.insert_latest(id, new_key.clone());
@@ -493,14 +497,18 @@ impl KeyCacher for SimpleKeyCache {
                         }
                     }
                 } else {
-                    crate::metrics::record_cache_stale("latest");
+                    if crate::metrics::is_enabled() {
+                        crate::metrics::record_cache_stale("latest");
+                    }
                 }
                 return Ok(v);
             }
             // Key is invalid (revoked or policy-expired): must do a full reload
         }
         // Cold miss or invalid key — must load from metastore
-        crate::metrics::record_cache_miss("latest");
+        if crate::metrics::is_enabled() {
+            crate::metrics::record_cache_miss("latest");
+        }
         let v = loader()?;
         self.insert_latest(id, v.clone());
         Ok(v)
@@ -512,7 +520,9 @@ impl KeyCacher for SimpleKeyCache {
     ) -> anyhow::Result<Arc<CryptoKey>> {
         if let Some((v, expired)) = self.get_meta_if_fresh(meta) {
             if !expired {
-                crate::metrics::record_cache_hit("meta");
+                if crate::metrics::is_enabled() {
+                    crate::metrics::record_cache_hit("meta");
+                }
                 return Ok(v);
             }
             // Stale-while-revalidate for meta lookups (decrypt path).
@@ -522,11 +532,15 @@ impl KeyCacher for SimpleKeyCache {
             // not — just bump loaded_at via CAS so the entry stays fresh.
             // No loader call needed: zero metastore queries on the decrypt path.
             let _ = self.try_claim_reload_meta(meta);
-            crate::metrics::record_cache_stale("meta");
+            if crate::metrics::is_enabled() {
+                crate::metrics::record_cache_stale("meta");
+            }
             return Ok(v);
         }
         // Cold miss — must load from metastore
-        crate::metrics::record_cache_miss("meta");
+        if crate::metrics::is_enabled() {
+            crate::metrics::record_cache_miss("meta");
+        }
         let v = loader()?;
         self.insert_meta(meta, v.clone());
         Ok(v)

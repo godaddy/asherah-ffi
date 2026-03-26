@@ -397,10 +397,16 @@ impl<
         payload: &[u8],
         storer: &T,
     ) -> anyhow::Result<serde_json::Value> {
-        let start = std::time::Instant::now();
+        let start = if metrics::is_enabled() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let drr = self.encrypt(payload)?;
         let res = storer.store(&drr);
-        metrics::record_store(start);
+        if let Some(start) = start {
+            metrics::record_store(start);
+        }
         res
     }
     pub fn load<T: crate::traits::Loader>(
@@ -408,12 +414,18 @@ impl<
         key: &serde_json::Value,
         loader: &T,
     ) -> anyhow::Result<Vec<u8>> {
-        let start = std::time::Instant::now();
+        let start = if metrics::is_enabled() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let drr = loader
             .load(key)?
             .ok_or_else(|| anyhow::anyhow!("not found"))?;
         let res = self.decrypt(drr);
-        metrics::record_load(start);
+        if let Some(start) = start {
+            metrics::record_load(start);
+        }
         res
     }
 }
