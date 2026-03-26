@@ -27,7 +27,9 @@
   "scripts": {
     "build": "napi build",
     "build:release": "napi build --release",
-    "test": "node test/roundtrip.js",
+    "test": "node test/roundtrip.js && node test/e2e-consumer.js",
+    "test:unit": "node test/roundtrip.js",
+    "test:e2e": "node test/e2e-consumer.js",
     "test:bun": "bun test/roundtrip.js"
   },
   "devDependencies": {
