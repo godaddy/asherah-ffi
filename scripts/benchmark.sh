@@ -81,6 +81,7 @@ BENCH_MYSQL_URL="${BENCH_MYSQL_URL:-${MYSQL_URL:-}}"
 BENCH_MYSQL_IMAGE="${BENCH_MYSQL_IMAGE:-mysql:8.1}"
 MYSQL_CONTAINER_ID=""
 MYSQL_STARTED_BY_SCRIPT=0
+RUST_ONLY=0
 log() { echo ">>> $1" >&2; }
 skip() { echo "    SKIP: $1" >&2; }
 
@@ -150,11 +151,14 @@ while [ $# -gt 0 ]; do
         --mysql-url=*)
             BENCH_MYSQL_URL="${1#--mysql-url=}"
             ;;
+        --rust-only)
+            RUST_ONLY=1
+            ;;
         "")
             ;;
         *)
             echo "Unknown option: $1" >&2
-            echo "Usage: $0 [--memory|--hot|--warm|--cold] [--mysql-url <url>] [--setup|--clean]" >&2
+            echo "Usage: $0 [--memory|--hot|--warm|--cold] [--rust-only] [--mysql-url <url>] [--setup|--clean]" >&2
             exit 2
             ;;
     esac
@@ -420,6 +424,13 @@ print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(10
         skip "Rust native benchmark failed (see log): $(tail -5 "$RESULTS_DIR/criterion_native.log" 2>/dev/null)"
     fi
 fi
+
+########################################################################
+# Skip non-Rust benchmarks when --rust-only is set
+########################################################################
+
+if [ "$RUST_ONLY" = 0 ]; then
+# BEGIN non-Rust benchmarks (indented block)
 
 ########################################################################
 # .NET FFI + Canonical (BenchmarkDotNet)
@@ -819,6 +830,9 @@ if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/node-bench-canonical/node_modules/ti
     else
         skip "Node.js Canonical benchmark failed (see log): $(tail -5 "$RESULTS_DIR/node_canon.log" 2>/dev/null)"
     fi
+fi
+
+# END non-Rust benchmarks
 fi
 
 ########################################################################

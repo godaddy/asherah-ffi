@@ -149,7 +149,7 @@ fn bench_cold_decrypt_from_json(c: &mut Criterion) {
         let mut data = vec![0u8; size];
         rng.fill_bytes(&mut data);
         let drr = session_a.encrypt(&data).expect("encrypt");
-        let json = drr.to_json_fast();
+        let json = serde_json::to_string(&drr).expect("DRR serialization");
         test_data.push((size, json));
     }
 

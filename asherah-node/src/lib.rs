@@ -245,7 +245,7 @@ pub fn encrypt(partition_id: String, data: Buffer) -> Result<String> {
         r
     })?;
     let t_json0 = Instant::now();
-    let out = drr.to_json_fast();
+    let out = serde_json::to_string(&drr).map_err(|e| Error::from_reason(e.to_string()))?;
     debug_log(&format!(
         "encrypt total={} us json={} us",
         t0.elapsed().as_micros(),
@@ -400,7 +400,7 @@ impl AsherahSession {
         let drr = session
             .encrypt(&data)
             .map_err(|e| Error::from_reason(format!("encrypt error: {e}")))?;
-        Ok(drr.to_json_fast())
+        serde_json::to_string(&drr).map_err(|e| Error::from_reason(e.to_string()))
     }
 
     #[napi]

@@ -51,7 +51,7 @@ fn main() -> anyhow::Result<()> {
         let enc_us = enc_dur.as_micros() as f64 / iterations as f64;
 
         // Serialize to JSON (like Go does with json.Marshal)
-        let json_bytes = last_drr.unwrap().to_json_fast();
+        let json_bytes = serde_json::to_string(&last_drr.unwrap()).expect("serialization");
 
         // Benchmark decrypt with JSON parse (apples-to-apples with Go)
         let start = Instant::now();

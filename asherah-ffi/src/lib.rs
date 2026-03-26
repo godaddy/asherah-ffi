@@ -236,7 +236,7 @@ pub unsafe extern "C" fn asherah_encrypt_to_json(
     };
     match s.inner.encrypt(bytes) {
         Ok(drr) => {
-            let v = drr.to_json_fast().into_bytes();
+            let v = serde_json::to_vec(&drr).expect("DRR serialization");
             take_vec_into_buffer(v, out)
         }
         Err(e) => {

@@ -133,6 +133,34 @@ That's the point — they can't drift.
 - `docker/tests.Dockerfile` must use the same Debian version as build containers
   (currently bookworm) or binaries will fail with glibc version mismatch
 
+## Performance Notes — DO NOT re-attempt hand-written JSON parsers
+
+Hand-written JSON serializers/deserializers (`to_json_fast`, `from_json_fast`)
+were removed after comprehensive benchmarking showed serde_json matches or
+beats them at all payload sizes end-to-end, and is strictly faster for large
+payloads (100MB+ email attachments) due to SIMD optimizations.
+
+Microbenchmarks were misleading — they showed 19-24% wins for EKR parsing in
+isolation, but end-to-end encrypt/decrypt benchmarks (both `--memory` and
+`--warm`) showed zero improvement or slight regressions. The hot path is
+dominated by AES-GCM and key hierarchy operations; JSON serialization is noise.
+
+Additionally, every attempted Rust-level allocation optimization (thread-local
+buffers, stack-allocated formatters, lazy `.with_context()`, `query_opt()`)
+either showed no end-to-end improvement or actively regressed performance by
+perturbing the compiler's inlining and code layout decisions.
+
+**Rules:**
+- Use serde_json for all JSON serialization/deserialization. Do not write
+  hand-rolled parsers.
+- Do not attempt allocation micro-optimizations in the encrypt/decrypt hot path.
+- **ALL Rust code optimizations MUST be verified with
+  `scripts/benchmark.sh --rust-only --memory` before and after the change.**
+  This runs only the Criterion native benchmark (~30 seconds) and shows
+  encrypt/decrypt ns/op for 64B, 1KB, 8KB payloads. If the numbers don't
+  improve, revert. Do not rely on microbenchmarks alone.
+- For metastore/DB-related changes, also run `scripts/benchmark.sh --rust-only --warm`.
+
 ## Coding Conventions
 
 - Rust edition 2021; minimum supported version 1.88.0 (toolchain pinned to 1.91.1)
