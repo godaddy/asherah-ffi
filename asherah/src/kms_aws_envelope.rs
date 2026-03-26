@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_kms::{config::Region, primitives::Blob, types::DataKeySpec, Client};
 
@@ -102,12 +103,162 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
             rt,
         })
     }
+
+    fn block_on_maybe<F: std::future::Future>(&self, f: F) -> F::Output {
+        match &self.rt {
+            Some(rt) => {
+                if tokio::runtime::Handle::try_current().is_ok() {
+                    tokio::task::block_in_place(|| rt.block_on(f))
+                } else {
+                    rt.block_on(f)
+                }
+            }
+            None => match tokio::runtime::Handle::try_current() {
+                Ok(h) => tokio::task::block_in_place(|| h.block_on(f)),
+                Err(_) => tokio::runtime::Runtime::new()
+                    .expect("failed to create temporary tokio runtime")
+                    .block_on(f),
+            },
+        }
+    }
+
+    async fn encrypt_key_impl(&self, key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+        // Generate data key in preferred region
+        let pref = &self.clients[self.preferred];
+        let resp = pref
+            .client
+            .generate_data_key()
+            .key_id(pref.key_arn.clone())
+            .key_spec(DataKeySpec::Aes256)
+            .send()
+            .await?;
+        let plaintext = resp
+            .plaintext()
+            .ok_or_else(|| anyhow::anyhow!("missing plaintext"))?;
+        let preferred_ciphertext = resp
+            .ciphertext_blob()
+            .ok_or_else(|| anyhow::anyhow!("missing ciphertext_blob"))?;
+        let key_id = resp.key_id().unwrap_or("").to_string();
+
+        // AEAD-encrypt the key with the plaintext data key
+        let enc_key = self.aead.encrypt(key_bytes, plaintext.as_ref())?;
+
+        // Encrypt KEK in all regions
+        let mut keks: Vec<RegionalKek> = Vec::with_capacity(self.clients.len());
+        for (i, c) in self.clients.iter().enumerate() {
+            if i == self.preferred {
+                keks.push(RegionalKek {
+                    region: c.region.clone(),
+                    arn: key_id.clone(),
+                    encrypted_kek: preferred_ciphertext.as_ref().to_vec(),
+                });
+                continue;
+            }
+            let out = c
+                .client
+                .encrypt()
+                .key_id(&c.key_arn)
+                .plaintext(Blob::new(plaintext.as_ref().to_vec()))
+                .send()
+                .await?;
+            let blob = out
+                .ciphertext_blob()
+                .ok_or_else(|| anyhow::anyhow!("missing ciphertext_blob"))?;
+            keks.push(RegionalKek {
+                region: c.region.clone(),
+                arn: c.key_arn.clone(),
+                encrypted_kek: blob.as_ref().to_vec(),
+            });
+        }
+
+        let env = KekEnvelope {
+            encrypted_key: enc_key,
+            keks,
+        };
+        let bytes = serde_json::to_vec(&env)?;
+        Ok(bytes)
+    }
+
+    async fn decrypt_key_impl(&self, blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+        let env: KekEnvelope = serde_json::from_slice(blob).map_err(|e| {
+            log::error!("AwsKmsEnvelope decrypt_key: invalid envelope JSON: {e}");
+            anyhow::anyhow!("invalid KMS envelope JSON: {e}")
+        })?;
+        // Build map region->kek
+        let mut map = std::collections::HashMap::new();
+        for k in &env.keks {
+            map.insert(k.region.as_str(), k);
+        }
+        let mut errors: Vec<String> = Vec::new();
+        // Try preferred first, then others
+        for (i, c) in self.clients.iter().enumerate() {
+            let reg_kek = match map.get(c.region.as_str()) {
+                Some(k) => *k,
+                None => {
+                    log::debug!(
+                        "AwsKmsEnvelope decrypt_key: no KEK for region={}, skipping",
+                        c.region
+                    );
+                    continue;
+                }
+            };
+            let out = c
+                .client
+                .decrypt()
+                .key_id(&c.key_arn)
+                .ciphertext_blob(Blob::new(reg_kek.encrypted_kek.clone()))
+                .send()
+                .await;
+            let out = match out {
+                Ok(v) => v,
+                Err(e) => {
+                    log::warn!(
+                        "AwsKmsEnvelope decrypt_key: KMS Decrypt failed for region={} arn={}: {e:#}",
+                        c.region,
+                        c.key_arn
+                    );
+                    errors.push(format!("region {}: {e}", c.region));
+                    if i == self.preferred { /* try fallbacks */ }
+                    continue;
+                }
+            };
+            let dk = match out.plaintext() {
+                Some(p) => p.as_ref().to_vec(),
+                None => {
+                    log::warn!(
+                        "AwsKmsEnvelope decrypt_key: KMS returned no plaintext for region={}",
+                        c.region
+                    );
+                    errors.push(format!("region {}: no plaintext returned", c.region));
+                    continue;
+                }
+            };
+            match self.aead.decrypt(&env.encrypted_key, &dk) {
+                Ok(key) => return Ok(key),
+                Err(e) => {
+                    log::warn!(
+                        "AwsKmsEnvelope decrypt_key: AEAD decrypt failed for region={}: {e:#}",
+                        c.region
+                    );
+                    errors.push(format!("region {}: AEAD decrypt failed: {e}", c.region));
+                }
+            }
+        }
+        let detail = if errors.is_empty() {
+            "no matching regions found".to_string()
+        } else {
+            errors.join("; ")
+        };
+        log::error!("AwsKmsEnvelope decrypt_key: all backends failed: {detail}");
+        Err(anyhow::anyhow!(
+            "all KMS backends failed to decrypt: {detail}"
+        ))
+    }
 }
 
 fn new_kms_client(
     region: Option<String>,
 ) -> anyhow::Result<(Client, String, Option<Arc<tokio::runtime::Runtime>>)> {
-    // Use existing runtime if present; else create one
     let handle = tokio::runtime::Handle::try_current().ok();
     let rt = if handle.is_some() {
         None
@@ -174,165 +325,26 @@ fn new_kms_client_with_rt(
     Ok((client, resolved_region, rt_local))
 }
 
+#[async_trait]
 impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKmsEnvelope<A> {
     fn encrypt_key(&self, _ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        // Generate data key in preferred region
-        let pref = &self.clients[self.preferred];
-        let fut = async {
-            pref.client
-                .generate_data_key()
-                .key_id(pref.key_arn.clone())
-                .key_spec(DataKeySpec::Aes256)
-                .send()
-                .await
-        };
-        let resp = match &self.rt {
-            Some(rt) => rt.block_on(fut)?,
-            None => tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current()
-                    .block_on(fut)
-                    .map_err(|e| anyhow::anyhow!(e))
-            })?,
-        };
-        let plaintext = resp
-            .plaintext()
-            .ok_or_else(|| anyhow::anyhow!("missing plaintext"))?;
-        let preferred_ciphertext = resp
-            .ciphertext_blob()
-            .ok_or_else(|| anyhow::anyhow!("missing ciphertext_blob"))?;
-        let key_id = resp.key_id().unwrap_or("").to_string();
-
-        // AEAD-encrypt the key with the plaintext data key
-        let enc_key = self.aead.encrypt(key_bytes, plaintext.as_ref())?;
-
-        // Encrypt KEK in all regions
-        let mut keks: Vec<RegionalKek> = Vec::with_capacity(self.clients.len());
-        for (i, c) in self.clients.iter().enumerate() {
-            if i == self.preferred {
-                keks.push(RegionalKek {
-                    region: c.region.clone(),
-                    arn: key_id.clone(),
-                    encrypted_kek: preferred_ciphertext.as_ref().to_vec(),
-                });
-                continue;
-            }
-            let fut = async {
-                c.client
-                    .encrypt()
-                    .key_id(&c.key_arn)
-                    .plaintext(Blob::new(plaintext.as_ref().to_vec()))
-                    .send()
-                    .await
-            };
-            let out = match &self.rt {
-                Some(rt) => rt.block_on(fut)?,
-                None => tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current()
-                        .block_on(fut)
-                        .map_err(|e| anyhow::anyhow!(e))
-                })?,
-            };
-            let blob = out
-                .ciphertext_blob()
-                .ok_or_else(|| anyhow::anyhow!("missing ciphertext_blob"))?;
-            keks.push(RegionalKek {
-                region: c.region.clone(),
-                arn: c.key_arn.clone(),
-                encrypted_kek: blob.as_ref().to_vec(),
-            });
-        }
-
-        let env = KekEnvelope {
-            encrypted_key: enc_key,
-            keks,
-        };
-        let bytes = serde_json::to_vec(&env)?;
-        Ok(bytes)
+        self.block_on_maybe(self.encrypt_key_impl(key_bytes))
     }
 
     fn decrypt_key(&self, _ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        let env: KekEnvelope = serde_json::from_slice(blob).map_err(|e| {
-            log::error!("AwsKmsEnvelope decrypt_key: invalid envelope JSON: {e}");
-            anyhow::anyhow!("invalid KMS envelope JSON: {e}")
-        })?;
-        // Build map region->kek
-        let mut map = std::collections::HashMap::new();
-        for k in &env.keks {
-            map.insert(k.region.as_str(), k);
-        }
-        let mut errors: Vec<String> = Vec::new();
-        // Try preferred first, then others
-        for (i, c) in self.clients.iter().enumerate() {
-            let reg_kek = match map.get(c.region.as_str()) {
-                Some(k) => *k,
-                None => {
-                    log::debug!(
-                        "AwsKmsEnvelope decrypt_key: no KEK for region={}, skipping",
-                        c.region
-                    );
-                    continue;
-                }
-            };
-            let fut = async {
-                c.client
-                    .decrypt()
-                    .key_id(&c.key_arn)
-                    .ciphertext_blob(Blob::new(reg_kek.encrypted_kek.clone()))
-                    .send()
-                    .await
-            };
-            let out = match &self.rt {
-                Some(rt) => rt.block_on(fut).map_err(|e| anyhow::anyhow!(e)),
-                None => tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current()
-                        .block_on(fut)
-                        .map_err(|e| anyhow::anyhow!(e))
-                }),
-            };
-            let out = match out {
-                Ok(v) => v,
-                Err(e) => {
-                    log::warn!(
-                        "AwsKmsEnvelope decrypt_key: KMS Decrypt failed for region={} arn={}: {e:#}",
-                        c.region,
-                        c.key_arn
-                    );
-                    errors.push(format!("region {}: {e}", c.region));
-                    if i == self.preferred { /* try fallbacks */ }
-                    continue;
-                }
-            };
-            let dk = match out.plaintext() {
-                Some(p) => p.as_ref().to_vec(),
-                None => {
-                    log::warn!(
-                        "AwsKmsEnvelope decrypt_key: KMS returned no plaintext for region={}",
-                        c.region
-                    );
-                    errors.push(format!("region {}: no plaintext returned", c.region));
-                    continue;
-                }
-            };
-            match self.aead.decrypt(&env.encrypted_key, &dk) {
-                Ok(key) => return Ok(key),
-                Err(e) => {
-                    log::warn!(
-                        "AwsKmsEnvelope decrypt_key: AEAD decrypt failed for region={}: {e:#}",
-                        c.region
-                    );
-                    errors.push(format!("region {}: AEAD decrypt failed: {e}", c.region));
-                }
-            }
-        }
-        let detail = if errors.is_empty() {
-            "no matching regions found".to_string()
-        } else {
-            errors.join("; ")
-        };
-        log::error!("AwsKmsEnvelope decrypt_key: all backends failed: {detail}");
-        Err(anyhow::anyhow!(
-            "all KMS backends failed to decrypt: {detail}"
-        ))
+        self.block_on_maybe(self.decrypt_key_impl(blob))
+    }
+
+    async fn encrypt_key_async(
+        &self,
+        _ctx: &(),
+        key_bytes: &[u8],
+    ) -> Result<Vec<u8>, anyhow::Error> {
+        self.encrypt_key_impl(key_bytes).await
+    }
+
+    async fn decrypt_key_async(&self, _ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+        self.decrypt_key_impl(blob).await
     }
 }
 
@@ -352,13 +364,11 @@ mod tests {
             }],
         };
         let j = serde_json::to_string(&env)?;
-        // Check JSON field names match Go
         assert!(j.contains("\"encryptedKey\""));
         assert!(j.contains("\"kmsKeks\""));
         assert!(j.contains("\"region\""));
         assert!(j.contains("\"arn\""));
         assert!(j.contains("\"encryptedKek\""));
-        // Byte fields must be base64 strings, not JSON arrays
         assert!(
             j.contains("\"encryptedKey\":\""),
             "encryptedKey should be a base64 string, got: {j}"
@@ -367,7 +377,6 @@ mod tests {
             j.contains("\"encryptedKek\":\""),
             "encryptedKek should be a base64 string, got: {j}"
         );
-        // Roundtrip
         let back: KekEnvelope = serde_json::from_str(&j)?;
         assert_eq!(back.encrypted_key, vec![1, 2, 3]);
         assert_eq!(back.keks.len(), 1);
@@ -379,8 +388,6 @@ mod tests {
 
     #[test]
     fn test_deserialize_go_produced_kms_envelope() {
-        // Go asherah produces base64-encoded byte fields in KMS envelope JSON.
-        // This test ensures Rust can deserialize that format.
         let go_json = r#"{
             "encryptedKey": "AQIDBAU=",
             "kmsKeks": [{
@@ -415,8 +422,6 @@ mod tests {
 
     #[test]
     fn decrypt_key_invalid_envelope_json_fails() {
-        // decrypt_key deserializes the blob as KekEnvelope JSON.
-        // Invalid JSON should return an error.
         let aead = Arc::new(crate::aead::AES256GCM::new());
         let kms = AwsKmsEnvelope {
             clients: vec![],
@@ -430,7 +435,6 @@ mod tests {
 
     #[test]
     fn decrypt_key_no_matching_region_fails() {
-        // Valid envelope JSON but no clients to decrypt with
         let aead = Arc::new(crate::aead::AES256GCM::new());
         let env = KekEnvelope {
             encrypted_key: vec![1, 2, 3],

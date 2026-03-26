@@ -36,6 +36,12 @@ async function main() {
   // 6. Setup/shutdown cycle (consumers restart services)
   await testSetupShutdownCycle();
 
+  // 7. Sync/async interop — encrypt sync, decrypt async and vice versa
+  await testSyncAsyncInterop();
+
+  // 8. Heavy concurrent async — 100 simultaneous operations
+  await testHeavyConcurrentAsync();
+
   console.log('=== All E2E Consumer Tests Passed ===');
 }
 
@@ -188,6 +194,55 @@ async function testSetupShutdownCycle() {
     await asherah.shutdownAsync();
   }
   console.log('  PASS: setup/shutdown cycle x3');
+}
+
+async function testSyncAsyncInterop() {
+  await asherah.setupAsync({
+    serviceName: 'e2e-interop',
+    productId: 'e2e-prod',
+    metastore: 'memory',
+    kms: 'static',
+  });
+
+  // Encrypt sync, decrypt async
+  const enc1 = asherah.encryptString('interop-p', 'sync-to-async');
+  const dec1 = await asherah.decryptStringAsync('interop-p', enc1);
+  assert.strictEqual(dec1, 'sync-to-async');
+
+  // Encrypt async, decrypt sync
+  const enc2 = await asherah.encryptStringAsync('interop-p', 'async-to-sync');
+  const dec2 = asherah.decryptString('interop-p', enc2);
+  assert.strictEqual(dec2, 'async-to-sync');
+
+  await asherah.shutdownAsync();
+  console.log('  PASS: sync/async interop');
+}
+
+async function testHeavyConcurrentAsync() {
+  await asherah.setupAsync({
+    serviceName: 'e2e-heavy',
+    productId: 'e2e-prod',
+    metastore: 'memory',
+    kms: 'static',
+  });
+
+  // 100 concurrent async operations across 20 partitions
+  const promises = [];
+  for (let i = 0; i < 100; i++) {
+    const partition = `heavy-${i % 20}`;
+    const payload = `heavy-payload-${i}`;
+    promises.push(
+      asherah.encryptStringAsync(partition, payload)
+        .then(drr => asherah.decryptStringAsync(partition, drr))
+        .then(recovered => {
+          assert.strictEqual(recovered, payload, `heavy op ${i} roundtrip failed`);
+        })
+    );
+  }
+  await Promise.all(promises);
+
+  await asherah.shutdownAsync();
+  console.log('  PASS: heavy concurrent async (100 ops, 20 partitions)');
 }
 
 main().catch(err => {

@@ -1,3 +1,5 @@
+use async_trait::async_trait;
+
 use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
 use anyhow::Context;
@@ -215,6 +217,7 @@ impl PostgresMetastore {
     }
 }
 
+#[async_trait]
 impl Metastore for PostgresMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         log::debug!("postgres load: id={id} created={created}");
