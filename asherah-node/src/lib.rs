@@ -309,10 +309,10 @@ pub async fn encrypt_async(partition_id: String, data: Buffer) -> Result<String>
 }
 
 #[napi]
-pub fn decrypt(partition_id: String, data_row_record: String) -> Result<Buffer> {
+pub fn decrypt(partition_id: String, data_row_record: Buffer) -> Result<Buffer> {
     let t0 = Instant::now();
     let t_parse0 = Instant::now();
-    let drr: asherah::types::DataRowRecord = serde_json::from_str(&data_row_record)
+    let drr: asherah::types::DataRowRecord = serde_json::from_slice(&data_row_record)
         .map_err(|e| Error::from_reason(format!("invalid DataRowRecord JSON: {e}")))?;
     debug_log(&format!(
         "decrypt json parse {} us",
@@ -334,8 +334,8 @@ pub fn decrypt(partition_id: String, data_row_record: String) -> Result<Buffer> 
 }
 
 #[napi]
-pub async fn decrypt_async(partition_id: String, data_row_record: String) -> Result<Buffer> {
-    let drr: asherah::types::DataRowRecord = serde_json::from_str(&data_row_record)
+pub async fn decrypt_async(partition_id: String, data_row_record: Buffer) -> Result<Buffer> {
+    let drr: asherah::types::DataRowRecord = serde_json::from_slice(&data_row_record)
         .map_err(|e| Error::from_reason(format!("invalid DataRowRecord JSON: {e}")))?;
     let (session, cached) = get_session_arc(&partition_id)?;
     let pt = session
@@ -360,13 +360,13 @@ pub async fn encrypt_string_async(partition_id: String, data: String) -> Result<
 
 #[napi]
 pub fn decrypt_string(partition_id: String, drr: String) -> Result<String> {
-    let buf = decrypt(partition_id, drr)?;
+    let buf = decrypt(partition_id, Buffer::from(drr.into_bytes()))?;
     String::from_utf8(buf.to_vec()).map_err(|e| Error::from_reason(format!("utf8 error: {e}")))
 }
 
 #[napi]
 pub async fn decrypt_string_async(partition_id: String, drr: String) -> Result<String> {
-    let buf = decrypt_async(partition_id, drr).await?;
+    let buf = decrypt_async(partition_id, Buffer::from(drr.into_bytes())).await?;
     String::from_utf8(buf.to_vec()).map_err(|e| Error::from_reason(format!("utf8 error: {e}")))
 }
 
