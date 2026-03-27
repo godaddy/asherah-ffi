@@ -5,12 +5,9 @@ require "fileutils"
 require "digest"
 require "rbconfig"
 
-# Acquires the prebuilt native library for the current platform.
-# Tries in order:
-# 1. Already exists (previous install or platform gem)
-# 2. Build from source if in a git checkout with cargo available
-# 3. Read NATIVE_VERSION from published fallback gem → download that release
-# 4. Query GitHub API for latest release → download
+# Downloads the prebuilt native library for the current platform from
+# GitHub Releases during `gem install` (fallback gem only — platform gems
+# ship the binary directly and never run this).
 module AsherahFetchNative
   REPO = "godaddy/asherah-ffi"
   MAX_ATTEMPTS = 3
@@ -29,115 +26,16 @@ module AsherahFetchNative
     ["mingw", "aarch64"]  => ["libasherah-arm64.dll",      "asherah_ffi.dll"],
   }.freeze
 
-  # Map [os, cpu] to the Rust library filename produced by cargo build.
-  CARGO_LIB_NAME = {
-    ["linux", "x86_64"]   => "libasherah_ffi.so",
-    ["linux", "aarch64"]  => "libasherah_ffi.so",
-    ["darwin", "x86_64"]  => "libasherah_ffi.dylib",
-    ["darwin", "arm64"]   => "libasherah_ffi.dylib",
-    ["mingw", "x86_64"]   => "asherah_ffi.dll",
-    ["mingw", "aarch64"]  => "asherah_ffi.dll",
-  }.freeze
-
   class << self
     def download
-      _asset_name, local_name = resolve_platform
+      asset_name, local_name = resolve_platform
       dest = File.join(NATIVE_DIR, local_name)
 
       if File.exist?(dest)
-        puts "#{dest} already exists, skipping"
+        puts "#{dest} already exists, skipping download"
         return
       end
 
-      # Try building from source (git checkout with cargo)
-      if try_build_from_source(dest)
-        return
-      end
-
-      # Fall back to downloading a prebuilt binary
-      download_prebuilt(dest)
-    end
-
-    private
-
-    def try_build_from_source(dest)
-      workspace_root = File.expand_path("..", ROOT_DIR)
-      cargo_toml = File.join(workspace_root, "Cargo.toml")
-
-      return false unless File.exist?(cargo_toml)
-
-      # A C compiler is required for ring, rusqlite, and vendored OpenSSL.
-      unless has_c_compiler?
-        puts "No C compiler found (needed for native build), falling back to download"
-        return false
-      end
-
-      cargo = find_cargo
-      return false unless cargo
-
-      puts "Building native library from source (this may take a minute)..."
-      result = system(cargo, "build", "-p", "asherah-ffi", "--release",
-                       chdir: workspace_root,
-                       out: $stdout, err: $stderr)
-
-      unless result
-        puts "WARNING: cargo build failed, falling back to download"
-        return false
-      end
-
-      os, cpu = resolve_os_cpu
-      lib_name = CARGO_LIB_NAME[[os, cpu]]
-      built = File.join(workspace_root, "target", "release", lib_name)
-
-      unless File.exist?(built)
-        puts "WARNING: Expected #{built} after cargo build, falling back to download"
-        return false
-      end
-
-      FileUtils.mkdir_p(NATIVE_DIR)
-      FileUtils.cp(built, dest)
-      File.chmod(0o755, dest) unless Gem.win_platform?
-      puts "Built and installed native library: #{dest} (#{File.size(dest)} bytes)"
-      true
-    end
-
-    def has_c_compiler?
-      %w[cc gcc clang].any? { |cmd| system("#{cmd} --version", out: File::NULL, err: File::NULL) }
-    end
-
-    def find_cargo
-      # Check PATH
-      cargo = ENV["CARGO"] || "cargo"
-      return cargo if system(cargo, "--version", out: File::NULL, err: File::NULL)
-
-      # Check common install locations
-      home = ENV["HOME"] || ENV["USERPROFILE"]
-      if home
-        rustup_cargo = File.join(home, ".cargo", "bin", "cargo")
-        return rustup_cargo if File.executable?(rustup_cargo)
-      end
-
-      # Install Rust via rustup if not found
-      return nil if Gem.win_platform? # rustup -y doesn't work unattended on Windows
-
-      puts "Rust not found. Installing via rustup..."
-      install_ok = system("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal",
-                          out: $stdout, err: $stderr)
-      unless install_ok
-        puts "WARNING: rustup install failed"
-        return nil
-      end
-
-      if home
-        installed = File.join(home, ".cargo", "bin", "cargo")
-        return installed if File.executable?(installed)
-      end
-
-      nil
-    end
-
-    def download_prebuilt(dest)
-      asset_name, _local_name = resolve_platform
       version = resolve_version
       url = "https://github.com/#{REPO}/releases/download/#{version}/#{asset_name}"
 
@@ -156,15 +54,9 @@ module AsherahFetchNative
       puts "Installed native library: #{dest} (#{content.bytesize} bytes)"
     end
 
-    def resolve_platform
-      os, cpu = resolve_os_cpu
-      key = [os, cpu]
-      result = PLATFORM_MAP[key]
-      abort "ERROR: Unsupported platform #{os}-#{cpu} (#{RUBY_PLATFORM})" unless result
-      result
-    end
+    private
 
-    def resolve_os_cpu
+    def resolve_platform
       host_os = RbConfig::CONFIG["host_os"]
       host_cpu = RbConfig::CONFIG["host_cpu"]
 
@@ -181,15 +73,17 @@ module AsherahFetchNative
             else                            host_cpu
             end
 
-      [os, cpu]
+      key = [os, cpu]
+      result = PLATFORM_MAP[key]
+      abort "ERROR: Unsupported platform #{os}-#{cpu} (#{RUBY_PLATFORM})" unless result
+      result
     end
 
     def resolve_version
-      # The native binary version tracks asherah-ffi releases (v0.6.x), not the
-      # gem version (0.9.x which tracks the canonical asherah-ruby gem).
       # NATIVE_VERSION is stamped into published fallback gems by the publish
-      # workflow. For git-sourced installs it won't exist, so we fall through
-      # to the GitHub API.
+      # workflow with the release tag (e.g. "v0.6.73"). It is not committed
+      # to the repo — the gem version and the native binary version are
+      # intentionally decoupled.
       native_version_file = File.join(ROOT_DIR, "NATIVE_VERSION")
       if File.exist?(native_version_file)
         tag = File.read(native_version_file).strip
