@@ -84,8 +84,9 @@ module AsherahFetchNative
     def resolve_version
       # The native binary version tracks asherah-ffi releases (v0.6.x), not the
       # gem version (0.9.x which tracks the canonical asherah-ruby gem).
-      # NATIVE_VERSION is committed to the repo and updated automatically by
-      # the release workflow. This ensures git-pinned versions get matching binaries.
+      # NATIVE_VERSION is stamped into published fallback gems by the publish
+      # workflow. For git-sourced installs it won't exist, so we fall through
+      # to the GitHub API.
       native_version_file = File.join(ROOT_DIR, "NATIVE_VERSION")
       if File.exist?(native_version_file)
         tag = File.read(native_version_file).strip

@@ -28,6 +28,9 @@ Gem::Specification.new do |spec|
   else
     # Fallback gem: no binary bundled. Downloads the native library at install
     # time from GitHub Releases via ext/asherah/extconf.rb.
+    # NATIVE_VERSION is stamped by the publish workflow (not in git).
+    # Dir[] only matches if the file exists, so it's included in published
+    # fallback gems but absent from development installs.
     spec.files = Dir["lib/**/*.rb", "ext/**/*.rb", "ext/**/*.c", "NATIVE_VERSION", "LICENSE", "README.md"]
     spec.extensions = ["ext/asherah/extconf.rb"]
   end
