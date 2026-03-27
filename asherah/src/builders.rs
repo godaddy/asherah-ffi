@@ -535,7 +535,11 @@ pub async fn metastore_from_env_async() -> anyhow::Result<MetastoreEnvResult> {
     if mchoice == "rdbms" || std::env::var("MYSQL_URL").is_ok() {
         #[cfg(feature = "mysql")]
         if let Ok(url) = std::env::var("MYSQL_URL") {
-            let my = crate::metastore_mysql::MySqlMetastore::connect_async(&url).await?;
+            let my = tokio::task::spawn_blocking(move || {
+                crate::metastore_mysql::MySqlMetastore::connect(&url)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("mysql connect join error: {e}"))??;
             return Ok((Arc::new(my), service, product, region_suffix));
         }
         #[cfg(not(feature = "mysql"))]

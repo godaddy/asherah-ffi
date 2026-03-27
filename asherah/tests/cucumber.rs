@@ -204,29 +204,34 @@ async fn start_mysql() -> (testcontainers::ContainerAsync<GenericImage>, String)
             Ok(port) => {
                 let url = format!("mysql://root@127.0.0.1:{port}/test");
                 let url_clone = url.clone();
-                let table_ok = async {
+                let table_ok = tokio::task::spawn_blocking(move || {
+                    use mysql::prelude::Queryable;
                     for _ in 0..30 {
-                        if let Ok(pool) = sqlx::MySqlPool::connect(&url_clone).await {
-                            if sqlx::query(
-                                r#"CREATE TABLE IF NOT EXISTS encryption_key (
-                                    id VARCHAR(255) NOT NULL,
-                                    created TIMESTAMP NOT NULL,
-                                    key_record JSON NOT NULL,
-                                    PRIMARY KEY(id, created)
-                                ) ENGINE=InnoDB"#,
-                            )
-                            .execute(&pool)
-                            .await
-                            .is_ok()
-                            {
-                                return true;
+                        if let Ok(pool) =
+                            mysql::Pool::new(mysql::Opts::try_from(url_clone.as_str()).unwrap())
+                        {
+                            if let Ok(mut conn) = pool.get_conn() {
+                                if conn
+                                    .query_drop(
+                                        r#"CREATE TABLE IF NOT EXISTS encryption_key (
+                                        id VARCHAR(255) NOT NULL,
+                                        created TIMESTAMP NOT NULL,
+                                        key_record JSON NOT NULL,
+                                        PRIMARY KEY(id, created)
+                                    ) ENGINE=InnoDB"#,
+                                    )
+                                    .is_ok()
+                                {
+                                    return true;
+                                }
                             }
                         }
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        std::thread::sleep(std::time::Duration::from_secs(1));
                     }
                     false
-                }
-                .await;
+                })
+                .await
+                .unwrap();
                 if table_ok {
                     return (container, url);
                 }
