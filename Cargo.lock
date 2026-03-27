@@ -153,7 +153,9 @@ dependencies = [
  "asherah",
  "asherah-cobhan",
  "asherah-config",
+ "once_cell",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
