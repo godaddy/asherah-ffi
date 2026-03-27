@@ -50,6 +50,19 @@ internal static class NativeMethods
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     internal static extern IntPtr asherah_last_error_message();
+
+    // Async FFI — callback-based
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern unsafe int asherah_encrypt_to_json_async(
+        IntPtr session, byte* data, UIntPtr length,
+        delegate* unmanaged[Cdecl]<IntPtr, IntPtr, UIntPtr, IntPtr, void> callback,
+        IntPtr userData);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern unsafe int asherah_decrypt_from_json_async(
+        IntPtr session, byte* json, UIntPtr length,
+        delegate* unmanaged[Cdecl]<IntPtr, IntPtr, UIntPtr, IntPtr, void> callback,
+        IntPtr userData);
 }
 
 [StructLayout(LayoutKind.Sequential)]
