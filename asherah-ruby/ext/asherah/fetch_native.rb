@@ -82,13 +82,13 @@ module AsherahFetchNative
     end
 
     def resolve_version
-      # Try gem version first (set during publish), then fall back to latest release
-      version_file = File.join(ROOT_DIR, "lib", "asherah", "version.rb")
-      if File.exist?(version_file)
-        content = File.read(version_file)
-        if content =~ /VERSION\s*=\s*["']([^"']+)["']/
-          return "v#{$1}"
-        end
+      # The native binary version tracks asherah-ffi releases (v0.6.x), not the
+      # gem version (0.9.x which tracks the canonical asherah-ruby gem).
+      # Check for an explicit native version file first, then query GitHub API.
+      native_version_file = File.join(ROOT_DIR, "NATIVE_VERSION")
+      if File.exist?(native_version_file)
+        tag = File.read(native_version_file).strip
+        return tag unless tag.empty?
       end
 
       # Fall back: query GitHub API for latest release
