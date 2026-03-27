@@ -42,12 +42,10 @@ module AsherahFetchNative
       puts "Downloading native library: #{url}"
       content = download_with_retry(url)
 
-      # Verify we got a reasonable binary (not an HTML error page)
       if content.bytesize < 1024
         abort "ERROR: Downloaded file is too small (#{content.bytesize} bytes) — likely a 404 or error page"
       end
 
-      # Verify SHA256 against checksums from the release (if available)
       verify_checksum(content, asset_name, version)
 
       FileUtils.mkdir_p(NATIVE_DIR)
@@ -82,23 +80,40 @@ module AsherahFetchNative
     end
 
     def resolve_version
-      # Try gem version first (set during publish), then fall back to latest release
-      version_file = File.join(ROOT_DIR, "lib", "asherah", "version.rb")
-      if File.exist?(version_file)
-        content = File.read(version_file)
-        if content =~ /VERSION\s*=\s*["']([^"']+)["']/
-          return "v#{$1}"
+      # NATIVE_VERSION is stamped into published fallback gems by the publish
+      # workflow with the release tag (e.g. "v0.6.73"). It is not committed
+      # to the repo — the gem version and the native binary version are
+      # intentionally decoupled.
+      # Environment variable override: NATIVE_VERSION=v0.6.22 bundle install
+      env_version = ENV["NATIVE_VERSION"]
+      if env_version && !env_version.strip.empty?
+        tag = env_version.strip
+        tag = "v#{tag}" unless tag.start_with?("v")
+        puts "Using native version from environment: #{tag}"
+        return tag
+      end
+
+      # Published fallback gems have NATIVE_VERSION stamped by the publish workflow
+      native_version_file = File.join(ROOT_DIR, "NATIVE_VERSION")
+      if File.exist?(native_version_file)
+        tag = File.read(native_version_file).strip
+        unless tag.empty?
+          puts "Using native version: #{tag}"
+          return tag
         end
       end
 
-      # Fall back: query GitHub API for latest release
-      puts "Resolving latest release version from GitHub..."
-      require "json"
-      api_url = "https://api.github.com/repos/#{REPO}/releases/latest"
-      response = URI.parse(api_url).open("Accept" => "application/vnd.github+json").read
-      tag = JSON.parse(response)["tag_name"]
-      abort "ERROR: Could not determine release version" if tag.nil? || tag.empty?
-      tag
+      abort <<~MSG
+        ERROR: Native binary version not specified.
+
+        Set the NATIVE_VERSION environment variable to the release tag:
+          NATIVE_VERSION=0.6.73 bundle install
+
+        Or create a NATIVE_VERSION file in the asherah-ruby directory:
+          echo "v0.6.73" > asherah-ruby/NATIVE_VERSION
+
+        Available releases: https://github.com/#{REPO}/releases
+      MSG
     end
 
     def download_with_retry(url)
@@ -137,7 +152,6 @@ module AsherahFetchNative
     end
 
     def verify_checksum(content, asset_name, version)
-      # Try to download SHA256SUMS from the release
       sums_url = "https://github.com/#{REPO}/releases/download/#{version}/SHA256SUMS"
       begin
         sums = URI.parse(sums_url).open(read_timeout: 15, open_timeout: 10).read
