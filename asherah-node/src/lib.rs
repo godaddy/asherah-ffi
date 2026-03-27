@@ -141,9 +141,18 @@ pub fn setup(config: AsherahConfig) -> Result<()> {
 
 #[napi]
 pub async fn setup_async(config: AsherahConfig) -> Result<()> {
-    // DynamoDB/KMS constructors use block_in_place internally when called from
-    // a tokio context, so this is safe to call directly without spawn_blocking.
-    setup(config)
+    // DynamoDB, KMS, and Postgres constructors internally call block_on to
+    // initialize async SDK clients or database connections. This panics if
+    // called from within a tokio runtime context. tokio::spawn_blocking still
+    // runs within the runtime context (Handle::try_current() returns Ok).
+    // Use a plain OS thread to guarantee no tokio context exists.
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let result = setup(config);
+        drop(tx.send(result));
+    });
+    rx.await
+        .map_err(|_| Error::from_reason("setup thread panicked"))?
 }
 
 #[napi]
@@ -164,7 +173,13 @@ pub fn shutdown() -> Result<()> {
 
 #[napi]
 pub async fn shutdown_async() -> Result<()> {
-    shutdown()
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let result = shutdown();
+        drop(tx.send(result));
+    });
+    rx.await
+        .map_err(|_| Error::from_reason("shutdown thread panicked"))?
 }
 
 fn with_session<R>(partition_id: &str, fcall: impl FnOnce(&Session) -> Result<R>) -> Result<R> {

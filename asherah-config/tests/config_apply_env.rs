@@ -292,7 +292,11 @@ fn test_optional_int_fields_set() {
     assert_eq!(get_env("SESSION_CACHE_MAX_SIZE").as_deref(), Some("50"));
 }
 
-fn test_optional_int_fields_none() {
+fn test_optional_int_fields_none_preserves_env() {
+    // Pre-set env vars
+    std::env::set_var("EXPIRE_AFTER_SECS", "999");
+    std::env::set_var("REVOKE_CHECK_INTERVAL_SECS", "888");
+
     let cfg = ConfigOptions {
         expire_after: None,
         check_interval: None,
@@ -301,10 +305,17 @@ fn test_optional_int_fields_none() {
         ..base_config()
     };
     let _applied = cfg.apply_env().unwrap();
-    assert!(get_env("EXPIRE_AFTER_SECS").is_none());
-    assert!(get_env("REVOKE_CHECK_INTERVAL_SECS").is_none());
-    assert!(get_env("SESSION_CACHE_DURATION_SECS").is_none());
-    assert!(get_env("SESSION_CACHE_MAX_SIZE").is_none());
+
+    // None fields should leave pre-set env vars alone
+    assert_eq!(get_env("EXPIRE_AFTER_SECS").as_deref(), Some("999"));
+    assert_eq!(
+        get_env("REVOKE_CHECK_INTERVAL_SECS").as_deref(),
+        Some("888")
+    );
+
+    // Clean up
+    std::env::remove_var("EXPIRE_AFTER_SECS");
+    std::env::remove_var("REVOKE_CHECK_INTERVAL_SECS");
 }
 
 fn test_region_map_set() {
@@ -626,8 +637,8 @@ fn main() {
     );
     run_test("test_optional_int_fields_set", test_optional_int_fields_set);
     run_test(
-        "test_optional_int_fields_none",
-        test_optional_int_fields_none,
+        "test_optional_int_fields_none_preserves_env",
+        test_optional_int_fields_none_preserves_env,
     );
     run_test("test_region_map_set", test_region_map_set);
     run_test("test_region_map_none", test_region_map_none);

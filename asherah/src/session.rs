@@ -948,22 +948,72 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
 // These use async metastore/KMS methods and the cache check+insert pattern
 // so they never need spawn_blocking or block_on.
 #[allow(clippy::same_name_method, clippy::multiple_inherent_impl)]
-impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
-    PublicSession<A, K, M>
+impl<
+        A: AEAD + Clone + 'static,
+        K: KeyManagementService + Clone + 'static,
+        M: Metastore + Clone + 'static,
+    > PublicSession<A, K, M>
 {
     async fn get_or_load_system_key_async(&self, meta: KeyMeta) -> anyhow::Result<Arc<CryptoKey>> {
+        // SK load/create calls sync metastore methods which may internally call
+        // block_on (e.g. the Postgres crate). Use cache check + plain thread for
+        // the loader to avoid panicking from a tokio runtime context.
         if meta.created == 0 {
             let id = self.inner.f.partition.system_key_id();
-            let mut loader_latest = || -> anyhow::Result<Arc<CryptoKey>> {
-                Ok(Arc::new(self.inner.load_latest_or_create_system_key()?))
-            };
-            // SK cache is always sync (system keys are rare, not worth async caching)
-            self.sk_cache.get_or_load_latest(&id, &mut loader_latest)
+            match self.sk_cache.check_latest(&id) {
+                CacheCheck::Hit(v) | CacheCheck::StaleOther(v) => Ok(v),
+                CacheCheck::StaleReload(stale) => {
+                    let inner = self.inner.f.clone();
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    std::thread::spawn(move || {
+                        let session = Session { f: inner };
+                        drop(tx.send(session.load_latest_or_create_system_key().map(Arc::new)));
+                    });
+                    match rx
+                        .await
+                        .map_err(|_| anyhow::anyhow!("SK load thread panicked"))?
+                    {
+                        Ok(key) => {
+                            self.sk_cache.insert_latest_key(&id, key.clone());
+                            Ok(key)
+                        }
+                        Err(_) => Ok(stale),
+                    }
+                }
+                CacheCheck::Miss => {
+                    let inner = self.inner.f.clone();
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    std::thread::spawn(move || {
+                        let session = Session { f: inner };
+                        drop(tx.send(session.load_latest_or_create_system_key().map(Arc::new)));
+                    });
+                    let key = rx
+                        .await
+                        .map_err(|_| anyhow::anyhow!("SK load thread panicked"))??;
+                    self.sk_cache.insert_latest_key(&id, key.clone());
+                    Ok(key)
+                }
+            }
         } else {
-            let mut loader = || -> anyhow::Result<Arc<CryptoKey>> {
-                Ok(Arc::new(self.inner.load_system_key(meta.clone())?))
-            };
-            self.sk_cache.get_or_load(&meta, &mut loader)
+            match self.sk_cache.check_meta(&meta) {
+                CacheCheck::Hit(v) | CacheCheck::StaleOther(v) | CacheCheck::StaleReload(v) => {
+                    Ok(v)
+                }
+                CacheCheck::Miss => {
+                    let inner = self.inner.f.clone();
+                    let meta_clone = meta.clone();
+                    let (tx, rx) = tokio::sync::oneshot::channel();
+                    std::thread::spawn(move || {
+                        let session = Session { f: inner };
+                        drop(tx.send(session.load_system_key(meta_clone).map(Arc::new)));
+                    });
+                    let key = rx
+                        .await
+                        .map_err(|_| anyhow::anyhow!("SK load thread panicked"))??;
+                    self.sk_cache.insert_meta_key(&meta, key.clone());
+                    Ok(key)
+                }
+            }
         }
     }
 
