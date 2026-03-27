@@ -166,8 +166,11 @@ dependencies = [
  "asherah",
  "asherah-config",
  "jni",
+ "log",
+ "once_cell",
  "serde_json",
  "serial_test",
+ "tokio",
 ]
 
 [[package]]
