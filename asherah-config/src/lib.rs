@@ -73,21 +73,20 @@ pub struct AppliedConfig {
 fn set_env_opt_str(key: &str, value: Option<&str>) {
     match value {
         Some(v) if !v.is_empty() => std::env::set_var(key, v),
-        Some(_) | None => std::env::remove_var(key),
+        Some(_) => std::env::remove_var(key), // Explicitly set to empty string → clear
+        None => {}                            // Not specified → leave existing env var alone
     }
 }
 
 fn set_env_opt_i64(key: &str, value: Option<i64>) {
-    match value {
-        Some(v) => std::env::set_var(key, v.to_string()),
-        None => std::env::remove_var(key),
+    if let Some(v) = value {
+        std::env::set_var(key, v.to_string());
     }
 }
 
 fn set_env_opt_u32(key: &str, value: Option<u32>) {
-    match value {
-        Some(v) => std::env::set_var(key, v.to_string()),
-        None => std::env::remove_var(key),
+    if let Some(v) = value {
+        std::env::set_var(key, v.to_string());
     }
 }
 

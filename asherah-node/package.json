@@ -30,6 +30,7 @@
     "test": "node test/roundtrip.js && node test/e2e-consumer.js",
     "test:unit": "node test/roundtrip.js",
     "test:e2e": "node test/e2e-consumer.js",
+    "test:e2e-aws": "node test/e2e-aws.js",
     "test:bun": "bun test/roundtrip.js"
   },
   "devDependencies": {

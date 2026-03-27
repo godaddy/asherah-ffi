@@ -285,6 +285,58 @@ impl Metastore for PostgresMetastore {
         log::debug!("postgres store: id={id} created={created} stored={stored}");
         Ok(stored)
     }
+
+    // Override async methods to use spawn_blocking. The sync `postgres` crate
+    // internally calls block_on when creating connections, which panics if
+    // called from within a tokio runtime (e.g. napi's encrypt_async path).
+    // The sync `postgres` crate internally calls block_on when creating
+    // connections and running queries. This panics from within a tokio runtime.
+    // Run on a plain OS thread (not spawn_blocking, which is still in-runtime).
+    async fn load_async(
+        &self,
+        id: &str,
+        created: i64,
+    ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        let this = self.clone();
+        let id = id.to_string();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            drop(tx.send(this.load(&id, created)));
+        });
+        rx.await
+            .map_err(|_| anyhow::anyhow!("postgres load_async thread panicked"))?
+    }
+
+    async fn load_latest_async(
+        &self,
+        id: &str,
+    ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        let this = self.clone();
+        let id = id.to_string();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            drop(tx.send(this.load_latest(&id)));
+        });
+        rx.await
+            .map_err(|_| anyhow::anyhow!("postgres load_latest_async thread panicked"))?
+    }
+
+    async fn store_async(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<bool, anyhow::Error> {
+        let this = self.clone();
+        let id = id.to_string();
+        let ekr = ekr.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            drop(tx.send(this.store(&id, created, &ekr)));
+        });
+        rx.await
+            .map_err(|_| anyhow::anyhow!("postgres store_async thread panicked"))?
+    }
 }
 
 #[cfg(test)]
