@@ -72,6 +72,7 @@ name = "asherah"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "aws-config",
  "aws-sdk-kms",
  "base64 0.22.1",

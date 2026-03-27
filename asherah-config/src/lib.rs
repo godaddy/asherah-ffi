@@ -304,3 +304,18 @@ pub fn factory_from_config(config: &ConfigOptions) -> Result<(Factory, AppliedCo
     let factory = asherah::builders::factory_from_env()?;
     Ok((factory, applied))
 }
+
+/// Async variant — uses async constructors for DynamoDB/KMS.
+/// Postgres construction uses spawn_blocking internally.
+pub async fn factory_from_config_async(config: &ConfigOptions) -> Result<(Factory, AppliedConfig)> {
+    // apply_env uses process-global env vars as config transport.
+    // Hold the lock only during apply_env, drop before the async factory build.
+    let applied = {
+        let _guard = FACTORY_BUILD_LOCK
+            .lock()
+            .map_err(|_| anyhow!("factory build lock poisoned"))?;
+        config.apply_env()?
+    };
+    let factory = asherah::builders::factory_from_env_async().await?;
+    Ok((factory, applied))
+}

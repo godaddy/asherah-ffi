@@ -141,18 +141,37 @@ pub fn setup(config: AsherahConfig) -> Result<()> {
 
 #[napi]
 pub async fn setup_async(config: AsherahConfig) -> Result<()> {
-    // DynamoDB, KMS, and Postgres constructors internally call block_on to
-    // initialize async SDK clients or database connections. This panics if
-    // called from within a tokio runtime context. tokio::spawn_blocking still
-    // runs within the runtime context (Handle::try_current() returns Ok).
-    // Use a plain OS thread to guarantee no tokio context exists.
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    std::thread::spawn(move || {
-        let result = setup(config);
-        drop(tx.send(result));
+    // Use async factory creation — DynamoDB/KMS constructors .await on this
+    // runtime instead of creating their own. Postgres uses spawn_blocking
+    // internally (sync crate).
+    let opts = to_config_options(&config);
+    let (factory, applied) = asherah_config::factory_from_config_async(&opts)
+        .await
+        .map_err(|e| Error::from_reason(format!("setup error: {e}")))?;
+
+    let dbg_env = std::env::var("ASHERAH_NODE_DEBUG")
+        .ok()
+        .map(|v| matches!(v.as_str(), "1" | "true" | "on" | "yes"));
+    DEBUG_ENABLED.store(
+        applied.verbose || dbg_env.unwrap_or(false),
+        Ordering::Relaxed,
+    );
+
+    let mut guard = STATE.lock();
+    if guard.is_some() {
+        return Err(Error::from_reason(
+            "asherah already configured; call shutdown() first",
+        ));
+    }
+
+    let max_size = config.session_cache_max_size.unwrap_or(1000) as usize;
+    *guard = Some(GlobalState {
+        factory,
+        sessions: HashMap::new(),
+        session_caching: applied.enable_session_caching,
+        session_cache_max: max_size,
     });
-    rx.await
-        .map_err(|_| Error::from_reason("setup thread panicked"))?
+    Ok(())
 }
 
 #[napi]
