@@ -5,9 +5,12 @@ require "fileutils"
 require "digest"
 require "rbconfig"
 
-# Downloads the prebuilt native library for the current platform from
-# GitHub Releases during `gem install` (fallback gem only — platform gems
-# ship the binary directly and never run this).
+# Acquires the prebuilt native library for the current platform.
+# Tries in order:
+# 1. Already exists (previous install or platform gem)
+# 2. Build from source if in a git checkout with cargo available
+# 3. Read NATIVE_VERSION from published fallback gem → download that release
+# 4. Query GitHub API for latest release → download
 module AsherahFetchNative
   REPO = "godaddy/asherah-ffi"
   MAX_ATTEMPTS = 3
@@ -26,28 +29,99 @@ module AsherahFetchNative
     ["mingw", "aarch64"]  => ["libasherah-arm64.dll",      "asherah_ffi.dll"],
   }.freeze
 
+  # Map [os, cpu] to the Rust library filename produced by cargo build.
+  CARGO_LIB_NAME = {
+    ["linux", "x86_64"]   => "libasherah_ffi.so",
+    ["linux", "aarch64"]  => "libasherah_ffi.so",
+    ["darwin", "x86_64"]  => "libasherah_ffi.dylib",
+    ["darwin", "arm64"]   => "libasherah_ffi.dylib",
+    ["mingw", "x86_64"]   => "asherah_ffi.dll",
+    ["mingw", "aarch64"]  => "asherah_ffi.dll",
+  }.freeze
+
   class << self
     def download
-      asset_name, local_name = resolve_platform
+      _asset_name, local_name = resolve_platform
       dest = File.join(NATIVE_DIR, local_name)
 
       if File.exist?(dest)
-        puts "#{dest} already exists, skipping download"
+        puts "#{dest} already exists, skipping"
         return
       end
 
+      # Try building from source (git checkout with cargo)
+      if try_build_from_source(dest)
+        return
+      end
+
+      # Fall back to downloading a prebuilt binary
+      download_prebuilt(dest)
+    end
+
+    private
+
+    def try_build_from_source(dest)
+      workspace_root = File.expand_path("..", ROOT_DIR)
+      cargo_toml = File.join(workspace_root, "Cargo.toml")
+
+      return false unless File.exist?(cargo_toml)
+
+      cargo = find_cargo
+      return false unless cargo
+
+      puts "Building native library from source (this may take a minute)..."
+      result = system(cargo, "build", "-p", "asherah-ffi", "--release",
+                       chdir: workspace_root,
+                       out: $stdout, err: $stderr)
+
+      unless result
+        puts "WARNING: cargo build failed, falling back to download"
+        return false
+      end
+
+      os, cpu = resolve_os_cpu
+      lib_name = CARGO_LIB_NAME[[os, cpu]]
+      built = File.join(workspace_root, "target", "release", lib_name)
+
+      unless File.exist?(built)
+        puts "WARNING: Expected #{built} after cargo build, falling back to download"
+        return false
+      end
+
+      FileUtils.mkdir_p(NATIVE_DIR)
+      FileUtils.cp(built, dest)
+      File.chmod(0o755, dest) unless Gem.win_platform?
+      puts "Built and installed native library: #{dest} (#{File.size(dest)} bytes)"
+      true
+    end
+
+    def find_cargo
+      # Check PATH
+      cargo = ENV["CARGO"] || "cargo"
+      return cargo if system(cargo, "--version", out: File::NULL, err: File::NULL)
+
+      # Check common install locations
+      home = ENV["HOME"] || ENV["USERPROFILE"]
+      if home
+        rustup_cargo = File.join(home, ".cargo", "bin", "cargo")
+        return rustup_cargo if File.executable?(rustup_cargo)
+      end
+
+      nil
+    end
+
+    def download_prebuilt(dest)
+      asset_name, _local_name = resolve_platform
       version = resolve_version
       url = "https://github.com/#{REPO}/releases/download/#{version}/#{asset_name}"
 
       puts "Downloading native library: #{url}"
       content = download_with_retry(url)
 
-      # Verify we got a reasonable binary (not an HTML error page)
       if content.bytesize < 1024
         abort "ERROR: Downloaded file is too small (#{content.bytesize} bytes) — likely a 404 or error page"
       end
 
-      # Verify SHA256 against checksums from the release (if available)
       verify_checksum(content, asset_name, version)
 
       FileUtils.mkdir_p(NATIVE_DIR)
@@ -56,9 +130,15 @@ module AsherahFetchNative
       puts "Installed native library: #{dest} (#{content.bytesize} bytes)"
     end
 
-    private
-
     def resolve_platform
+      os, cpu = resolve_os_cpu
+      key = [os, cpu]
+      result = PLATFORM_MAP[key]
+      abort "ERROR: Unsupported platform #{os}-#{cpu} (#{RUBY_PLATFORM})" unless result
+      result
+    end
+
+    def resolve_os_cpu
       host_os = RbConfig::CONFIG["host_os"]
       host_cpu = RbConfig::CONFIG["host_cpu"]
 
@@ -75,10 +155,7 @@ module AsherahFetchNative
             else                            host_cpu
             end
 
-      key = [os, cpu]
-      result = PLATFORM_MAP[key]
-      abort "ERROR: Unsupported platform #{os}-#{cpu} (#{RUBY_PLATFORM})" unless result
-      result
+      [os, cpu]
     end
 
     def resolve_version
@@ -143,7 +220,6 @@ module AsherahFetchNative
     end
 
     def verify_checksum(content, asset_name, version)
-      # Try to download SHA256SUMS from the release
       sums_url = "https://github.com/#{REPO}/releases/download/#{version}/SHA256SUMS"
       begin
         sums = URI.parse(sums_url).open(read_timeout: 15, open_timeout: 10).read
