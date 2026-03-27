@@ -1,19 +1,12 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
+use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions, MySqlSslMode};
+use sqlx::{MySqlPool, Row};
 
 use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
 use anyhow::Context;
-use mysql::prelude::Queryable;
-use mysql::{Opts, OptsBuilder, Pool, PoolConstraints, PoolOpts, PooledConn, SslOpts};
-use std::cell::RefCell;
-use std::fmt::Write;
-
-thread_local! {
-    /// Thread-local MySQL connection cache. Avoids pool mutex contention
-    /// when multiple metastore calls happen sequentially within one
-    /// encrypt/decrypt operation (typically 2-4 queries per operation).
-    static TL_CONN: RefCell<Option<PooledConn>> = const { RefCell::new(None) };
-}
 
 /// Convert Unix epoch seconds to a "YYYY-MM-DD HH:MM:SS" UTC datetime string.
 ///
@@ -21,20 +14,13 @@ thread_local! {
 /// formatted in UTC (the driver's default `Loc=time.UTC`) and sent as a plain
 /// datetime string without timezone info. MySQL then interprets this string in
 /// the session's `@@time_zone`.
-///
-/// Using `FROM_UNIXTIME(epoch)` is technically more correct (timezone-safe),
-/// but it produces different results than Go when `@@time_zone` isn't UTC,
-/// breaking cross-language interoperability.
 fn epoch_to_utc_datetime(epoch: i64) -> String {
-    // Seconds within the day
+    use std::fmt::Write;
     let day_secs = epoch.rem_euclid(86400);
     let hour = day_secs / 3600;
     let min = (day_secs % 3600) / 60;
     let sec = day_secs % 60;
-
-    // Days since Unix epoch (1970-01-01)
     let z = epoch.div_euclid(86400) + 719_468;
-    // Howard Hinnant's civil_from_days algorithm
     let era = (if z >= 0 { z } else { z - 146_096 }) / 146_097;
     let doe = (z - era * 146_097) as u32;
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
@@ -44,63 +30,83 @@ fn epoch_to_utc_datetime(epoch: i64) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = if m <= 2 { y + 1 } else { y };
-
     let mut buf = String::with_capacity(19);
     let _ = write!(buf, "{y:04}-{m:02}-{d:02} {hour:02}:{min:02}:{sec:02}");
     buf
 }
 
+fn parse_connect_options(url: &str) -> anyhow::Result<MySqlConnectOptions> {
+    let opts: MySqlConnectOptions = url
+        .parse()
+        .with_context(|| format!("invalid MySQL URL: {url}"))?;
+
+    // Apply TLS from MYSQL_TLS_MODE env var (matches Go go-sql-driver tls param)
+    let opts = if let Ok(tls_mode) = std::env::var("MYSQL_TLS_MODE") {
+        match tls_mode.as_str() {
+            "skip-verify" => opts.ssl_mode(MySqlSslMode::Required), // encrypted, no cert check
+            "false" => opts.ssl_mode(MySqlSslMode::Disabled),
+            _ => opts.ssl_mode(MySqlSslMode::VerifyCa), // "true", "preferred" → verify
+        }
+    } else {
+        opts
+    };
+
+    Ok(opts)
+}
+
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
 pub struct MySqlMetastore {
-    pool: Pool,
+    pool: MySqlPool,
+    /// Private runtime for sync callers (Python, Java, etc.)
+    rt: Arc<tokio::runtime::Runtime>,
 }
 
 impl MySqlMetastore {
+    /// Sync constructor — creates a private tokio runtime for the connection pool.
     pub fn connect(url: &str) -> anyhow::Result<Self> {
-        let opts: Opts = url.try_into()?;
+        let rt = tokio::runtime::Runtime::new()?;
+        let pool = rt.block_on(Self::create_pool(url))?;
+        Ok(Self {
+            pool,
+            rt: Arc::new(rt),
+        })
+    }
 
-        // Only override MySQL default pool (min=10, max=100) with saner defaults
-        // (min=0, max=10). If the user explicitly set pool_min/pool_max in their
-        // connection URL, those will differ from defaults and we respect them.
-        let constraints = opts.get_pool_opts().constraints();
-        let need_pool_defaults = constraints.min() == PoolConstraints::DEFAULT.min()
-            && constraints.max() == PoolConstraints::DEFAULT.max();
+    /// Async constructor — creates the pool on the caller's runtime.
+    pub async fn connect_async(url: &str) -> anyhow::Result<Self> {
+        let pool = Self::create_pool(url).await?;
+        let rt = tokio::runtime::Runtime::new()?;
+        Ok(Self {
+            pool,
+            rt: Arc::new(rt),
+        })
+    }
 
-        let mut builder = OptsBuilder::from_opts(opts);
+    async fn create_pool(url: &str) -> anyhow::Result<MySqlPool> {
+        let opts = parse_connect_options(url)?;
+        let max_pool = std::env::var("ASHERAH_POOL_SIZE")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .unwrap_or(10);
 
-        // Apply TLS configuration from MYSQL_TLS_MODE env var.
-        // Values match Go go-sql-driver/mysql `tls` parameter:
-        //   "skip-verify" → TLS required, skip certificate verification
-        //   "true"        → TLS required with certificate verification
-        //   "false"       → TLS disabled (explicit)
-        //   "preferred"   → TLS required with verification (best-effort mapping)
-        if let Ok(tls_mode) = std::env::var("MYSQL_TLS_MODE") {
-            match tls_mode.as_str() {
-                "skip-verify" => {
-                    builder = builder.ssl_opts(Some(
-                        SslOpts::default()
-                            .with_danger_accept_invalid_certs(true)
-                            .with_danger_skip_domain_validation(true),
-                    ));
-                }
-                "false" => {
-                    builder = builder.ssl_opts(None::<SslOpts>);
-                }
-                // "true", "preferred", or any other value → require TLS with verification
-                _ => {
-                    builder = builder.ssl_opts(Some(SslOpts::default()));
-                }
-            }
-        }
+        let pool = MySqlPoolOptions::new()
+            .min_connections(1)
+            .max_connections(max_pool.max(1))
+            .connect_with(opts)
+            .await
+            .context("MySQL connection pool creation failed")?;
 
-        // Aurora MySQL write forwarding: set replica read consistency on each connection
+        // Aurora replica read consistency
         if let Ok(consistency) = std::env::var("REPLICA_READ_CONSISTENCY") {
             match consistency.as_str() {
                 "eventual" | "global" | "session" => {
-                    builder = builder.init(vec![format!(
+                    sqlx::query(&format!(
                         "SET aurora_replica_read_consistency = '{consistency}'"
-                    )]);
+                    ))
+                    .execute(&pool)
+                    .await
+                    .context("Failed to set aurora_replica_read_consistency")?;
                 }
                 _ => {
                     anyhow::bail!(
@@ -111,61 +117,40 @@ impl MySqlMetastore {
             }
         }
 
-        if need_pool_defaults {
-            // min=1 validates the connection at setup (fail-fast on bad URL/credentials)
-            // and keeps one warm connection ready. Max defaults to 10, configurable via
-            // ASHERAH_POOL_SIZE.
-            let max_pool = std::env::var("ASHERAH_POOL_SIZE")
-                .ok()
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(10);
-            builder = builder.pool_opts(PoolOpts::default().with_constraints(
-                PoolConstraints::new(1, max_pool.max(1)).expect("valid: min=1 <= max>=1"),
-            ));
+        Ok(pool)
+    }
+
+    fn block_on_maybe<F: std::future::Future>(&self, f: F) -> F::Output {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            tokio::task::block_in_place(|| self.rt.block_on(f))
+        } else {
+            self.rt.block_on(f)
         }
-
-        let pool = Pool::new(builder)?;
-        Ok(Self { pool })
     }
 
-    fn conn(&self) -> anyhow::Result<PooledConn> {
-        // Thread-local connection cache: reuse the last connection on this thread
-        // to avoid pool mutex contention on sequential load/store calls within a
-        // single encrypt or decrypt operation (typically 2-4 queries).
-        let reused = TL_CONN.with(|cell| cell.borrow_mut().take());
-        if let Some(conn) = reused {
-            return Ok(conn);
-        }
+    // ── Async query implementations ──
 
-        self.pool.get_conn().map_err(|e| {
-            log::error!("MySQL connection pool error: {e:#}");
-            anyhow::anyhow!("MySQL connection failed: {e}")
-        })
-    }
-
-    /// Return a connection to the thread-local cache for reuse by the next
-    /// metastore call on this thread.
-    fn return_conn(conn: PooledConn) {
-        TL_CONN.with(|cell| {
-            *cell.borrow_mut() = Some(conn);
-        });
-    }
-}
-
-#[async_trait]
-impl Metastore for MySqlMetastore {
-    fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+    async fn load_impl(
+        &self,
+        id: &str,
+        created: i64,
+    ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         log::debug!("mysql load: id={id} created={created}");
-        let mut conn = self.conn()?;
         let ts = epoch_to_utc_datetime(created);
-        let row: Option<(String,)> = conn
-            .exec_first(
-                "SELECT key_record FROM encryption_key WHERE id=? AND created=?",
-                (id, &ts),
-            )
-            .with_context(|| format!("MySQL load query failed for id={id} created={created}"))?;
-        Self::return_conn(conn);
-        if let Some((json_str,)) = row {
+        let row: Option<sqlx::mysql::MySqlRow> =
+            sqlx::query("SELECT key_record FROM encryption_key WHERE id=? AND created=?")
+                .bind(id)
+                .bind(&ts)
+                .fetch_optional(&self.pool)
+                .await
+                .with_context(|| {
+                    format!("MySQL load query failed for id={id} created={created}")
+                })?;
+
+        if let Some(row) = row {
+            let json_str: String = row
+                .try_get("key_record")
+                .context("MySQL load: failed to get key_record column")?;
             log::debug!("mysql load hit: id={id} created={created}");
             let ekr = EnvelopeKeyRecord::from_json_fast(&json_str).with_context(|| {
                 format!("MySQL load: failed to parse key_record JSON for id={id}")
@@ -177,17 +162,20 @@ impl Metastore for MySqlMetastore {
         }
     }
 
-    fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+    async fn load_latest_impl(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         log::debug!("mysql load_latest: id={id}");
-        let mut conn = self.conn()?;
-        let row: Option<(String,)> = conn
-            .exec_first(
-                "SELECT key_record FROM encryption_key WHERE id=? ORDER BY created DESC LIMIT 1",
-                (id,),
-            )
-            .with_context(|| format!("MySQL load_latest query failed for id={id}"))?;
-        Self::return_conn(conn);
-        if let Some((json_str,)) = row {
+        let row: Option<sqlx::mysql::MySqlRow> = sqlx::query(
+            "SELECT key_record FROM encryption_key WHERE id=? ORDER BY created DESC LIMIT 1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .with_context(|| format!("MySQL load_latest query failed for id={id}"))?;
+
+        if let Some(row) = row {
+            let json_str: String = row
+                .try_get("key_record")
+                .context("MySQL load_latest: failed to get key_record column")?;
             log::debug!("mysql load_latest hit: id={id}");
             let ekr = EnvelopeKeyRecord::from_json_fast(&json_str).with_context(|| {
                 format!("MySQL load_latest: failed to parse key_record JSON for id={id}")
@@ -199,7 +187,7 @@ impl Metastore for MySqlMetastore {
         }
     }
 
-    fn store(
+    async fn store_impl(
         &self,
         id: &str,
         created: i64,
@@ -207,47 +195,55 @@ impl Metastore for MySqlMetastore {
     ) -> Result<bool, anyhow::Error> {
         log::debug!("mysql store: id={id} created={created}");
         let rec = ekr.to_json_fast();
-        let mut conn = self.conn()?;
         let ts = epoch_to_utc_datetime(created);
-        conn.exec_drop(
+        let result = sqlx::query(
             "INSERT IGNORE INTO encryption_key(id, created, key_record) VALUES(?, ?, CAST(? AS JSON))",
-            (id, &ts, rec),
-        ).with_context(|| format!("MySQL store insert failed for id={id} created={created}"))?;
-        let stored = conn.affected_rows() > 0;
-        Self::return_conn(conn);
+        )
+        .bind(id)
+        .bind(&ts)
+        .bind(rec)
+        .execute(&self.pool)
+        .await
+        .with_context(|| format!("MySQL store insert failed for id={id} created={created}"))?;
+
+        let stored = result.rows_affected() > 0;
         log::debug!("mysql store: id={id} created={created} stored={stored}");
         Ok(stored)
     }
+}
 
-    // The sync mysql crate does blocking I/O. Run on a plain OS thread to
-    // avoid blocking the tokio worker during async encrypt/decrypt.
+#[async_trait]
+impl Metastore for MySqlMetastore {
+    fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        self.block_on_maybe(self.load_impl(id, created))
+    }
+
+    fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        self.block_on_maybe(self.load_latest_impl(id))
+    }
+
+    fn store(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<bool, anyhow::Error> {
+        self.block_on_maybe(self.store_impl(id, created, ekr))
+    }
+
     async fn load_async(
         &self,
         id: &str,
         created: i64,
     ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
-        let this = self.clone();
-        let id = id.to_string();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        std::thread::spawn(move || {
-            drop(tx.send(this.load(&id, created)));
-        });
-        rx.await
-            .map_err(|_| anyhow::anyhow!("mysql load_async thread panicked"))?
+        self.load_impl(id, created).await
     }
 
     async fn load_latest_async(
         &self,
         id: &str,
     ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
-        let this = self.clone();
-        let id = id.to_string();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        std::thread::spawn(move || {
-            drop(tx.send(this.load_latest(&id)));
-        });
-        rx.await
-            .map_err(|_| anyhow::anyhow!("mysql load_latest_async thread panicked"))?
+        self.load_latest_impl(id).await
     }
 
     async fn store_async(
@@ -256,15 +252,7 @@ impl Metastore for MySqlMetastore {
         created: i64,
         ekr: &EnvelopeKeyRecord,
     ) -> Result<bool, anyhow::Error> {
-        let this = self.clone();
-        let id = id.to_string();
-        let ekr = ekr.clone();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        std::thread::spawn(move || {
-            drop(tx.send(this.store(&id, created, &ekr)));
-        });
-        rx.await
-            .map_err(|_| anyhow::anyhow!("mysql store_async thread panicked"))?
+        self.store_impl(id, created, ekr).await
     }
 }
 
@@ -279,31 +267,26 @@ mod tests {
 
     #[test]
     fn epoch_known_date() {
-        // 2024-01-15 13:30:00 UTC = 1705325400
         assert_eq!(epoch_to_utc_datetime(1_705_325_400), "2024-01-15 13:30:00");
     }
 
     #[test]
     fn epoch_recent() {
-        // 2026-03-12 12:58:00 UTC = 1773320280
         assert_eq!(epoch_to_utc_datetime(1_773_320_280), "2026-03-12 12:58:00");
     }
 
     #[test]
     fn epoch_leap_year() {
-        // 2024-02-29 12:00:00 UTC = 1709208000
         assert_eq!(epoch_to_utc_datetime(1_709_208_000), "2024-02-29 12:00:00");
     }
 
     #[test]
     fn epoch_end_of_day() {
-        // 2023-12-31 23:59:59 UTC = 1704067199
         assert_eq!(epoch_to_utc_datetime(1_704_067_199), "2023-12-31 23:59:59");
     }
 
     #[test]
     fn epoch_y2k() {
-        // 2000-01-01 00:00:00 UTC = 946684800
         assert_eq!(epoch_to_utc_datetime(946_684_800), "2000-01-01 00:00:00");
     }
 }
