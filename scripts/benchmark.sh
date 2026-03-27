@@ -894,10 +894,19 @@ run();
 }
 
 if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/asherah-node-bench/node_modules/tinybench" ]; then
-    # Ensure release addon is built (interop tests may have built debug)
+    # Ensure release addon is built and copied to the platform-specific location
+    # that npm/index.js loads first. Without this, a stale debug binary in the
+    # platform directory would be loaded instead of the release build.
     if [ -f "$ROOT_DIR/asherah-node/package.json" ] && command -v npx >/dev/null 2>&1; then
         log "Building Node.js addon (release)..."
         (cd "$ROOT_DIR/asherah-node" && npx @napi-rs/cli build --release 2>&1 | tail -1) || true
+        # Copy release binary to platform directory so npm/index.js loads it
+        for platdir in "$ROOT_DIR"/asherah-node/npm/*/; do
+            platbin=$(find "$platdir" -name '*.node' 2>/dev/null | head -1)
+            if [ -n "$platbin" ] && [ -f "$ROOT_DIR/asherah-node/index.node" ]; then
+                cp "$ROOT_DIR/asherah-node/index.node" "$platbin"
+            fi
+        done
     fi
     reset_mysql
     log "Running Node.js FFI benchmark (tinybench, sync)..."
