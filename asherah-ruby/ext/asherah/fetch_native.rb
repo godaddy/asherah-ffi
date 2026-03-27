@@ -84,20 +84,14 @@ module AsherahFetchNative
     def resolve_version
       # The native binary version tracks asherah-ffi releases (v0.6.x), not the
       # gem version (0.9.x which tracks the canonical asherah-ruby gem).
-      # Check for an explicit native version file first, then query GitHub API.
-      native_version_file = File.join(ROOT_DIR, "NATIVE_VERSION")
-      if File.exist?(native_version_file)
-        tag = File.read(native_version_file).strip
-        return tag unless tag.empty?
-      end
-
-      # Fall back: query GitHub API for latest release
+      # Always fetch the latest release tag from GitHub.
       puts "Resolving latest release version from GitHub..."
       require "json"
       api_url = "https://api.github.com/repos/#{REPO}/releases/latest"
       response = URI.parse(api_url).open("Accept" => "application/vnd.github+json").read
       tag = JSON.parse(response)["tag_name"]
       abort "ERROR: Could not determine release version" if tag.nil? || tag.empty?
+      puts "Using release: #{tag}"
       tag
     end
 
