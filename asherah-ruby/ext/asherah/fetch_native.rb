@@ -84,6 +84,16 @@ module AsherahFetchNative
       # workflow with the release tag (e.g. "v0.6.73"). It is not committed
       # to the repo — the gem version and the native binary version are
       # intentionally decoupled.
+      # Environment variable override: NATIVE_VERSION=v0.6.22 bundle install
+      env_version = ENV["NATIVE_VERSION"]
+      if env_version && !env_version.strip.empty?
+        tag = env_version.strip
+        tag = "v#{tag}" unless tag.start_with?("v")
+        puts "Using native version from environment: #{tag}"
+        return tag
+      end
+
+      # Published fallback gems have NATIVE_VERSION stamped by the publish workflow
       native_version_file = File.join(ROOT_DIR, "NATIVE_VERSION")
       if File.exist?(native_version_file)
         tag = File.read(native_version_file).strip
