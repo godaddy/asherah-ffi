@@ -41,7 +41,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
-          echo "RELEASE_TAG=${TAG}" >> "$GITHUB_ENV"
           echo "Downloading native libs from release ${TAG}"
 
           mkdir -p /tmp/native-dl
@@ -105,10 +104,7 @@ jobs:
           # Build fallback ruby-platform gem (no binary — downloads at install time)
           echo "=== Building fallback (ruby platform) gem ==="
           rm -rf lib/asherah/native
-          # Stamp the release tag so fetch_native.rb downloads the right version
-          echo "${RELEASE_TAG}" > NATIVE_VERSION
           gem build asherah.gemspec && mv *.gem pkg/
-          rm -f NATIVE_VERSION
           mkdir -p lib/asherah/native
 
           echo ""
