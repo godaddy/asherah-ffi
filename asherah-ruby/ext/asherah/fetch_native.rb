@@ -66,6 +66,12 @@ module AsherahFetchNative
 
       return false unless File.exist?(cargo_toml)
 
+      # A C compiler is required for ring, rusqlite, and vendored OpenSSL.
+      unless has_c_compiler?
+        puts "No C compiler found (needed for native build), falling back to download"
+        return false
+      end
+
       cargo = find_cargo
       return false unless cargo
 
@@ -93,6 +99,10 @@ module AsherahFetchNative
       File.chmod(0o755, dest) unless Gem.win_platform?
       puts "Built and installed native library: #{dest} (#{File.size(dest)} bytes)"
       true
+    end
+
+    def has_c_compiler?
+      %w[cc gcc clang].any? { |cmd| system("#{cmd} --version", out: File::NULL, err: File::NULL) }
     end
 
     def find_cargo
