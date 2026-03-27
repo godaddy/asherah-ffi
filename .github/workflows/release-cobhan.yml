@@ -1,7 +1,7 @@
 name: Release Asherah Native Library
 
 permissions:
-  contents: write
+  contents: read
 
 on:
   release:
@@ -343,28 +343,3 @@ jobs:
           echo ""
           echo "=============================================="
 
-  # Update NATIVE_VERSION in the repo so Ruby git-sourced installs
-  # download binaries matching this release.
-  update-native-version:
-    needs: upload-release
-    if: github.event_name == 'release'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          ref: main
-      - name: Update NATIVE_VERSION
-        run: |
-          TAG="${{ github.ref_name }}"
-          echo "${TAG}" > asherah-ruby/NATIVE_VERSION
-          if git diff --quiet asherah-ruby/NATIVE_VERSION; then
-            echo "NATIVE_VERSION already at ${TAG}"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add asherah-ruby/NATIVE_VERSION
-            git commit -m "chore: update Ruby NATIVE_VERSION to ${TAG}"
-            git push
-          fi
