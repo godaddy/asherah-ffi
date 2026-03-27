@@ -173,7 +173,16 @@ start_mysql_container() {
         exit 2
     fi
 
+    # Kill any orphaned benchmark MySQL containers from previous runs
+    local stale
+    stale="$(docker ps -a --filter label=asherah-benchmark-mysql -q 2>/dev/null || true)"
+    if [ -n "$stale" ]; then
+        log "Cleaning up $(echo "$stale" | wc -l | tr -d ' ') orphaned benchmark MySQL container(s)..."
+        echo "$stale" | xargs docker rm -f >/dev/null 2>&1 || true
+    fi
+
     MYSQL_CONTAINER_ID="$(docker run -d --rm \
+        --label asherah-benchmark-mysql \
         -e MYSQL_DATABASE=test \
         -e MYSQL_ALLOW_EMPTY_PASSWORD=yes \
         -p 127.0.0.1::3306 \
@@ -433,53 +442,64 @@ if [ "$RUST_ONLY" = 0 ]; then
 # BEGIN non-Rust benchmarks (indented block)
 
 ########################################################################
-# .NET FFI + Canonical (BenchmarkDotNet)
+# .NET FFI (BenchmarkDotNet)
 ########################################################################
 
-if [ "$HAVE_DOTNET" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
-    reset_mysql
-    log "Running .NET benchmark (BenchmarkDotNet)..."
-    if dotnet run --project "$BENCH_DIR/dotnet-bench" -c Release > "$RESULTS_DIR/bdn.log" 2>&1; then
-        python3 -c "
+parse_bdn_log() {
+    local log_file=$1 impl_name=$2 out_file=$3
+    python3 -c "
 import re, sys
 results = {}
-for line in open('$RESULTS_DIR/bdn.log'):
+for line in open('$log_file'):
     if '|' not in line or 'Method' in line or '---' in line: continue
     parts = [p.strip() for p in line.split('|')]
     if len(parts) < 6: continue
-    name_field = parts[1]
-    cat_field = parts[2]
-    size_field = parts[3]
-    mean_field = parts[4]
+    name_field, cat_field, size_field, mean_field = parts[1], parts[2], parts[3], parts[4]
     if not size_field.strip().isdigit(): continue
-    for impl_name in ['Rust FFI', 'Canonical C# v0.2.10']:
-        if impl_name in name_field:
-            size = int(size_field)
-            m = re.search(r'([\d,]+\.?\d*)\s*(ns|us|µs|ms)', mean_field)
-            if m:
-                val = float(m.group(1).replace(',', ''))
-                unit = m.group(2)
-                if unit in ('us', 'µs'): val *= 1000
-                elif unit == 'ms': val *= 1_000_000
-                results.setdefault(impl_name, {}).setdefault(cat_field, {})[size] = int(val)
+    if '$impl_name' in name_field:
+        size = int(size_field)
+        m = re.search(r'([\d,]+\.?\d*)\s*(ns|us|µs|ms)', mean_field)
+        if m:
+            val = float(m.group(1).replace(',', ''))
+            unit = m.group(2)
+            if unit in ('us', 'µs'): val *= 1000
+            elif unit == 'ms': val *= 1_000_000
+            results.setdefault(cat_field, {})[size] = int(val)
 if not results:
-    print('BDN produced no results. Log tail:', file=sys.stderr)
-    lines = open('$RESULTS_DIR/bdn.log').readlines()
+    print('BDN produced no results for $impl_name. Log tail:', file=sys.stderr)
+    lines = open('$log_file').readlines()
     for line in lines[-30:]:
         print('  ' + line.rstrip(), file=sys.stderr)
-canon_pairs = [('Canonical C# v0.2.10', '90_Canonical_C#_v0.2.10')] if '$BENCH_MODE' in ('memory', 'hot') else []
-for name, fname in [('Rust FFI', '02_.NET_FFI')] + canon_pairs:
-    d = results.get(name, {})
-    e, dc = d.get('Encrypt', {}), d.get('Decrypt', {})
-    with open('$RESULTS_DIR/' + fname, 'w') as f:
+else:
+    e, dc = results.get('Encrypt', {}), results.get('Decrypt', {})
+    with open('$out_file', 'w') as f:
         f.write(f\"{e.get(64,0)} {e.get(1024,0)} {e.get(8192,0)} {dc.get(64,0)} {dc.get(1024,0)} {dc.get(8192,0)}\n\")
 "
+}
+
+if [ "$HAVE_DOTNET" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
+    reset_mysql
+    log "Running .NET FFI benchmark (BenchmarkDotNet)..."
+    if dotnet run --project "$BENCH_DIR/dotnet-bench" -c Release > "$RESULTS_DIR/bdn_ffi.log" 2>&1; then
+        parse_bdn_log "$RESULTS_DIR/bdn_ffi.log" "Rust FFI" "$RESULTS_DIR/02_.NET_FFI"
     else
-        skip ".NET benchmark failed. Log tail:"
-        tail -20 "$RESULTS_DIR/bdn.log" 2>/dev/null >&2
+        skip ".NET FFI benchmark failed (see log): $(tail -5 "$RESULTS_DIR/bdn_ffi.log" 2>/dev/null)"
     fi
 else
     skip ".NET SDK or Rust FFI lib not available"
+fi
+
+########################################################################
+# .NET Canonical (BenchmarkDotNet)
+########################################################################
+
+if [ "$HAVE_DOTNET" = 1 ] && [ "$BENCH_MODE" = "memory" -o "$BENCH_MODE" = "hot" ]; then
+    log "Running .NET Canonical benchmark (BenchmarkDotNet)..."
+    if dotnet run --project "$BENCH_DIR/dotnet-bench-canonical" -c Release > "$RESULTS_DIR/bdn_canon.log" 2>&1; then
+        parse_bdn_log "$RESULTS_DIR/bdn_canon.log" "Canonical C#" "$RESULTS_DIR/90_Canonical_C#_v0.2.10"
+    else
+        skip ".NET Canonical benchmark failed (see log): $(tail -5 "$RESULTS_DIR/bdn_canon.log" 2>/dev/null)"
+    fi
 fi
 
 ########################################################################
