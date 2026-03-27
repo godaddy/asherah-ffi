@@ -103,15 +103,17 @@ module AsherahFetchNative
         end
       end
 
-      # Fallback: query GitHub API for latest release
-      puts "NATIVE_VERSION not found, resolving latest release from GitHub..."
-      require "json"
-      api_url = "https://api.github.com/repos/#{REPO}/releases/latest"
-      response = URI.parse(api_url).open("Accept" => "application/vnd.github+json").read
-      tag = JSON.parse(response)["tag_name"]
-      abort "ERROR: Could not determine release version" if tag.nil? || tag.empty?
-      puts "Using release: #{tag}"
-      tag
+      abort <<~MSG
+        ERROR: Native binary version not specified.
+
+        Set the NATIVE_VERSION environment variable to the release tag:
+          NATIVE_VERSION=0.6.73 bundle install
+
+        Or create a NATIVE_VERSION file in the asherah-ruby directory:
+          echo "v0.6.73" > asherah-ruby/NATIVE_VERSION
+
+        Available releases: https://github.com/#{REPO}/releases
+      MSG
     end
 
     def download_with_retry(url)
