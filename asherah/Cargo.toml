@@ -41,7 +41,7 @@ path = "src/bin/interop.rs"
 
 [features]
 sqlite = ["dep:rusqlite"]
-mysql = ["dep:sqlx"]
+mysql = ["dep:mysql", "dep:sqlx"]
 postgres = ["dep:postgres", "dep:postgres-native-tls", "dep:native-tls", "dep:openssl"]
 dynamodb = ["dep:aws-sdk-dynamodb"]
 cucumber_xlang = []
@@ -64,6 +64,11 @@ optional = true
 [dependencies.tokio]
 version = "1"
 features = ["rt-multi-thread", "macros"]
+
+[dependencies.mysql]
+version = "27"
+optional = true
+features = ["native-tls"]
 
 [dependencies.sqlx]
 version = "0.8"

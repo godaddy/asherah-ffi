@@ -1,6 +1,9 @@
-use std::sync::Arc;
+use std::cell::RefCell;
+use std::fmt::Write;
 
 use async_trait::async_trait;
+use mysql::prelude::Queryable;
+use mysql::{Opts, OptsBuilder, Pool, PoolConstraints, PoolOpts, PooledConn, SslOpts};
 use sqlx::mysql::{MySqlConnectOptions, MySqlPoolOptions, MySqlSslMode};
 use sqlx::{MySqlPool, Row};
 
@@ -8,14 +11,13 @@ use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
 use anyhow::Context;
 
+thread_local! {
+    /// Thread-local MySQL connection cache for the sync path.
+    static TL_CONN: RefCell<Option<PooledConn>> = const { RefCell::new(None) };
+}
+
 /// Convert Unix epoch seconds to a "YYYY-MM-DD HH:MM:SS" UTC datetime string.
-///
-/// This matches the Go go-sql-driver/mysql behavior: `time.Unix(epoch, 0)` is
-/// formatted in UTC (the driver's default `Loc=time.UTC`) and sent as a plain
-/// datetime string without timezone info. MySQL then interprets this string in
-/// the session's `@@time_zone`.
 fn epoch_to_utc_datetime(epoch: i64) -> String {
-    use std::fmt::Write;
     let day_secs = epoch.rem_euclid(86400);
     let hour = day_secs / 3600;
     let min = (day_secs % 3600) / 60;
@@ -35,122 +37,150 @@ fn epoch_to_utc_datetime(epoch: i64) -> String {
     buf
 }
 
-fn parse_connect_options(url: &str) -> anyhow::Result<MySqlConnectOptions> {
-    let opts: MySqlConnectOptions = url
-        .parse()
-        .with_context(|| format!("invalid MySQL URL: {url}"))?;
-
-    // Apply TLS from MYSQL_TLS_MODE env var (matches Go go-sql-driver tls param)
-    let opts = if let Ok(tls_mode) = std::env::var("MYSQL_TLS_MODE") {
-        match tls_mode.as_str() {
-            "skip-verify" => opts.ssl_mode(MySqlSslMode::Required), // encrypted, no cert check
-            "false" => opts.ssl_mode(MySqlSslMode::Disabled),
-            _ => opts.ssl_mode(MySqlSslMode::VerifyCa), // "true", "preferred" → verify
-        }
-    } else {
-        opts
-    };
-
-    Ok(opts)
-}
-
+/// MySQL metastore with dual connection pools:
+/// - Sync pool (mysql crate): direct blocking I/O with thread-local caching, zero runtime overhead
+/// - Async pool (sqlx): truly async I/O for Node.js encrypt_async/decrypt_async
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
 pub struct MySqlMetastore {
-    pool: MySqlPool,
-    /// Private runtime for sync callers (Python, Java, etc.)
-    rt: Arc<tokio::runtime::Runtime>,
+    sync_pool: Pool,
+    async_pool: MySqlPool,
 }
 
 impl MySqlMetastore {
-    /// Sync constructor — creates a private tokio runtime for the connection pool.
+    /// Sync constructor.
     pub fn connect(url: &str) -> anyhow::Result<Self> {
+        let sync_pool = Self::create_sync_pool(url)?;
         let rt = tokio::runtime::Runtime::new()?;
-        let pool = rt.block_on(Self::create_pool(url))?;
+        let async_pool = rt.block_on(Self::create_async_pool(url))?;
+        drop(rt);
         Ok(Self {
-            pool,
-            rt: Arc::new(rt),
+            sync_pool,
+            async_pool,
         })
     }
 
-    /// Async constructor — creates the pool on the caller's runtime.
+    /// Async constructor.
     pub async fn connect_async(url: &str) -> anyhow::Result<Self> {
-        let pool = Self::create_pool(url).await?;
-        let rt = tokio::runtime::Runtime::new()?;
+        let sync_pool = Self::create_sync_pool(url)?;
+        let async_pool = Self::create_async_pool(url).await?;
         Ok(Self {
-            pool,
-            rt: Arc::new(rt),
+            sync_pool,
+            async_pool,
         })
     }
 
-    async fn create_pool(url: &str) -> anyhow::Result<MySqlPool> {
-        let opts = parse_connect_options(url)?;
+    fn create_sync_pool(url: &str) -> anyhow::Result<Pool> {
+        let opts: Opts = url.try_into()?;
+        let constraints = opts.get_pool_opts().constraints();
+        let need_pool_defaults = constraints.min() == PoolConstraints::DEFAULT.min()
+            && constraints.max() == PoolConstraints::DEFAULT.max();
+        let mut builder = OptsBuilder::from_opts(opts);
+
+        if let Ok(tls_mode) = std::env::var("MYSQL_TLS_MODE") {
+            match tls_mode.as_str() {
+                "skip-verify" => {
+                    builder = builder.ssl_opts(Some(
+                        SslOpts::default()
+                            .with_danger_accept_invalid_certs(true)
+                            .with_danger_skip_domain_validation(true),
+                    ));
+                }
+                "false" => {
+                    builder = builder.ssl_opts(None::<SslOpts>);
+                }
+                _ => {
+                    builder = builder.ssl_opts(Some(SslOpts::default()));
+                }
+            }
+        }
+
+        if let Ok(consistency) = std::env::var("REPLICA_READ_CONSISTENCY") {
+            match consistency.as_str() {
+                "eventual" | "global" | "session" => {
+                    builder = builder.init(vec![format!(
+                        "SET aurora_replica_read_consistency = '{consistency}'"
+                    )]);
+                }
+                _ => {
+                    anyhow::bail!("invalid REPLICA_READ_CONSISTENCY value: '{consistency}'");
+                }
+            }
+        }
+
+        if need_pool_defaults {
+            let max_pool = std::env::var("ASHERAH_POOL_SIZE")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(10);
+            builder = builder.pool_opts(PoolOpts::default().with_constraints(
+                PoolConstraints::new(1, max_pool.max(1)).expect("valid: min=1 <= max>=1"),
+            ));
+        }
+
+        Ok(Pool::new(builder)?)
+    }
+
+    async fn create_async_pool(url: &str) -> anyhow::Result<MySqlPool> {
+        let opts: MySqlConnectOptions = url
+            .parse()
+            .with_context(|| format!("invalid MySQL URL for async pool: {url}"))?;
+        let opts = if let Ok(tls_mode) = std::env::var("MYSQL_TLS_MODE") {
+            match tls_mode.as_str() {
+                "skip-verify" => opts.ssl_mode(MySqlSslMode::Required),
+                "false" => opts.ssl_mode(MySqlSslMode::Disabled),
+                _ => opts.ssl_mode(MySqlSslMode::VerifyCa),
+            }
+        } else {
+            opts
+        };
         let max_pool = std::env::var("ASHERAH_POOL_SIZE")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(10);
-
         let pool = MySqlPoolOptions::new()
             .min_connections(1)
             .max_connections(max_pool.max(1))
             .connect_with(opts)
             .await
-            .context("MySQL connection pool creation failed")?;
-
-        // Aurora replica read consistency
-        if let Ok(consistency) = std::env::var("REPLICA_READ_CONSISTENCY") {
-            match consistency.as_str() {
-                "eventual" | "global" | "session" => {
-                    sqlx::query(&format!(
-                        "SET aurora_replica_read_consistency = '{consistency}'"
-                    ))
-                    .execute(&pool)
-                    .await
-                    .context("Failed to set aurora_replica_read_consistency")?;
-                }
-                _ => {
-                    anyhow::bail!(
-                        "invalid REPLICA_READ_CONSISTENCY value: '{}' (expected eventual, global, or session)",
-                        consistency
-                    );
-                }
-            }
-        }
-
+            .context("MySQL async pool creation failed")?;
         Ok(pool)
     }
 
-    fn block_on_maybe<F: std::future::Future>(&self, f: F) -> F::Output {
-        if tokio::runtime::Handle::try_current().is_ok() {
-            tokio::task::block_in_place(|| self.rt.block_on(f))
-        } else {
-            self.rt.block_on(f)
+    fn conn(&self) -> anyhow::Result<PooledConn> {
+        let reused = TL_CONN.with(|cell| cell.borrow_mut().take());
+        if let Some(conn) = reused {
+            return Ok(conn);
         }
+        self.sync_pool.get_conn().map_err(|e| {
+            log::error!("MySQL connection pool error: {e:#}");
+            anyhow::anyhow!("MySQL connection failed: {e}")
+        })
     }
 
-    // ── Async query implementations ──
+    fn return_conn(conn: PooledConn) {
+        TL_CONN.with(|cell| {
+            *cell.borrow_mut() = Some(conn);
+        });
+    }
+}
 
-    async fn load_impl(
-        &self,
-        id: &str,
-        created: i64,
-    ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+#[async_trait]
+impl Metastore for MySqlMetastore {
+    // ── Sync methods (mysql crate — zero runtime overhead) ──
+
+    fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         log::debug!("mysql load: id={id} created={created}");
+        let mut conn = self.conn()?;
         let ts = epoch_to_utc_datetime(created);
-        let row: Option<sqlx::mysql::MySqlRow> =
-            sqlx::query("SELECT key_record FROM encryption_key WHERE id=? AND created=?")
-                .bind(id)
-                .bind(&ts)
-                .fetch_optional(&self.pool)
-                .await
-                .with_context(|| {
-                    format!("MySQL load query failed for id={id} created={created}")
-                })?;
-
-        if let Some(row) = row {
-            let json_str: String = row
-                .try_get("key_record")
-                .context("MySQL load: failed to get key_record column")?;
+        let row: Option<(String,)> = conn
+            .exec_first(
+                "SELECT key_record FROM encryption_key WHERE id=? AND created=?",
+                (id, &ts),
+            )
+            .with_context(|| format!("MySQL load query failed for id={id} created={created}"))?;
+        Self::return_conn(conn);
+        if let Some((json_str,)) = row {
             log::debug!("mysql load hit: id={id} created={created}");
             let ekr = EnvelopeKeyRecord::from_json_fast(&json_str).with_context(|| {
                 format!("MySQL load: failed to parse key_record JSON for id={id}")
@@ -162,20 +192,17 @@ impl MySqlMetastore {
         }
     }
 
-    async fn load_latest_impl(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+    fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         log::debug!("mysql load_latest: id={id}");
-        let row: Option<sqlx::mysql::MySqlRow> = sqlx::query(
-            "SELECT key_record FROM encryption_key WHERE id=? ORDER BY created DESC LIMIT 1",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
-        .with_context(|| format!("MySQL load_latest query failed for id={id}"))?;
-
-        if let Some(row) = row {
-            let json_str: String = row
-                .try_get("key_record")
-                .context("MySQL load_latest: failed to get key_record column")?;
+        let mut conn = self.conn()?;
+        let row: Option<(String,)> = conn
+            .exec_first(
+                "SELECT key_record FROM encryption_key WHERE id=? ORDER BY created DESC LIMIT 1",
+                (id,),
+            )
+            .with_context(|| format!("MySQL load_latest query failed for id={id}"))?;
+        Self::return_conn(conn);
+        if let Some((json_str,)) = row {
             log::debug!("mysql load_latest hit: id={id}");
             let ekr = EnvelopeKeyRecord::from_json_fast(&json_str).with_context(|| {
                 format!("MySQL load_latest: failed to parse key_record JSON for id={id}")
@@ -187,7 +214,7 @@ impl MySqlMetastore {
         }
     }
 
-    async fn store_impl(
+    fn store(
         &self,
         id: &str,
         created: i64,
@@ -195,55 +222,77 @@ impl MySqlMetastore {
     ) -> Result<bool, anyhow::Error> {
         log::debug!("mysql store: id={id} created={created}");
         let rec = ekr.to_json_fast();
+        let mut conn = self.conn()?;
         let ts = epoch_to_utc_datetime(created);
-        let result = sqlx::query(
+        conn.exec_drop(
             "INSERT IGNORE INTO encryption_key(id, created, key_record) VALUES(?, ?, CAST(? AS JSON))",
-        )
-        .bind(id)
-        .bind(&ts)
-        .bind(rec)
-        .execute(&self.pool)
-        .await
-        .with_context(|| format!("MySQL store insert failed for id={id} created={created}"))?;
-
-        let stored = result.rows_affected() > 0;
+            (id, &ts, rec),
+        ).with_context(|| format!("MySQL store insert failed for id={id} created={created}"))?;
+        let stored = conn.affected_rows() > 0;
+        Self::return_conn(conn);
         log::debug!("mysql store: id={id} created={created} stored={stored}");
         Ok(stored)
     }
-}
 
-#[async_trait]
-impl Metastore for MySqlMetastore {
-    fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
-        self.block_on_maybe(self.load_impl(id, created))
-    }
-
-    fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
-        self.block_on_maybe(self.load_latest_impl(id))
-    }
-
-    fn store(
-        &self,
-        id: &str,
-        created: i64,
-        ekr: &EnvelopeKeyRecord,
-    ) -> Result<bool, anyhow::Error> {
-        self.block_on_maybe(self.store_impl(id, created, ekr))
-    }
+    // ── Async methods (sqlx — truly async, no thread spawn) ──
 
     async fn load_async(
         &self,
         id: &str,
         created: i64,
     ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
-        self.load_impl(id, created).await
+        log::debug!("mysql load_async: id={id} created={created}");
+        let ts = epoch_to_utc_datetime(created);
+        let row: Option<sqlx::mysql::MySqlRow> = sqlx::query(
+            "SELECT CAST(key_record AS CHAR) AS key_record FROM encryption_key WHERE id=? AND created=?",
+        )
+        .bind(id)
+        .bind(&ts)
+        .fetch_optional(&self.async_pool)
+        .await
+        .with_context(|| format!("MySQL load_async query failed for id={id} created={created}"))?;
+
+        if let Some(row) = row {
+            let json_str: String = row
+                .try_get("key_record")
+                .context("MySQL load_async: failed to get key_record column")?;
+            log::debug!("mysql load_async hit: id={id} created={created}");
+            let ekr = EnvelopeKeyRecord::from_json_fast(&json_str).with_context(|| {
+                format!("MySQL load_async: failed to parse key_record JSON for id={id}")
+            })?;
+            Ok(Some(ekr))
+        } else {
+            log::debug!("mysql load_async miss: id={id} created={created}");
+            Ok(None)
+        }
     }
 
     async fn load_latest_async(
         &self,
         id: &str,
     ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
-        self.load_latest_impl(id).await
+        log::debug!("mysql load_latest_async: id={id}");
+        let row: Option<sqlx::mysql::MySqlRow> = sqlx::query(
+            "SELECT CAST(key_record AS CHAR) AS key_record FROM encryption_key WHERE id=? ORDER BY created DESC LIMIT 1",
+        )
+        .bind(id)
+        .fetch_optional(&self.async_pool)
+        .await
+        .with_context(|| format!("MySQL load_latest_async query failed for id={id}"))?;
+
+        if let Some(row) = row {
+            let json_str: String = row
+                .try_get("key_record")
+                .context("MySQL load_latest_async: failed to get key_record column")?;
+            log::debug!("mysql load_latest_async hit: id={id}");
+            let ekr = EnvelopeKeyRecord::from_json_fast(&json_str).with_context(|| {
+                format!("MySQL load_latest_async: failed to parse key_record JSON for id={id}")
+            })?;
+            Ok(Some(ekr))
+        } else {
+            log::debug!("mysql load_latest_async miss: id={id}");
+            Ok(None)
+        }
     }
 
     async fn store_async(
@@ -252,7 +301,22 @@ impl Metastore for MySqlMetastore {
         created: i64,
         ekr: &EnvelopeKeyRecord,
     ) -> Result<bool, anyhow::Error> {
-        self.store_impl(id, created, ekr).await
+        log::debug!("mysql store_async: id={id} created={created}");
+        let rec = ekr.to_json_fast();
+        let ts = epoch_to_utc_datetime(created);
+        let result = sqlx::query(
+            "INSERT IGNORE INTO encryption_key(id, created, key_record) VALUES(?, ?, CAST(? AS JSON))",
+        )
+        .bind(id)
+        .bind(&ts)
+        .bind(rec)
+        .execute(&self.async_pool)
+        .await
+        .with_context(|| format!("MySQL store_async insert failed for id={id} created={created}"))?;
+
+        let stored = result.rows_affected() > 0;
+        log::debug!("mysql store_async: id={id} created={created} stored={stored}");
+        Ok(stored)
     }
 }
 
