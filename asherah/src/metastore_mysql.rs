@@ -218,6 +218,54 @@ impl Metastore for MySqlMetastore {
         log::debug!("mysql store: id={id} created={created} stored={stored}");
         Ok(stored)
     }
+
+    // The sync mysql crate does blocking I/O. Run on a plain OS thread to
+    // avoid blocking the tokio worker during async encrypt/decrypt.
+    async fn load_async(
+        &self,
+        id: &str,
+        created: i64,
+    ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        let this = self.clone();
+        let id = id.to_string();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            drop(tx.send(this.load(&id, created)));
+        });
+        rx.await
+            .map_err(|_| anyhow::anyhow!("mysql load_async thread panicked"))?
+    }
+
+    async fn load_latest_async(
+        &self,
+        id: &str,
+    ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        let this = self.clone();
+        let id = id.to_string();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            drop(tx.send(this.load_latest(&id)));
+        });
+        rx.await
+            .map_err(|_| anyhow::anyhow!("mysql load_latest_async thread panicked"))?
+    }
+
+    async fn store_async(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<bool, anyhow::Error> {
+        let this = self.clone();
+        let id = id.to_string();
+        let ekr = ekr.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            drop(tx.send(this.store(&id, created, &ekr)));
+        });
+        rx.await
+            .map_err(|_| anyhow::anyhow!("mysql store_async thread panicked"))?
+    }
 }
 
 #[cfg(test)]
