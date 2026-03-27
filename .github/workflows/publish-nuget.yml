@@ -27,6 +27,7 @@ jobs:
     permissions:
       packages: write
       contents: read
+      actions: write
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -40,13 +41,16 @@ jobs:
       - name: Set version
         env:
           INPUT_VERSION: ${{ github.event.inputs.version }}
+          REPO_VERSION: ${{ vars.NUGET_VERSION }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -n "$INPUT_VERSION" ]; then
             VERSION="$INPUT_VERSION"
+          elif [ -n "$REPO_VERSION" ]; then
+            VERSION="$REPO_VERSION"
           else
-            TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
-            VERSION="${TAG#v}"
+            echo "::error::Neither input version nor NUGET_VERSION repo variable is set"
+            exit 1
           fi
           echo "Publishing version: ${VERSION}"
           echo "NUGET_VERSION=${VERSION}" >> "$GITHUB_ENV"
@@ -87,9 +91,14 @@ jobs:
           find "$NATIVE_DIR" -type f | sort
 
       - name: Pack
-        working-directory: asherah-dotnet/AsherahDotNet
+        working-directory: asherah-dotnet
         run: |
-          dotnet pack -c Release \
+          # Pack core (contains native libs)
+          dotnet pack AsherahDotNet/AsherahDotNet.csproj -c Release \
+            /p:Version="${NUGET_VERSION}" \
+            /p:PackageOutputPath="$GITHUB_WORKSPACE/dist"
+          # Pack compat (references core, no native libs)
+          dotnet pack AsherahDotNet.Compat/AsherahDotNet.Compat.csproj -c Release \
             /p:Version="${NUGET_VERSION}" \
             /p:PackageOutputPath="$GITHUB_WORKSPACE/dist"
 
@@ -121,3 +130,15 @@ jobs:
         run: |
           echo "Dry run complete. Would publish:"
           ls -lh dist/
+
+      - name: Bump NUGET_VERSION patch
+        if: ${{ vars.NUGET_VERSION != '' && (github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')) }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MAJOR=$(echo "$NUGET_VERSION" | cut -d. -f1)
+          MINOR=$(echo "$NUGET_VERSION" | cut -d. -f2)
+          PATCH=$(echo "$NUGET_VERSION" | cut -d. -f3)
+          NEXT_PATCH=$((PATCH + 1))
+          gh variable set NUGET_VERSION --body "${MAJOR}.${MINOR}.${NEXT_PATCH}"
+          echo "Bumped NUGET_VERSION to ${MAJOR}.${MINOR}.${NEXT_PATCH}"
