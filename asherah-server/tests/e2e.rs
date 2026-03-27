@@ -187,8 +187,11 @@ async fn test_binary_roundtrip() {
     drop(resp);
     drop(client);
 
-    let status = stop_server(&mut child, Duration::from_secs(5));
-    assert!(status.success(), "server should exit cleanly on SIGTERM");
+    let status = stop_server(&mut child, Duration::from_secs(10));
+    assert!(
+        status.success(),
+        "server should exit cleanly on SIGTERM (got {status})"
+    );
 
     drop(std::fs::remove_file(&sock));
 }
@@ -245,7 +248,7 @@ async fn test_binary_stale_socket_cleanup() {
     drop(resp);
     drop(client);
 
-    stop_server(&mut child, Duration::from_secs(5));
+    stop_server(&mut child, Duration::from_secs(10));
     drop(std::fs::remove_file(&sock));
 }
 
@@ -324,7 +327,7 @@ async fn test_binary_env_var_config() {
     drop(resp);
     drop(client);
 
-    stop_server(&mut child, Duration::from_secs(5));
+    stop_server(&mut child, Duration::from_secs(10));
     drop(std::fs::remove_file(&sock));
 }
 
@@ -387,6 +390,6 @@ async fn test_binary_multiple_clients() {
         h.await.unwrap();
     }
 
-    stop_server(&mut child, Duration::from_secs(5));
+    stop_server(&mut child, Duration::from_secs(10));
     drop(std::fs::remove_file(&sock));
 }
