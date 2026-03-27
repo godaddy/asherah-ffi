@@ -47,8 +47,14 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
             b.build()
         };
         let conf = match (&rt, handle) {
-            (Some(rt), _) => rt.block_on(conf_fut),
-            (None, Some(h)) => h.block_on(conf_fut),
+            (Some(rt), _) => {
+                if tokio::runtime::Handle::try_current().is_ok() {
+                    tokio::task::block_in_place(|| rt.block_on(conf_fut))
+                } else {
+                    rt.block_on(conf_fut)
+                }
+            }
+            (None, Some(h)) => tokio::task::block_in_place(|| h.block_on(conf_fut)),
             (None, None) => unreachable!("tokio runtime unavailable"),
         };
         let client = Client::from_conf(conf);
