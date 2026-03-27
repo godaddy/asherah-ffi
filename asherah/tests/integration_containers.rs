@@ -130,11 +130,9 @@ fn with_endpoint<T>(endpoint: &str, f: impl FnOnce() -> T) -> T {
 }
 
 /// Create the encryption_key table in MySQL.
-fn create_mysql_table(url: &str) {
-    use mysql::prelude::Queryable;
-    let pool = mysql::Pool::new(mysql::Opts::try_from(url).unwrap()).unwrap();
-    let mut conn = pool.get_conn().unwrap();
-    conn.query_drop(
+async fn create_mysql_table(url: &str) -> Result<(), sqlx::Error> {
+    let pool = sqlx::MySqlPool::connect(url).await?;
+    sqlx::query(
         r#"CREATE TABLE IF NOT EXISTS encryption_key (
             id VARCHAR(255) NOT NULL,
             created TIMESTAMP NOT NULL,
@@ -142,7 +140,9 @@ fn create_mysql_table(url: &str) {
             PRIMARY KEY(id, created)
         ) ENGINE=InnoDB"#,
     )
-    .unwrap();
+    .execute(&pool)
+    .await?;
+    Ok(())
 }
 
 /// Create the encryption_key table in Postgres.
@@ -242,18 +242,16 @@ async fn start_mysql() -> Option<(ContainerAsync<GenericImage>, String)> {
                 let url = format!("mysql://root@127.0.0.1:{port}/test");
                 // Create table before returning — matches Go behavior where tables must pre-exist
                 let url_clone = url.clone();
-                let table_ok = tokio::task::spawn_blocking(move || {
-                    // Retry table creation since MySQL may still be starting
+                let table_ok = async {
                     for _ in 0..30 {
-                        if std::panic::catch_unwind(|| create_mysql_table(&url_clone)).is_ok() {
+                        if create_mysql_table(&url_clone).await.is_ok() {
                             return true;
                         }
-                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     }
                     false
-                })
-                .await
-                .unwrap();
+                }
+                .await;
                 if !table_ok {
                     eprintln!("MySQL table creation failed after retries (attempt {attempt})");
                     continue;
