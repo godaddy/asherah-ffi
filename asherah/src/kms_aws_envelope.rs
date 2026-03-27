@@ -282,8 +282,14 @@ fn new_kms_client(
         b.build()
     };
     let conf = match (&rt, handle) {
-        (Some(rt), _) => rt.block_on(conf_fut),
-        (None, Some(h)) => h.block_on(conf_fut),
+        (Some(rt), _) => {
+            if tokio::runtime::Handle::try_current().is_ok() {
+                tokio::task::block_in_place(|| rt.block_on(conf_fut))
+            } else {
+                rt.block_on(conf_fut)
+            }
+        }
+        (None, Some(h)) => tokio::task::block_in_place(|| h.block_on(conf_fut)),
         (None, None) => unreachable!("tokio runtime unavailable"),
     };
     let client = Client::from_conf(conf.clone());
@@ -316,8 +322,14 @@ fn new_kms_client_with_rt(
         b.build()
     };
     let conf = match (&rt_local, handle) {
-        (Some(rt), _) => rt.block_on(conf_fut),
-        (None, Some(h)) => h.block_on(conf_fut),
+        (Some(rt), _) => {
+            if tokio::runtime::Handle::try_current().is_ok() {
+                tokio::task::block_in_place(|| rt.block_on(conf_fut))
+            } else {
+                rt.block_on(conf_fut)
+            }
+        }
+        (None, Some(h)) => tokio::task::block_in_place(|| h.block_on(conf_fut)),
         (None, None) => unreachable!(),
     };
     let client = Client::from_conf(conf.clone());
