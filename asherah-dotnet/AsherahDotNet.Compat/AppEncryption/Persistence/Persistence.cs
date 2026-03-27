@@ -1,3 +1,5 @@
+using LanguageExt;
+
 namespace GoDaddy.Asherah.AppEncryption.Persistence;
 
 /// <summary>

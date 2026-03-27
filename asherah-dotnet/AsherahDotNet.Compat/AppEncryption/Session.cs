@@ -1,5 +1,6 @@
 using System.Text;
 using GoDaddy.Asherah.AppEncryption.Persistence;
+using LanguageExt;
 using Newtonsoft.Json.Linq;
 
 namespace GoDaddy.Asherah.AppEncryption;
@@ -25,7 +26,7 @@ public abstract class Session<TP, TD> : IDisposable
     public virtual Option<TP> Load(string persistenceKey, Persistence<TD> dataPersistence)
     {
         var drr = dataPersistence.Load(persistenceKey);
-        return drr.HasValue ? Option<TP>.Some(Decrypt(drr.Value)) : Option<TP>.Empty;
+        return drr.Map(d => Decrypt(d));
     }
 
     public virtual string Store(TP payload, Persistence<TD> dataPersistence)
@@ -41,20 +42,4 @@ public abstract class Session<TP, TD> : IDisposable
         var drr = Encrypt(payload);
         dataPersistence.Store(key, drr);
     }
-}
-
-/// <summary>Simple optional value type matching the canonical SDK's Option.</summary>
-public readonly struct Option<T>
-{
-    public static readonly Option<T> Empty = new();
-
-    private readonly T? _value;
-    public bool HasValue { get; }
-    public T Value => HasValue ? _value! : throw new InvalidOperationException("No value");
-
-    private Option(T value) { _value = value; HasValue = true; }
-
-    public static Option<T> Some(T value) => new(value);
-    public Option<TU> Map<TU>(Func<T, TU> mapper) =>
-        HasValue ? Option<TU>.Some(mapper(_value!)) : Option<TU>.Empty;
 }
