@@ -102,12 +102,16 @@ jobs:
             /p:Version="${NUGET_VERSION}" \
             /p:PackageOutputPath="$GITHUB_WORKSPACE/dist"
 
-      - name: Verify native libraries in package
+      - name: Verify native libraries in core package
         run: |
+          # Only verify the core package — the Compat package has no native libs
           for pkg in dist/*.nupkg; do
             echo "=== $pkg ==="
+            if echo "$pkg" | grep -q "Compat"; then
+              echo "  (Compat package — no native libraries expected, skipping)"
+              continue
+            fi
             unzip -l "$pkg" | grep -E 'native|runtimes' | sort
-            # Verify required platforms (Linux + macOS = 4 minimum)
             for required in linux-x64 linux-arm64 osx-x64 osx-arm64; do
               if ! unzip -l "$pkg" | grep -q "runtimes/${required}/native/"; then
                 echo "ERROR: Missing required native library for ${required}"
