@@ -5,10 +5,11 @@ use anyhow::Context;
 use asherah as ael;
 use asherah_config as config;
 use jni::errors::ThrowRuntimeExAndDefault;
-use jni::objects::{JByteArray, JClass, JString};
+use jni::objects::{JByteArray, JClass, JObject, JString};
 use jni::strings::JNIString;
 use jni::sys::jlong;
-use jni::EnvUnowned;
+use jni::{EnvUnowned, JavaVM};
+use once_cell::sync::Lazy;
 use serde_json::{self, Value};
 
 type Factory = ael::session::PublicFactory<
@@ -221,4 +222,132 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decrypt<'calle
         Ok(arr)
     })
     .resolve::<ThrowRuntimeExAndDefault>()
+}
+
+// ── Async JNI ────────────────────────────────────────────────────────
+
+static ASYNC_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("asherah-java-async")
+        .enable_all()
+        .build()
+        .expect("failed to create async JNI tokio runtime")
+});
+
+/// Async encrypt. Accepts a CompletableFuture<byte[]> and completes it on a tokio worker thread.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_encryptAsync<'caller>(
+    mut env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    session_handle: jlong,
+    plaintext: JByteArray<'caller>,
+    future: JObject<'caller>,
+) {
+    env.with_env(|env| -> jni::errors::Result<()> {
+        let session = unsafe { from_handle::<Session>(session_handle) }
+            .ok_or_else(|| throw_err(env, "session handle is null"))?;
+        let data = env.convert_byte_array(&plaintext)?;
+        let jvm = env.get_java_vm()?;
+        let future_ref = env.new_global_ref(&future)?;
+        let session_ptr: *const Session = session;
+        let session_addr = session_ptr as usize;
+
+        ASYNC_RT.spawn(async move {
+            let session = unsafe { &*(session_addr as *const Session) };
+            let result = match session.encrypt_async(&data).await {
+                Ok(drr) => serde_json::to_vec(&drr).map_err(|e| anyhow::anyhow!("{e}")),
+                Err(e) => Err(e),
+            };
+            complete_java_future(&jvm, &future_ref, result);
+        });
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>();
+}
+
+/// Async decrypt. Accepts a CompletableFuture<byte[]> and completes it on a tokio worker thread.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decryptAsync<'caller>(
+    mut env: EnvUnowned<'caller>,
+    _class: JClass<'caller>,
+    session_handle: jlong,
+    ciphertext: JByteArray<'caller>,
+    future: JObject<'caller>,
+) {
+    env.with_env(|env| -> jni::errors::Result<()> {
+        let session = unsafe { from_handle::<Session>(session_handle) }
+            .ok_or_else(|| throw_err(env, "session handle is null"))?;
+        let data = env.convert_byte_array(&ciphertext)?;
+        let jvm = env.get_java_vm()?;
+        let future_ref = env.new_global_ref(&future)?;
+        let session_ptr: *const Session = session;
+        let session_addr = session_ptr as usize;
+
+        ASYNC_RT.spawn(async move {
+            let session = unsafe { &*(session_addr as *const Session) };
+            let drr = match serde_json::from_slice::<ael::types::DataRowRecord>(&data) {
+                Ok(d) => d,
+                Err(e) => {
+                    complete_java_future(
+                        &jvm,
+                        &future_ref,
+                        Err(anyhow::anyhow!("invalid DataRowRecord JSON: {e}")),
+                    );
+                    return;
+                }
+            };
+            let result = session.decrypt_async(drr).await;
+            complete_java_future(&jvm, &future_ref, result);
+        });
+        Ok(())
+    })
+    .resolve::<ThrowRuntimeExAndDefault>();
+}
+
+/// Complete a Java CompletableFuture<byte[]> from a tokio worker thread.
+fn complete_java_future(
+    jvm: &JavaVM,
+    future_ref: &jni::objects::Global<JObject<'static>>,
+    result: Result<Vec<u8>, anyhow::Error>,
+) {
+    let jni_result: Result<(), jni::errors::Error> =
+        jvm.attach_current_thread(|env| -> Result<(), jni::errors::Error> {
+            let complete_sig =
+                jni::signature::RuntimeMethodSignature::from_str("(Ljava/lang/Object;)Z")?;
+            let except_sig =
+                jni::signature::RuntimeMethodSignature::from_str("(Ljava/lang/Throwable;)Z")?;
+            let rt_ctor_sig =
+                jni::signature::RuntimeMethodSignature::from_str("(Ljava/lang/String;)V")?;
+            match result {
+                Ok(ref bytes) => {
+                    let byte_array = env.byte_array_from_slice(bytes)?;
+                    env.call_method(
+                        future_ref.as_obj(),
+                        JNIString::from("complete"),
+                        complete_sig.method_signature(),
+                        &[jni::objects::JValue::Object(&byte_array.into())],
+                    )?;
+                }
+                Err(ref e) => {
+                    let msg = e.to_string();
+                    let jmsg = env.new_string(&msg)?;
+                    let exception = env.new_object(
+                        JNIString::from("java/lang/RuntimeException"),
+                        rt_ctor_sig.method_signature(),
+                        &[jni::objects::JValue::Object(&jmsg.into())],
+                    )?;
+                    env.call_method(
+                        future_ref.as_obj(),
+                        JNIString::from("completeExceptionally"),
+                        except_sig.method_signature(),
+                        &[jni::objects::JValue::Object(&exception)],
+                    )?;
+                }
+            }
+            Ok(())
+        });
+    if let Err(e) = jni_result {
+        log::error!("failed to complete Java future: {e}");
+    }
 }

@@ -26,4 +26,10 @@ final class AsherahNative {
   static native byte[] encrypt(long sessionHandle, byte[] plaintext);
 
   static native byte[] decrypt(long sessionHandle, byte[] ciphertextJson);
+
+  static native void encryptAsync(long sessionHandle, byte[] plaintext,
+      java.util.concurrent.CompletableFuture<byte[]> future);
+
+  static native void decryptAsync(long sessionHandle, byte[] ciphertextJson,
+      java.util.concurrent.CompletableFuture<byte[]> future);
 }

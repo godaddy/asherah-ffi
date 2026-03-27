@@ -3,6 +3,7 @@ package com.godaddy.asherah.jni;
 import java.lang.ref.Cleaner;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public final class AsherahSession implements AutoCloseable {
@@ -59,6 +60,36 @@ public final class AsherahSession implements AutoCloseable {
     Objects.requireNonNull(ciphertextJson, "ciphertextJson");
     byte[] plaintext = decryptFromJson(ciphertextJson);
     return new String(plaintext, StandardCharsets.UTF_8);
+  }
+
+  /** True async encrypt — runs on Rust's tokio runtime, does not block a Java thread. */
+  public CompletableFuture<byte[]> encryptBytesAsync(byte[] plaintext) {
+    ensureOpen();
+    Objects.requireNonNull(plaintext, "plaintext");
+    CompletableFuture<byte[]> future = new CompletableFuture<>();
+    AsherahNative.encryptAsync(cleanup.peek(), plaintext, future);
+    return future;
+  }
+
+  public CompletableFuture<String> encryptStringAsync(String plaintext) {
+    Objects.requireNonNull(plaintext, "plaintext");
+    return encryptBytesAsync(plaintext.getBytes(StandardCharsets.UTF_8))
+        .thenApply(bytes -> new String(bytes, StandardCharsets.UTF_8));
+  }
+
+  /** True async decrypt — runs on Rust's tokio runtime, does not block a Java thread. */
+  public CompletableFuture<byte[]> decryptBytesAsync(byte[] ciphertextJson) {
+    ensureOpen();
+    Objects.requireNonNull(ciphertextJson, "ciphertextJson");
+    CompletableFuture<byte[]> future = new CompletableFuture<>();
+    AsherahNative.decryptAsync(cleanup.peek(), ciphertextJson, future);
+    return future;
+  }
+
+  public CompletableFuture<String> decryptStringAsync(String ciphertextJson) {
+    Objects.requireNonNull(ciphertextJson, "ciphertextJson");
+    return decryptBytesAsync(ciphertextJson.getBytes(StandardCharsets.UTF_8))
+        .thenApply(bytes -> new String(bytes, StandardCharsets.UTF_8));
   }
 
   @Override
