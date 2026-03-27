@@ -66,6 +66,37 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
         })
     }
 
+    /// Async constructor — loads AWS config on the caller's tokio runtime.
+    pub async fn new_async(
+        aead: Arc<A>,
+        key_id: impl Into<String>,
+        region: Option<String>,
+    ) -> anyhow::Result<Self> {
+        let region_provider = if let Some(r) = region {
+            RegionProviderChain::first_try(Region::new(r))
+        } else {
+            RegionProviderChain::default_provider()
+        };
+        let shared_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+            .region(region_provider)
+            .load()
+            .await;
+        let mut b = aws_sdk_kms::config::Builder::from(&shared_config);
+        if let Ok(url) = std::env::var("AWS_ENDPOINT_URL") {
+            b = b.endpoint_url(url);
+        }
+        let conf = b.build();
+        let client = Client::from_conf(conf);
+        // Keep a runtime for sync callers (encrypt_key/decrypt_key)
+        let rt = Some(Arc::new(tokio::runtime::Runtime::new()?));
+        Ok(Self {
+            client,
+            key_id: key_id.into(),
+            _aead: aead,
+            rt,
+        })
+    }
+
     fn block_on_maybe<F: std::future::Future>(&self, f: F) -> F::Output {
         match &self.rt {
             Some(rt) => {
