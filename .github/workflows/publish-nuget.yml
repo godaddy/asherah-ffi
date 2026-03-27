@@ -27,7 +27,6 @@ jobs:
     permissions:
       packages: write
       contents: read
-      actions: write
 
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -138,7 +137,7 @@ jobs:
       - name: Bump NUGET_VERSION patch
         if: ${{ vars.NUGET_VERSION != '' && (github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true')) }}
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           MAJOR=$(echo "$NUGET_VERSION" | cut -d. -f1)
           MINOR=$(echo "$NUGET_VERSION" | cut -d. -f2)

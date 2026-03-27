@@ -334,7 +334,7 @@ jobs:
 
   publish-dry-run-nuget:
     runs-on: ubuntu-22.04
-    needs: build-dotnet-x86_64
+    needs: build-rlib-x86_64
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
@@ -342,19 +342,21 @@ jobs:
           dotnet-version: |
             8.0.x
             10.0.x
-      - name: Download x86_64 dotnet artifact
+      - name: Download rlib artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: bindings-linux-x86_64-part-dotnet
-          path: /tmp/dotnet-artifact
-      - name: Stage native libraries and pack
+          name: x86_64-rlib-artifacts
+          path: /tmp
+      - name: Extract rlib and build FFI lib
+        run: |
+          tar xzf /tmp/x86_64-rlib.tar.gz
+          cargo build -p asherah-ffi --release
+      - name: Pack both NuGet packages
         working-directory: asherah-dotnet
         run: |
-          NATIVE_DIR="AsherahDotNet/runtimes"
-          mkdir -p "$NATIVE_DIR/linux-x64/native"
-          cp /tmp/dotnet-artifact/libasherah_ffi.so "$NATIVE_DIR/linux-x64/native/"
-          echo "Staged native libraries:"
-          find "$NATIVE_DIR" -type f | sort
+          # Stage the FFI lib as linux-x64 native
+          mkdir -p AsherahDotNet/runtimes/linux-x64/native
+          cp ../target/release/libasherah_ffi.so AsherahDotNet/runtimes/linux-x64/native/
 
           dotnet pack AsherahDotNet/AsherahDotNet.csproj -c Release \
             /p:Version="0.0.0-dryrun" \
@@ -362,26 +364,24 @@ jobs:
           dotnet pack AsherahDotNet.Compat/AsherahDotNet.Compat.csproj -c Release \
             /p:Version="0.0.0-dryrun" \
             /p:PackageOutputPath="$GITHUB_WORKSPACE/dist"
-
-          echo "=== Packed NuGet packages ==="
-          ls -lh "$GITHUB_WORKSPACE/dist/"
       - name: Verify packages
         run: |
+          echo "=== Packed packages ==="
+          ls -lh dist/
+
           for pkg in dist/*.nupkg; do
-            echo "=== $pkg ==="
+            echo "--- $pkg ---"
             if echo "$pkg" | grep -q "Compat"; then
-              echo "  (Compat package — no native libraries expected)"
+              echo "  Compat package — no native libraries expected"
               continue
             fi
             unzip -l "$pkg" | grep -E 'native|runtimes' | sort
             if ! unzip -l "$pkg" | grep -q "runtimes/linux-x64/native/"; then
-              echo "ERROR: Missing linux-x64 native library in core package"
+              echo "ERROR: Core package missing linux-x64 native library"
               exit 1
             fi
-            COUNT=$(unzip -l "$pkg" | grep -c "runtimes/.*/native/.*\.\(so\|dylib\|dll\)$" || true)
-            echo "$COUNT native libraries bundled (1 expected in dry-run, 4+ in release)"
           done
-          echo "NuGet pack dry-run passed for $(ls dist/*.nupkg | wc -l) package(s)"
+          echo "NuGet dry-run passed ($(ls dist/*.nupkg | wc -l) packages)"
 
   build-ffi-x86_64:
     runs-on: ubuntu-22.04
