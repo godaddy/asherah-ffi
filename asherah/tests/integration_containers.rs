@@ -130,9 +130,11 @@ fn with_endpoint<T>(endpoint: &str, f: impl FnOnce() -> T) -> T {
 }
 
 /// Create the encryption_key table in MySQL.
-async fn create_mysql_table(url: &str) -> Result<(), sqlx::Error> {
-    let pool = sqlx::MySqlPool::connect(url).await?;
-    sqlx::query(
+fn create_mysql_table(url: &str) {
+    use mysql::prelude::Queryable;
+    let pool = mysql::Pool::new(mysql::Opts::try_from(url).unwrap()).unwrap();
+    let mut conn = pool.get_conn().unwrap();
+    conn.query_drop(
         r#"CREATE TABLE IF NOT EXISTS encryption_key (
             id VARCHAR(255) NOT NULL,
             created TIMESTAMP NOT NULL,
@@ -140,9 +142,7 @@ async fn create_mysql_table(url: &str) -> Result<(), sqlx::Error> {
             PRIMARY KEY(id, created)
         ) ENGINE=InnoDB"#,
     )
-    .execute(&pool)
-    .await?;
-    Ok(())
+    .unwrap();
 }
 
 /// Create the encryption_key table in Postgres.
@@ -242,16 +242,17 @@ async fn start_mysql() -> Option<(ContainerAsync<GenericImage>, String)> {
                 let url = format!("mysql://root@127.0.0.1:{port}/test");
                 // Create table before returning — matches Go behavior where tables must pre-exist
                 let url_clone = url.clone();
-                let table_ok = async {
+                let table_ok = tokio::task::spawn_blocking(move || {
                     for _ in 0..30 {
-                        if create_mysql_table(&url_clone).await.is_ok() {
+                        if std::panic::catch_unwind(|| create_mysql_table(&url_clone)).is_ok() {
                             return true;
                         }
-                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                        std::thread::sleep(std::time::Duration::from_secs(1));
                     }
                     false
-                }
-                .await;
+                })
+                .await
+                .unwrap();
                 if !table_ok {
                     eprintln!("MySQL table creation failed after retries (attempt {attempt})");
                     continue;

@@ -797,6 +797,7 @@ async function run() {
     }
     await bench.run();
     for (const t of bench.tasks) {
+      if (!t.result || !t.result.latency) { console.error('WARN: ' + t.name + ' no result, error: ' + (t.result && t.result.error || 'unknown')); continue; }
       console.log(t.name + ' ' + Math.round(t.result.latency.mean * 1e6));
     }
   }
@@ -884,6 +885,7 @@ async function run() {
     }
     await bench.run();
     for (const t of bench.tasks) {
+      if (!t.result || !t.result.latency) { console.error('WARN: ' + t.name + ' no result, error: ' + (t.result && t.result.error || 'unknown')); continue; }
       console.log(t.name + ' ' + Math.round(t.result.latency.mean * 1e6));
     }
   }
