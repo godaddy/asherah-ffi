@@ -107,6 +107,22 @@ module AsherahFetchNative
         return rustup_cargo if File.executable?(rustup_cargo)
       end
 
+      # Install Rust via rustup if not found
+      return nil if Gem.win_platform? # rustup -y doesn't work unattended on Windows
+
+      puts "Rust not found. Installing via rustup..."
+      install_ok = system("curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal",
+                          out: $stdout, err: $stderr)
+      unless install_ok
+        puts "WARNING: rustup install failed"
+        return nil
+      end
+
+      if home
+        installed = File.join(home, ".cargo", "bin", "cargo")
+        return installed if File.executable?(installed)
+      end
+
       nil
     end
 
