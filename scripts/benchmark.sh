@@ -664,8 +664,21 @@ for line in open('$RESULTS_DIR/python.log'):
         dec[int(m.group(1))] = int(m.group(3))
 print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
 " > "$RESULTS_DIR/04_Python_FFI"
+    reset_mysql
+    log "Running Python FFI async benchmark (timeit)..."
+    python3 "$BENCH_DIR/python-bench/bench_async.py" > "$RESULTS_DIR/python_async.log" 2>&1
+    python3 -c "
+import re
+enc, dec = {}, {}
+for line in open('$RESULTS_DIR/python_async.log'):
+    m = re.match(r'\s+(\d+)B\s+(\d+)\s+ns\s+\d+\s+ns\s+(\d+)\s+ns', line)
+    if m:
+        enc[int(m.group(1))] = int(m.group(2))
+        dec[int(m.group(1))] = int(m.group(3))
+print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
+" > "$RESULTS_DIR/05_Python_FFI_(async)"
 else
-    skip "Python Python asherah not installed"
+    skip "Python asherah not installed"
 fi
 
 ########################################################################
