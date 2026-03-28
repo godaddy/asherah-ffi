@@ -52,8 +52,8 @@ import com.godaddy.asherah.jni.AsherahConfig;
 AsherahConfig config = AsherahConfig.builder()
         .serviceName("my-service")
         .productId("my-product")
-        .metastore("memory")
-        .kms("static")
+        .metastore("memory")   // testing only
+        .kms("static")         // testing only
         .enableSessionCaching(Boolean.TRUE)
         .build();
 
@@ -81,8 +81,8 @@ import com.godaddy.asherah.jni.AsherahSession;
 AsherahConfig config = AsherahConfig.builder()
         .serviceName("my-service")
         .productId("my-product")
-        .metastore("memory")
-        .kms("static")
+        .metastore("memory")   // testing only
+        .kms("static")         // testing only
         .build();
 
 try (AsherahFactory factory = Asherah.factoryFromConfig(config)) {
@@ -171,7 +171,7 @@ All configuration is done through `AsherahConfig.builder()`:
 |---|---|---|---|
 | `serviceName` | `String` | Yes | Service identifier for key hierarchy |
 | `productId` | `String` | Yes | Product identifier for key hierarchy |
-| `metastore` | `String` | Yes | `"memory"`, `"rdbms"`, or `"dynamodb"` |
+| `metastore` | `String` | Yes | `"rdbms"`, `"dynamodb"`, `"memory"` (testing) |
 | `kms` | `String` | No | `"static"` (default) or `"aws"` |
 | `connectionString` | `String` | No | RDBMS connection string |
 | `dynamoDbEndpoint` | `String` | No | Custom DynamoDB endpoint |

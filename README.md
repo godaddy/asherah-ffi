@@ -17,7 +17,7 @@ record.
 
 **KMS backends:** AWS KMS, static (testing only)
 
-**Metastores:** DynamoDB, MySQL, Postgres, SQLite, in-memory
+**Metastores:** DynamoDB, MySQL, Postgres, SQLite, in-memory (testing only)
 
 ## Language Bindings
 
@@ -51,8 +51,8 @@ const asherah = require('asherah');
 asherah.setup({
   serviceName: 'my-service',
   productId: 'my-product',
-  metastore: 'memory',
-  kms: 'static',
+  metastore: 'memory',   // testing only — use 'rdbms' or 'dynamodb' in production
+  kms: 'static',         // testing only — use 'aws' in production
 });
 
 const ct = asherah.encryptString('partition', 'secret data');

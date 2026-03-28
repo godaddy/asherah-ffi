@@ -33,8 +33,8 @@ require "asherah"
 Asherah.setup(
   "ServiceName" => "my-service",
   "ProductID"   => "my-product",
-  "Metastore"   => "memory",
-  "KMS"         => "static"
+  "Metastore"   => "memory",   # testing only
+  "KMS"         => "static"    # testing only
 )
 
 ciphertext = Asherah.encrypt_string("partition-id", "sensitive data")
@@ -53,8 +53,8 @@ For an API compatible with the canonical GoDaddy Asherah Ruby gem, use `configur
 Asherah.configure do |config|
   config.service_name = "my-service"
   config.product_id   = "my-product"
-  config.kms          = "static"
-  config.metastore    = "memory"
+  config.kms          = "static"   # testing only
+  config.metastore    = "memory"   # testing only
 end
 
 ciphertext = Asherah.encrypt_string("partition-id", "sensitive data")
@@ -73,8 +73,8 @@ require "asherah"
 Asherah.configure do |config|
   config.service_name = "my-service"
   config.product_id   = "my-product"
-  config.kms          = "static"
-  config.metastore    = "memory"
+  config.kms          = "static"   # testing only
+  config.metastore    = "memory"   # testing only
 end
 
 factory = Asherah::SessionFactory.new(
@@ -93,7 +93,7 @@ Or via the static API's internal factory (the typical pattern):
 
 ```ruby
 Asherah.setup("ServiceName" => "my-service", "ProductID" => "my-product",
-              "Metastore" => "memory", "KMS" => "static")
+              "Metastore" => "memory", "KMS" => "static") # testing only
 
 # The static API acquires and caches sessions automatically
 ct = Asherah.encrypt("partition-id", "data")
@@ -173,7 +173,7 @@ Keys are PascalCase strings matching the Asherah configuration format:
 |---|---|---|---|
 | `ServiceName` | `String` | Yes | Service identifier for key hierarchy |
 | `ProductID` | `String` | Yes | Product identifier for key hierarchy |
-| `Metastore` | `String` | Yes | `"memory"`, `"rdbms"`, or `"dynamodb"` |
+| `Metastore` | `String` | Yes | `"rdbms"`, `"dynamodb"`, `"memory"` (testing) |
 | `KMS` | `String` | Yes | `"static"` or `"aws"` |
 | `ConnectionString` | `String` | No | RDBMS connection string |
 | `DynamoDBEndpoint` | `String` | No | Custom DynamoDB endpoint |

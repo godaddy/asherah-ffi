@@ -23,8 +23,8 @@ import asherah
 asherah.setup({
     "ServiceName": "my-service",
     "ProductID": "my-product",
-    "Metastore": "memory",
-    "KMS": "static",
+    "Metastore": "memory",    # testing only — use "rdbms" or "dynamodb" in production
+    "KMS": "static",          # testing only — use "aws" in production
     "EnableSessionCaching": True,
 })
 
@@ -43,8 +43,8 @@ The `SessionFactory` class reads configuration from environment variables (set t
 import os
 os.environ["SERVICE_NAME"] = "my-service"
 os.environ["PRODUCT_ID"] = "my-product"
-os.environ["Metastore"] = "memory"
-os.environ["KMS"] = "static"
+os.environ["Metastore"] = "memory"  # testing only
+os.environ["KMS"] = "static"       # testing only
 os.environ["STATIC_MASTER_KEY_HEX"] = "22" * 32
 os.environ["SESSION_CACHE"] = "1"
 
@@ -107,7 +107,7 @@ The `setup()` function accepts a dict (or any JSON-serializable object) with Pas
 |-----|------|----------|-------------|
 | `ServiceName` | str | Yes | Service identifier for key hierarchy |
 | `ProductID` | str | Yes | Product identifier for key hierarchy |
-| `Metastore` | str | Yes | `"memory"`, `"sqlite"`, `"rdbms"`, or `"dynamodb"` |
+| `Metastore` | str | Yes | `"rdbms"`, `"dynamodb"`, `"memory"` (testing) |
 | `KMS` | str | No | `"static"` (default) or `"aws"` |
 | `ConnectionString` | str | Conditional | Required for `sqlite` and `rdbms` metastores |
 | `RegionMap` | dict | Conditional | Required for `aws` KMS. Maps preferred region to ARN. |

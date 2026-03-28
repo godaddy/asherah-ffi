@@ -62,8 +62,8 @@ func main() {
     err := asherah.Setup(asherah.Config{
         ServiceName: "my-service",
         ProductID:   "my-product",
-        Metastore:   "memory",
-        KMS:         "static",
+        Metastore:   "memory",  // testing only
+        KMS:         "static", // testing only
     })
     if err != nil {
         log.Fatal(err)
@@ -93,8 +93,8 @@ For direct control over session lifecycle, use `Factory` and `Session`:
 factory, err := asherah.NewFactory(asherah.Config{
     ServiceName: "my-service",
     ProductID:   "my-product",
-    Metastore:   "memory",
-    KMS:         "static",
+    Metastore:   "memory",  // testing only
+    KMS:         "static", // testing only
 })
 if err != nil {
     log.Fatal(err)
@@ -217,7 +217,7 @@ Benchmarked on Apple M4 Max, 64-byte payload, hot session cache:
 |---|---|---|---|
 | `ServiceName` | `string` | Yes | Service identifier for key hierarchy |
 | `ProductID` | `string` | Yes | Product identifier for key hierarchy |
-| `Metastore` | `string` | Yes | `"memory"`, `"rdbms"`, or `"dynamodb"` |
+| `Metastore` | `string` | Yes | `"rdbms"`, `"dynamodb"`, `"memory"` (testing) |
 | `KMS` | `string` | No | `"static"` (default) or `"aws"` |
 | `ConnectionString` | `*string` | No | RDBMS connection string |
 | `ReplicaReadConsistency` | `*string` | No | DynamoDB read consistency |
