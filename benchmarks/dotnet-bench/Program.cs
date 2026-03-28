@@ -122,7 +122,7 @@ public class AsherahBenchmark
         GoDaddy.Asherah.Asherah.Shutdown();
     }
 
-    [Benchmark(Description = "Rust FFI"), BenchmarkCategory("Encrypt")]
+    [Benchmark(Description = "Rust FFI (sync)"), BenchmarkCategory("Encrypt")]
     public byte[] RustFfiEncrypt()
     {
         if (_mode is "memory" or "hot")
@@ -133,7 +133,18 @@ public class AsherahBenchmark
         return GoDaddy.Asherah.Asherah.Encrypt(_ffiPartitionPool[idx], _payload);
     }
 
-    [Benchmark(Description = "Rust FFI"), BenchmarkCategory("Decrypt")]
+    [Benchmark(Description = "Rust FFI (async)"), BenchmarkCategory("Encrypt")]
+    public async Task<byte[]> RustFfiEncryptAsync()
+    {
+        if (_mode is "memory" or "hot")
+            return await GoDaddy.Asherah.Asherah.EncryptAsync(PartitionId, _payload);
+
+        var idx = _ffiEncryptPoolIndex;
+        _ffiEncryptPoolIndex = (_ffiEncryptPoolIndex + 1) % _ffiPartitionPool.Length;
+        return await GoDaddy.Asherah.Asherah.EncryptAsync(_ffiPartitionPool[idx], _payload);
+    }
+
+    [Benchmark(Description = "Rust FFI (sync)"), BenchmarkCategory("Decrypt")]
     public byte[] RustFfiDecrypt()
     {
         if (_mode is "memory" or "hot")
@@ -142,6 +153,17 @@ public class AsherahBenchmark
         var idx = _ffiDecryptPoolIndex;
         _ffiDecryptPoolIndex = (_ffiDecryptPoolIndex + 1) % _ffiPartitionPool.Length;
         return GoDaddy.Asherah.Asherah.Decrypt(_ffiPartitionPool[idx], _ffiCiphertextPool[idx]);
+    }
+
+    [Benchmark(Description = "Rust FFI (async)"), BenchmarkCategory("Decrypt")]
+    public async Task<byte[]> RustFfiDecryptAsync()
+    {
+        if (_mode is "memory" or "hot")
+            return await GoDaddy.Asherah.Asherah.DecryptAsync(PartitionId, _ffiCiphertext);
+
+        var idx = _ffiDecryptPoolIndex;
+        _ffiDecryptPoolIndex = (_ffiDecryptPoolIndex + 1) % _ffiPartitionPool.Length;
+        return await GoDaddy.Asherah.Asherah.DecryptAsync(_ffiPartitionPool[idx], _ffiCiphertextPool[idx]);
     }
 
     private static string ResolveMode()

@@ -118,11 +118,26 @@ public static class Asherah
         return Encoding.UTF8.GetString(ciphertext);
     }
 
-    public static Task<byte[]> EncryptAsync(string partitionId, byte[] plaintext) =>
-        Task.Run(() => Encrypt(partitionId, plaintext));
+    public static async Task<byte[]> EncryptAsync(string partitionId, byte[] plaintext)
+    {
+        ArgumentNullException.ThrowIfNull(partitionId);
+        ArgumentNullException.ThrowIfNull(plaintext);
+        var session = AcquireSession(partitionId);
+        try
+        {
+            return await session.EncryptBytesAsync(plaintext).ConfigureAwait(false);
+        }
+        finally
+        {
+            ReleaseSession(partitionId, session);
+        }
+    }
 
-    public static Task<string> EncryptStringAsync(string partitionId, string plaintext) =>
-        Task.Run(() => EncryptString(partitionId, plaintext));
+    public static async Task<string> EncryptStringAsync(string partitionId, string plaintext)
+    {
+        var ciphertext = await EncryptAsync(partitionId, Encoding.UTF8.GetBytes(plaintext)).ConfigureAwait(false);
+        return Encoding.UTF8.GetString(ciphertext);
+    }
 
     public static byte[] Decrypt(string partitionId, byte[] dataRowRecordJson)
     {
@@ -148,11 +163,26 @@ public static class Asherah
         return Encoding.UTF8.GetString(plaintext);
     }
 
-    public static Task<byte[]> DecryptAsync(string partitionId, byte[] dataRowRecordJson) =>
-        Task.Run(() => Decrypt(partitionId, dataRowRecordJson));
+    public static async Task<byte[]> DecryptAsync(string partitionId, byte[] dataRowRecordJson)
+    {
+        ArgumentNullException.ThrowIfNull(partitionId);
+        ArgumentNullException.ThrowIfNull(dataRowRecordJson);
+        var session = AcquireSession(partitionId);
+        try
+        {
+            return await session.DecryptBytesAsync(dataRowRecordJson).ConfigureAwait(false);
+        }
+        finally
+        {
+            ReleaseSession(partitionId, session);
+        }
+    }
 
-    public static Task<string> DecryptStringAsync(string partitionId, string dataRowRecordJson) =>
-        Task.Run(() => DecryptString(partitionId, dataRowRecordJson));
+    public static async Task<string> DecryptStringAsync(string partitionId, string dataRowRecordJson)
+    {
+        var plaintext = await DecryptAsync(partitionId, Encoding.UTF8.GetBytes(dataRowRecordJson)).ConfigureAwait(false);
+        return Encoding.UTF8.GetString(plaintext);
+    }
 
     private static AsherahSession AcquireSession(string partitionId)
     {

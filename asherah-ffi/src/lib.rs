@@ -9,11 +9,12 @@ extern crate asherah_cobhan;
 use std::ffi::{CStr, CString};
 use std::fmt;
 use std::mem::ManuallyDrop;
-use std::os::raw::{c_char, c_int};
+use std::os::raw::{c_char, c_int, c_void};
 use std::ptr::null_mut;
 
 use asherah as ael;
 use asherah_config as config;
+use once_cell::sync::Lazy;
 
 type Factory = ael::session::PublicFactory<
     ael::aead::AES256GCM,
@@ -282,4 +283,176 @@ pub unsafe extern "C" fn asherah_decrypt_from_json(
             -1
         }
     }
+}
+
+// ── Async FFI ────────────────────────────────────────────────────────
+//
+// Callback-based async API for languages that use C FFI (.NET, Ruby, Java).
+// The callback is invoked on a tokio worker thread when the operation completes.
+// The result buffer is valid only for the duration of the callback.
+
+/// Send-safe wrapper for async FFI context. Converts all pointer types to usize
+/// so the async task can be spawned on the tokio runtime. The caller guarantees
+/// the session pointer remains valid until the callback fires.
+struct AsyncContext {
+    session: usize,
+    callback: usize,
+    user_data: usize,
+}
+
+// All fields are usize — trivially Send.
+unsafe impl Send for AsyncContext {}
+
+impl AsyncContext {
+    fn new(
+        session: *mut AsherahSession,
+        callback: AsherahCompletionFn,
+        user_data: *mut c_void,
+    ) -> Self {
+        Self {
+            session: session as usize,
+            callback: callback as usize,
+            user_data: user_data as usize,
+        }
+    }
+
+    /// Restore the session reference and callback. User data stays as usize
+    /// until the callback call site to avoid holding a *mut c_void across await points.
+    unsafe fn restore(&self) -> (&AsherahSession, AsherahCompletionFn, usize) {
+        let session = &*(self.session as *const AsherahSession);
+        let callback: AsherahCompletionFn = std::mem::transmute(self.callback);
+        (session, callback, self.user_data)
+    }
+}
+
+/// Shared tokio runtime for async FFI operations.
+static ASYNC_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("asherah-async-ffi")
+        .enable_all()
+        .build()
+        .expect("failed to create async FFI tokio runtime")
+});
+
+/// Completion callback type for async operations.
+/// - `user_data`: opaque pointer passed through from the async call.
+/// - `result_data`/`result_len`: output bytes on success (NULL/0 on error).
+/// - `error_message`: null-terminated UTF-8 error string on failure (NULL on success).
+///
+/// The callback runs on a tokio worker thread. Do not block in the callback.
+/// The result buffer is freed after the callback returns — copy it if needed.
+pub type AsherahCompletionFn = unsafe extern "C" fn(
+    user_data: *mut c_void,
+    result_data: *const u8,
+    result_len: usize,
+    error_message: *const c_char,
+);
+
+/// # Safety
+/// `session` must be a valid session pointer that outlives the async operation.
+/// `data` must reference `len` bytes. `callback` must be a valid function pointer.
+/// `user_data` is passed through to the callback unchanged.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn asherah_encrypt_to_json_async(
+    session: *mut AsherahSession,
+    data: *const u8,
+    len: usize,
+    callback: AsherahCompletionFn,
+    user_data: *mut c_void,
+) -> c_int {
+    if session.is_null() {
+        set_error("null session");
+        return -1;
+    }
+    if data.is_null() && len > 0 {
+        set_error("null data");
+        return -1;
+    }
+    // Copy input data — the caller's buffer may not outlive the async task.
+    let input = if data.is_null() {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(data, len).to_vec()
+    };
+    spawn_encrypt_async(AsyncContext::new(session, callback, user_data), input);
+    0
+}
+
+fn spawn_encrypt_async(ctx: AsyncContext, input: Vec<u8>) {
+    ASYNC_RT.spawn(async move {
+        let (session_ref, cb, ud) = unsafe { ctx.restore() };
+        match session_ref.inner.encrypt_async(&input).await {
+            Ok(drr) => {
+                let json = drr.to_json_fast();
+                let bytes = json.as_bytes();
+                unsafe {
+                    cb(
+                        ud as *mut c_void,
+                        bytes.as_ptr(),
+                        bytes.len(),
+                        std::ptr::null(),
+                    )
+                };
+            }
+            Err(e) => {
+                let msg =
+                    CString::new(e.to_string()).unwrap_or_else(|_| c"async encrypt error".into());
+                unsafe { cb(ud as *mut c_void, std::ptr::null(), 0, msg.as_ptr()) };
+            }
+        }
+    });
+}
+
+fn spawn_decrypt_async(ctx: AsyncContext, input: Vec<u8>) {
+    ASYNC_RT.spawn(async move {
+        let (session_ref, cb, ud) = unsafe { ctx.restore() };
+        let drr = match serde_json::from_slice::<ael::types::DataRowRecord>(&input) {
+            Ok(d) => d,
+            Err(e) => {
+                let msg = CString::new(format!("invalid DataRowRecord JSON: {e}"))
+                    .unwrap_or_else(|_| c"json parse error".into());
+                unsafe { cb(ud as *mut c_void, std::ptr::null(), 0, msg.as_ptr()) };
+                return;
+            }
+        };
+        match session_ref.inner.decrypt_async(drr).await {
+            Ok(pt) => {
+                unsafe { cb(ud as *mut c_void, pt.as_ptr(), pt.len(), std::ptr::null()) };
+            }
+            Err(e) => {
+                let msg =
+                    CString::new(e.to_string()).unwrap_or_else(|_| c"async decrypt error".into());
+                unsafe { cb(ud as *mut c_void, std::ptr::null(), 0, msg.as_ptr()) };
+            }
+        }
+    });
+}
+
+/// # Safety
+/// `session` must be a valid session pointer that outlives the async operation.
+/// `json` must reference `len` bytes. `callback` must be a valid function pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn asherah_decrypt_from_json_async(
+    session: *mut AsherahSession,
+    json: *const u8,
+    len: usize,
+    callback: AsherahCompletionFn,
+    user_data: *mut c_void,
+) -> c_int {
+    if session.is_null() {
+        set_error("null session");
+        return -1;
+    }
+    if json.is_null() && len > 0 {
+        set_error("null json");
+        return -1;
+    }
+    let input = if json.is_null() {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(json, len).to_vec()
+    };
+    spawn_decrypt_async(AsyncContext::new(session, callback, user_data), input);
+    0
 }

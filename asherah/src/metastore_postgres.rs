@@ -286,12 +286,9 @@ impl Metastore for PostgresMetastore {
         Ok(stored)
     }
 
-    // Override async methods to use spawn_blocking. The sync `postgres` crate
-    // internally calls block_on when creating connections, which panics if
-    // called from within a tokio runtime (e.g. napi's encrypt_async path).
-    // The sync `postgres` crate internally calls block_on when creating
-    // connections and running queries. This panics from within a tokio runtime.
-    // Run on a plain OS thread (not spawn_blocking, which is still in-runtime).
+    // The sync postgres crate does blocking I/O with internal block_on for
+    // connection management. spawn_blocking is safe here because blocking pool
+    // threads don't have the runtime "entered" (only Handle is available).
     async fn load_async(
         &self,
         id: &str,
@@ -299,12 +296,9 @@ impl Metastore for PostgresMetastore {
     ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         let this = self.clone();
         let id = id.to_string();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        std::thread::spawn(move || {
-            drop(tx.send(this.load(&id, created)));
-        });
-        rx.await
-            .map_err(|_| anyhow::anyhow!("postgres load_async thread panicked"))?
+        tokio::task::spawn_blocking(move || this.load(&id, created))
+            .await
+            .map_err(|e| anyhow::anyhow!("postgres load_async join error: {e}"))?
     }
 
     async fn load_latest_async(
@@ -313,12 +307,9 @@ impl Metastore for PostgresMetastore {
     ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         let this = self.clone();
         let id = id.to_string();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        std::thread::spawn(move || {
-            drop(tx.send(this.load_latest(&id)));
-        });
-        rx.await
-            .map_err(|_| anyhow::anyhow!("postgres load_latest_async thread panicked"))?
+        tokio::task::spawn_blocking(move || this.load_latest(&id))
+            .await
+            .map_err(|e| anyhow::anyhow!("postgres load_latest_async join error: {e}"))?
     }
 
     async fn store_async(
@@ -330,12 +321,9 @@ impl Metastore for PostgresMetastore {
         let this = self.clone();
         let id = id.to_string();
         let ekr = ekr.clone();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        std::thread::spawn(move || {
-            drop(tx.send(this.store(&id, created, &ekr)));
-        });
-        rx.await
-            .map_err(|_| anyhow::anyhow!("postgres store_async thread panicked"))?
+        tokio::task::spawn_blocking(move || this.store(&id, created, &ekr))
+            .await
+            .map_err(|e| anyhow::anyhow!("postgres store_async join error: {e}"))?
     }
 }
 

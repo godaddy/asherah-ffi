@@ -67,6 +67,58 @@ impl DynamoDbMetastore {
         })
     }
 
+    /// Async constructor — loads AWS config on the caller's tokio runtime.
+    /// The private runtime is still created for sync callers (load/store).
+    pub async fn new_async(
+        table: impl Into<String>,
+        region: Option<String>,
+    ) -> anyhow::Result<Self> {
+        let region_provider = if let Some(r) = region.clone() {
+            RegionProviderChain::first_try(Region::new(r))
+        } else {
+            RegionProviderChain::default_provider()
+        };
+        let conf = {
+            let cfg = aws_config::defaults(aws_config::BehaviorVersion::latest())
+                .region(region_provider)
+                .load()
+                .await;
+            let mut b = aws_sdk_dynamodb::config::Builder::from(&cfg);
+            if let Ok(url) = std::env::var("AWS_ENDPOINT_URL") {
+                b = b.endpoint_url(url);
+            }
+            b.build()
+        };
+        let client = Client::from_conf(conf.clone());
+        // Private runtime for sync callers — Runtime::new() is safe from a tokio
+        // worker (it creates the runtime without entering it).
+        let rt = tokio::runtime::Runtime::new()?;
+        let with_suffix = std::env::var("DDB_REGION_SUFFIX")
+            .ok()
+            .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .unwrap_or(false);
+        let suffix = if with_suffix {
+            conf.region().map(|r| r.to_string())
+        } else {
+            None
+        };
+        let table_name = {
+            let t = table.into();
+            if t.is_empty() {
+                "EncryptionKey".to_string()
+            } else {
+                t
+            }
+        };
+        Ok(Self {
+            client,
+            table: table_name,
+            rt: Arc::new(rt),
+            region_suffix_enabled: with_suffix,
+            region_suffix: suffix,
+        })
+    }
+
     /// Block on a future, handling both tokio-worker and plain-thread contexts.
     fn block_on_maybe<F: std::future::Future>(rt: &tokio::runtime::Runtime, f: F) -> F::Output {
         if tokio::runtime::Handle::try_current().is_ok() {

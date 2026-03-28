@@ -90,7 +90,7 @@ function main() {
       const json = addon.encrypt(partition, data);
       process.stdout.write(Buffer.from(json, 'utf8').toString('base64'));
     } else if (action === 'decrypt') {
-      const json = Buffer.from(payloadB64, 'base64').toString('utf8');
+      const json = Buffer.from(payloadB64, 'base64');
       const buf = addon.decrypt(partition, json);
       process.stdout.write(Buffer.from(buf).toString('base64'));
     } else {

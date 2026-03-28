@@ -243,7 +243,6 @@ async fn start_mysql() -> Option<(ContainerAsync<GenericImage>, String)> {
                 // Create table before returning — matches Go behavior where tables must pre-exist
                 let url_clone = url.clone();
                 let table_ok = tokio::task::spawn_blocking(move || {
-                    // Retry table creation since MySQL may still be starting
                     for _ in 0..30 {
                         if std::panic::catch_unwind(|| create_mysql_table(&url_clone)).is_ok() {
                             return true;

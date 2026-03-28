@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO;
 using System.Text;
 using System.Threading.Tasks;
 using GoDaddy.Asherah;
@@ -11,7 +12,7 @@ using Newtonsoft.Json.Linq;
 using Xunit;
 using static LanguageExt.Prelude;
 
-namespace AsherahDotNet.Tests;
+namespace GoDaddy.Asherah.AppEncryption.Compat.Tests;
 
 public class SessionFactoryCompatTests : IDisposable
 {
@@ -22,6 +23,21 @@ public class SessionFactoryCompatTests : IDisposable
         Environment.SetEnvironmentVariable("STATIC_MASTER_KEY_HEX",
             Environment.GetEnvironmentVariable("STATIC_MASTER_KEY_HEX")
             ?? new string('2', 64));
+
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASHERAH_DOTNET_NATIVE")))
+        {
+            var dir = new DirectoryInfo(AppContext.BaseDirectory);
+            while (dir is not null)
+            {
+                if (File.Exists(Path.Combine(dir.FullName, "Cargo.toml")))
+                {
+                    Environment.SetEnvironmentVariable("ASHERAH_DOTNET_NATIVE",
+                        Path.Combine(dir.FullName, "target", "debug"));
+                    break;
+                }
+                dir = dir.Parent;
+            }
+        }
     }
 
     public void Dispose()

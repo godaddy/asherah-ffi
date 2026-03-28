@@ -52,7 +52,7 @@ function main() {
   const pid = 'p1';
   const drr = addon.encrypt(pid, Buffer.from('hello-napi'));
   assert.ok(typeof drr === 'string' && drr.includes('"Key"'));
-  const out = addon.decrypt(pid, drr);
+  const out = addon.decrypt(pid, Buffer.from(drr));
   assert.strictEqual(out.toString(), 'hello-napi');
 
   const drr2 = addon.encryptString(pid, 'string-payload');
@@ -63,7 +63,7 @@ function main() {
 
   addon.setup(cfg);
   const next = addon.encrypt(pid, Buffer.from('second-pass'));
-  const recovered = addon.decrypt(pid, next);
+  const recovered = addon.decrypt(pid, Buffer.from(next));
   assert.strictEqual(recovered.toString(), 'second-pass');
   addon.shutdown();
   console.log('asherah-node roundtrip OK');
@@ -261,7 +261,7 @@ function testFfiBoundary() {
   const allBytes = Buffer.alloc(256);
   for (let i = 0; i < 256; i++) allBytes[i] = i;
   const binDrr = addon.encrypt(pid, allBytes);
-  const binRecovered = addon.decrypt(pid, binDrr);
+  const binRecovered = addon.decrypt(pid, Buffer.from(binDrr));
   assert.ok(Buffer.isBuffer(binRecovered), 'decrypt should return Buffer');
   assert.strictEqual(binRecovered.length, 256, 'all 256 bytes should survive');
   for (let i = 0; i < 256; i++) {
@@ -271,7 +271,7 @@ function testFfiBoundary() {
 
   // Empty payload
   const emptyDrr = addon.encrypt(pid, Buffer.alloc(0));
-  const emptyRecovered = addon.decrypt(pid, emptyDrr);
+  const emptyRecovered = addon.decrypt(pid, Buffer.from(emptyDrr));
   assert.strictEqual(emptyRecovered.length, 0, 'empty payload roundtrip');
   console.log('asherah-node empty payload OK');
 
@@ -279,7 +279,7 @@ function testFfiBoundary() {
   const oneMb = Buffer.alloc(1024 * 1024);
   for (let i = 0; i < oneMb.length; i++) oneMb[i] = i % 256;
   const largeDrr = addon.encrypt(pid, oneMb);
-  const largeRecovered = addon.decrypt(pid, largeDrr);
+  const largeRecovered = addon.decrypt(pid, Buffer.from(largeDrr));
   assert.strictEqual(largeRecovered.length, oneMb.length, '1MB length mismatch');
   assert.ok(oneMb.equals(largeRecovered), '1MB data mismatch');
   console.log('asherah-node 1MB payload OK');
@@ -287,7 +287,7 @@ function testFfiBoundary() {
   // Error: decrypt with invalid JSON
   let caught = false;
   try {
-    addon.decrypt(pid, 'not valid json');
+    addon.decrypt(pid, Buffer.from('not valid json'));
   } catch (e) {
     caught = true;
   }
@@ -297,7 +297,7 @@ function testFfiBoundary() {
   const wrongDrr = addon.encrypt('partition-a', Buffer.from('secret'));
   caught = false;
   try {
-    addon.decrypt('partition-b', wrongDrr);
+    addon.decrypt('partition-b', Buffer.from(wrongDrr));
   } catch (e) {
     caught = true;
   }
@@ -508,7 +508,7 @@ async function testAsyncFromAsyncContext() {
     KMS: 'static',
   });
   const drr2 = await addon.encryptAsync('cycle', Buffer.from('async-cycle-test'));
-  const buf = await addon.decryptAsync('cycle', drr2);
+  const buf = await addon.decryptAsync('cycle', Buffer.from(drr2));
   assert.strictEqual(buf.toString(), 'async-cycle-test');
   await addon.shutdownAsync();
 

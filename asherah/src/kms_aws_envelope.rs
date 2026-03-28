@@ -104,6 +104,59 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
         })
     }
 
+    /// Async constructor — single region, loads config on caller's runtime.
+    pub async fn new_single_async(
+        aead: Arc<A>,
+        key_id: String,
+        region: Option<String>,
+    ) -> anyhow::Result<Self> {
+        let (client, resolved_region) = new_kms_client_async(region).await?;
+        let rc = RegionalClient {
+            client,
+            region: resolved_region,
+            key_arn: key_id,
+        };
+        let rt = Some(Arc::new(tokio::runtime::Runtime::new()?));
+        Ok(Self {
+            clients: vec![rc],
+            preferred: 0,
+            aead,
+            rt,
+        })
+    }
+
+    /// Async constructor — multi region, loads config on caller's runtime.
+    pub async fn new_multi_async(
+        aead: Arc<A>,
+        preferred: usize,
+        entries: Vec<(String, String)>,
+    ) -> anyhow::Result<Self> {
+        if entries.is_empty() {
+            return Err(anyhow::anyhow!("no kms entries provided"));
+        }
+        let mut clients = Vec::with_capacity(entries.len());
+        for (region, key) in entries.into_iter() {
+            let (client, resolved_region) = new_kms_client_async(Some(region)).await?;
+            clients.push(RegionalClient {
+                client,
+                region: resolved_region,
+                key_arn: key,
+            });
+        }
+        let pref = if preferred < clients.len() {
+            preferred
+        } else {
+            0
+        };
+        let rt = Some(Arc::new(tokio::runtime::Runtime::new()?));
+        Ok(Self {
+            clients,
+            preferred: pref,
+            aead,
+            rt,
+        })
+    }
+
     fn block_on_maybe<F: std::future::Future>(&self, f: F) -> F::Output {
         match &self.rt {
             Some(rt) => {
@@ -254,6 +307,29 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
             "all KMS backends failed to decrypt: {detail}"
         ))
     }
+}
+
+async fn new_kms_client_async(region: Option<String>) -> anyhow::Result<(Client, String)> {
+    let region_provider = if let Some(r) = region.clone() {
+        RegionProviderChain::first_try(Region::new(r))
+    } else {
+        RegionProviderChain::default_provider()
+    };
+    let shared_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .region(region_provider)
+        .load()
+        .await;
+    let mut b = aws_sdk_kms::config::Builder::from(&shared_config);
+    if let Ok(url) = std::env::var("AWS_ENDPOINT_URL") {
+        b = b.endpoint_url(url);
+    }
+    let conf = b.build();
+    let client = Client::from_conf(conf.clone());
+    let resolved_region = conf
+        .region()
+        .map(|r| r.to_string())
+        .unwrap_or(region.unwrap_or_default());
+    Ok((client, resolved_region))
 }
 
 fn new_kms_client(
@@ -435,11 +511,15 @@ mod tests {
     #[test]
     fn decrypt_key_invalid_envelope_json_fails() {
         let aead = Arc::new(crate::aead::AES256GCM::new());
+        // Use current_thread runtime to avoid kqueue/epoll (Miri/Valgrind safe)
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
         let kms = AwsKmsEnvelope {
             clients: vec![],
             preferred: 0,
             aead,
-            rt: None,
+            rt: Some(Arc::new(rt)),
         };
         let result = kms.decrypt_key(&(), b"not json");
         assert!(result.is_err());
@@ -457,11 +537,14 @@ mod tests {
             }],
         };
         let blob = serde_json::to_vec(&env).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
         let kms = AwsKmsEnvelope {
             clients: vec![], // no clients
             preferred: 0,
             aead,
-            rt: None,
+            rt: Some(Arc::new(rt)),
         };
         let err = kms.decrypt_key(&(), &blob).unwrap_err();
         assert!(

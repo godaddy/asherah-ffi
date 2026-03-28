@@ -215,12 +215,27 @@ function set_log_hook(callback) {
   return native.setLogHook(callback);
 }
 
+// Wrap decrypt/decryptAsync to accept both String and Buffer inputs.
+// The native functions take Buffer to avoid V8 UTF-16→UTF-8 string conversion
+// overhead that scales with payload size.
+function toBuffer(input) {
+  return typeof input === 'string' ? Buffer.from(input) : input;
+}
+function decrypt(partitionId, dataRowRecord) {
+  return native.decrypt(partitionId, toBuffer(dataRowRecord));
+}
+function decryptAsync(partitionId, dataRowRecord) {
+  return native.decryptAsync(partitionId, toBuffer(dataRowRecord));
+}
+
 // Export everything from native addon
 Object.assign(module.exports, native);
 
 // Override setup/setupAsync with normalizing versions
 module.exports.setup = setup;
 module.exports.setupAsync = setupAsync;
+module.exports.decrypt = decrypt;
+module.exports.decryptAsync = decryptAsync;
 
 // snake_case aliases for canonical API compatibility
 module.exports.setup_async = setupAsync;
@@ -228,7 +243,7 @@ module.exports.shutdown_async = native.shutdownAsync;
 module.exports.encrypt_async = native.encryptAsync;
 module.exports.encrypt_string = native.encryptString;
 module.exports.encrypt_string_async = native.encryptStringAsync;
-module.exports.decrypt_async = native.decryptAsync;
+module.exports.decrypt_async = decryptAsync;
 module.exports.decrypt_string = native.decryptString;
 module.exports.decrypt_string_async = native.decryptStringAsync;
 module.exports.set_max_stack_alloc_item_size = native.setMaxStackAllocItemSize;

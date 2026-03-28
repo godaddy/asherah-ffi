@@ -174,10 +174,8 @@ function main() {
   try {
     if (action === 'roundtrip') {
       const ciphertext = addon.encrypt(partition, Buffer.from(payload));
-      const decryptInput = flavour === 'legacy' ? Buffer.from(ciphertext) : Buffer.from(ciphertext).toString('utf8');
-      const plaintext = flavour === 'legacy'
-        ? addon.decrypt(partition, decryptInput)
-        : addon.decrypt(partition, decryptInput);
+      const decryptInput = Buffer.from(ciphertext);
+      const plaintext = addon.decrypt(partition, decryptInput);
       const bufferOut = Buffer.from(plaintext);
       process.stdout.write(bufferOut.toString('base64'));
     } else if (action === 'encrypt') {
@@ -187,12 +185,7 @@ function main() {
       process.stdout.write(bufferOut.toString('base64'));
     } else if (action === 'decrypt') {
       let plaintext;
-      if (flavour === 'legacy') {
-        plaintext = addon.decrypt(partition, Buffer.from(payload));
-      } else {
-        const json = Buffer.from(payload).toString('utf8');
-        plaintext = addon.decrypt(partition, json);
-      }
+      plaintext = addon.decrypt(partition, Buffer.from(payload));
       const bufferOut = Buffer.from(plaintext);
       process.stdout.write(bufferOut.toString('base64'));
     } else {
