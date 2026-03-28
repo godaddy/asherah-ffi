@@ -181,7 +181,7 @@ This replaces `github.com/godaddy/asherah/go/appencryption`. Key differences:
 | Implementation | Pure Go | Rust + purego FFI |
 | CGO required | Yes (protectedmemory) or No (memguard) | No (purego) |
 | Serialization | Protobuf | JSON |
-| Memory protection | protectedmemory (CGO) or memguard | Rust memguard (locked, wiped pages) |
+| Memory protection | protectedmemory/memguard | Rust memguard (mlock + wipe) |
 | Session model | `SessionFactory` | `Factory` / `Session` (+ compat layer) |
 | Metastore format | Wire-compatible | Wire-compatible |
 
@@ -263,10 +263,10 @@ The loader searches for the native library in this order:
 | `SetupFromEnv() error` | Initialize from environment variables |
 | `Shutdown()` | Release all resources and cached sessions |
 | `GetSetupStatus() bool` | Check if initialized |
-| `Encrypt(partition string, data []byte) ([]byte, error)` | Encrypt bytes, returns DRR JSON |
-| `Decrypt(partition string, drr []byte) ([]byte, error)` | Decrypt DRR JSON to bytes |
-| `EncryptString(partition, data string) (string, error)` | String convenience wrapper |
-| `DecryptString(partition, drr string) (string, error)` | String convenience wrapper |
+| `Encrypt(partition, data)` | Encrypt `[]byte`, returns DRR JSON |
+| `Decrypt(partition, drr)` | Decrypt DRR JSON to `[]byte` |
+| `EncryptString(partition, data)` | String convenience wrapper |
+| `DecryptString(partition, drr)` | String convenience wrapper |
 | `SetEnvJSON(payload []byte) error` | Set env vars from JSON |
 | `SetEnvMap(values map[string]*string)` | Set env vars from map |
 
@@ -276,31 +276,31 @@ The loader searches for the native library in this order:
 |---|---|
 | `NewFactory(cfg Config) (*Factory, error)` | Create a factory from config |
 | `NewFactoryFromEnv() (*Factory, error)` | Create a factory from env vars |
-| `(*Factory).GetSession(partitionID string) (*Session, error)` | Create a session for a partition |
+| `(*Factory).GetSession(partitionID)` | Create a session for a partition |
 | `(*Factory).Close()` | Release the factory |
 
 ### Session
 
 | Method | Description |
 |---|---|
-| `(*Session).Encrypt(plaintext []byte) ([]byte, error)` | Encrypt bytes, returns DRR JSON |
-| `(*Session).EncryptString(plaintext string) (string, error)` | String convenience wrapper |
-| `(*Session).Decrypt(drr []byte) ([]byte, error)` | Decrypt DRR JSON to bytes |
-| `(*Session).DecryptString(drr string) (string, error)` | String convenience wrapper |
+| `(*Session).Encrypt(plaintext)` | Encrypt `[]byte`, returns DRR JSON |
+| `(*Session).EncryptString(plaintext)` | String convenience wrapper |
+| `(*Session).Decrypt(drr)` | Decrypt DRR JSON to `[]byte` |
+| `(*Session).DecryptString(drr)` | String convenience wrapper |
 | `(*Session).Close()` | Release the session |
 
 ### Canonical Compatibility Layer
 
 | Type/Function | Description |
 |---|---|
-| `NewSessionFactory(config, store, kms, aead, ...opts)` | Create a canonical-compatible factory |
-| `(*SessionFactory).GetSession(id string) (*CompatSession, error)` | Get a canonical-compatible session |
-| `(*SessionFactory).Close() error` | Release the factory |
-| `(*CompatSession).Encrypt(ctx, data) (*DataRowRecord, error)` | Encrypt, returns `DataRowRecord` struct |
-| `(*CompatSession).Decrypt(ctx, drr) ([]byte, error)` | Decrypt a `DataRowRecord` |
-| `(*CompatSession).Load(ctx, key, store) ([]byte, error)` | Load and decrypt from a store |
-| `(*CompatSession).Store(ctx, data, store) (any, error)` | Encrypt and store |
-| `(*CompatSession).Close() error` | Release the session |
+| `NewSessionFactory(config, store, kms, ...)` | Create a canonical-compatible factory |
+| `(*SessionFactory).GetSession(id)` | Get a canonical-compatible session |
+| `(*SessionFactory).Close()` | Release the factory |
+| `(*CompatSession).Encrypt(ctx, data)` | Encrypt, returns `*DataRowRecord` |
+| `(*CompatSession).Decrypt(ctx, drr)` | Decrypt a `*DataRowRecord` |
+| `(*CompatSession).Load(ctx, key, store)` | Load and decrypt from a store |
+| `(*CompatSession).Store(ctx, data, store)` | Encrypt and store |
+| `(*CompatSession).Close()` | Release the session |
 
 ## License
 

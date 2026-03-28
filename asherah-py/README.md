@@ -123,7 +123,7 @@ The `setup()` function accepts a dict (or any JSON-serializable object) with Pas
 | `DynamoDBSigningRegion` | str | No | Signing region (overrides `DynamoDBRegion`) |
 | `DynamoDBTableName` | str | No | DynamoDB table name |
 | `ReplicaReadConsistency` | str | No | DynamoDB read consistency |
-| `SQLMetastoreDBType` | str | No | `"mysql"` or `"postgres"` (hint for ambiguous connection strings) |
+| `SQLMetastoreDBType` | str | No | `"mysql"` or `"postgres"` hint for rdbms |
 | `Verbose` | bool | No | Enable verbose logging |
 | `EnableCanaries` | bool | No | Enable canary buffer overflow detection |
 | `NullDataCheck` | bool | No | Enable null data validation |
