@@ -57,11 +57,12 @@ jobs:
       - name: Download native libraries from release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           # Use the tag from the triggering workflow_run, not "latest release"
           # (prevents race if two releases overlap)
-          if [ -n "${{ github.event.workflow_run.head_branch }}" ]; then
-            TAG="${{ github.event.workflow_run.head_branch }}"
+          if [ -n "$WORKFLOW_RUN_BRANCH" ]; then
+            TAG="$WORKFLOW_RUN_BRANCH"
           else
             TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
           fi
