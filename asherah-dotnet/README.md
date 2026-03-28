@@ -223,7 +223,7 @@ var config = AsherahConfig.CreateBuilder()
 | `Shutdown()` | Tear down the shared global instance |
 | `ShutdownAsync()` | Async version of `Shutdown` |
 | `GetSetupStatus()` | Returns `true` if `Setup` has been called |
-| `SetEnv(IDictionary<string, string?>)` | Set environment variables (e.g., `STATIC_MASTER_KEY_HEX`) |
+| `SetEnv(IDictionary<string, string?>)` | Set environment variables before setup |
 | `Encrypt(string, byte[])` | Encrypt bytes for a partition |
 | `EncryptString(string, string)` | Encrypt a UTF-8 string for a partition |
 | `EncryptAsync(string, byte[])` | Async encrypt bytes |

@@ -136,7 +136,7 @@ is auto-mapped for backward compatibility with the canonical Go-based package).
 |-------|------|---------|-------------|
 | `serviceName` | `string` | **(required)** | Service identifier for key hierarchy |
 | `productId` | `string` | **(required)** | Product identifier for key hierarchy |
-| `metastore` | `string` | **(required)** | `"memory"`, `"sqlite"`, `"rdbms"`, or `"dynamodb"` |
+| `metastore` | `string` | **(required)** | `"memory"`, `"sqlite"`, `"rdbms"`, `"dynamodb"` |
 | `kms` | `string` | `"static"` | `"static"` or `"aws"` |
 | `connectionString` | `string` | | Connection string for sqlite or rdbms metastore |
 | `sqlMetastoreDBType` | `string` | | `"mysql"` or `"postgres"` (for rdbms metastore) |

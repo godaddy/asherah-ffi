@@ -21,14 +21,14 @@ record.
 
 ## Language Bindings
 
-| Language | Package | Install | README |
-|----------|---------|---------|--------|
-| Node.js | `asherah` (npm) | `npm install asherah` | [asherah-node/](asherah-node/) |
-| Python | `asherah` (PyPI) | `pip install asherah` | [asherah-py/](asherah-py/) |
-| .NET | `GoDaddy.Asherah.AppEncryption` (NuGet) | `dotnet add package GoDaddy.Asherah.AppEncryption` | [asherah-dotnet/](asherah-dotnet/) |
-| Java | `com.godaddy.asherah:asherah` (Maven) | Maven/Gradle | [asherah-java/](asherah-java/) |
-| Ruby | `asherah` (RubyGems) | `gem install asherah` | [asherah-ruby/](asherah-ruby/) |
-| Go | `github.com/godaddy/asherah-go` | `go get github.com/godaddy/asherah-go` | [asherah-go/](asherah-go/) |
+| Language | Package | Docs |
+|----------|---------|------|
+| Node.js | [`asherah`](https://www.npmjs.com/package/asherah) on npm | [README](asherah-node/) |
+| Python | [`asherah`](https://pypi.org/project/asherah) on PyPI | [README](asherah-py/) |
+| .NET | [`GoDaddy.Asherah.AppEncryption`](https://nuget.org/packages/GoDaddy.Asherah.AppEncryption) on NuGet | [README](asherah-dotnet/) |
+| Java | `com.godaddy.asherah:asherah` on Maven | [README](asherah-java/) |
+| Ruby | [`asherah`](https://rubygems.org/gems/asherah) on RubyGems | [README](asherah-ruby/) |
+| Go | [`github.com/godaddy/asherah-go`](https://pkg.go.dev/github.com/godaddy/asherah-go) | [README](asherah-go/) |
 
 ## Platform Support
 
