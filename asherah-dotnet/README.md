@@ -30,8 +30,8 @@ using GoDaddy.Asherah;
 var config = AsherahConfig.CreateBuilder()
     .WithServiceName("my-service")
     .WithProductId("my-product")
-    .WithMetastore("memory")
-    .WithKms("static")
+    .WithMetastore("memory")    // testing only
+    .WithKms("static")          // testing only
     .WithEnableSessionCaching(true)
     .Build();
 
@@ -57,8 +57,8 @@ using GoDaddy.Asherah;
 var config = AsherahConfig.CreateBuilder()
     .WithServiceName("my-service")
     .WithProductId("my-product")
-    .WithMetastore("memory")
-    .WithKms("static")
+    .WithMetastore("memory")    // testing only
+    .WithKms("static")          // testing only
     .Build();
 
 using var factory = Asherah.FactoryFromConfig(config);
@@ -161,8 +161,8 @@ var config = AsherahConfig.CreateBuilder()
     // Required
     .WithServiceName("my-service")
     .WithProductId("my-product")
-    .WithMetastore("memory")             // "memory", "rdbms", "dynamodb"
-    .WithKms("static")                   // "static", "aws"
+    .WithMetastore("memory")             // "rdbms", "dynamodb", "memory" (testing)
+    .WithKms("static")                   // "aws", "static" (testing)
 
     // Key rotation
     .WithExpireAfter(86400)              // Key expiration in seconds
@@ -201,7 +201,7 @@ var config = AsherahConfig.CreateBuilder()
 
 | Value | Description |
 |-------|-------------|
-| `"memory"` | In-memory (non-persistent, for testing/development) |
+| `"memory"` | In-memory, non-persistent (testing only) |
 | `"rdbms"` | MySQL or PostgreSQL via `ConnectionString` |
 | `"dynamodb"` | AWS DynamoDB |
 
@@ -263,7 +263,7 @@ var config = AsherahConfig.CreateBuilder()
 |--------|-------------|
 | `WithServiceName(string)` | **Required.** Service name for key hierarchy |
 | `WithProductId(string)` | **Required.** Product ID for key hierarchy |
-| `WithMetastore(string)` | **Required.** `"memory"`, `"rdbms"`, or `"dynamodb"` |
+| `WithMetastore(string)` | **Required.** `"rdbms"`, `"dynamodb"`, `"memory"` (testing) |
 | `WithKms(string)` | KMS type: `"static"` (default) or `"aws"` |
 | `WithExpireAfter(long?)` | Key expiration in seconds |
 | `WithCheckInterval(long?)` | Revoke check interval in seconds |

@@ -28,8 +28,8 @@ process.env.STATIC_MASTER_KEY_HEX = '22'.repeat(32);
 asherah.setup({
   serviceName: 'my-service',
   productId: 'my-product',
-  metastore: 'memory',
-  kms: 'static',
+  metastore: 'memory',   // testing only
+  kms: 'static',         // testing only
   enableSessionCaching: true,
 });
 
@@ -60,8 +60,8 @@ process.env.STATIC_MASTER_KEY_HEX = '22'.repeat(32);
 const factory = new SessionFactory({
   serviceName: 'my-service',
   productId: 'my-product',
-  metastore: 'memory',
-  kms: 'static',
+  metastore: 'memory',   // testing only
+  kms: 'static',         // testing only
 });
 
 const session = factory.getSession('my-partition');
@@ -98,8 +98,8 @@ process.env.STATIC_MASTER_KEY_HEX = '22'.repeat(32);
 await asherah.setupAsync({
   serviceName: 'my-service',
   productId: 'my-product',
-  metastore: 'memory',
-  kms: 'static',
+  metastore: 'memory',   // testing only
+  kms: 'static',         // testing only
 });
 
 const ct = await asherah.encryptStringAsync('my-partition', 'secret');
@@ -136,7 +136,7 @@ is auto-mapped for backward compatibility with the canonical Go-based package).
 |-------|------|---------|-------------|
 | `serviceName` | `string` | **(required)** | Service identifier for key hierarchy |
 | `productId` | `string` | **(required)** | Product identifier for key hierarchy |
-| `metastore` | `string` | **(required)** | `"memory"`, `"sqlite"`, `"rdbms"`, `"dynamodb"` |
+| `metastore` | `string` | **(required)** | `"rdbms"`, `"dynamodb"`, `"memory"` (testing) |
 | `kms` | `string` | `"static"` | `"static"` or `"aws"` |
 | `connectionString` | `string` | | Connection string for sqlite or rdbms metastore |
 | `sqlMetastoreDBType` | `string` | | `"mysql"` or `"postgres"` (for rdbms metastore) |
