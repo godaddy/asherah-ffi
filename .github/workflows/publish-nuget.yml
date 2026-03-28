@@ -58,7 +58,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+          # Use the tag from the triggering workflow_run, not "latest release"
+          # (prevents race if two releases overlap)
+          if [ -n "${{ github.event.workflow_run.head_branch }}" ]; then
+            TAG="${{ github.event.workflow_run.head_branch }}"
+          else
+            TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+          fi
           echo "Downloading native libs from release ${TAG}"
 
           NATIVE_DIR="asherah-dotnet/GoDaddy.Asherah.AppEncryption/runtimes"

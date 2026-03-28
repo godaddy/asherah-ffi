@@ -23,7 +23,32 @@ on:
         default: false
 
 jobs:
+  verify-ci:
+    if: ${{ github.event_name == 'release' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify CI passed on this commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          SHA="${{ github.sha }}"
+          echo "Checking CI status for commit ${SHA}..."
+          RESULT=$(gh api "repos/${{ github.repository }}/commits/${SHA}/check-runs" \
+            --jq '[.check_runs[] | select(.name == "rust-tests" or .name == "lint" or .name == "integration-tests")] | map(.conclusion) | unique')
+          echo "CI conclusions: ${RESULT}"
+          if echo "$RESULT" | grep -q '"failure"\|"cancelled"\|"timed_out"'; then
+            echo "::error::CI has failing checks on ${SHA}. Aborting publish."
+            exit 1
+          fi
+          if ! echo "$RESULT" | grep -q '"success"'; then
+            echo "::error::CI has not completed on ${SHA}. Wait for CI to finish before publishing."
+            exit 1
+          fi
+          echo "CI passed on ${SHA}"
+
   resolve-version:
+    needs: [verify-ci]
+    if: ${{ always() && (needs.verify-ci.result == 'success' || needs.verify-ci.result == 'skipped') }}
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.resolve.outputs.version }}
