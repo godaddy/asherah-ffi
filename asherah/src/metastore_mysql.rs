@@ -219,9 +219,9 @@ impl Metastore for MySqlMetastore {
         Ok(stored)
     }
 
-    // Async methods run the sync mysql crate on a plain OS thread to avoid
-    // blocking the tokio worker. The event loop stays responsive while the
-    // MySQL query executes on the spawned thread.
+    // Async methods use spawn_blocking (reuses thread pool) instead of
+    // std::thread::spawn (creates new OS thread per call). The mysql crate
+    // doesn't call block_on internally, so spawn_blocking is safe here.
     async fn load_async(
         &self,
         id: &str,
@@ -229,12 +229,9 @@ impl Metastore for MySqlMetastore {
     ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         let this = self.clone();
         let id = id.to_string();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        std::thread::spawn(move || {
-            drop(tx.send(this.load(&id, created)));
-        });
-        rx.await
-            .map_err(|_| anyhow::anyhow!("mysql load_async thread panicked"))?
+        tokio::task::spawn_blocking(move || this.load(&id, created))
+            .await
+            .map_err(|e| anyhow::anyhow!("mysql load_async join error: {e}"))?
     }
 
     async fn load_latest_async(
@@ -243,12 +240,9 @@ impl Metastore for MySqlMetastore {
     ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         let this = self.clone();
         let id = id.to_string();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        std::thread::spawn(move || {
-            drop(tx.send(this.load_latest(&id)));
-        });
-        rx.await
-            .map_err(|_| anyhow::anyhow!("mysql load_latest_async thread panicked"))?
+        tokio::task::spawn_blocking(move || this.load_latest(&id))
+            .await
+            .map_err(|e| anyhow::anyhow!("mysql load_latest_async join error: {e}"))?
     }
 
     async fn store_async(
@@ -260,12 +254,9 @@ impl Metastore for MySqlMetastore {
         let this = self.clone();
         let id = id.to_string();
         let ekr = ekr.clone();
-        let (tx, rx) = tokio::sync::oneshot::channel();
-        std::thread::spawn(move || {
-            drop(tx.send(this.store(&id, created, &ekr)));
-        });
-        rx.await
-            .map_err(|_| anyhow::anyhow!("mysql store_async thread panicked"))?
+        tokio::task::spawn_blocking(move || this.store(&id, created, &ekr))
+            .await
+            .map_err(|e| anyhow::anyhow!("mysql store_async join error: {e}"))?
     }
 }
 
