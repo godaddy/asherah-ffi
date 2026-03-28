@@ -3,6 +3,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 use rand::{rngs::StdRng, RngCore, SeedableRng};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use tokio::runtime::Runtime;
 
 /// On Apple Silicon, request P-core scheduling via QoS class.
 /// This prevents benchmarks from running on efficiency cores when plugged in.
@@ -205,5 +206,138 @@ fn bench_decrypt_from_json(c: &mut Criterion) {
     factory.close().ok();
 }
 
-criterion_group!(benches, bench_encrypt, bench_decrypt, bench_decrypt_from_json);
+fn bench_encrypt_async(c: &mut Criterion) {
+    let rt = Runtime::new().expect("tokio runtime");
+    let factory = builders::factory_from_env().expect("factory setup");
+    let cold = uses_partition_rotation();
+
+    let mut rng = StdRng::seed_from_u64(12345);
+    let sizes = [64, 1024, 8192];
+
+    // Warmup: populate SK cache
+    {
+        let session = factory.get_session("bench-warmup-async");
+        let _ = session.encrypt(&[0u8; 64]).expect("warmup encrypt");
+        session.close().ok();
+    }
+
+    let mut group = c.benchmark_group("native_encrypt_async");
+    for size in sizes {
+        let mut data = vec![0u8; size];
+        rng.fill_bytes(&mut data);
+
+        let data = data.as_slice();
+        if cold {
+            let mode = bench_mode();
+            let pool_size = 2048_usize;
+            let partitions: Vec<String> = (0..pool_size)
+                .map(|i| format!("bench-{mode}-async-{size}-{i}"))
+                .collect();
+            let mut sessions: HashMap<&str, _> = HashMap::new();
+            for p in &partitions {
+                let session = factory.get_session(p);
+                let _ = session.encrypt(data).expect("pre-encrypt");
+                sessions.insert(p.as_str(), session);
+            }
+            for w in 0..1000 {
+                let session = &sessions[partitions[w % pool_size].as_str()];
+                let _ = black_box(session.encrypt(data).expect("warmup"));
+            }
+
+            let ctr = AtomicUsize::new(0);
+            group.bench_function(BenchmarkId::new("rust_native_async", size), |b| {
+                b.to_async(&rt).iter(|| {
+                    let i = ctr.fetch_add(1, Ordering::Relaxed) % pool_size;
+                    let session = &sessions[partitions[i].as_str()];
+                    async move {
+                        black_box(session.encrypt_async(data).await.expect("encrypt async"))
+                    }
+                })
+            });
+        } else {
+            let session = factory.get_session("bench-partition-async");
+            let drr = session.encrypt(data).expect("verify encrypt");
+            let decrypted = session.decrypt(drr).expect("verify decrypt");
+            assert_eq!(decrypted, data, "async round-trip verification failed for {size}B");
+
+            let session_ref = &session;
+            group.bench_function(BenchmarkId::new("rust_native_async", size), |b| {
+                b.to_async(&rt).iter(|| async move {
+                    black_box(session_ref.encrypt_async(black_box(data)).await.expect("encrypt async"))
+                })
+            });
+            session.close().ok();
+        }
+    }
+    group.finish();
+    factory.close().ok();
+}
+
+fn bench_decrypt_async(c: &mut Criterion) {
+    let rt = Runtime::new().expect("tokio runtime");
+    let factory = builders::factory_from_env().expect("factory setup");
+    let cold = uses_partition_rotation();
+
+    let mut rng = StdRng::seed_from_u64(67890);
+    let sizes = [64, 1024, 8192];
+
+    let mut group = c.benchmark_group("native_decrypt_async");
+    for size in sizes {
+        let mut data = vec![0u8; size];
+        rng.fill_bytes(&mut data);
+
+        if cold {
+            let mode = bench_mode();
+            let pool_size = 2048_usize;
+            let mut partitions = Vec::with_capacity(pool_size);
+            let mut ciphertexts = Vec::with_capacity(pool_size);
+            let mut sessions: HashMap<String, _> = HashMap::new();
+            for i in 0..pool_size {
+                let partition = format!("bench-{mode}-async-{size}-{i}");
+                let session = factory.get_session(&partition);
+                let drr = session.encrypt(&data).expect("pre-encrypt");
+                ciphertexts.push(drr);
+                sessions.insert(partition.clone(), session);
+                partitions.push(partition);
+            }
+            for w in 0..1000 {
+                let i = w % pool_size;
+                let session = &sessions[&partitions[i]];
+                let _ = black_box(session.decrypt(ciphertexts[i].clone()).expect("warmup"));
+            }
+
+            let ctr = AtomicUsize::new(0);
+            group.bench_function(BenchmarkId::new("rust_native_async", size), |b| {
+                b.to_async(&rt).iter(|| {
+                    let i = ctr.fetch_add(1, Ordering::Relaxed) % pool_size;
+                    let session = &sessions[&partitions[i]];
+                    let ct = ciphertexts[i].clone();
+                    async move {
+                        black_box(session.decrypt_async(ct).await.expect("decrypt async"))
+                    }
+                })
+            });
+        } else {
+            let session = factory.get_session("bench-partition-async");
+            let drr = session.encrypt(&data).expect("encrypt for decrypt setup");
+            let decrypted = session.decrypt(drr.clone()).expect("verify decrypt");
+            assert_eq!(decrypted, data, "async decrypt verification failed for {size}B");
+
+            let session_ref = &session;
+            group.bench_function(BenchmarkId::new("rust_native_async", size), |b| {
+                b.to_async(&rt).iter(|| {
+                    let drr_clone = drr.clone();
+                    async move {
+                        black_box(session_ref.decrypt_async(black_box(drr_clone)).await.expect("decrypt async"))
+                    }
+                })
+            });
+            session.close().ok();
+        }
+    }
+    group.finish();
+    factory.close().ok();
+}
+
+criterion_group!(benches, bench_encrypt, bench_decrypt, bench_decrypt_from_json, bench_encrypt_async, bench_decrypt_async);
 criterion_main!(benches);
