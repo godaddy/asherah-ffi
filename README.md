@@ -1,43 +1,146 @@
-Asherah
--------
+# Asherah
 
-This repository hosts the Rust Asherah AppEncryption SDK along with multi-language bindings that mirror the established Go APIs.
+Application-layer encryption with automatic key rotation. Rust implementation
+with bindings for Node.js, Python, .NET, Java, Ruby, and Go.
 
-Rust crates
-- `asherah`: Rust port of Asherah AppEncryption with compatible JSON, API, and KMS/metastore integrations.
-- `asherah-ffi`: C ABI wrapper consumed by the language bindings found in this repository.
+## What is Asherah?
 
-Build & test
-- Build + test whole workspace: `cargo build && cargo test`
-- `cd asherah && cargo test`
-- Python bindings: `python3 -m pytest asherah-py/tests`
-- Node addon: `cd asherah-node && npm install && npm test`
-- Java bindings: `cargo build -p asherah-java && cd asherah-java/java && mvn test`
-- .NET bindings: `cargo build -p asherah-ffi && dotnet test asherah-dotnet/GoDaddy.Asherah.AppEncryption.slnx`
-- Ruby bindings: `ruby -Iasherah-ruby/lib -Iasherah-ruby/test asherah-ruby/test/round_trip_test.rb`
-- Go bindings: `cd asherah-go && go test ./...` (requires `ASHERAH_GO_NATIVE` pointing to the native library path)
-- Full matrix via Docker: `./scripts/test-in-docker.sh` (requires Docker engine)
+Asherah implements envelope encryption: data is encrypted with a random data key,
+which is itself encrypted with an intermediate key, which is encrypted by a
+master key held in a KMS. Keys rotate automatically based on configurable
+intervals, and old keys remain accessible for decryption while new data is always
+encrypted with fresh keys.
 
-Backends (feature‑gated)
-- SQLite (`sqlite`), MySQL (`mysql`), Postgres (`postgres`), DynamoDB (`dynamodb`)
+This design means application code never handles raw master keys, key rotation
+happens transparently, and compromise of a single data key exposes only one
+record.
 
-Examples
-- `asherah/examples/` contains examples for in-memory, SQLite, MySQL, Postgres, and AWS KMS usage.
+**KMS backends:** AWS KMS, static (testing only)
 
-Docker-based test harness
-- Build deterministic environment with Rust, Node, Python, Java, .NET, Ruby, Go: `./scripts/test-in-docker.sh`
-- The script builds `docker/tests.Dockerfile`, mounts the repo, and runs all language-specific tests (`cargo test`, Python, Node, Ruby, Go, interop, Java, .NET).
+**Metastores:** DynamoDB, MySQL, Postgres, SQLite, in-memory (testing only)
 
-.NET usage
-- Managed wrapper lives under `asherah-dotnet/`
-- Ensure the native Asherah library is on the search path (`ASHERAH_DOTNET_NATIVE=/path/to/target/debug`), then:
-  - `dotnet add package` is not required—projects already reference the wrapper
-  - Run tests via `dotnet test asherah-dotnet/GoDaddy.Asherah.AppEncryption.slnx`
-- The wrapper loads the native `asherah_ffi` library using `ASHERAH_DOTNET_NATIVE`, `AppContext` data, or OS search paths.
+## Language Bindings
 
-See `asherah/README.md` for full details.
-- Python, Ruby, Java, .NET, and Go wrappers now expose `setup`/`shutdown` (plus async counterparts where idiomatic), session caching, and byte/string helpers mirroring the published `asherah-node` API, including environment bootstrap helpers to build factories from structured configuration objects.
+| Language | Package | Docs |
+|----------|---------|------|
+| Node.js | [`asherah`](https://www.npmjs.com/package/asherah) on npm | [README](asherah-node/) |
+| Python | [`asherah`](https://pypi.org/project/asherah) on PyPI | [README](asherah-py/) |
+| .NET | `GoDaddy.Asherah.AppEncryption` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages) | [README](asherah-dotnet/) |
+| Java | `com.godaddy.asherah:asherah` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages) | [README](asherah-java/) |
+| Ruby | `asherah` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages) | [README](asherah-ruby/) |
+| Go | [`github.com/godaddy/asherah-go`](https://pkg.go.dev/github.com/godaddy/asherah-go) | [README](asherah-go/) |
 
-Contributing & security
-- Please read `CONTRIBUTING.md` for development workflow expectations.
-- For vulnerability disclosures, consult `SECURITY.md`.
+## Platform Support
+
+| Platform | Architecture | Status |
+|----------|-------------|--------|
+| Linux | x86_64 (glibc) | Supported |
+| Linux | x86_64 (musl) | Supported |
+| Linux | ARM64 (glibc) | Supported |
+| Linux | ARM64 (musl) | Supported |
+| macOS | x86_64 | Supported |
+| macOS | ARM64 (Apple Silicon) | Supported |
+| Windows | x64 | Supported |
+| Windows | ARM64 | Supported |
+
+## Quick Start
+
+```js
+const asherah = require('asherah');
+
+asherah.setup({
+  serviceName: 'my-service',
+  productId: 'my-product',
+  metastore: 'memory',   // testing only — use 'rdbms' or 'dynamodb' in production
+  kms: 'static',         // testing only — use 'aws' in production
+});
+
+const ct = asherah.encryptString('partition', 'secret data');
+const pt = asherah.decryptString('partition', ct);
+
+asherah.shutdown();
+```
+
+See each binding's README for complete examples including async APIs,
+session-based usage, and production configuration.
+
+## Performance
+
+The Rust core delivers sub-microsecond encrypt/decrypt operations. Binding
+overhead varies by language but stays well under 2 microseconds in all cases.
+
+| Implementation | Encrypt 64B (ns) | Decrypt 64B (ns) |
+|---|---|---|
+| Rust native | 397 | 306 |
+| .NET | 693 | 618 |
+| Node.js | 972 | 1,208 |
+| Python | 1,049 | 791 |
+| Go | 1,074 | 973 |
+| Java | 1,118 | 974 |
+| Ruby | 1,170 | 1,110 |
+
+Apple M4 Max, memory metastore, hot cache. See each binding's README for
+detailed benchmarks including async and comparison with canonical
+implementations.
+
+## Testing
+
+- **127 Rust unit tests** covering core encryption engine, key management,
+  metastore adapters, and memory protection
+- **64 .NET tests** (34 core + 30 compatibility layer) across net8.0 and net10.0
+- **49 Node.js tests** including async context, unicode, binary edge cases, and
+  Factory/Session API
+- **21 Go tests** covering Factory/Session API and compatibility layer
+- **21 Python tests** including session-based and async APIs
+- **16 Java tests** including JNI lifecycle and async CompletableFuture
+- **74 Ruby tests** including thread safety, session lifecycle, and async
+  callbacks
+- **5 cross-language interop tests** verifying Python, Node.js, Rust, and Ruby
+  encrypt/decrypt compatibility
+- **6 fuzz targets** for Cargo-fuzz continuous fuzzing
+- **Memory safety**: Miri (undefined behavior detection), AddressSanitizer, and
+  Valgrind on every PR
+- **12 publish dry-run jobs** that replicate every unique compilation path in the
+  release pipeline
+- **56+ CI jobs** on every pull request across x86_64 and ARM64
+
+```bash
+# Run all tests
+scripts/test.sh --all
+
+# Individual test modes
+scripts/test.sh --unit
+scripts/test.sh --integration    # requires Docker (MySQL, Postgres, DynamoDB)
+scripts/test.sh --bindings       # requires language toolchains
+scripts/test.sh --interop
+scripts/test.sh --lint
+scripts/test.sh --sanitizers     # Miri, AddressSanitizer, Valgrind
+scripts/test.sh --fuzz           # requires nightly
+```
+
+## Project Structure
+
+| Directory | Description |
+|-----------|-------------|
+| `asherah/` | Rust core library |
+| `asherah-node/` | Node.js bindings |
+| `asherah-py/` | Python bindings |
+| `asherah-dotnet/` | .NET bindings |
+| `asherah-java/` | Java bindings (JNI) |
+| `asherah-ruby/` | Ruby bindings |
+| `asherah-go/` | Go bindings (purego, no CGO) |
+| `asherah-ffi/` | C ABI for language bindings |
+| `asherah-server/` | gRPC sidecar server |
+| `samples/` | Usage examples for each language |
+| `benchmarks/` | Cross-language benchmark suite |
+
+## Security
+
+- All secret buffers use mlock'd memory with guard pages
+- Automatic wipe-on-free for all key material
+- Core dump protection enabled at initialization
+- Static master keys are for testing only -- production must use AWS KMS
+
+## License
+
+[Apache-2.0](LICENSE)
