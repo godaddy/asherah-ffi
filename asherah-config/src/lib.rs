@@ -307,9 +307,15 @@ pub fn factory_from_config(config: &ConfigOptions) -> Result<(Factory, AppliedCo
 
 /// Async variant — uses async constructors for DynamoDB/KMS.
 /// Postgres construction uses spawn_blocking internally.
+///
+/// **Not safe for concurrent use.** The lock is released before the async
+/// factory build, so concurrent calls with different configs could read each
+/// other's env vars. In practice this is not an issue because setup is
+/// called exactly once per application lifecycle.
 pub async fn factory_from_config_async(config: &ConfigOptions) -> Result<(Factory, AppliedConfig)> {
     // apply_env uses process-global env vars as config transport.
-    // Hold the lock only during apply_env, drop before the async factory build.
+    // We cannot hold a std::sync::Mutex across .await, so the lock is
+    // scoped to apply_env only. This is safe because setup is single-call.
     let applied = {
         let _guard = FACTORY_BUILD_LOCK
             .lock()

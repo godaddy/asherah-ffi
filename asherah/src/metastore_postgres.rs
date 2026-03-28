@@ -323,7 +323,7 @@ impl Metastore for PostgresMetastore {
         let ekr = ekr.clone();
         tokio::task::spawn_blocking(move || this.store(&id, created, &ekr))
             .await
-            .map_err(|_| anyhow::anyhow!("postgres store_async thread panicked"))?
+            .map_err(|e| anyhow::anyhow!("postgres store_async join error: {e}"))?
     }
 }
 
