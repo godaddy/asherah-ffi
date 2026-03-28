@@ -2,17 +2,19 @@
 
 .NET bindings for the [Asherah](https://github.com/godaddy/asherah) envelope encryption library with automatic key rotation. Powered by a native Rust implementation via P/Invoke.
 
-[![NuGet](https://img.shields.io/nuget/v/GoDaddy.Asherah.AppEncryption)](https://www.nuget.org/packages/GoDaddy.Asherah.AppEncryption)
-
 ## Installation
 
-```
+Published to [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages). Add the GitHub NuGet source, then install:
+
+```bash
+dotnet nuget add source "https://nuget.pkg.github.com/godaddy/index.json" \
+  --name godaddy --username YOUR_GITHUB_USERNAME --password YOUR_GITHUB_TOKEN
 dotnet add package GoDaddy.Asherah.AppEncryption
 ```
 
 For drop-in compatibility with the canonical GoDaddy Asherah .NET SDK (SessionFactory builder pattern, `Session<TP, TD>` generics, `Persistence<T>`, etc.):
 
-```
+```bash
 dotnet add package GoDaddy.Asherah.AppEncryption.Compat
 ```
 
