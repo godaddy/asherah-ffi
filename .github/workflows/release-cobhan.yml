@@ -31,20 +31,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           SHA="${{ github.sha }}"
+          REPO="${{ github.repository }}"
           echo "Checking CI status for commit ${SHA}..."
-          # Query check runs for the CI workflow on this commit
-          RESULT=$(gh api "repos/${{ github.repository }}/commits/${SHA}/check-runs" \
-            --jq '[.check_runs[] | select(.name == "rust-tests" or .name == "lint" or .name == "integration-tests")] | map(.conclusion) | unique')
-          echo "CI conclusions: ${RESULT}"
-          if echo "$RESULT" | grep -q '"failure"\|"cancelled"\|"timed_out"'; then
-            echo "::error::CI has failing checks on ${SHA}. Aborting release."
-            exit 1
-          fi
-          if ! echo "$RESULT" | grep -q '"success"'; then
-            echo "::error::CI has not completed on ${SHA}. Wait for CI to finish before releasing."
-            exit 1
-          fi
-          echo "CI passed on ${SHA}"
+          FAILED=0
+          for CHECK in lint rust-tests integration-tests; do
+            CONCLUSION=$(gh api "repos/${REPO}/commits/${SHA}/check-runs?check_name=${CHECK}" \
+              --jq '.check_runs[0].conclusion // empty')
+            echo "  ${CHECK}: ${CONCLUSION:-not found}"
+            if [ -z "$CONCLUSION" ]; then
+              echo "::error::CI check '${CHECK}' not found on ${SHA}. Wait for CI to finish."
+              FAILED=1
+            elif [ "$CONCLUSION" != "success" ]; then
+              echo "::error::CI check '${CHECK}' concluded '${CONCLUSION}' on ${SHA}."
+              FAILED=1
+            fi
+          done
+          if [ "$FAILED" -ne 0 ]; then exit 1; fi
+          echo "All CI checks passed on ${SHA}"
 
   build:
     needs: [verify-ci]
