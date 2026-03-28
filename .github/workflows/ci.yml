@@ -1469,5 +1469,5 @@ jobs:
           find artifacts -name 'libasherah_java.*' -exec cp {} "$NATIVE_DIR/linux-x86_64/" \;
           ls "$NATIVE_DIR/linux-x86_64/libasherah_java."* || { echo "ERROR: No JNI lib found in artifacts"; exit 1; }
           mvn -B -f asherah-java/java/pom.xml -Dnative.build.skip=true -DskipTests package
-          JAR=$(find asherah-java/java/target -name 'asherah-*.jar' -not -name '*sources*' -not -name '*javadoc*' | head -1)
+          JAR=$(find asherah-java/java/target -name 'appencryption-*.jar' -not -name '*sources*' -not -name '*javadoc*' | head -1)
           jar tf "$JAR" | grep "native/.*\\.so$" || { echo "ERROR: No native lib in JAR"; exit 1; }
