@@ -428,7 +428,21 @@ for m in re.finditer(r'native_(encrypt|decrypt)/rust_native/(\d+)\s.*?time:\s+\[
     d = enc if op == 'encrypt' else dec
     d[size] = int(val)
 print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
-" > "$RESULTS_DIR/01_Rust_native"
+" > "$RESULTS_DIR/01_Rust_native_(sync)"
+
+        # Parse async results from the same log
+        python3 -c "
+import re, sys
+text = open('$RESULTS_DIR/criterion_native.log').read()
+enc, dec = {}, {}
+for m in re.finditer(r'native_(encrypt|decrypt)_async/rust_native_async/(\d+)\s.*?time:\s+\[[\d.]+ \w+ ([\d.]+) (ns|µs|us|ms)', text, re.S):
+    op, size, val, unit = m.group(1), int(m.group(2)), float(m.group(3)), m.group(4)
+    if unit in ('µs', 'us'): val *= 1000
+    elif unit == 'ms': val *= 1_000_000
+    d = enc if op == 'encrypt' else dec
+    d[size] = int(val)
+print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
+" > "$RESULTS_DIR/01b_Rust_native_(async)"
     else
         skip "Rust native benchmark failed (see log): $(tail -5 "$RESULTS_DIR/criterion_native.log" 2>/dev/null)"
     fi
@@ -670,7 +684,7 @@ for line in open('$RESULTS_DIR/python.log'):
         enc[int(m.group(1))] = int(m.group(2))
         dec[int(m.group(1))] = int(m.group(3))
 print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
-" > "$RESULTS_DIR/05_Python_FFI"
+" > "$RESULTS_DIR/05_Python_FFI_(sync)"
     reset_mysql
     log "Running Python FFI async benchmark (timeit)..."
     python3 "$BENCH_DIR/python-bench/bench_async.py" > "$RESULTS_DIR/python_async.log" 2>&1
