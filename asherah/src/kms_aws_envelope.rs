@@ -511,11 +511,15 @@ mod tests {
     #[test]
     fn decrypt_key_invalid_envelope_json_fails() {
         let aead = Arc::new(crate::aead::AES256GCM::new());
+        // Use current_thread runtime to avoid kqueue/epoll (Miri/Valgrind safe)
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
         let kms = AwsKmsEnvelope {
             clients: vec![],
             preferred: 0,
             aead,
-            rt: None,
+            rt: Some(Arc::new(rt)),
         };
         let result = kms.decrypt_key(&(), b"not json");
         assert!(result.is_err());
@@ -533,11 +537,14 @@ mod tests {
             }],
         };
         let blob = serde_json::to_vec(&env).unwrap();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
         let kms = AwsKmsEnvelope {
             clients: vec![], // no clients
             preferred: 0,
             aead,
-            rt: None,
+            rt: Some(Arc::new(rt)),
         };
         let err = kms.decrypt_key(&(), &blob).unwrap_err();
         assert!(
