@@ -1,25 +1,121 @@
-# Asherah .NET
+# GoDaddy.Asherah.AppEncryption
 
-.NET bindings for the Asherah envelope encryption and key rotation library.
+.NET bindings for the [Asherah](https://github.com/godaddy/asherah) envelope encryption library with automatic key rotation. Powered by a native Rust implementation via P/Invoke.
 
-Published to GitHub Packages (NuGet) with prebuilt native libraries for
-Linux (x64/arm64), macOS (x64/arm64), and Windows (x64/arm64).
+## Installation
 
-## Features
+Published to [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages). Add the GitHub NuGet source, then install:
 
-- Envelope encryption with automatic key rotation
-- Drop-in compatible API with the original GoDaddy Asherah .NET SDK
-- `SessionFactory` builder pattern with `WithInMemoryMetastore()`, `WithStaticKeyManagementService()`, etc.
-- `Session<TP, TD>` generics for typed encrypt/decrypt
-- Async encrypt/decrypt support
-- Targets .NET 8.0 and .NET 10.0
+```bash
+dotnet nuget add source "https://nuget.pkg.github.com/godaddy/index.json" \
+  --name godaddy --username YOUR_GITHUB_USERNAME --password YOUR_GITHUB_TOKEN
+dotnet add package GoDaddy.Asherah.AppEncryption
+```
 
-## Quick Start
+For drop-in compatibility with the canonical GoDaddy Asherah .NET SDK (SessionFactory builder pattern, `Session<TP, TD>` generics, `Persistence<T>`, etc.):
+
+```bash
+dotnet add package GoDaddy.Asherah.AppEncryption.Compat
+```
+
+**Supported targets:** .NET 8.0 and .NET 10.0. Native libraries are bundled for Linux x64/ARM64, macOS x64/ARM64, and Windows x64/ARM64.
+
+## Quick Start (Static API)
+
+The simplest way to use Asherah -- configure once, encrypt/decrypt anywhere:
+
+```csharp
+using GoDaddy.Asherah;
+
+var config = AsherahConfig.CreateBuilder()
+    .WithServiceName("my-service")
+    .WithProductId("my-product")
+    .WithMetastore("memory")    // testing only
+    .WithKms("static")          // testing only
+    .WithEnableSessionCaching(true)
+    .Build();
+
+Asherah.Setup(config);
+try
+{
+    var ct = Asherah.EncryptString("partition", "secret data");
+    var pt = Asherah.DecryptString("partition", ct);
+}
+finally
+{
+    Asherah.Shutdown();
+}
+```
+
+## Factory/Session API (preferred)
+
+For explicit lifetime management and multiple concurrent partitions:
+
+```csharp
+using GoDaddy.Asherah;
+
+var config = AsherahConfig.CreateBuilder()
+    .WithServiceName("my-service")
+    .WithProductId("my-product")
+    .WithMetastore("memory")    // testing only
+    .WithKms("static")          // testing only
+    .Build();
+
+using var factory = Asherah.FactoryFromConfig(config);
+using var session = factory.GetSession("user-123");
+
+byte[] plaintext = System.Text.Encoding.UTF8.GetBytes("sensitive payload");
+byte[] ciphertext = session.EncryptBytes(plaintext);
+byte[] decrypted = session.DecryptBytes(ciphertext);
+```
+
+## Async API
+
+All encrypt/decrypt operations have async counterparts:
+
+```csharp
+// Static API
+var ct = await Asherah.EncryptStringAsync("partition", "data");
+var pt = await Asherah.DecryptStringAsync("partition", ct);
+
+// Session API
+var ct = await session.EncryptBytesAsync(plaintext);
+var pt = await session.DecryptBytesAsync(ct);
+```
+
+## Async Behavior
+
+The .NET async methods use **true async callbacks** from the Rust tokio runtime. A `TaskCompletionSource` is completed from a tokio worker thread via an `[UnmanagedCallersOnly]` callback -- the .NET thread pool is NOT blocked while waiting for the native operation.
+
+| Metastore | Async Pattern | Blocks ThreadPool? |
+|-----------|--------------|-------------------|
+| In-Memory | Tokio worker -> callback | No |
+| DynamoDB | True async AWS SDK -> callback | No |
+| MySQL | spawn_blocking -> callback | No |
+| Postgres | spawn_blocking -> callback | No |
+
+**Overhead:** ~9.8us async vs ~0.7us sync (64B payload, hot cache). Use async for ASP.NET Core request handlers; use sync for batch processing.
+
+## Migration from Canonical (`GoDaddy.Asherah.AppEncryption` v0.2.x)
+
+The `GoDaddy.Asherah.AppEncryption.Compat` NuGet package provides a drop-in compatible API surface matching the canonical C# SDK:
+
+- `SessionFactory.NewBuilder("product", "service")` builder pattern
+- `Session<JObject, JObject>` and `Session<byte[], byte[]>` generics
+- `Persistence<T>` and `AdhocPersistence<T>`
+- `Option<T>` (LanguageExt-compatible, bundled -- no extra dependency)
+- `NeverExpiredCryptoPolicy`, `BasicExpiringCryptoPolicy`
+- `StaticKeyManagementServiceImpl`, `AwsKeyManagementServiceImpl`
+- `InMemoryMetastoreImpl`, `AdoMetastoreImpl`, `DynamoDbMetastoreImpl`
+
+### Before (canonical SDK)
 
 ```csharp
 using GoDaddy.Asherah.AppEncryption;
+using GoDaddy.Asherah.AppEncryption.Kms;
+using GoDaddy.Asherah.AppEncryption.Persistence;
 
-var factory = SessionFactory.NewBuilder("product", "service")
+using var factory = SessionFactory.NewBuilder("product", "service")
     .WithInMemoryMetastore()
     .WithNeverExpiredCryptoPolicy()
     .WithStaticKeyManagementService("thisIsAStaticMasterKeyForTesting")
@@ -30,9 +126,169 @@ byte[] encrypted = session.Encrypt(Encoding.UTF8.GetBytes("hello"));
 byte[] decrypted = session.Decrypt(encrypted);
 ```
 
-## Building
+### After (this package -- same code, no changes needed)
+
+```csharp
+// Same code works. Just replace the NuGet package:
+//   - GoDaddy.Asherah.AppEncryption (old canonical)
+//   + GoDaddy.Asherah.AppEncryption.Compat (this Rust FFI binding)
+
+using var factory = SessionFactory.NewBuilder("product", "service")
+    .WithInMemoryMetastore()
+    .WithNeverExpiredCryptoPolicy()
+    .WithStaticKeyManagementService("thisIsAStaticMasterKeyForTesting")
+    .Build();
+
+using var session = factory.GetSessionBytes("partition");
+byte[] encrypted = session.Encrypt(Encoding.UTF8.GetBytes("hello"));
+byte[] decrypted = session.Decrypt(encrypted);
+```
+
+## Performance vs Canonical
+
+This Rust implementation delivers significantly better performance than the canonical C# SDK (v0.2.10):
+
+- **Encrypt 64B:** ~693 ns (Rust FFI) -- see `scripts/benchmark.sh` for canonical comparison
+- **Decrypt 64B:** ~618 ns (Rust FFI)
+- .NET is the fastest FFI binding due to minimal P/Invoke overhead
+
+## Configuration
+
+`AsherahConfig` uses a fluent builder:
+
+```csharp
+var config = AsherahConfig.CreateBuilder()
+    // Required
+    .WithServiceName("my-service")
+    .WithProductId("my-product")
+    .WithMetastore("memory")             // "rdbms", "dynamodb", "memory" (testing)
+    .WithKms("static")                   // "aws", "static" (testing)
+
+    // Key rotation
+    .WithExpireAfter(86400)              // Key expiration in seconds
+    .WithCheckInterval(3600)             // Revoke check interval in seconds
+
+    // RDBMS metastore
+    .WithConnectionString("Server=...")  // MySQL or PostgreSQL connection string
+
+    // DynamoDB metastore
+    .WithDynamoDbEndpoint("http://localhost:8000")
+    .WithDynamoDbRegion("us-west-2")
+    .WithDynamoDbSigningRegion("us-west-2")
+    .WithDynamoDbTableName("EncryptionKey")
+    .WithReplicaReadConsistency("eventual")
+    .WithEnableRegionSuffix(true)
+
+    // AWS KMS
+    .WithRegionMap(new Dictionary<string, string>
+    {
+        ["us-west-2"] = "arn:aws:kms:us-west-2:123456789:key/abc-123"
+    })
+    .WithPreferredRegion("us-west-2")
+
+    // Session caching
+    .WithEnableSessionCaching(true)      // Default: true
+    .WithSessionCacheMaxSize(1000)
+    .WithSessionCacheDuration(600)       // Seconds
+
+    // Diagnostics
+    .WithVerbose(true)
+
+    .Build();
+```
+
+### Metastore options
+
+| Value | Description |
+|-------|-------------|
+| `"memory"` | In-memory, non-persistent (testing only) |
+| `"rdbms"` | MySQL or PostgreSQL via `ConnectionString` |
+| `"dynamodb"` | AWS DynamoDB |
+
+### KMS options
+
+| Value | Description |
+|-------|-------------|
+| `"static"` | Static master key (testing only). Set `STATIC_MASTER_KEY_HEX` env var. |
+| `"aws"` | AWS KMS. Requires `RegionMap` and `PreferredRegion`. |
+
+## API Reference
+
+### `Asherah` (static class)
+
+| Method | Description |
+|--------|-------------|
+| `FactoryFromConfig(AsherahConfig)` | Create a new `AsherahFactory` from config |
+| `FactoryFromEnv()` | Create a new `AsherahFactory` from environment variables |
+| `Setup(AsherahConfig)` | Initialize the shared global instance |
+| `SetupAsync(AsherahConfig)` | Async version of `Setup` |
+| `Shutdown()` | Tear down the shared global instance |
+| `ShutdownAsync()` | Async version of `Shutdown` |
+| `GetSetupStatus()` | Returns `true` if `Setup` has been called |
+| `SetEnv(IDictionary<string, string?>)` | Set environment variables before setup |
+| `Encrypt(string, byte[])` | Encrypt bytes for a partition |
+| `EncryptString(string, string)` | Encrypt a UTF-8 string for a partition |
+| `EncryptAsync(string, byte[])` | Async encrypt bytes |
+| `EncryptStringAsync(string, string)` | Async encrypt string |
+| `Decrypt(string, byte[])` | Decrypt bytes for a partition |
+| `DecryptJson(string, string)` | Decrypt a JSON string, return raw bytes |
+| `DecryptString(string, string)` | Decrypt a JSON string, return UTF-8 string |
+| `DecryptAsync(string, byte[])` | Async decrypt bytes |
+| `DecryptStringAsync(string, string)` | Async decrypt string |
+
+### `AsherahFactory` : `IAsherahFactory`, `IDisposable`
+
+| Method | Description |
+|--------|-------------|
+| `GetSession(string partitionId)` | Create a new `AsherahSession` for the given partition |
+| `Dispose()` | Release the native factory handle |
+
+### `AsherahSession` : `IAsherahSession`, `IDisposable`
+
+| Method | Description |
+|--------|-------------|
+| `EncryptBytes(byte[])` | Encrypt plaintext bytes, returns ciphertext JSON bytes |
+| `EncryptString(string)` | Encrypt a UTF-8 string, returns ciphertext JSON string |
+| `EncryptBytesAsync(byte[])` | True async encrypt via tokio callback |
+| `EncryptStringAsync(string)` | True async encrypt, string variant |
+| `DecryptBytes(byte[])` | Decrypt ciphertext JSON bytes, returns plaintext bytes |
+| `DecryptString(string)` | Decrypt ciphertext JSON string, returns plaintext string |
+| `DecryptBytesAsync(byte[])` | True async decrypt via tokio callback |
+| `DecryptStringAsync(string)` | True async decrypt, string variant |
+| `Dispose()` | Release the native session handle |
+
+### `AsherahConfig.Builder`
+
+| Method | Description |
+|--------|-------------|
+| `WithServiceName(string)` | **Required.** Service name for key hierarchy |
+| `WithProductId(string)` | **Required.** Product ID for key hierarchy |
+| `WithMetastore(string)` | **Required.** `"rdbms"`, `"dynamodb"`, `"memory"` (testing) |
+| `WithKms(string)` | KMS type: `"static"` (default) or `"aws"` |
+| `WithExpireAfter(long?)` | Key expiration in seconds |
+| `WithCheckInterval(long?)` | Revoke check interval in seconds |
+| `WithConnectionString(string?)` | RDBMS connection string |
+| `WithDynamoDbEndpoint(string?)` | DynamoDB endpoint URL |
+| `WithDynamoDbRegion(string?)` | DynamoDB region |
+| `WithDynamoDbSigningRegion(string?)` | DynamoDB signing region |
+| `WithDynamoDbTableName(string?)` | DynamoDB table name |
+| `WithReplicaReadConsistency(string?)` | DynamoDB read consistency |
+| `WithRegionMap(IDictionary<string, string>?)` | AWS KMS region-to-ARN map |
+| `WithPreferredRegion(string?)` | Preferred AWS region |
+| `WithEnableRegionSuffix(bool?)` | Enable region suffix on key IDs |
+| `WithEnableSessionCaching(bool?)` | Enable session caching (default: true) |
+| `WithSessionCacheMaxSize(int?)` | Max cached sessions |
+| `WithSessionCacheDuration(long?)` | Cache TTL in seconds |
+| `WithVerbose(bool?)` | Enable verbose logging |
+| `Build()` | Build the immutable `AsherahConfig` |
+
+## Building from Source
 
 ```bash
 dotnet build asherah-dotnet/GoDaddy.Asherah.AppEncryption/
 dotnet test asherah-dotnet/GoDaddy.Asherah.AppEncryption.slnx
 ```
+
+## License
+
+See the repository root for license information.

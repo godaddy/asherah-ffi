@@ -16,7 +16,7 @@
   <dependencies>
     <dependency>
       <groupId>com.godaddy.asherah</groupId>
-      <artifactId>asherah-java</artifactId>
+      <artifactId>asherah</artifactId>
       <version>${asherah.java.version}</version>
     </dependency>
     <dependency>
