@@ -15,7 +15,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AsherahDotNet\AsherahDotNet.csproj" />
+    <ProjectReference Include="..\GoDaddy.Asherah.AppEncryption\GoDaddy.Asherah.AppEncryption.csproj" />
   </ItemGroup>
 
   <ItemGroup>

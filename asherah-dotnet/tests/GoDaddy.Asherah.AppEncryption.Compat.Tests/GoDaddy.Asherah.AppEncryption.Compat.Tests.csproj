@@ -5,7 +5,6 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
-
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.9.0" />
     <PackageReference Include="xunit" Version="2.6.1" />
@@ -14,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\AsherahDotNet\AsherahDotNet.csproj" />
-    <ProjectReference Include="..\..\AsherahDotNet.Compat\AsherahDotNet.Compat.csproj" />
+    <ProjectReference Include="..\..\GoDaddy.Asherah.AppEncryption\GoDaddy.Asherah.AppEncryption.csproj" />
+    <ProjectReference Include="..\..\GoDaddy.Asherah.AppEncryption.Compat\GoDaddy.Asherah.AppEncryption.Compat.csproj" />
   </ItemGroup>
 </Project>

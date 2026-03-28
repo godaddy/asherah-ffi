@@ -5,7 +5,7 @@ namespace LanguageExt;
 /// <summary>
 /// Lightweight optional value type, API-compatible with LanguageExt.Option.
 /// If you need the full LanguageExt library, replace this package reference
-/// with the real LanguageExt.Core NuGet and remove AsherahDotNet's Option.
+/// with the real LanguageExt.Core NuGet and remove this Option.
 /// </summary>
 public readonly struct Option<T>
 {

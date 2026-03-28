@@ -80,6 +80,13 @@ module Asherah
     attach_function :asherah_decrypt_from_json, [:pointer, :buffer_in, :size_t, :pointer], :int
     attach_function :asherah_buffer_free, [:pointer], :void
 
+    # Async callback type: void(user_data, result_data, result_len, error_message)
+    callback :asherah_completion_fn, [:pointer, :pointer, :size_t, :string], :void
+    attach_function :asherah_encrypt_to_json_async,
+                    [:pointer, :buffer_in, :size_t, :asherah_completion_fn, :pointer], :int
+    attach_function :asherah_decrypt_from_json_async,
+                    [:pointer, :buffer_in, :size_t, :asherah_completion_fn, :pointer], :int
+
     def self.last_error
       ptr = asherah_last_error_message
       ptr.null? ? "unknown error" : ptr.read_string

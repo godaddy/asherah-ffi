@@ -218,6 +218,46 @@ impl Metastore for MySqlMetastore {
         log::debug!("mysql store: id={id} created={created} stored={stored}");
         Ok(stored)
     }
+
+    // Async methods use spawn_blocking (reuses thread pool) instead of
+    // std::thread::spawn (creates new OS thread per call). The mysql crate
+    // doesn't call block_on internally, so spawn_blocking is safe here.
+    async fn load_async(
+        &self,
+        id: &str,
+        created: i64,
+    ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        let this = self.clone();
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || this.load(&id, created))
+            .await
+            .map_err(|e| anyhow::anyhow!("mysql load_async join error: {e}"))?
+    }
+
+    async fn load_latest_async(
+        &self,
+        id: &str,
+    ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        let this = self.clone();
+        let id = id.to_string();
+        tokio::task::spawn_blocking(move || this.load_latest(&id))
+            .await
+            .map_err(|e| anyhow::anyhow!("mysql load_latest_async join error: {e}"))?
+    }
+
+    async fn store_async(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<bool, anyhow::Error> {
+        let this = self.clone();
+        let id = id.to_string();
+        let ekr = ekr.clone();
+        tokio::task::spawn_blocking(move || this.store(&id, created, &ekr))
+            .await
+            .map_err(|e| anyhow::anyhow!("mysql store_async join error: {e}"))?
+    }
 }
 
 #[cfg(test)]

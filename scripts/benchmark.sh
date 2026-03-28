@@ -428,7 +428,21 @@ for m in re.finditer(r'native_(encrypt|decrypt)/rust_native/(\d+)\s.*?time:\s+\[
     d = enc if op == 'encrypt' else dec
     d[size] = int(val)
 print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
-" > "$RESULTS_DIR/01_Rust_native"
+" > "$RESULTS_DIR/01_Rust_native_(sync)"
+
+        # Parse async results from the same log
+        python3 -c "
+import re, sys
+text = open('$RESULTS_DIR/criterion_native.log').read()
+enc, dec = {}, {}
+for m in re.finditer(r'native_(encrypt|decrypt)_async/rust_native_async/(\d+)\s.*?time:\s+\[[\d.]+ \w+ ([\d.]+) (ns|µs|us|ms)', text, re.S):
+    op, size, val, unit = m.group(1), int(m.group(2)), float(m.group(3)), m.group(4)
+    if unit in ('µs', 'us'): val *= 1000
+    elif unit == 'ms': val *= 1_000_000
+    d = enc if op == 'encrypt' else dec
+    d[size] = int(val)
+print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
+" > "$RESULTS_DIR/01b_Rust_native_(async)"
     else
         skip "Rust native benchmark failed (see log): $(tail -5 "$RESULTS_DIR/criterion_native.log" 2>/dev/null)"
     fi
@@ -481,7 +495,8 @@ if [ "$HAVE_DOTNET" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
     reset_mysql
     log "Running .NET FFI benchmark (BenchmarkDotNet)..."
     if dotnet run --project "$BENCH_DIR/dotnet-bench" -c Release > "$RESULTS_DIR/bdn_ffi.log" 2>&1; then
-        parse_bdn_log "$RESULTS_DIR/bdn_ffi.log" "Rust FFI" "$RESULTS_DIR/02_.NET_FFI"
+        parse_bdn_log "$RESULTS_DIR/bdn_ffi.log" "Rust FFI (sync)" "$RESULTS_DIR/02_.NET_FFI_(sync)"
+        parse_bdn_log "$RESULTS_DIR/bdn_ffi.log" "Rust FFI (async)" "$RESULTS_DIR/03_.NET_FFI_(async)"
     else
         skip ".NET FFI benchmark failed (see log): $(tail -5 "$RESULTS_DIR/bdn_ffi.log" 2>/dev/null)"
     fi
@@ -522,14 +537,20 @@ if [ "$HAVE_JAVA" = 1 ] && [ "$FFI_LIB_EXISTS" = 1 ]; then
         -jar "$BENCH_DIR/java-bench/target/java-bench-1.0-SNAPSHOT.jar" > "$RESULTS_DIR/jmh_ffi.log" 2>&1
     python3 -c "
 import re
-enc, dec = {}, {}
+enc, dec, enc_a, dec_a = {}, {}, {}, {}
 for line in open('$RESULTS_DIR/jmh_ffi.log'):
-    m = re.search(r'Benchmark\.(encrypt|decrypt)\s+(\d+)\s+avgt\s+\d+\s+([\d.]+)', line)
+    m = re.search(r'Benchmark\.(encrypt|decrypt)(Async)?\s+(\d+)\s+avgt\s+\d+\s+([\d.]+)', line)
     if m:
-        op, size, val = m.group(1), int(m.group(2)), float(m.group(3))
-        (enc if op == 'encrypt' else dec)[size] = int(val)
-print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
-" > "$RESULTS_DIR/05_Java_FFI"
+        op, is_async, size, val = m.group(1), m.group(2), int(m.group(3)), float(m.group(4))
+        if is_async:
+            (enc_a if op == 'encrypt' else dec_a)[size] = int(val)
+        else:
+            (enc if op == 'encrypt' else dec)[size] = int(val)
+with open('$RESULTS_DIR/07_Java_FFI_(sync)', 'w') as f:
+    f.write(f\"{enc.get(64,0)} {enc.get(1024,0)} {enc.get(8192,0)} {dec.get(64,0)} {dec.get(1024,0)} {dec.get(8192,0)}\n\")
+with open('$RESULTS_DIR/08_Java_FFI_(async)', 'w') as f:
+    f.write(f\"{enc_a.get(64,0)} {enc_a.get(1024,0)} {enc_a.get(8192,0)} {dec_a.get(64,0)} {dec_a.get(1024,0)} {dec_a.get(8192,0)}\n\")
+"
 else
     skip "Java or Rust FFI lib not available"
 fi
@@ -584,7 +605,7 @@ for line in open('$RESULTS_DIR/go_ffi.log'):
         (enc if op == 'encrypt' else dec)[size].append(val)
 def avg(d, s): vals = d.get(s, []); return int(sum(vals)/len(vals)) if vals else 0
 print(avg(enc,64), avg(enc,1024), avg(enc,8192), avg(dec,64), avg(dec,1024), avg(dec,8192))
-" > "$RESULTS_DIR/03_Go_FFI"
+" > "$RESULTS_DIR/04_Go_FFI"
     else
         skip "Go FFI benchmark failed (see log): $(tail -5 "$RESULTS_DIR/go_ffi.log" 2>/dev/null)"
     fi
@@ -663,9 +684,22 @@ for line in open('$RESULTS_DIR/python.log'):
         enc[int(m.group(1))] = int(m.group(2))
         dec[int(m.group(1))] = int(m.group(3))
 print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
-" > "$RESULTS_DIR/04_Python_FFI"
+" > "$RESULTS_DIR/05_Python_FFI_(sync)"
+    reset_mysql
+    log "Running Python FFI async benchmark (timeit)..."
+    python3 "$BENCH_DIR/python-bench/bench_async.py" > "$RESULTS_DIR/python_async.log" 2>&1
+    python3 -c "
+import re
+enc, dec = {}, {}
+for line in open('$RESULTS_DIR/python_async.log'):
+    m = re.match(r'\s+(\d+)B\s+(\d+)\s+ns\s+\d+\s+ns\s+(\d+)\s+ns', line)
+    if m:
+        enc[int(m.group(1))] = int(m.group(2))
+        dec[int(m.group(1))] = int(m.group(3))
+print(enc.get(64,0), enc.get(1024,0), enc.get(8192,0), dec.get(64,0), dec.get(1024,0), dec.get(8192,0))
+" > "$RESULTS_DIR/06_Python_FFI_(async)"
 else
-    skip "Python Python asherah not installed"
+    skip "Python asherah not installed"
 fi
 
 ########################################################################
@@ -696,7 +730,7 @@ if [ "$HAVE_RUBY" = 1 ]; then
     log "Running Ruby FFI benchmark (benchmark-ips)..."
     if ASHERAH_RUBY_NATIVE="$FFI_LIB_DIR" $RUBY_CMD -I "$ROOT_DIR/asherah-ruby/lib" \
         "$BENCH_DIR/ruby-bench/bench_ffi.rb" > "$RESULTS_DIR/ruby_ffi.log" 2>/dev/null; then
-        parse_ruby_ips "$RESULTS_DIR/ruby_ffi.log" > "$RESULTS_DIR/06_Ruby_FFI"
+        parse_ruby_ips "$RESULTS_DIR/ruby_ffi.log" > "$RESULTS_DIR/09_Ruby_FFI"
     else
         skip "Ruby FFI benchmark failed (see log): $(tail -5 "$RESULTS_DIR/ruby_ffi.log" 2>/dev/null)"
     fi
@@ -797,6 +831,7 @@ async function run() {
     }
     await bench.run();
     for (const t of bench.tasks) {
+      if (!t.result || !t.result.latency) { console.error('WARN: ' + t.name + ' no result, error: ' + (t.result && t.result.error || 'unknown')); continue; }
       console.log(t.name + ' ' + Math.round(t.result.latency.mean * 1e6));
     }
   }
@@ -884,6 +919,7 @@ async function run() {
     }
     await bench.run();
     for (const t of bench.tasks) {
+      if (!t.result || !t.result.latency) { console.error('WARN: ' + t.name + ' no result, error: ' + (t.result && t.result.error || 'unknown')); continue; }
       console.log(t.name + ' ' + Math.round(t.result.latency.mean * 1e6));
     }
   }
@@ -894,16 +930,25 @@ run();
 }
 
 if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/asherah-node-bench/node_modules/tinybench" ]; then
-    # Ensure release addon is built (interop tests may have built debug)
+    # Ensure release addon is built and copied to the platform-specific location
+    # that npm/index.js loads first. Without this, a stale debug binary in the
+    # platform directory would be loaded instead of the release build.
     if [ -f "$ROOT_DIR/asherah-node/package.json" ] && command -v npx >/dev/null 2>&1; then
         log "Building Node.js addon (release)..."
         (cd "$ROOT_DIR/asherah-node" && npx @napi-rs/cli build --release 2>&1 | tail -1) || true
+        # Copy release binary to platform directory so npm/index.js loads it
+        for platdir in "$ROOT_DIR"/asherah-node/npm/*/; do
+            platbin=$(find "$platdir" -name '*.node' 2>/dev/null | head -1)
+            if [ -n "$platbin" ] && [ -f "$ROOT_DIR/asherah-node/index.node" ]; then
+                cp "$ROOT_DIR/asherah-node/index.node" "$platbin"
+            fi
+        done
     fi
     reset_mysql
     log "Running Node.js FFI benchmark (tinybench, sync)..."
     if (cd "$BENCH_DIR/asherah-node-bench" && run_node_bench "asherah-node" "ffi") \
         > "$RESULTS_DIR/node_ffi.log" 2>&1; then
-        parse_node_bench "$RESULTS_DIR/node_ffi.log" > "$RESULTS_DIR/07_Node.js_FFI_(sync)"
+        parse_node_bench "$RESULTS_DIR/node_ffi.log" > "$RESULTS_DIR/10_Node.js_FFI_(sync)"
     else
         skip "Node.js FFI sync benchmark failed (see log): $(tail -5 "$RESULTS_DIR/node_ffi.log" 2>/dev/null)"
     fi
@@ -911,7 +956,7 @@ if [ "$HAVE_NODE" = 1 ] && [ -d "$BENCH_DIR/asherah-node-bench/node_modules/tiny
     log "Running Node.js FFI benchmark (tinybench, async)..."
     if (cd "$BENCH_DIR/asherah-node-bench" && run_node_bench_async "asherah-node" "ffi") \
         > "$RESULTS_DIR/node_ffi_async.log" 2>&1; then
-        parse_node_bench "$RESULTS_DIR/node_ffi_async.log" > "$RESULTS_DIR/08_Node.js_FFI_(async)"
+        parse_node_bench "$RESULTS_DIR/node_ffi_async.log" > "$RESULTS_DIR/11_Node.js_FFI_(async)"
     else
         skip "Node.js FFI async benchmark failed (see log): $(tail -5 "$RESULTS_DIR/node_ffi_async.log" 2>/dev/null)"
     fi

@@ -45,7 +45,7 @@ python samples/python/sample.py
 
 ## C# / .NET
 
-Uses a project reference to the `AsherahDotNet` project in this repo. The native
+Uses a project reference to the `GoDaddy.Asherah.AppEncryption` project in this repo. The native
 library must be built first:
 
 ```sh

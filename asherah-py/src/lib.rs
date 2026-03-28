@@ -464,38 +464,5 @@ fn _asherah(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_metrics_hook, m)?)?;
     m.add_function(wrap_pyfunction!(set_log_hook, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
-    let py = m.py();
-    let dict = m.dict();
-    py.run(
-        cr#"
-import asyncio as _asyncio
-
-async def setup_async(config):
-    loop = _asyncio.get_running_loop()
-    return await loop.run_in_executor(None, setup, config)
-
-async def shutdown_async():
-    loop = _asyncio.get_running_loop()
-    return await loop.run_in_executor(None, shutdown)
-
-async def encrypt_bytes_async(partition_id, data):
-    loop = _asyncio.get_running_loop()
-    return await loop.run_in_executor(None, encrypt_bytes, partition_id, data)
-
-async def encrypt_string_async(partition_id, text):
-    loop = _asyncio.get_running_loop()
-    return await loop.run_in_executor(None, encrypt_string, partition_id, text)
-
-async def decrypt_bytes_async(partition_id, data_row_record):
-    loop = _asyncio.get_running_loop()
-    return await loop.run_in_executor(None, decrypt_bytes, partition_id, data_row_record)
-
-async def decrypt_string_async(partition_id, data_row_record):
-    loop = _asyncio.get_running_loop()
-    return await loop.run_in_executor(None, decrypt_string, partition_id, data_row_record)
-"#,
-        None,
-        Some(&dict),
-    )?;
     Ok(())
 }

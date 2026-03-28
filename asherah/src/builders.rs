@@ -484,6 +484,157 @@ pub fn factory_from_env(
     Ok(crate::api::new_session_factory(cfg, metastore, kms, crypto))
 }
 
+/// Async variant of metastore_from_env — uses async constructors for DynamoDB.
+/// Postgres uses spawn_blocking (sync crate). MySQL/SQLite/memory are sync-safe.
+pub async fn metastore_from_env_async() -> anyhow::Result<MetastoreEnvResult> {
+    let service = std::env::var("SERVICE_NAME").unwrap_or_else(|_| "service".to_string());
+    let product = std::env::var("PRODUCT_ID").unwrap_or_else(|_| "product".to_string());
+    let region_suffix = std::env::var("REGION_SUFFIX").ok();
+    let mchoice = std::env::var("Metastore")
+        .unwrap_or_else(|_| "memory".to_string())
+        .to_lowercase();
+
+    if mchoice == "sqlite" || std::env::var("SQLITE_PATH").is_ok() {
+        #[cfg(feature = "sqlite")]
+        {
+            let path = std::env::var("SQLITE_PATH").unwrap_or_else(|_| ":memory:".to_string());
+            let sqlite = crate::metastore_sqlite::SqliteMetastore::open(&path)?;
+            return Ok((Arc::new(sqlite), service, product, region_suffix));
+        }
+        #[cfg(not(feature = "sqlite"))]
+        anyhow::bail!("Enable feature 'sqlite' to use SQLite metastore");
+    }
+    if mchoice == "dynamodb" || std::env::var("DDB_TABLE").is_ok() {
+        #[cfg(feature = "dynamodb")]
+        {
+            let table = std::env::var("DDB_TABLE").unwrap_or_else(|_| "EncryptionKey".to_string());
+            let region = std::env::var("AWS_REGION").ok();
+            let ddb =
+                crate::metastore_dynamodb::DynamoDbMetastore::new_async(table, region).await?;
+            return Ok((Arc::new(ddb), service, product, region_suffix));
+        }
+        #[cfg(not(feature = "dynamodb"))]
+        anyhow::bail!("Enable feature 'dynamodb' to use DynamoDB metastore");
+    }
+    if mchoice == "rdbms" || std::env::var("POSTGRES_URL").is_ok() {
+        #[cfg(feature = "postgres")]
+        if let Ok(url) = std::env::var("POSTGRES_URL") {
+            // Postgres uses sync crate — construct on a plain thread
+            let pg = tokio::task::spawn_blocking(move || {
+                crate::metastore_postgres::PostgresMetastore::connect(&url)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("postgres connect join error: {e}"))??;
+            return Ok((Arc::new(pg), service, product, region_suffix));
+        }
+        #[cfg(not(feature = "postgres"))]
+        if std::env::var("POSTGRES_URL").is_ok() {
+            anyhow::bail!("Enable feature 'postgres' to use Postgres metastore");
+        }
+    }
+    if mchoice == "rdbms" || std::env::var("MYSQL_URL").is_ok() {
+        #[cfg(feature = "mysql")]
+        if let Ok(url) = std::env::var("MYSQL_URL") {
+            let my = tokio::task::spawn_blocking(move || {
+                crate::metastore_mysql::MySqlMetastore::connect(&url)
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("mysql connect join error: {e}"))??;
+            return Ok((Arc::new(my), service, product, region_suffix));
+        }
+        #[cfg(not(feature = "mysql"))]
+        if std::env::var("MYSQL_URL").is_ok() {
+            anyhow::bail!("Enable feature 'mysql' to use MySQL metastore");
+        }
+    }
+    if mchoice == "rdbms" {
+        anyhow::bail!(
+            "Metastore=rdbms requires POSTGRES_URL or MYSQL_URL to be set \
+             (and the corresponding feature enabled)"
+        );
+    }
+    let mem = crate::metastore::InMemoryMetastore::new();
+    Ok((Arc::new(mem), service, product, region_suffix))
+}
+
+/// Async variant of factory_from_env — uses async constructors for DynamoDB/KMS.
+pub async fn factory_from_env_async(
+) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
+    let cfg = config_from_env();
+    let (store_dyn, _svc, _prod, _sfx) = metastore_from_env_async().await?;
+    let metastore = Arc::new(DynMetastore(store_dyn));
+    let crypto = Arc::new(crate::aead::AES256GCM::new());
+    let kms_kind = std::env::var("KMS")
+        .unwrap_or_else(|_| "static".into())
+        .to_lowercase();
+    let kms_dyn: Arc<dyn crate::traits::KeyManagementService> = match kms_kind.as_str() {
+        "aws" => {
+            if let Ok(map_json) = std::env::var("REGION_MAP") {
+                let regions: std::collections::HashMap<String, String> =
+                    serde_json::from_str(&map_json)?;
+                let preferred = std::env::var("PREFERRED_REGION").ok();
+                let mut entries: Vec<(String, String)> = Vec::new();
+                let mut pref_idx = 0_usize;
+                for (i, (region, key)) in regions.iter().enumerate() {
+                    if preferred.as_ref() == Some(region) {
+                        pref_idx = i;
+                    }
+                    entries.push((region.clone(), key.clone()));
+                }
+                let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_multi_async(
+                    crypto.clone(),
+                    pref_idx,
+                    entries,
+                )
+                .await?;
+                Arc::new(kms)
+            } else {
+                let key_id = std::env::var("KMS_KEY_ID")
+                    .map_err(|_| anyhow::anyhow!("KMS_KEY_ID required for KMS=aws"))?;
+                let region = std::env::var("AWS_REGION").ok();
+                let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_single_async(
+                    crypto.clone(),
+                    key_id,
+                    region,
+                )
+                .await?;
+                Arc::new(kms)
+            }
+        }
+        "static" | "test-debug-static" => {
+            log::warn!(
+                "Using static master key (KMS={kms_kind}). \
+                 This is for testing only — do NOT use in production."
+            );
+            let hex = std::env::var("STATIC_MASTER_KEY_HEX").unwrap_or_else(|_| {
+                "746869734973415374617469634d61737465724b6579466f7254657374696e67".to_string()
+            });
+            if !hex.len().is_multiple_of(2) {
+                anyhow::bail!(
+                    "STATIC_MASTER_KEY_HEX has odd length ({}) — must be even",
+                    hex.len()
+                );
+            }
+            let mut key = vec![0_u8; hex.len() / 2];
+            for i in 0..key.len() {
+                key[i] = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).map_err(|_| {
+                    anyhow::anyhow!(
+                        "STATIC_MASTER_KEY_HEX contains invalid hex at position {}",
+                        2 * i
+                    )
+                })?;
+            }
+            let kms = crate::kms::StaticKMS::new(crypto.clone(), key)?;
+            Arc::new(kms)
+        }
+        other => {
+            anyhow::bail!("Unknown KMS type '{other}'. Valid values: 'aws', 'static'");
+        }
+    };
+    let kms = Arc::new(DynKms(kms_dyn));
+    Ok(crate::api::new_session_factory(cfg, metastore, kms, crypto))
+}
+
 #[cfg(test)]
 #[allow(clippy::panic)]
 mod tests {

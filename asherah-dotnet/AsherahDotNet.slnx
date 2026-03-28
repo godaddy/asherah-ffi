@@ -1,5 +1,0 @@
-<Solution>
-  <Project Path="AsherahDotNet/AsherahDotNet.csproj" />
-  <Project Path="AsherahDotNet.Compat/AsherahDotNet.Compat.csproj" />
-  <Project Path="tests/AsherahDotNet.Tests/AsherahDotNet.Tests.csproj" />
-</Solution>
