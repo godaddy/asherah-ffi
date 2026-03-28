@@ -74,6 +74,13 @@ coverage/
 docker_tests.log
 docker_run.log
 
+# Local testing directories
+e2e-npm-test*/
+e2e-pypi-test*/
+
+# AI assistant local config
+.claude/
+
 # IDE specific
 .idea/
 .vs/
