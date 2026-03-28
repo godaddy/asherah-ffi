@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\AsherahDotNet\AsherahDotNet.csproj" />
-    <ProjectReference Include="..\..\AsherahDotNet.Compat\AsherahDotNet.Compat.csproj" />
+    <ProjectReference Include="..\..\GoDaddy.Asherah.AppEncryption\GoDaddy.Asherah.AppEncryption.csproj" />
+    <ProjectReference Include="..\..\GoDaddy.Asherah.AppEncryption.Compat\GoDaddy.Asherah.AppEncryption.Compat.csproj" />
   </ItemGroup>
 </Project>

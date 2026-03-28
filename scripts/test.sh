@@ -315,7 +315,7 @@ do_bindings() {
     # .NET
     if [ "$binding" = "all" ] || [ "$binding" = "dotnet" ]; then
         if command -v dotnet >/dev/null 2>&1; then
-            run_test ".NET (xUnit)" dotnet test asherah-dotnet/AsherahDotNet.slnx --nologo
+            run_test ".NET (xUnit)" dotnet test asherah-dotnet/GoDaddy.Asherah.AppEncryption.slnx --nologo
         else
             skip ".NET tests (dotnet not installed)"
         fi
