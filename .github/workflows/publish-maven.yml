@@ -89,7 +89,7 @@ jobs:
 
       - name: Verify native libraries in JAR
         run: |
-          JAR=$(find asherah-java/java/target -name 'asherah-*.jar' -not -name '*sources*' -not -name '*javadoc*' | head -1)
+          JAR=$(find asherah-java/java/target -name 'appencryption-*.jar' -not -name '*sources*' -not -name '*javadoc*' | head -1)
           echo "=== Native libs in $JAR ==="
           jar tf "$JAR" | grep native/ | sort
           COUNT=$(jar tf "$JAR" | grep -c "native/.*\.\(so\|dylib\|dll\)$" || true)
@@ -116,4 +116,4 @@ jobs:
           echo "Dry run complete. Would publish:"
           ls -lh asherah-java/java/target/*.jar
           echo ""
-          echo "Package: com.godaddy.asherah:asherah:${MAVEN_VERSION}"
+          echo "Package: com.godaddy.asherah:appencryption:${MAVEN_VERSION}"

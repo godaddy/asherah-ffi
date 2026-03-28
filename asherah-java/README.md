@@ -9,7 +9,7 @@ Java bindings (JNI) for [Asherah](https://github.com/godaddy/asherah-ffi) envelo
 ```xml
 <dependency>
   <groupId>com.godaddy.asherah</groupId>
-  <artifactId>asherah</artifactId>
+  <artifactId>appencryption</artifactId>
   <version>0.6.64</version>
 </dependency>
 ```
@@ -35,7 +35,7 @@ repositories {
 }
 
 dependencies {
-    implementation 'com.godaddy.asherah:asherah:0.6.64'
+    implementation 'com.godaddy.asherah:appencryption:0.6.64'
 }
 ```
 
@@ -150,9 +150,10 @@ Key differences:
 | Async support | None | `CompletableFuture` |
 
 Migration steps:
-1. Replace `com.godaddy.asherah:appencryption` with `com.godaddy.asherah:asherah`
-2. Replace `AppEncryptionSessionFactory` with `AsherahFactory` or the static `Asherah` API
-3. Both read the same metastore tables -- no data migration required
+1. Update the `com.godaddy.asherah:appencryption` version to this implementation (same coordinates)
+2. Update the repository URL to `https://maven.pkg.github.com/godaddy/asherah-ffi`
+3. Replace `AppEncryptionSessionFactory` with `AsherahFactory` or the static `Asherah` API
+4. Both read the same metastore tables -- no data migration required
 
 ## Performance
 

@@ -212,14 +212,14 @@ The C# compat layer needs `Newtonsoft.Json` for `JObject` (canonical uses this).
 Two options:
 
 **Option A: Single JAR with both APIs** (recommended)
-- Package: `com.godaddy.asherah:asherah`
+- Package: `com.godaddy.asherah:appencryption`
 - Contains both `com.godaddy.asherah.jni.*` (new API) and `com.godaddy.asherah.appencryption.*` (compat)
 - Users switching from canonical just change the Maven dependency, no import changes
 - `org.json:json` added as a dependency
 
 **Option B: Separate compat JAR**
-- `com.godaddy.asherah:asherah` (new API, existing)
-- `com.godaddy.asherah:asherah-compat` (canonical API surface, depends on asherah-java)
+- `com.godaddy.asherah:appencryption` (new API, existing)
+- `com.godaddy.asherah:appencryption-compat` (canonical API surface)
 - More modular but adds dependency management burden
 
 Recommendation: **Option A** — single JAR. The compat classes are small (pure adapter code) and having one dependency simplifies migration.
