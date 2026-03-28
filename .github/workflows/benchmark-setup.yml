@@ -79,10 +79,10 @@ jobs:
       - name: Build Java FFI JAR
         run: |
           mvn -B -f asherah-java/java/pom.xml -Dnative.build.skip=true -DskipTests package -q
-          JAR_FILE=$(ls asherah-java/java/target/asherah-*.jar | grep -v sources | grep -v javadoc | head -1)
-          JAR_VERSION=$(echo "$JAR_FILE" | sed 's/.*asherah-\(.*\)\.jar/\1/')
+          JAR_FILE=$(ls asherah-java/java/target/appencryption-*.jar | grep -v sources | grep -v javadoc | head -1)
+          JAR_VERSION=$(echo "$JAR_FILE" | sed 's/.*appencryption-\(.*\)\.jar/\1/')
           mvn -B install:install-file -Dfile="$JAR_FILE" \
-            -DgroupId=com.godaddy.asherah -DartifactId=asherah \
+            -DgroupId=com.godaddy.asherah -DartifactId=appencryption \
             -Dversion="${JAR_VERSION}" -Dpackaging=jar -q
 
       - name: Clone canonical asherah repo
