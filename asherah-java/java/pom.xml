@@ -4,9 +4,9 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.godaddy.asherah</groupId>
-  <artifactId>asherah-java</artifactId>
+  <artifactId>asherah</artifactId>
   <version>0.1.0</version>
-  <name>asherah-java</name>
+  <name>asherah</name>
   <description>Asherah application-layer encryption for Java, powered by the native Rust implementation.</description>
   <url>https://github.com/godaddy/asherah-ffi</url>
   <packaging>jar</packaging>
