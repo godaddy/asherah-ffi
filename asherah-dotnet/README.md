@@ -34,5 +34,5 @@ byte[] decrypted = session.Decrypt(encrypted);
 
 ```bash
 dotnet build asherah-dotnet/AsherahDotNet/
-dotnet test asherah-dotnet/tests/AsherahDotNet.Tests/
+dotnet test asherah-dotnet/AsherahDotNet.slnx
 ```

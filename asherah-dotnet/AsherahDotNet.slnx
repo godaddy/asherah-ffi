@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="AsherahDotNet/AsherahDotNet.csproj" />
   <Project Path="AsherahDotNet.Compat/AsherahDotNet.Compat.csproj" />
-  <Project Path="tests/AsherahDotNet.Tests/AsherahDotNet.Tests.csproj" />
+  <Project Path="tests/GoDaddy.Asherah.AppEncryption.Tests/GoDaddy.Asherah.AppEncryption.Tests.csproj" />
+  <Project Path="tests/GoDaddy.Asherah.AppEncryption.Compat.Tests/GoDaddy.Asherah.AppEncryption.Compat.Tests.csproj" />
 </Solution>
