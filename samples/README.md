@@ -1,41 +1,36 @@
 # Asherah Samples
 
-Minimal encrypt/decrypt examples for each supported language.
+Complete examples for each supported language, demonstrating:
 
-All samples use an in-memory metastore with a static master key for simplicity.
-**Do not use a static master key in production** — use `kms: "aws"` with a proper
-region map instead.
+1. **Static API** — simplest pattern (setup, encrypt, decrypt, shutdown)
+2. **Factory/Session API** — recommended for applications (session reuse, partition isolation)
+3. **Async API** — non-blocking patterns for event loops and concurrent applications
+4. **Production config** — commented-out examples showing RDBMS + AWS KMS
+
+All samples default to in-memory metastore with a static master key for local
+development. **Do not use memory metastore or static KMS in production** — use
+`rdbms`/`dynamodb` with `aws` KMS instead. Each sample includes a commented-out
+production config example.
 
 ## Rust
-
-Uses path dependencies to the `asherah` and `asherah-config` crates in this repo.
 
 ```sh
 cargo run --manifest-path samples/rust/Cargo.toml
 ```
 
-## Go
+Covers: Factory/Session API, JSON interop (DataRowRecord serialization), async
+via tokio runtime.
 
-Uses a path reference to the `asherah-go` binding in this repo. The native
-library must be built first:
-
-```sh
-cargo build --release -p asherah-ffi
-cd samples/go && go run .
-```
-
-## Node.js / TypeScript
-
-Uses the [`asherah`](https://www.npmjs.com/package/asherah) npm package which
-includes prebuilt native bindings for all platforms.
+## Node.js
 
 ```sh
 cd samples/node && npm install && node index.mjs
 ```
 
-## Python
+Covers: Static API (string + Buffer), Session/Factory API with partition
+isolation, async API (setupAsync/encryptStringAsync/decryptStringAsync).
 
-Requires the `asherah-py` package. Build and install from this repo using maturin:
+## Python
 
 ```sh
 pip install maturin
@@ -43,36 +38,48 @@ maturin develop --manifest-path asherah-py/Cargo.toml
 python samples/python/sample.py
 ```
 
-## C# / .NET
+Covers: Static API (string + bytes), Session/Factory API with context managers,
+async API via asyncio.
 
-Uses a project reference to the `GoDaddy.Asherah.AppEncryption` project in this repo. The native
-library must be built first:
+## C# / .NET
 
 ```sh
 cargo build --release -p asherah-ffi
 ASHERAH_DOTNET_NATIVE=target/release dotnet run --project samples/dotnet
 ```
 
-## Java
+Covers: Static API, Factory/Session API with `using` disposal, async API
+(true async via Rust tokio — does not block .NET thread pool).
 
-Uses the `asherah-java` binding in this repo. Build the native library and the
-Java jar, then compile and run:
+## Java
 
 ```sh
 cargo build -p asherah-java
 mvn -B -f asherah-java/java/pom.xml -Dnative.build.skip=true package -DskipTests
-javac -cp asherah-java/java/target/asherah-java-0.1.0-SNAPSHOT.jar samples/java/Sample.java
+javac -cp asherah-java/java/target/appencryption-*.jar samples/java/Sample.java
 java -Dasherah.java.nativeLibraryPath=target/debug \
-     -cp asherah-java/java/target/asherah-java-0.1.0-SNAPSHOT.jar:samples/java Sample
+     -cp "asherah-java/java/target/appencryption-*.jar:samples/java" Sample
 ```
 
-## Ruby
+Covers: Static API, Factory/Session API (try-with-resources), async API
+via CompletableFuture.
 
-Requires the `ffi` gem and the `libasherah_ffi` native library. Build the native
-library from this repo, then run with the local binding:
+## Go
+
+```sh
+cargo build --release -p asherah-ffi
+cd samples/go && go run .
+```
+
+Covers: Global API, Factory/Session API, concurrent goroutine example with
+sync.WaitGroup (Go uses goroutines instead of async/await).
+
+## Ruby
 
 ```sh
 cargo build --release -p asherah-ffi
 gem install ffi
 ruby -Iasherah-ruby/lib samples/ruby/sample.rb
 ```
+
+Covers: Static API, Session/Factory API, async API (tokio callback via FFI).
