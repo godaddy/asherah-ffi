@@ -9,6 +9,7 @@ import org.openjdk.jmh.runner.options.OptionsBuilder;
 
 import java.util.Arrays;
 import java.util.Random;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 @BenchmarkMode(Mode.AverageTime)
@@ -170,6 +171,26 @@ public class AsherahBenchmark {
             return Asherah.decrypt(partitionPool[idx], ciphertextPool[idx]);
         }
         return Asherah.decrypt("bench-partition", ciphertext);
+    }
+
+    @Benchmark
+    public byte[] encryptAsync() throws Exception {
+        if (benchmarkMode.equals("warm") || benchmarkMode.equals("cold")) {
+            int idx = encryptPoolIndex;
+            encryptPoolIndex = (encryptPoolIndex + 1) % partitionPool.length;
+            return Asherah.encryptAsync(partitionPool[idx], payload).get();
+        }
+        return Asherah.encryptAsync("bench-partition", payload).get();
+    }
+
+    @Benchmark
+    public byte[] decryptAsync() throws Exception {
+        if (benchmarkMode.equals("warm") || benchmarkMode.equals("cold")) {
+            int idx = decryptPoolIndex;
+            decryptPoolIndex = (decryptPoolIndex + 1) % partitionPool.length;
+            return Asherah.decryptAsync(partitionPool[idx], ciphertextPool[idx]).get();
+        }
+        return Asherah.decryptAsync("bench-partition", ciphertext).get();
     }
 
     public static void main(String[] args) throws Exception {
