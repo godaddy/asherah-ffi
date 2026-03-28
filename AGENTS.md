@@ -190,6 +190,27 @@ That's the point — they can't drift.
 - memguard attempts to disable core dumps on init
 - Static master keys are for testing only — production must use AWS KMS
 
+## Async Design Principles
+
+Two rules govern all async work in this project:
+
+1. **Best possible performance** — never sacrifice latency for async purity.
+   If a sync driver (e.g., the `mysql` crate) is faster than an async driver
+   (e.g., sqlx) for the same operation, use the sync driver. tokio reactor
+   overhead per query is real and measurable (~300μs penalty for MySQL warm).
+
+2. **Never lie to async callers** — when a language binding returns a
+   Promise/Future/CompletableFuture, the caller's dispatch thread (event loop,
+   thread pool, etc.) must not be blocked. Use `std::thread::spawn` + oneshot
+   channel to offload blocking work if needed. The caller doesn't care whether
+   the I/O runs on a tokio reactor or a plain OS thread — they care that their
+   event loop stays responsive.
+
+These principles apply to all language bindings, not just Node.js. The C FFI
+async callback functions (`asherah_encrypt_to_json_async`, etc.) follow the
+same pattern for .NET (TaskCompletionSource), Java (CompletableFuture), and
+Ruby (Queue + callback).
+
 ## PR Guidelines
 
 - Concise, imperative commit messages
