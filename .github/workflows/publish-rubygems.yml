@@ -40,7 +40,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+          if [ -n "${{ github.event.workflow_run.head_branch }}" ]; then
+            TAG="${{ github.event.workflow_run.head_branch }}"
+          else
+            TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+          fi
           echo "RELEASE_TAG=${TAG}" >> "$GITHUB_ENV"
           echo "Downloading native libs from release ${TAG}"
 
@@ -69,8 +73,12 @@ jobs:
           elif [ -n "${{ vars.RUBYGEMS_VERSION }}" ]; then
             VERSION="${{ vars.RUBYGEMS_VERSION }}"
           else
-            # Fallback: derive from latest release tag
-            TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+            # Fallback: derive from triggering release tag
+            if [ -n "$WORKFLOW_RUN_BRANCH" ]; then
+              TAG="$WORKFLOW_RUN_BRANCH"
+            else
+              TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+            fi
             VERSION="${TAG#v}"
           fi
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"

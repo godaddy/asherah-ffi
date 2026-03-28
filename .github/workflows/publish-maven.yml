@@ -43,7 +43,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+          if [ -n "${{ github.event.workflow_run.head_branch }}" ]; then
+            TAG="${{ github.event.workflow_run.head_branch }}"
+          else
+            TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+          fi
           echo "Downloading Java JNI native libs from release ${TAG}"
 
           NATIVE_DIR=asherah-java/java/src/main/resources/native
