@@ -39,7 +39,7 @@ Run targeted tests before broader validation:
    - Ruby: `bundle exec rake test` in `asherah-ruby/`.
    - Go: `ASHERAH_GO_NATIVE=<path/to/libasherah_ffi.so> go test ./...` in
      `asherah-go/`.
-   - .NET: `dotnet test asherah-dotnet/AsherahDotNet.slnx`.
+   - .NET: `dotnet test asherah-dotnet/GoDaddy.Asherah.AppEncryption.slnx`.
    - Java: `mvn test` inside `asherah-java/java/`.
 
 If any platform-specific artifacts are generated (e.g., prebuilt Node binaries),

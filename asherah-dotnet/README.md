@@ -33,6 +33,6 @@ byte[] decrypted = session.Decrypt(encrypted);
 ## Building
 
 ```bash
-dotnet build asherah-dotnet/AsherahDotNet/
-dotnet test asherah-dotnet/AsherahDotNet.slnx
+dotnet build asherah-dotnet/GoDaddy.Asherah.AppEncryption/
+dotnet test asherah-dotnet/GoDaddy.Asherah.AppEncryption.slnx
 ```
