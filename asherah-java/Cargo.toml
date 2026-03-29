@@ -6,7 +6,6 @@ license = "Apache-2.0"
 description = "JNI bindings for the Asherah Rust library"
 homepage = "https://github.com/godaddy/asherah-ffi"
 repository = "https://github.com/godaddy/asherah-ffi"
-documentation = "https://docs.rs/asherah-java"
 readme = "README.md"
 keywords = ["asherah", "java", "jni", "encryption"]
 categories = ["cryptography", "api-bindings", "ffi"]

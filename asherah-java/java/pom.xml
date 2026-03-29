@@ -5,7 +5,7 @@
 
   <groupId>com.godaddy.asherah</groupId>
   <artifactId>appencryption</artifactId>
-  <version>0.1.0</version>
+  <version>0.50.0</version>
   <name>appencryption</name>
   <description>Asherah application-layer encryption for Java, powered by the native Rust implementation.</description>
   <url>https://github.com/godaddy/asherah-ffi</url>

@@ -60,12 +60,16 @@ jobs:
           gh release download "$TAG" -p 'libasherah_java-arm64.so'    -D /tmp/native-dl
           gh release download "$TAG" -p 'libasherah_java-x64.dylib'   -D /tmp/native-dl
           gh release download "$TAG" -p 'libasherah_java-arm64.dylib' -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah_java-x64.dll'     -D /tmp/native-dl || true
+          gh release download "$TAG" -p 'libasherah_java-arm64.dll'   -D /tmp/native-dl || true
 
           # Stage into JAR resource directories
           cp /tmp/native-dl/libasherah_java-x64.so     "$NATIVE_DIR/linux-x86_64/libasherah_java.so"
           cp /tmp/native-dl/libasherah_java-arm64.so    "$NATIVE_DIR/linux-aarch64/libasherah_java.so"
           cp /tmp/native-dl/libasherah_java-x64.dylib   "$NATIVE_DIR/darwin-x86_64/libasherah_java.dylib"
           cp /tmp/native-dl/libasherah_java-arm64.dylib "$NATIVE_DIR/darwin-aarch64/libasherah_java.dylib"
+          [ -f /tmp/native-dl/libasherah_java-x64.dll ]  && cp /tmp/native-dl/libasherah_java-x64.dll   "$NATIVE_DIR/windows-x86_64/asherah_java.dll"
+          [ -f /tmp/native-dl/libasherah_java-arm64.dll ] && cp /tmp/native-dl/libasherah_java-arm64.dll "$NATIVE_DIR/windows-aarch64/asherah_java.dll"
 
           echo "Native libraries staged:"
           find "$NATIVE_DIR" -type f -not -name '.git*' | sort

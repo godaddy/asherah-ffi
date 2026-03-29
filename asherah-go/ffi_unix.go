@@ -10,7 +10,7 @@ func openLibrary(path string) (uintptr, error) {
 
 func loadSymbols(lib uintptr) error {
 	var err error
-	reg := func(fptr interface{}, name string) {
+	reg := func(fptr any, name string) {
 		if err != nil {
 			return
 		}
