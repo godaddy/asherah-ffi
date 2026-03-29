@@ -35,3 +35,14 @@ elif command -v apt-get &>/dev/null; then
   # glibc cross-compile (manylinux-cross): openssl-sys vendors OpenSSL
 fi
 pkg-config --libs openssl 2>/dev/null || echo "INFO: pkg-config openssl not found, will vendor or use OPENSSL_DIR"
+
+# Pre-install maturin via pip so maturin-action skips its fragile curl-based
+# download from GitHub Releases (which fails when CDN returns HTML error pages).
+# pip has built-in retries and proper error handling.
+if ! command -v maturin &>/dev/null; then
+  PIP_BSP=""
+  python3 -m pip install --break-system-packages --help &>/dev/null && PIP_BSP="--break-system-packages"
+  python3 -m pip install $PIP_BSP maturin==1.9.4 || \
+  python3 -m pip install $PIP_BSP maturin==1.9.4 || \
+  python3 -m pip install $PIP_BSP maturin==1.9.4
+fi
