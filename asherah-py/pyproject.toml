@@ -10,7 +10,10 @@ readme = "README.md"
 requires-python = ">=3.8"
 license = { text = "Apache-2.0" }
 authors = [
-  { name = "Jay Gowdy" }
+  { name = "Jay Gowdy" },
+  { name = "Bo Thompson" },
+  { name = "Michael Micco" },
+  { name = "Dalibor Nasevic" },
 ]
 keywords = ["encryption", "envelope-encryption", "key-rotation", "security", "cryptography"]
 classifiers = [

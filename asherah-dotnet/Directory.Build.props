@@ -7,7 +7,7 @@
 
     <!-- Shared NuGet package metadata -->
     <Version>0.50.0</Version>
-    <Authors>Jay Gowdy</Authors>
+    <Authors>Jay Gowdy, Bo Thompson, Michael Micco, Dalibor Nasevic</Authors>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/godaddy/asherah-ffi</RepositoryUrl>
     <RepositoryType>git</RepositoryType>

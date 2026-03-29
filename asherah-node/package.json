@@ -4,6 +4,11 @@
   "private": false,
   "description": "Asherah application-layer encryption for Node.js with automatic key rotation, powered by the native Rust implementation.",
   "author": "Jay Gowdy",
+  "contributors": [
+    "Bo Thompson",
+    "Michael Micco",
+    "Dalibor Nasevic"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/godaddy/asherah-ffi.git",

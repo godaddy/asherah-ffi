@@ -29,6 +29,18 @@
       <organization>GoDaddy</organization>
       <organizationUrl>https://github.com/godaddy</organizationUrl>
     </developer>
+    <developer>
+      <name>Bo Thompson</name>
+      <organization>GoDaddy</organization>
+    </developer>
+    <developer>
+      <name>Michael Micco</name>
+      <organization>GoDaddy</organization>
+    </developer>
+    <developer>
+      <name>Dalibor Nasevic</name>
+      <organization>GoDaddy</organization>
+    </developer>
   </developers>
 
   <distributionManagement>

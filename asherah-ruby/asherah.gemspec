@@ -5,7 +5,7 @@ require_relative "lib/asherah/version"
 Gem::Specification.new do |spec|
   spec.name = "asherah"
   spec.version = Asherah::VERSION
-  spec.authors = ["Jay Gowdy"]
+  spec.authors = ["Jay Gowdy", "Bo Thompson", "Michael Micco", "Dalibor Nasevic"]
   spec.email = "oss@godaddy.com"
   spec.summary = "Asherah application-layer encryption for Ruby with automatic key rotation."
   spec.description = "Asherah application-layer encryption for Ruby with automatic key rotation, powered by the native Rust implementation."
