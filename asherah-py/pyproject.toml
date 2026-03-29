@@ -12,12 +12,24 @@ license = { text = "Apache-2.0" }
 authors = [
   { name = "Asherah Maintainers" }
 ]
+keywords = ["encryption", "envelope-encryption", "key-rotation", "security", "cryptography"]
 classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Operating System :: Microsoft :: Windows",
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Programming Language :: Rust",
   "Topic :: Security :: Cryptography",
-  "License :: OSI Approved :: Apache Software License"
 ]
 
 [project.urls]
@@ -29,3 +41,7 @@ bindings = "pyo3"
 features = []
 python-source = "."
 module-name = "asherah._asherah"
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true

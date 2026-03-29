@@ -4,8 +4,8 @@ version = "0.5.1"
 edition = "2021"
 license = "Apache-2.0"
 description = "C ABI for Asherah using Cobhan buffer format - drop-in replacement for Go asherah-cobhan"
-homepage = "https://github.com/godaddy/asherah"
-repository = "https://github.com/godaddy/asherah"
+homepage = "https://github.com/godaddy/asherah-ffi"
+repository = "https://github.com/godaddy/asherah-ffi"
 keywords = ["asherah", "ffi", "encryption", "kms", "cobhan"]
 categories = ["cryptography", "memory-management", "ffi"]
 

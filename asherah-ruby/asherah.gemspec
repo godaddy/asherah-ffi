@@ -6,6 +6,7 @@ Gem::Specification.new do |spec|
   spec.name = "asherah"
   spec.version = Asherah::VERSION
   spec.authors = ["GoDaddy"]
+  spec.email = "oss@godaddy.com"
   spec.summary = "Asherah application-layer encryption for Ruby"
   spec.description = "Asherah application-layer encryption for Ruby, powered by the native Rust implementation."
   spec.homepage = "https://github.com/godaddy/asherah-ffi"
@@ -14,7 +15,9 @@ Gem::Specification.new do |spec|
 
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["source_code_uri"] = spec.homepage
-  spec.metadata["github_repo"] = "ssh://github.com/godaddy/asherah-ffi"
+  spec.metadata["github_repo"] = "https://github.com/godaddy/asherah-ffi"
+  spec.metadata["changelog_uri"] = "https://github.com/godaddy/asherah-ffi/releases"
+  spec.metadata["bug_tracker_uri"] = "https://github.com/godaddy/asherah-ffi/issues"
   spec.metadata["rubygems_mfa_required"] = "true"
 
   # Platform-specific gems include the precompiled native library.

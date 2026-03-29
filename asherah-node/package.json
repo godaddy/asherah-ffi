@@ -3,7 +3,32 @@
   "version": "4.0.0-beta.1",
   "private": false,
   "description": "Asherah envelope encryption and key rotation library",
+  "author": "GoDaddy",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/godaddy/asherah-ffi.git",
+    "directory": "asherah-node"
+  },
+  "homepage": "https://github.com/godaddy/asherah-ffi/tree/main/asherah-node",
+  "bugs": {
+    "url": "https://github.com/godaddy/asherah-ffi/issues"
+  },
+  "keywords": [
+    "encryption",
+    "envelope-encryption",
+    "key-rotation",
+    "security",
+    "cryptography",
+    "asherah",
+    "napi"
+  ],
   "main": "npm/index.js",
+  "exports": {
+    ".": {
+      "require": "./npm/index.js",
+      "default": "./npm/index.js"
+    }
+  },
   "types": "index.d.ts",
   "files": [
     "npm/index.js",
