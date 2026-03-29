@@ -174,7 +174,7 @@ jobs:
 
       - name: Install cargo-zigbuild (musl builds)
         if: contains(matrix.settings.target, 'musl')
-        uses: taiki-e/install-action@0d865d5cc6d507df4765f1f866bfae8bab4e2a73 # v2
+        uses: taiki-e/install-action@fd0f63e180a477d7434580b6d80817978b9ff2b8 # v2
         with:
           tool: cargo-zigbuild
 
