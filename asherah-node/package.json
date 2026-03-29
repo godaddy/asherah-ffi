@@ -2,8 +2,8 @@
   "name": "asherah",
   "version": "4.0.0-beta.1",
   "private": false,
-  "description": "Asherah envelope encryption and key rotation library",
-  "author": "GoDaddy",
+  "description": "Asherah application-layer encryption for Node.js with automatic key rotation, powered by the native Rust implementation.",
+  "author": "Jay Gowdy",
   "repository": {
     "type": "git",
     "url": "https://github.com/godaddy/asherah-ffi.git",
