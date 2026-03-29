@@ -1,3 +1,9 @@
+//! # Asherah FFI
+//!
+//! C ABI wrapper for the Asherah encryption library, providing the foreign
+//! function interface consumed by language bindings (.NET, Ruby, Go).
+//! Uses the Cobhan buffer format for cross-language data exchange.
+
 #![allow(unsafe_code)]
 
 // Link in asherah-cobhan to export its Cobhan-compatible symbols

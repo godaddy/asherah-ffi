@@ -7,7 +7,7 @@
   <artifactId>appencryption</artifactId>
   <version>0.1.0</version>
   <name>appencryption</name>
-  <description>Asherah application-layer encryption for Java, powered by the native Rust implementation.</description>
+  <description>Asherah application-layer encryption for Java with automatic key rotation, powered by the native Rust implementation.</description>
   <url>https://github.com/godaddy/asherah-ffi</url>
   <packaging>jar</packaging>
 
@@ -22,6 +22,26 @@
     <url>https://github.com/godaddy/asherah-ffi</url>
     <connection>scm:git:https://github.com/godaddy/asherah-ffi.git</connection>
   </scm>
+
+  <developers>
+    <developer>
+      <name>Jay Gowdy</name>
+      <organization>GoDaddy</organization>
+      <organizationUrl>https://github.com/godaddy</organizationUrl>
+    </developer>
+    <developer>
+      <name>Bo Thompson</name>
+      <organization>GoDaddy</organization>
+    </developer>
+    <developer>
+      <name>Michael Micco</name>
+      <organization>GoDaddy</organization>
+    </developer>
+    <developer>
+      <name>Dalibor Nasevic</name>
+      <organization>GoDaddy</organization>
+    </developer>
+  </developers>
 
   <distributionManagement>
     <repository>
@@ -103,6 +123,37 @@
         <configuration>
           <release>${maven.compiler.release}</release>
         </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <version>3.3.1</version>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <goals>
+              <goal>jar-no-fork</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <version>3.6.3</version>
+        <configuration>
+          <failOnError>false</failOnError>
+        </configuration>
+        <executions>
+          <execution>
+            <id>attach-javadocs</id>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>

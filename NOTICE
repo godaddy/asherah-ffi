@@ -1,0 +1,38 @@
+Asherah
+Copyright 2025-2026 GoDaddy Operating Company, LLC
+
+This product includes software developed at GoDaddy (https://www.godaddy.com/).
+
+Licensed under the Apache License, Version 2.0.
+
+## Authors
+
+- Jay Gowdy — Asherah design author; primary developer of the Rust
+  implementation and all language bindings.
+- Bo Thompson (@aka-bo) — Primary developer of the canonical Go
+  implementation (https://github.com/godaddy/asherah).
+- Michael Micco (@chief-micco) — Contributor to the canonical
+  implementation and .NET binding.
+- Dalibor Nasevic (@dalibor) — Author of the canonical Ruby
+  implementation.
+
+## Supported Versions
+
+Security fixes and new features are applied to the most recent release.
+Each language binding is published independently; always use the latest
+available version for your platform:
+
+- **npm**: https://www.npmjs.com/package/asherah
+- **PyPI**: https://pypi.org/project/asherah
+- **NuGet**: https://github.com/godaddy/asherah-ffi/packages
+- **Maven**: https://github.com/godaddy/asherah-ffi/packages
+- **RubyGems**: https://github.com/godaddy/asherah-ffi/packages
+- **Go**: https://pkg.go.dev/github.com/godaddy/asherah-go
+- **Rust**: https://github.com/godaddy/asherah-ffi/releases
+- **gRPC Server**: https://github.com/godaddy/asherah-ffi/pkgs/container/asherah-server
+
+## Acknowledgements
+
+This Rust implementation is an agentic port of the canonical Go
+implementation at https://github.com/godaddy/asherah, maintaining
+wire-compatible metastore formats and key hierarchy design.

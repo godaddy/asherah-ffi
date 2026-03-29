@@ -1,58 +1,102 @@
 # Contributing
 
 Thank you for your interest in improving the Asherah ecosystem. This repository
-contains the Rust core, native FFI wrapper, and language bindings used across
-multiple runtimes. The following guidelines keep contributions consistent and
-easy to review.
+contains the Rust core encryption engine, native FFI layer, and language
+bindings for Node.js, Python, .NET, Java, Ruby, and Go. The following
+guidelines keep contributions consistent and easy to review.
 
 ## Getting Started
 
-- Install the Rust toolchain (Rust 1.88+ required, 1.91+ recommended) and enable the `rustfmt`
-  and `clippy` components.
-- Install language toolchains required for the bindings you plan to touch:
-  Node 18+, Python 3.9+, Go 1.21+, Ruby 3.1+, .NET 8, and Java 17.
-- Ensure Docker is available if you plan to use the full matrix test harness
-  located in `scripts/test-in-docker.sh`.
+1. Install the Rust toolchain (1.91+ pinned via `rust-toolchain.toml`) with
+   the `rustfmt` and `clippy` components.
+2. Install language toolchains for the bindings you plan to touch:
+   - Node.js 18+
+   - Python 3.8+
+   - .NET 8.0 or 10.0
+   - Java 11+ (Maven)
+   - Ruby 3.0+
+   - Go 1.23+
+3. Docker is required for integration tests (MySQL, Postgres, DynamoDB) and
+   the full test suite: `scripts/test.sh --all`.
 
 ## Development Workflow
 
 1. Create a feature branch from `main`.
-2. Make focused commits with clear messages describing the change and why it is
-   needed.
-3. Keep changes minimal—avoid sweeping refactors unless they are required to
-   fix a bug or implement a feature.
+2. Make focused commits with clear, imperative messages describing the change
+   and why it is needed.
+3. Keep changes minimal — avoid sweeping refactors unless required to fix a
+   bug or implement a feature.
+4. Open a pull request. CI runs automatically and must pass before merge.
 
-## Formatting & Linting
+## Building
 
-- Run `cargo fmt` and `cargo clippy --all-targets --all-features` inside the
-  `asherah/` crate when modifying Rust sources.
-- Use the repository `.editorconfig` settings to align editors across the
-  different languages.
-- Apply language-specific formatters where available (`go fmt`, `npm run lint`,
-  `black`, `rubocop`, etc.) when updating those bindings.
+```bash
+# Rust workspace (all crates)
+cargo build
+
+# Individual binding
+cargo build -p asherah-node    # Node.js (napi-rs)
+cargo build -p asherah-py      # Python (PyO3/maturin)
+cargo build -p asherah-java    # Java (JNI)
+cargo build -p asherah-ffi     # C ABI (.NET, Ruby, Go)
+```
 
 ## Testing
 
-Run the tests that correspond to the areas you changed before opening a pull
-request.
+Run the tests for the areas you changed before opening a pull request.
 
-- Core crates: `cargo test` (workspace root) and `cd asherah && cargo test`.
-- Feature adapters: enable the relevant feature flag, e.g.
-  `cargo test --features sqlite`.
-- Language bindings: follow the commands in `README.md` (e.g. `npm test`,
-  `python -m pytest`, `dotnet test`).
-- Full matrix: `./scripts/test-in-docker.sh` for an end-to-end validation.
+```bash
+# Rust unit tests
+scripts/test.sh --unit
 
-Please include notes about which test suites you exercised in your pull
-request description.
+# Lint (rustfmt + clippy)
+scripts/test.sh --lint
+
+# All binding tests (requires language toolchains)
+scripts/test.sh --bindings
+
+# Integration tests (requires Docker)
+scripts/test.sh --integration
+
+# Everything
+scripts/test.sh --all
+```
+
+Individual binding tests:
+
+| Binding | Command |
+|---------|---------|
+| Node.js | `cd asherah-node && npm test` |
+| Python | `maturin develop --manifest-path asherah-py/Cargo.toml && pytest asherah-py/tests/` |
+| .NET | `dotnet test asherah-dotnet/GoDaddy.Asherah.AppEncryption.slnx` |
+| Java | `cd asherah-java/java && mvn test` |
+| Ruby | `ruby -Iasherah-ruby/lib -Iasherah-ruby/test asherah-ruby/test/round_trip_test.rb` |
+| Go | `cd asherah-go && go test ./...` |
+
+## Formatting & Linting
+
+- **Rust**: `cargo fmt` and `cargo clippy --workspace --all-targets` (enforced
+  by pre-commit hooks and CI).
+- **Go**: `go fmt ./...`
+- **Ruby**: `rubocop` (configuration in `asherah-ruby/.rubocop.yml`)
+- Use the repository `.editorconfig` to align editor settings across languages.
 
 ## Pull Request Checklist
 
-- [ ] All code compiles and tests pass for the components you touched.
-- [ ] Formatting and linting tools have been executed.
+- [ ] Code compiles and tests pass for the components you touched.
+- [ ] `scripts/test.sh --lint` passes.
 - [ ] Documentation is updated when behavior or configuration changes.
-- [ ] Sensitive data is not logged or committed.
+- [ ] No sensitive data (keys, credentials, tokens) is logged or committed.
+- [ ] New features include tests.
 
-We appreciate your contributions! If you are unsure about an approach, feel
-free to open a draft pull request or start a discussion in issues before
-investing significant effort.
+## Security
+
+Please do **not** open public issues for security vulnerabilities. Use the
+GitHub Security Advisories feature (Security tab > "Report a vulnerability")
+to contact maintainers privately. See [SECURITY.md](SECURITY.md) for details.
+
+## Questions?
+
+Open a draft pull request or start a discussion in
+[Issues](https://github.com/godaddy/asherah-ffi/issues) before investing
+significant effort. We're happy to help align on approach.

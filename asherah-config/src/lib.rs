@@ -1,3 +1,9 @@
+//! # Asherah Config
+//!
+//! Shared configuration types for Asherah language bindings. Handles
+//! environment variable transport, config option parsing, and factory
+//! construction from JSON or environment-based configuration.
+
 use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;

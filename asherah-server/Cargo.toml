@@ -3,7 +3,7 @@ name = "asherah-server"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-description = "gRPC sidecar server for Asherah envelope encryption"
+description = "gRPC sidecar server for Asherah application-layer encryption, wire-compatible with the Go asherah server."
 publish = false
 
 [lib]

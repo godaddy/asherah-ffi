@@ -1,3 +1,19 @@
+//! # Asherah
+//!
+//! Application-layer envelope encryption with automatic key rotation.
+//!
+//! This crate provides the core encryption engine, key hierarchy management,
+//! metastore adapters (DynamoDB, MySQL, Postgres, SQLite, in-memory), and
+//! KMS backends (AWS KMS, static for testing). All secret key material is
+//! protected with mlock'd memory and wiped on free.
+//!
+//! ## Feature Flags
+//!
+//! - `sqlite` — SQLite metastore adapter
+//! - `mysql` — MySQL metastore adapter
+//! - `postgres` — Postgres metastore adapter
+//! - `dynamodb` — DynamoDB metastore adapter (async via AWS SDK)
+
 #![allow(unsafe_code)]
 
 pub mod aead;
