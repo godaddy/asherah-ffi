@@ -292,7 +292,7 @@ fi
 
 if should_build dotnet || should_build all; then
   echo "[build-bindings] Packing .NET library"
-  _csproj="$ROOT_DIR/asherah-dotnet/GoDaddy.Asherah.AppEncryption/GoDaddy.Asherah.AppEncryption.csproj"
+  _csproj="$ROOT_DIR/asherah-dotnet/src/GoDaddy.Asherah.AppEncryption/GoDaddy.Asherah.AppEncryption.csproj"
   # Use 'dotnet msbuild' instead of 'dotnet pack' to work around .NET 10 SDK
   # injecting the csproj twice via a response file (MSB1008).
   dotnet msbuild "$_csproj" /t:Restore \

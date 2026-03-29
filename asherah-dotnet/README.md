@@ -285,7 +285,7 @@ var config = AsherahConfig.CreateBuilder()
 ## Building from Source
 
 ```bash
-dotnet build asherah-dotnet/GoDaddy.Asherah.AppEncryption/
+dotnet build asherah-dotnet/src/GoDaddy.Asherah.AppEncryption/
 dotnet test asherah-dotnet/GoDaddy.Asherah.AppEncryption.slnx
 ```
 

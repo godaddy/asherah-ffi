@@ -355,13 +355,13 @@ jobs:
         working-directory: asherah-dotnet
         run: |
           # Stage the FFI lib as linux-x64 native
-          mkdir -p GoDaddy.Asherah.AppEncryption/runtimes/linux-x64/native
-          cp ../target/release/libasherah_ffi.so GoDaddy.Asherah.AppEncryption/runtimes/linux-x64/native/
+          mkdir -p src/GoDaddy.Asherah.AppEncryption/runtimes/linux-x64/native
+          cp ../target/release/libasherah_ffi.so src/GoDaddy.Asherah.AppEncryption/runtimes/linux-x64/native/
 
-          dotnet pack GoDaddy.Asherah.AppEncryption/GoDaddy.Asherah.AppEncryption.csproj -c Release \
+          dotnet pack src/GoDaddy.Asherah.AppEncryption/GoDaddy.Asherah.AppEncryption.csproj -c Release \
             /p:Version="0.0.0-dryrun" \
             /p:PackageOutputPath="$GITHUB_WORKSPACE/dist"
-          dotnet pack GoDaddy.Asherah.AppEncryption.Compat/GoDaddy.Asherah.AppEncryption.Compat.csproj -c Release \
+          dotnet pack src/GoDaddy.Asherah.AppEncryption.Compat/GoDaddy.Asherah.AppEncryption.Compat.csproj -c Release \
             /p:Version="0.0.0-dryrun" \
             /p:PackageOutputPath="$GITHUB_WORKSPACE/dist"
       - name: Verify packages
