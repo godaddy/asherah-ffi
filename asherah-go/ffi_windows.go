@@ -5,6 +5,8 @@ package asherah
 import (
 	"fmt"
 	"syscall"
+
+	"github.com/ebitengine/purego"
 )
 
 func openLibrary(path string) (uintptr, error) {
@@ -16,42 +18,23 @@ func openLibrary(path string) (uintptr, error) {
 }
 
 func loadSymbols(lib uintptr) error {
-	h := syscall.Handle(lib)
-
-	lookup := func(name string) (uintptr, error) {
-		proc, err := syscall.GetProcAddress(h, name)
+	var err error
+	reg := func(fptr any, name string) {
 		if err != nil {
-			return 0, fmt.Errorf("GetProcAddress(%s): %w", name, err)
+			return
 		}
-		return proc, nil
+		purego.RegisterLibFunc(fptr, lib, name)
 	}
 
-	type symEntry struct {
-		fptr *uintptr
-		name string
-	}
+	reg(&fnFactoryNewFromEnv, "asherah_factory_new_from_env")
+	reg(&fnFactoryNewWithConfig, "asherah_factory_new_with_config")
+	reg(&fnFactoryFree, "asherah_factory_free")
+	reg(&fnFactoryGetSession, "asherah_factory_get_session")
+	reg(&fnSessionFree, "asherah_session_free")
+	reg(&fnEncryptToJSON, "asherah_encrypt_to_json")
+	reg(&fnDecryptFromJSON, "asherah_decrypt_from_json")
+	reg(&fnBufferFree, "asherah_buffer_free")
+	reg(&fnLastErrorMessage, "asherah_last_error_message")
 
-	// On Windows, purego isn't available. We use raw syscall trampolines.
-	// For now, just verify the symbols exist — the actual purego RegisterLibFunc
-	// approach works cross-platform, but Windows needs syscall.NewLazyDLL instead.
-	// TODO: implement Windows support with syscall.NewLazyDLL or purego Windows support.
-	syms := []string{
-		"asherah_factory_new_from_env",
-		"asherah_factory_new_with_config",
-		"asherah_factory_free",
-		"asherah_factory_get_session",
-		"asherah_session_free",
-		"asherah_encrypt_to_json",
-		"asherah_decrypt_from_json",
-		"asherah_buffer_free",
-		"asherah_last_error_message",
-	}
-
-	for _, name := range syms {
-		if _, err := lookup(name); err != nil {
-			return err
-		}
-	}
-
-	return fmt.Errorf("asherah-go: Windows support not yet implemented for purego")
+	return err
 }

@@ -1,82 +1,87 @@
 # Releasing
 
-This document captures the workflow for cutting a release across the Rust core
-crate and the associated language bindings.
+Releases are fully automated. Creating a GitHub Release triggers all build and
+publish workflows.
 
-## 1. Version Coordination
+## How to Release
 
-1. Choose a new semantic version for the Rust crates (`asherah`, `asherah-config`,
-   `asherah-ffi`, `asherah-node`, `asherah-py`, `asherah-java`).
-2. Update the version field in each `Cargo.toml`. Keep the workspace in sync by
-   adjusting `Cargo.lock` with `cargo update -p <crate>@<version>`.
-3. Propagate the version bump to language package manifests:
-   - Node: update `asherah-node/package.json` and regenerate lockfiles.
-   - Python: update `asherah-py/pyproject.toml` or `setup.cfg` as applicable.
-   - Ruby: update gemspec in `asherah-ruby/`.
-   - .NET: update the `.csproj` version in `asherah-dotnet/`.
-   - Java: update the Maven POM version under `asherah-java/java/`.
-   - Go: update any version constants or module tags in `asherah-go/`.
+1. Ensure all PRs are merged and CI passes on `main`.
+2. Create a [GitHub Release](https://github.com/godaddy/asherah-ffi/releases/new):
+   - Tag: `v0.6.86` (increment from latest release)
+   - Target: `main`
+   - Title: same as tag
+   - Click "Publish release"
 
-Record the changes in `CHANGELOG.md` under a new heading (e.g. `## [1.0.0] -
-YYYY-MM-DD`).
-
-## 2. Test Matrix
-
-Run targeted tests before broader validation:
-
-1. `cargo fmt --all` and `cargo clippy --all-targets --all-features`.
-2. `cargo test` at the workspace root and again within `asherah/`.
-3. Feature adapters (set the relevant environment values):
-   - SQLite: `cargo test --features sqlite`.
-   - MySQL: `MYSQL_URL=mysql://user:pass@host/db cargo test --features mysql`.
-   - Postgres: `POSTGRES_URL=postgres://user:pass@host/db cargo test --features postgres`.
-   - DynamoDB: `AWS_REGION=us-west-2 DDB_TABLE=asherah-tests cargo test --features dynamodb`.
-4. Language bindings:
-   - Node: `npm install && npm test` in `asherah-node/` for each supported
-     platform (CI covers macOS, Linux, Windows).
-   - Python: `maturin develop && python -m pytest asherah-py/tests` across the
-     supported interpreter matrix.
-   - Ruby: `bundle exec rake test` in `asherah-ruby/`.
-   - Go: `ASHERAH_GO_NATIVE=<path/to/libasherah_ffi.so> go test ./...` in
-     `asherah-go/`.
-   - .NET: `dotnet test asherah-dotnet/GoDaddy.Asherah.AppEncryption.slnx`.
-   - Java: `mvn test` inside `asherah-java/java/`.
-
-If any platform-specific artifacts are generated (e.g., prebuilt Node binaries),
-confirm they pass smoke tests before publishing.
-
-Finally, execute the full matrix script for parity with CI:
-
+Or via CLI:
 ```bash
-./scripts/test-in-docker.sh
+gh release create v0.6.86 --target main --generate-notes
 ```
 
-## 3. Packaging & Publishing
+## What Happens Automatically
 
-1. Create release builds of the Rust crates using `cargo build --release`.
-2. For Node, Python, Ruby, Go, .NET, and Java bindings, follow the packaging
-   instructions in their respective directories. Typical commands:
-   - Node: `npm run build && npm pack`.
-   - Python: `maturin build --release`.
-   - Ruby: `gem build asherah-ruby.gemspec`.
-   - Go: ensure the FFI artifacts are available, then tag the module.
-   - .NET: `dotnet pack -c Release`.
-   - Java: `mvn -pl java -am package`.
-3. Upload artifacts to their registries (crates.io, npm, PyPI, RubyGems, NuGet,
-   Maven Central) once validation succeeds. Each workflow requires credentials
-   configured via GitHub Actions secrets.
+Creating a release triggers two waves of workflows:
 
-## 4. Tagging & Release Notes
+### Wave 1 (triggered by `release: published`)
 
-1. Tag the repository using `git tag vX.Y.Z`.
-2. Push the tag to GitHub (`git push origin vX.Y.Z`).
-3. Create a GitHub release and populate the notes from the corresponding
-   `CHANGELOG.md` entry.
+Each workflow waits up to 20 minutes for CI (`lint`, `rust-tests`,
+`integration-tests`) to pass before building.
 
-## 5. Post-release Verification
+| Workflow | Publishes to |
+|----------|-------------|
+| `release-cobhan` | Native libraries uploaded to the GitHub Release |
+| `publish-npm` | [npmjs.com](https://www.npmjs.com/package/asherah) |
+| `publish-pypi` | [pypi.org](https://pypi.org/project/asherah) |
+| `publish-server` | [GHCR](https://github.com/godaddy/asherah-ffi/pkgs/container/asherah-server) |
 
-1. Monitor crates.io and other registries to confirm artifacts are available.
-2. Validate that documentation (e.g., https://docs.rs/asherah) has built
-   successfully.
-3. Update any downstream sample applications or integration tests to the new
-   version.
+### Wave 2 (triggered by `release-cobhan` completion)
+
+These download pre-built native libraries from the release, package them, and
+publish:
+
+| Workflow | Publishes to |
+|----------|-------------|
+| `publish-nuget` | [GitHub Packages (NuGet)](https://github.com/godaddy/asherah-ffi/packages) |
+| `publish-maven` | [GitHub Packages (Maven)](https://github.com/godaddy/asherah-ffi/packages) |
+| `publish-rubygems` | [GitHub Packages (RubyGems)](https://github.com/godaddy/asherah-ffi/packages) |
+
+## Version Numbers
+
+Versions are managed by repository variables, not by in-repo manifest files.
+The publish workflows read these variables and auto-increment the patch version
+after each successful publish.
+
+| Package | Version source | Variable |
+|---------|---------------|----------|
+| npm | Repo variable | `NPM_VERSION` |
+| PyPI | Repo variable | `PYPI_VERSION` |
+| NuGet | Repo variable | `NUGET_VERSION` |
+| RubyGems | Repo variable | `RUBYGEMS_VERSION` |
+| Maven | Release tag (`v0.6.86` → `0.6.86`) | n/a |
+| Server | Release tag | n/a |
+| Cobhan | Release tag | n/a |
+
+In-repo versions (`Cargo.toml`, `pom.xml`, `package.json`, etc.) are
+placeholders used only for local development builds.
+
+## Verifying a Release
+
+Check that all 7 publish workflows succeeded:
+
+```bash
+gh run list --limit 10 --json name,status,conclusion,headBranch \
+  --jq '.[] | select(.headBranch | startswith("v")) | "\(.name)\t\(.conclusion)"'
+```
+
+## Re-running Failed Jobs
+
+Wave 1 workflows can be re-run from the Actions tab or via CLI:
+```bash
+gh run rerun <run-id> --failed
+```
+
+Wave 2 workflows (NuGet, Maven, RubyGems) can be triggered manually:
+```bash
+gh workflow run publish-nuget.yml -f version=0.50.10
+gh workflow run publish-maven.yml -f version=0.6.86
+gh workflow run publish-rubygems.yml -f version=0.9.55
+```

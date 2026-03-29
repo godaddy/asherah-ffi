@@ -6,7 +6,6 @@ license = "Apache-2.0"
 description = "C ABI (Cobhan buffer format) for the Asherah encryption library, used by .NET, Ruby, and Go bindings."
 homepage = "https://github.com/godaddy/asherah-ffi"
 repository = "https://github.com/godaddy/asherah-ffi"
-documentation = "https://docs.rs/asherah-ffi"
 readme = "README.md"
 keywords = ["asherah", "ffi", "encryption", "kms"]
 categories = ["cryptography", "memory-management", "ffi"]

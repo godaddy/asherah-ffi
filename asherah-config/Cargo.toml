@@ -6,7 +6,6 @@ license = "Apache-2.0"
 description = "Shared configuration types and environment variable transport for Asherah language bindings."
 homepage = "https://github.com/godaddy/asherah-ffi"
 repository = "https://github.com/godaddy/asherah-ffi"
-documentation = "https://docs.rs/asherah-config"
 readme = "README.md"
 keywords = ["asherah", "configuration", "kms", "encryption"]
 categories = ["config", "cryptography", "memory-management"]

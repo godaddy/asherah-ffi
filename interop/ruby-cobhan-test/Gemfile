@@ -1,5 +1,0 @@
-source 'https://rubygems.org'
-
-gem 'asherah', '~> 0.5'
-gem 'base64'
-gem 'rspec', '~> 3.12'

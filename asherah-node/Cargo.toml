@@ -6,7 +6,6 @@ license = "Apache-2.0"
 description = "Node.js addon for Asherah (napi-rs)"
 homepage = "https://github.com/godaddy/asherah-ffi"
 repository = "https://github.com/godaddy/asherah-ffi"
-documentation = "https://docs.rs/asherah-node"
 readme = "README.md"
 keywords = ["asherah", "node", "napi", "encryption"]
 categories = ["cryptography", "api-bindings", "ffi"]
