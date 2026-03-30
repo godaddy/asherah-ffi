@@ -90,7 +90,7 @@ pub extern "C" fn asherah_factory_new_from_env() -> *mut AsherahFactory {
     match ael::builders::factory_from_env() {
         Ok(f) => Box::into_raw(Box::new(AsherahFactory { inner: f })),
         Err(e) => {
-            set_error(format!("{}", e));
+            set_error(format!("{e:#}"));
             null_mut()
         }
     }
@@ -111,7 +111,7 @@ pub unsafe extern "C" fn asherah_apply_config_json(config_json: *const c_char) -
     match factory_from_config_json(config_json) {
         Ok((_factory, _applied)) => 0,
         Err(e) => {
-            set_error(format!("{e}"));
+            set_error(format!("{e:#}"));
             -1
         }
     }
@@ -126,7 +126,7 @@ pub unsafe extern "C" fn asherah_factory_new_with_config(
     match factory_from_config_json(config_json) {
         Ok((factory, _applied)) => Box::into_raw(Box::new(AsherahFactory { inner: factory })),
         Err(e) => {
-            set_error(format!("{e}"));
+            set_error(format!("{e:#}"));
             null_mut()
         }
     }
@@ -167,7 +167,7 @@ pub unsafe extern "C" fn asherah_factory_get_session(
     let pid = match cstr_to_str(partition_id) {
         Ok(s) => s,
         Err(e) => {
-            set_error(format!("{e}"));
+            set_error(format!("{e:#}"));
             return null_mut();
         }
     };
@@ -247,7 +247,7 @@ pub unsafe extern "C" fn asherah_encrypt_to_json(
             take_vec_into_buffer(v, out)
         }
         Err(e) => {
-            set_error(format!("{e}"));
+            set_error(format!("{e:#}"));
             -1
         }
     }
@@ -280,12 +280,12 @@ pub unsafe extern "C" fn asherah_decrypt_from_json(
         Ok(drr) => match s.inner.decrypt(drr) {
             Ok(pt) => take_vec_into_buffer(pt, out),
             Err(e) => {
-                set_error(format!("{e}"));
+                set_error(format!("{e:#}"));
                 -1
             }
         },
         Err(e) => {
-            set_error(format!("{e}"));
+            set_error(format!("{e:#}"));
             -1
         }
     }

@@ -29,7 +29,8 @@ type SessionHandle = ael::session::PublicSession<
 >;
 
 fn anyhow_to_py(err: anyhow::Error) -> PyErr {
-    PyRuntimeError::new_err(err.to_string())
+    // Use {:#} to show the full error chain, not just the outermost context
+    PyRuntimeError::new_err(format!("{err:#}"))
 }
 
 fn json_parse_err(err: impl std::fmt::Display) -> PyErr {
