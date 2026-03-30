@@ -119,6 +119,11 @@ path = "tests/sqlite_tests.rs"
 required-features = ["sqlite"]
 
 [[test]]
+name = "kms_integration"
+path = "tests/kms_integration.rs"
+required-features = []
+
+[[test]]
 name = "cucumber"
 harness = false
 required-features = ["cucumber_xlang"]
