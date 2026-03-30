@@ -15,7 +15,7 @@ This design means application code never handles raw master keys, key rotation
 happens transparently, and compromise of a single data key exposes only one
 record.
 
-**KMS backends:** AWS KMS, static (testing only)
+**KMS backends:** AWS KMS, [HashiCorp Vault Transit](docs/vault-transit-kms.md), AWS Secrets Manager, static (testing only)
 
 **Metastores:** DynamoDB, MySQL, Postgres, SQLite, in-memory (testing only)
 
