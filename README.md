@@ -83,6 +83,97 @@ Apple M4 Max, memory metastore, hot cache. See each binding's README for
 detailed benchmarks including async and comparison with canonical
 implementations.
 
+## Architecture: Key Hierarchy and Secure Caching
+
+Asherah uses a four-level key hierarchy with envelope encryption:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    KMS Backend                          │
+│         (AWS KMS / Vault Transit / Static)              │
+│                                                         │
+│  Master Key ── never exposed, encrypt/decrypt via API   │
+└─────────────┬───────────────────────────────────────────┘
+              │ encrypts
+┌─────────────▼───────────────────────────────────────────┐
+│              System Key (SK)                             │
+│  Stored in metastore, cached in memory, auto-rotated    │
+└─────────────┬───────────────────────────────────────────┘
+              │ encrypts
+┌─────────────▼───────────────────────────────────────────┐
+│          Intermediate Key (IK)                           │
+│  Per-partition, stored in metastore, auto-rotated       │
+└─────────────┬───────────────────────────────────────────┘
+              │ encrypts
+┌─────────────▼───────────────────────────────────────────┐
+│           Data Row Key (DRK)                             │
+│  Random per-record, inline in ciphertext (envelope)     │
+└─────────────┬───────────────────────────────────────────┘
+              │ encrypts
+              ▼
+         Your Data
+```
+
+### Secure Memory Architecture
+
+All key material is protected by a custom memory guard system:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│               mlock'd Page (4KB)                        │
+│          Pinned in RAM, never swapped to disk            │
+├─────────────────────────────────────────────────────────┤
+│ Slot 0: Coffer Left   (XOR'd master key half)           │
+│ Slot 1: Coffer Right  (random, used for key derivation) │
+├─────────────────────────────────────────────────────────┤
+│ Slot 2..N: Shared pool                                  │
+│   ┌─────────────────────────────────────────────┐       │
+│   │ Hot Cache: recently used keys (LRU eviction)│       │
+│   │   SK decrypt key → slot 2                   │       │
+│   │   IK decrypt key → slot 3                   │       │
+│   │   ...                                       │       │
+│   ├─────────────────────────────────────────────┤       │
+│   │ Transient: acquired during crypto ops       │       │
+│   │   (released back to pool after use)         │       │
+│   └─────────────────────────────────────────────┘       │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Hot cache hit** (typical encrypt/decrypt): The decrypted key is already in
+an mlock'd slot — zero crypto overhead, just a pointer read. This is why
+hot-cache encrypt is ~400ns.
+
+**Hot cache miss**: The key's Enclave (AES-256-GCM encrypted ciphertext in
+regular memory) is decrypted using the Coffer master key, placed in a free
+slot, and promoted to the hot cache. LRU eviction makes room if needed.
+
+**Coffer**: The master key for Enclave encryption is split across two slots
+using XOR + hash derivation. Neither slot alone reveals the key. The Coffer
+is initialized once at startup with OS-entropy randomness.
+
+### Multi-Level Cache Hierarchy
+
+```
+Request ──► Session Cache (LRU, per-factory)
+                │ miss
+                ▼
+            IK Cache (per-session or shared, stale-while-revalidate)
+                │ miss
+                ▼
+            SK Cache (shared across all sessions, stale-while-revalidate)
+                │ miss
+                ▼
+            Metastore (DynamoDB / MySQL / Postgres)
+                │ load + decrypt
+                ▼
+            KMS (decrypt system key with master key)
+```
+
+**Stale-while-revalidate**: On cache expiry, the stale key is returned
+immediately while a background refresh loads the latest from the metastore.
+This eliminates thundering herd stampedes on cache expiry under high
+concurrency.
+
 ## Testing
 
 - **127 Rust unit tests** covering core encryption engine, key management,
@@ -136,10 +227,21 @@ scripts/test.sh --fuzz           # requires nightly
 
 ## Security
 
-- All secret buffers use mlock'd memory with guard pages
-- Automatic wipe-on-free for all key material
-- Core dump protection enabled at initialization
-- Static master keys are for testing only -- production must use AWS KMS
+- **mlock'd memory**: All key material lives in pages pinned to RAM
+  (`mlock`), preventing the OS from swapping secrets to disk
+- **Guard pages**: Buffer overflows and underflows are caught by
+  hardware-enforced guard pages around protected memory regions
+- **Canary bytes**: Optional buffer overflow detection via randomized
+  canary values at buffer boundaries
+- **Wipe-on-free**: All key material is cryptographically scrubbed
+  before memory is released — no residual secrets in freed pages
+- **Core dump protection**: Disabled at process initialization to
+  prevent secrets from appearing in crash dumps
+- **Coffer key splitting**: The Enclave master key is split across two
+  mlock'd slots using XOR + hash derivation — neither slot alone reveals
+  the key
+- **AES-256-GCM Enclaves**: Keys at rest in regular memory are encrypted
+  with authenticated encryption; only the mlock'd Coffer can decrypt them
 
 ## License
 
