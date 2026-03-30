@@ -66,22 +66,15 @@ session-based usage, and production configuration.
 
 ## Performance
 
-The Rust core delivers sub-microsecond encrypt/decrypt operations. Binding
-overhead varies by language but stays well under 2 microseconds in all cases.
+The Rust core delivers sub-microsecond encrypt/decrypt. All language bindings
+stay under 2μs for sync operations. The table includes both sync and async
+variants, plus head-to-head comparison with the canonical Go/C#/Java
+implementations:
 
-| Implementation | Encrypt 64B (ns) | Decrypt 64B (ns) |
-|---|---|---|
-| Rust native | 397 | 306 |
-| .NET | 693 | 618 |
-| Node.js | 972 | 1,208 |
-| Python | 1,049 | 791 |
-| Go | 1,074 | 973 |
-| Java | 1,118 | 974 |
-| Ruby | 1,170 | 1,110 |
+![Benchmark results — hot cache, Apple M4 Max](docs/images/benchmark-hot-cache.png)
 
-Apple M4 Max, memory metastore, hot cache. See each binding's README for
-detailed benchmarks including async and comparison with canonical
-implementations.
+See each binding's README for detailed async behavior and per-metastore
+performance characteristics.
 
 ## Architecture: Key Hierarchy and Secure Caching
 
