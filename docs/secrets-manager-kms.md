@@ -218,6 +218,7 @@ export PRODUCT_ID=my-product
 
 | Feature | Static | Secrets Manager | AWS KMS | Vault Transit |
 |---------|--------|----------------|---------|---------------|
+| **Intended use** | Testing only | Legacy migration only | **Production (AWS)** | **Production (on-prem)** |
 | Master key storage | Env var / config | AWS Secrets Manager | AWS KMS HSM | Vault server |
 | Master key leaves service? | Yes (in memory) | Yes (in memory) | Never | Never |
 | Master key rotation | Manual (re-encrypt SKs) | Manual (re-encrypt SKs) | Transparent | Transparent |
