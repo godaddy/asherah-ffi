@@ -67,7 +67,7 @@ pub struct AsherahConfig {
     pub dynamo_db_table_name: Option<String>,
     pub session_cache_max_size: Option<u32>,
     pub session_cache_duration: Option<i64>,
-    pub kms: Option<String>,                         // "aws" | "static"
+    pub kms: Option<String>, // "aws" | "static" | "vault" | "secrets-manager"
     pub region_map: Option<HashMap<String, String>>, // region -> arn
     pub preferred_region: Option<String>,
     pub enable_region_suffix: Option<bool>,
@@ -78,6 +78,23 @@ pub struct AsherahConfig {
     pub disable_zero_copy: Option<bool>,
     pub null_data_check: Option<bool>,
     pub enable_canaries: Option<bool>,
+    // KMS: AWS
+    pub kms_key_id: Option<String>,
+    // KMS: Secrets Manager
+    pub secrets_manager_secret_id: Option<String>,
+    // KMS: Vault Transit
+    pub vault_addr: Option<String>,
+    pub vault_token: Option<String>,
+    pub vault_auth_method: Option<String>,
+    pub vault_auth_role: Option<String>,
+    pub vault_auth_mount: Option<String>,
+    pub vault_approle_role_id: Option<String>,
+    pub vault_approle_secret_id: Option<String>,
+    pub vault_client_cert: Option<String>,
+    pub vault_client_key: Option<String>,
+    pub vault_k8s_token_path: Option<String>,
+    pub vault_transit_key: Option<String>,
+    pub vault_transit_mount: Option<String>,
 }
 
 fn to_config_options(cfg: &AsherahConfig) -> asherah_config::ConfigOptions {
@@ -105,6 +122,20 @@ fn to_config_options(cfg: &AsherahConfig) -> asherah_config::ConfigOptions {
         disable_zero_copy: cfg.disable_zero_copy,
         null_data_check: cfg.null_data_check,
         enable_canaries: cfg.enable_canaries,
+        kms_key_id: cfg.kms_key_id.clone(),
+        secrets_manager_secret_id: cfg.secrets_manager_secret_id.clone(),
+        vault_addr: cfg.vault_addr.clone(),
+        vault_token: cfg.vault_token.clone(),
+        vault_auth_method: cfg.vault_auth_method.clone(),
+        vault_auth_role: cfg.vault_auth_role.clone(),
+        vault_auth_mount: cfg.vault_auth_mount.clone(),
+        vault_approle_role_id: cfg.vault_approle_role_id.clone(),
+        vault_approle_secret_id: cfg.vault_approle_secret_id.clone(),
+        vault_client_cert: cfg.vault_client_cert.clone(),
+        vault_client_key: cfg.vault_client_key.clone(),
+        vault_k8s_token_path: cfg.vault_k8s_token_path.clone(),
+        vault_transit_key: cfg.vault_transit_key.clone(),
+        vault_transit_mount: cfg.vault_transit_mount.clone(),
     }
 }
 

@@ -125,6 +125,23 @@ const CONFIG_MAP = {
   DisableZeroCopy: 'disableZeroCopy',
   NullDataCheck: 'nullDataCheck',
   EnableCanaries: 'enableCanaries',
+  // KMS: AWS
+  KmsKeyId: 'kmsKeyId',
+  // KMS: Secrets Manager
+  SecretsManagerSecretId: 'secretsManagerSecretId',
+  // KMS: Vault Transit
+  VaultAddr: 'vaultAddr',
+  VaultToken: 'vaultToken',
+  VaultAuthMethod: 'vaultAuthMethod',
+  VaultAuthRole: 'vaultAuthRole',
+  VaultAuthMount: 'vaultAuthMount',
+  VaultApproleRoleId: 'vaultApproleRoleId',
+  VaultApproleSecretId: 'vaultApproleSecretId',
+  VaultClientCert: 'vaultClientCert',
+  VaultClientKey: 'vaultClientKey',
+  VaultK8sTokenPath: 'vaultK8sTokenPath',
+  VaultTransitKey: 'vaultTransitKey',
+  VaultTransitMount: 'vaultTransitMount',
 };
 
 // Legacy/debug metastore aliases (match Go behavior)

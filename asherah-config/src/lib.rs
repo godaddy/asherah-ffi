@@ -67,6 +67,54 @@ pub struct ConfigOptions {
     /// Enable canary buffer overflow detection.
     #[serde(rename = "EnableCanaries")]
     pub enable_canaries: Option<bool>,
+
+    // --- KMS: AWS ---
+    /// AWS KMS key ID or ARN (single-region mode).
+    #[serde(rename = "KmsKeyId")]
+    pub kms_key_id: Option<String>,
+
+    // --- KMS: AWS Secrets Manager ---
+    /// Secrets Manager secret ARN or name containing the master key.
+    #[serde(rename = "SecretsManagerSecretId")]
+    pub secrets_manager_secret_id: Option<String>,
+
+    // --- KMS: HashiCorp Vault Transit ---
+    /// Vault server URL (e.g., https://vault.example.com:8200).
+    #[serde(rename = "VaultAddr")]
+    pub vault_addr: Option<String>,
+    /// Vault authentication token (for token auth).
+    #[serde(rename = "VaultToken")]
+    pub vault_token: Option<String>,
+    /// Vault auth method: "kubernetes", "approle", "cert".
+    #[serde(rename = "VaultAuthMethod")]
+    pub vault_auth_method: Option<String>,
+    /// Vault role name (for Kubernetes and AppRole auth).
+    #[serde(rename = "VaultAuthRole")]
+    pub vault_auth_role: Option<String>,
+    /// Vault auth backend mount path (default: auth method name).
+    #[serde(rename = "VaultAuthMount")]
+    pub vault_auth_mount: Option<String>,
+    /// AppRole role ID.
+    #[serde(rename = "VaultApproleRoleId")]
+    pub vault_approle_role_id: Option<String>,
+    /// AppRole secret ID.
+    #[serde(rename = "VaultApproleSecretId")]
+    pub vault_approle_secret_id: Option<String>,
+    /// Path to TLS client certificate PEM (for cert auth).
+    #[serde(rename = "VaultClientCert")]
+    pub vault_client_cert: Option<String>,
+    /// Path to TLS client key PEM (for cert auth).
+    #[serde(rename = "VaultClientKey")]
+    pub vault_client_key: Option<String>,
+    /// Path to Kubernetes service account token (default: /var/run/secrets/...).
+    #[serde(rename = "VaultK8sTokenPath")]
+    pub vault_k8s_token_path: Option<String>,
+    /// Vault Transit key name (required for KMS=vault).
+    #[serde(rename = "VaultTransitKey")]
+    pub vault_transit_key: Option<String>,
+    /// Vault Transit mount path (default: "transit").
+    #[serde(rename = "VaultTransitMount")]
+    pub vault_transit_mount: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -217,6 +265,35 @@ impl ConfigOptions {
         let kms = normalize_alias(kms_raw);
         std::env::set_var("KMS", &kms);
         set_env_opt_str("PREFERRED_REGION", self.preferred_region.as_deref());
+
+        // KMS: AWS
+        set_env_opt_str("KMS_KEY_ID", self.kms_key_id.as_deref());
+
+        // KMS: AWS Secrets Manager
+        set_env_opt_str(
+            "SECRETS_MANAGER_SECRET_ID",
+            self.secrets_manager_secret_id.as_deref(),
+        );
+
+        // KMS: Vault Transit
+        set_env_opt_str("VAULT_ADDR", self.vault_addr.as_deref());
+        set_env_opt_str("VAULT_TOKEN", self.vault_token.as_deref());
+        set_env_opt_str("VAULT_AUTH_METHOD", self.vault_auth_method.as_deref());
+        set_env_opt_str("VAULT_AUTH_ROLE", self.vault_auth_role.as_deref());
+        set_env_opt_str("VAULT_AUTH_MOUNT", self.vault_auth_mount.as_deref());
+        set_env_opt_str(
+            "VAULT_APPROLE_ROLE_ID",
+            self.vault_approle_role_id.as_deref(),
+        );
+        set_env_opt_str(
+            "VAULT_APPROLE_SECRET_ID",
+            self.vault_approle_secret_id.as_deref(),
+        );
+        set_env_opt_str("VAULT_CLIENT_CERT", self.vault_client_cert.as_deref());
+        set_env_opt_str("VAULT_CLIENT_KEY", self.vault_client_key.as_deref());
+        set_env_opt_str("VAULT_K8S_TOKEN_PATH", self.vault_k8s_token_path.as_deref());
+        set_env_opt_str("VAULT_TRANSIT_KEY", self.vault_transit_key.as_deref());
+        set_env_opt_str("VAULT_TRANSIT_MOUNT", self.vault_transit_mount.as_deref());
 
         let verbose = self.verbose.unwrap_or(false);
         if verbose {
