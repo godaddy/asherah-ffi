@@ -1,4 +1,7 @@
 use crate::memguard::{wipe_bytes, Buffer, Enclave, SLOT_SIZE};
+// LessSafeKey: safe in our usage — encryption always uses a fresh random nonce
+// per operation (see aead.rs). The cached key schedule is a performance
+// optimization that avoids re-expanding the AES key on every encrypt/decrypt.
 use ring::aead::{LessSafeKey, UnboundKey, AES_256_GCM};
 
 pub struct CryptoKey {
@@ -6,6 +9,7 @@ pub struct CryptoKey {
     revoked: bool,
     secret: Enclave,
     /// Pre-expanded AES-256-GCM key schedule (avoids re-expansion on every use).
+    /// See aead.rs for nonce safety documentation.
     cached_lsk: Option<LessSafeKey>,
 }
 
@@ -66,7 +70,9 @@ impl CryptoKey {
     pub fn revoked(&self) -> bool {
         self.revoked
     }
-    /// Returns the pre-expanded LessSafeKey if available (32-byte AES-256 keys).
+    /// Returns the pre-expanded AES-256-GCM key if available (32-byte keys).
+    /// Named `LessSafeKey` by ring because it doesn't enforce nonce uniqueness
+    /// at the type level — our callers handle nonce generation correctly.
     pub fn less_safe_key(&self) -> Option<&LessSafeKey> {
         self.cached_lsk.as_ref()
     }

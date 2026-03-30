@@ -1,6 +1,20 @@
 use crate::traits::AEAD as AeadTrait;
 use rand::RngCore;
 use rand_chacha::ChaCha20Rng;
+// ring's `LessSafeKey` is named "less safe" only because it does not enforce
+// nonce uniqueness at the type level — the caller is responsible for never
+// reusing a nonce with the same key. Our usage is safe:
+//
+// - Data encryption (encrypt_with_lsk): generates a fresh 12-byte random nonce
+//   from a ChaCha20-based CSPRNG seeded from OS entropy. With 96-bit random
+//   nonces, the birthday-bound collision probability is negligible (~2^-32
+//   after 2^32 encryptions under the same key).
+//
+// - Enclave sealing (memguard.rs): uses a monotonic atomic counter, which
+//   guarantees uniqueness without randomness.
+//
+// ring's alternative (`SealingKey` with `NonceSequence`) would add overhead
+// for nonce tracking that we don't need — our nonce strategy is already sound.
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use std::cell::RefCell;
 
@@ -91,6 +105,8 @@ impl AeadTrait for AES256GCM {
 }
 
 /// Encrypt using a pre-expanded LessSafeKey (skips key schedule).
+/// Nonce safety: a fresh 12-byte random nonce is generated per call from
+/// a CSPRNG (ChaCha20 seeded from OS entropy).
 #[inline(always)]
 pub fn encrypt_with_lsk(data: &[u8], key: &LessSafeKey) -> Result<Vec<u8>, anyhow::Error> {
     let mut nonce = [0_u8; GCM_NONCE_SIZE];
@@ -106,6 +122,7 @@ pub fn encrypt_with_lsk(data: &[u8], key: &LessSafeKey) -> Result<Vec<u8>, anyho
 }
 
 /// Decrypt using a pre-expanded LessSafeKey (skips key schedule).
+/// The nonce is extracted from the ciphertext (appended during encryption).
 #[inline(always)]
 pub fn decrypt_with_lsk(data: &[u8], key: &LessSafeKey) -> Result<Vec<u8>, anyhow::Error> {
     if data.len() < GCM_NONCE_SIZE + AES256GCM::TAG_SIZE {
@@ -134,6 +151,7 @@ pub fn decrypt_with_lsk(data: &[u8], key: &LessSafeKey) -> Result<Vec<u8>, anyho
 }
 
 /// Make a LessSafeKey from raw 32-byte key material.
+/// See module-level comment on why LessSafeKey is safe in our usage.
 #[inline(always)]
 pub fn make_lsk(key: &[u8]) -> Result<LessSafeKey, anyhow::Error> {
     let unbound = UnboundKey::new(&AES_256_GCM, key)

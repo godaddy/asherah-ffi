@@ -7,6 +7,8 @@ use once_cell::sync::Lazy;
 use parking_lot::{Condvar, Mutex};
 use rand::rngs::OsRng;
 use rand::TryRngCore;
+// LessSafeKey: safe here — enclave sealing uses a monotonic atomic counter
+// for nonces (NONCE_COUNTER), guaranteeing uniqueness without randomness.
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
