@@ -81,30 +81,30 @@ performance characteristics.
 Asherah uses a four-level key hierarchy with envelope encryption:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    KMS Backend                          │
-│         (AWS KMS / Vault Transit / Static)              │
-│                                                         │
-│  Master Key ── never exposed, encrypt/decrypt via API   │
-└─────────────┬───────────────────────────────────────────┘
-              │ encrypts
-┌─────────────▼───────────────────────────────────────────┐
-│              System Key (SK)                             │
-│  Stored in metastore, cached in memory, auto-rotated    │
-└─────────────┬───────────────────────────────────────────┘
-              │ encrypts
-┌─────────────▼───────────────────────────────────────────┐
-│          Intermediate Key (IK)                           │
-│  Per-partition, stored in metastore, auto-rotated       │
-└─────────────┬───────────────────────────────────────────┘
-              │ encrypts
-┌─────────────▼───────────────────────────────────────────┐
-│           Data Row Key (DRK)                             │
-│  Random per-record, inline in ciphertext (envelope)     │
-└─────────────┬───────────────────────────────────────────┘
-              │ encrypts
-              ▼
-         Your Data
++-------------------------------------------------------+
+|                    KMS Backend                         |
+|         (AWS KMS / Vault Transit / Static)             |
+|                                                        |
+|  Master Key -- never exposed, encrypt/decrypt via API  |
++-------------------+-----------------------------------+
+                    | encrypts
++-------------------v-----------------------------------+
+|              System Key (SK)                           |
+|  Stored in metastore, cached in memory, auto-rotated  |
++-------------------+-----------------------------------+
+                    | encrypts
++-------------------v-----------------------------------+
+|          Intermediate Key (IK)                         |
+|  Per-partition, stored in metastore, auto-rotated      |
++-------------------+-----------------------------------+
+                    | encrypts
++-------------------v-----------------------------------+
+|           Data Row Key (DRK)                           |
+|  Random per-record, inline in ciphertext (envelope)    |
++-------------------+-----------------------------------+
+                    | encrypts
+                    v
+               Your Data
 ```
 
 ### Secure Memory Architecture
@@ -112,24 +112,26 @@ Asherah uses a four-level key hierarchy with envelope encryption:
 All key material is protected by a custom memory guard system:
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│               mlock'd Page (4KB)                        │
-│          Pinned in RAM, never swapped to disk            │
-├─────────────────────────────────────────────────────────┤
-│ Slot 0: Coffer Left   (XOR'd master key half)           │
-│ Slot 1: Coffer Right  (random, used for key derivation) │
-├─────────────────────────────────────────────────────────┤
-│ Slot 2..N: Shared pool                                  │
-│   ┌─────────────────────────────────────────────┐       │
-│   │ Hot Cache: recently used keys (LRU eviction)│       │
-│   │   SK decrypt key → slot 2                   │       │
-│   │   IK decrypt key → slot 3                   │       │
-│   │   ...                                       │       │
-│   ├─────────────────────────────────────────────┤       │
-│   │ Transient: acquired during crypto ops       │       │
-│   │   (released back to pool after use)         │       │
-│   └─────────────────────────────────────────────┘       │
-└─────────────────────────────────────────────────────────┘
++-------------------------------------------------------+
+|               mlock'd Page (4KB)                       |
+|          Pinned in RAM, never swapped to disk          |
++-------------------------------------------------------+
+| Slot 0: Coffer Left   (XOR'd master key half)          |
+| Slot 1: Coffer Right  (random, used for key derivation)|
++-------------------------------------------------------+
+| Slot 2..N: Shared pool                                 |
+|                                                        |
+|   +-----------------------------------------------+   |
+|   | Hot Cache: recently used keys (LRU eviction)   |   |
+|   |   SK decrypt key -> slot 2                     |   |
+|   |   IK decrypt key -> slot 3                     |   |
+|   |   ...                                          |   |
+|   +-----------------------------------------------+   |
+|   | Transient: acquired during crypto ops          |   |
+|   |   (released back to pool after use)            |   |
+|   +-----------------------------------------------+   |
+|                                                        |
++-------------------------------------------------------+
 ```
 
 **Hot cache hit** (typical encrypt/decrypt): The decrypted key is already in
@@ -147,18 +149,18 @@ is initialized once at startup with OS-entropy randomness.
 ### Multi-Level Cache Hierarchy
 
 ```
-Request ──► Session Cache (LRU, per-factory)
-                │ miss
-                ▼
+Request --> Session Cache (LRU, per-factory)
+                | miss
+                v
             IK Cache (per-session or shared, stale-while-revalidate)
-                │ miss
-                ▼
+                | miss
+                v
             SK Cache (shared across all sessions, stale-while-revalidate)
-                │ miss
-                ▼
+                | miss
+                v
             Metastore (DynamoDB / MySQL / Postgres)
-                │ load + decrypt
-                ▼
+                | load + decrypt
+                v
             KMS (decrypt system key with master key)
 ```
 
