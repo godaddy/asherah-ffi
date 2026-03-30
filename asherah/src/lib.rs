@@ -27,6 +27,10 @@ pub mod kms_aws;
 pub mod kms_aws_envelope;
 pub mod kms_builders;
 pub mod kms_multi;
+#[cfg(feature = "secrets-manager")]
+pub mod kms_secrets_manager;
+#[cfg(feature = "vault")]
+pub mod kms_vault_transit;
 pub mod logging;
 pub mod metastore;
 #[cfg(feature = "dynamodb")]

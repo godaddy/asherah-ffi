@@ -476,8 +476,43 @@ pub fn factory_from_env(
             let kms = crate::kms::StaticKMS::new(crypto.clone(), key)?;
             Arc::new(kms)
         }
+        #[cfg(feature = "secrets-manager")]
+        "secrets-manager" => {
+            let secret_id = std::env::var("SECRETS_MANAGER_SECRET_ID").map_err(|_| {
+                anyhow::anyhow!("SECRETS_MANAGER_SECRET_ID required for KMS=secrets-manager")
+            })?;
+            let region = std::env::var("AWS_REGION").ok();
+            let kms = crate::kms_secrets_manager::SecretsManagerKMS::new(
+                crypto.clone(),
+                secret_id,
+                region,
+            )?;
+            Arc::new(kms)
+        }
+        #[cfg(not(feature = "secrets-manager"))]
+        "secrets-manager" => {
+            anyhow::bail!("Enable feature 'secrets-manager' to use Secrets Manager KMS");
+        }
+        #[cfg(feature = "vault")]
+        "vault" | "vault-transit" => {
+            let vault_addr = std::env::var("VAULT_ADDR")
+                .map_err(|_| anyhow::anyhow!("VAULT_ADDR required for KMS=vault"))?;
+            let vault_key = std::env::var("VAULT_TRANSIT_KEY")
+                .map_err(|_| anyhow::anyhow!("VAULT_TRANSIT_KEY required for KMS=vault"))?;
+            let vault_mount = std::env::var("VAULT_TRANSIT_MOUNT").ok();
+            let kms = crate::kms_vault_transit::VaultTransitKms::new(
+                vault_addr,
+                &vault_key,
+                vault_mount.as_deref(),
+            )?;
+            Arc::new(kms)
+        }
+        #[cfg(not(feature = "vault"))]
+        "vault" | "vault-transit" => {
+            anyhow::bail!("Enable feature 'vault' to use Vault Transit KMS");
+        }
         other => {
-            anyhow::bail!("Unknown KMS type '{other}'. Valid values: 'aws', 'static'");
+            anyhow::bail!("Unknown KMS type '{other}'. Valid values: 'aws', 'static', 'secrets-manager', 'vault'");
         }
     };
     let kms = Arc::new(DynKms(kms_dyn));
@@ -627,8 +662,45 @@ pub async fn factory_from_env_async(
             let kms = crate::kms::StaticKMS::new(crypto.clone(), key)?;
             Arc::new(kms)
         }
+        #[cfg(feature = "secrets-manager")]
+        "secrets-manager" => {
+            let secret_id = std::env::var("SECRETS_MANAGER_SECRET_ID").map_err(|_| {
+                anyhow::anyhow!("SECRETS_MANAGER_SECRET_ID required for KMS=secrets-manager")
+            })?;
+            let region = std::env::var("AWS_REGION").ok();
+            let kms = crate::kms_secrets_manager::SecretsManagerKMS::new_async(
+                crypto.clone(),
+                secret_id,
+                region,
+            )
+            .await?;
+            Arc::new(kms)
+        }
+        #[cfg(not(feature = "secrets-manager"))]
+        "secrets-manager" => {
+            anyhow::bail!("Enable feature 'secrets-manager' to use Secrets Manager KMS");
+        }
+        #[cfg(feature = "vault")]
+        "vault" | "vault-transit" => {
+            let vault_addr = std::env::var("VAULT_ADDR")
+                .map_err(|_| anyhow::anyhow!("VAULT_ADDR required for KMS=vault"))?;
+            let vault_key = std::env::var("VAULT_TRANSIT_KEY")
+                .map_err(|_| anyhow::anyhow!("VAULT_TRANSIT_KEY required for KMS=vault"))?;
+            let vault_mount = std::env::var("VAULT_TRANSIT_MOUNT").ok();
+            let kms = crate::kms_vault_transit::VaultTransitKms::new_async(
+                vault_addr,
+                &vault_key,
+                vault_mount.as_deref(),
+            )
+            .await?;
+            Arc::new(kms)
+        }
+        #[cfg(not(feature = "vault"))]
+        "vault" | "vault-transit" => {
+            anyhow::bail!("Enable feature 'vault' to use Vault Transit KMS");
+        }
         other => {
-            anyhow::bail!("Unknown KMS type '{other}'. Valid values: 'aws', 'static'");
+            anyhow::bail!("Unknown KMS type '{other}'. Valid values: 'aws', 'static', 'secrets-manager', 'vault'");
         }
     };
     let kms = Arc::new(DynKms(kms_dyn));
