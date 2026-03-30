@@ -24,6 +24,20 @@ public final class AsherahConfig {
   private final Boolean enableRegionSuffix;
   private final Boolean enableSessionCaching;
   private final Boolean verbose;
+  private final String kmsKeyId;
+  private final String secretsManagerSecretId;
+  private final String vaultAddr;
+  private final String vaultToken;
+  private final String vaultAuthMethod;
+  private final String vaultAuthRole;
+  private final String vaultAuthMount;
+  private final String vaultApproleRoleId;
+  private final String vaultApproleSecretId;
+  private final String vaultClientCert;
+  private final String vaultClientKey;
+  private final String vaultK8sTokenPath;
+  private final String vaultTransitKey;
+  private final String vaultTransitMount;
 
   private AsherahConfig(final Builder builder) {
     this.serviceName = builder.serviceName;
@@ -45,6 +59,20 @@ public final class AsherahConfig {
     this.enableRegionSuffix = builder.enableRegionSuffix;
     this.enableSessionCaching = builder.enableSessionCaching;
     this.verbose = builder.verbose;
+    this.kmsKeyId = builder.kmsKeyId;
+    this.secretsManagerSecretId = builder.secretsManagerSecretId;
+    this.vaultAddr = builder.vaultAddr;
+    this.vaultToken = builder.vaultToken;
+    this.vaultAuthMethod = builder.vaultAuthMethod;
+    this.vaultAuthRole = builder.vaultAuthRole;
+    this.vaultAuthMount = builder.vaultAuthMount;
+    this.vaultApproleRoleId = builder.vaultApproleRoleId;
+    this.vaultApproleSecretId = builder.vaultApproleSecretId;
+    this.vaultClientCert = builder.vaultClientCert;
+    this.vaultClientKey = builder.vaultClientKey;
+    this.vaultK8sTokenPath = builder.vaultK8sTokenPath;
+    this.vaultTransitKey = builder.vaultTransitKey;
+    this.vaultTransitMount = builder.vaultTransitMount;
   }
 
   public String toJson() {
@@ -68,6 +96,20 @@ public final class AsherahConfig {
     json.put("EnableRegionSuffix", enableRegionSuffix);
     json.put("EnableSessionCaching", enableSessionCaching);
     json.put("Verbose", verbose);
+    json.put("KmsKeyId", kmsKeyId);
+    json.put("SecretsManagerSecretId", secretsManagerSecretId);
+    json.put("VaultAddr", vaultAddr);
+    json.put("VaultToken", vaultToken);
+    json.put("VaultAuthMethod", vaultAuthMethod);
+    json.put("VaultAuthRole", vaultAuthRole);
+    json.put("VaultAuthMount", vaultAuthMount);
+    json.put("VaultApproleRoleId", vaultApproleRoleId);
+    json.put("VaultApproleSecretId", vaultApproleSecretId);
+    json.put("VaultClientCert", vaultClientCert);
+    json.put("VaultClientKey", vaultClientKey);
+    json.put("VaultK8sTokenPath", vaultK8sTokenPath);
+    json.put("VaultTransitKey", vaultTransitKey);
+    json.put("VaultTransitMount", vaultTransitMount);
     return JsonUtil.toJson(json);
   }
 
@@ -103,6 +145,20 @@ public final class AsherahConfig {
     private Boolean enableRegionSuffix;
     private Boolean enableSessionCaching = Boolean.TRUE;
     private Boolean verbose = Boolean.FALSE;
+    private String kmsKeyId;
+    private String secretsManagerSecretId;
+    private String vaultAddr;
+    private String vaultToken;
+    private String vaultAuthMethod;
+    private String vaultAuthRole;
+    private String vaultAuthMount;
+    private String vaultApproleRoleId;
+    private String vaultApproleSecretId;
+    private String vaultClientCert;
+    private String vaultClientKey;
+    private String vaultK8sTokenPath;
+    private String vaultTransitKey;
+    private String vaultTransitMount;
 
     private Builder() {}
 
@@ -198,6 +254,76 @@ public final class AsherahConfig {
 
     public Builder verbose(final Boolean value) {
       this.verbose = value;
+      return this;
+    }
+
+    public Builder kmsKeyId(final String value) {
+      this.kmsKeyId = value;
+      return this;
+    }
+
+    public Builder secretsManagerSecretId(final String value) {
+      this.secretsManagerSecretId = value;
+      return this;
+    }
+
+    public Builder vaultAddr(final String value) {
+      this.vaultAddr = value;
+      return this;
+    }
+
+    public Builder vaultToken(final String value) {
+      this.vaultToken = value;
+      return this;
+    }
+
+    public Builder vaultAuthMethod(final String value) {
+      this.vaultAuthMethod = value;
+      return this;
+    }
+
+    public Builder vaultAuthRole(final String value) {
+      this.vaultAuthRole = value;
+      return this;
+    }
+
+    public Builder vaultAuthMount(final String value) {
+      this.vaultAuthMount = value;
+      return this;
+    }
+
+    public Builder vaultApproleRoleId(final String value) {
+      this.vaultApproleRoleId = value;
+      return this;
+    }
+
+    public Builder vaultApproleSecretId(final String value) {
+      this.vaultApproleSecretId = value;
+      return this;
+    }
+
+    public Builder vaultClientCert(final String value) {
+      this.vaultClientCert = value;
+      return this;
+    }
+
+    public Builder vaultClientKey(final String value) {
+      this.vaultClientKey = value;
+      return this;
+    }
+
+    public Builder vaultK8sTokenPath(final String value) {
+      this.vaultK8sTokenPath = value;
+      return this;
+    }
+
+    public Builder vaultTransitKey(final String value) {
+      this.vaultTransitKey = value;
+      return this;
+    }
+
+    public Builder vaultTransitMount(final String value) {
+      this.vaultTransitMount = value;
       return this;
     }
 
