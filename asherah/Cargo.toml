@@ -43,6 +43,8 @@ sqlite = ["dep:rusqlite"]
 mysql = ["dep:mysql"]
 postgres = ["dep:postgres", "dep:postgres-native-tls", "dep:native-tls", "dep:openssl"]
 dynamodb = ["dep:aws-sdk-dynamodb"]
+secrets-manager = ["dep:aws-sdk-secretsmanager", "dynamodb"]
+vault = ["dep:reqwest"]
 cucumber_xlang = []
 
 [dependencies.rusqlite]
@@ -57,6 +59,10 @@ version = "1"
 version = "1"
 
 [dependencies.aws-sdk-dynamodb]
+version = "1"
+optional = true
+
+[dependencies.aws-sdk-secretsmanager]
 version = "1"
 optional = true
 
@@ -88,6 +94,12 @@ version = "0.10"
 optional = true
 features = ["vendored"]
 
+[dependencies.reqwest]
+version = "0.12"
+optional = true
+default-features = false
+features = ["json", "rustls-tls", "blocking"]
+
 [dev-dependencies]
 cucumber = "0.22"
 futures = "0.3"
@@ -105,6 +117,11 @@ required-features = ["mysql", "postgres", "dynamodb"]
 name = "sqlite_tests"
 path = "tests/sqlite_tests.rs"
 required-features = ["sqlite"]
+
+[[test]]
+name = "kms_integration"
+path = "tests/kms_integration.rs"
+required-features = []
 
 [[test]]
 name = "cucumber"

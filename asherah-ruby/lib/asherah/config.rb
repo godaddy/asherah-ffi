@@ -36,9 +36,26 @@ module Asherah
       expire_after: :ExpireAfter,
       check_interval: :CheckInterval,
       verbose: :Verbose,
+      # KMS: AWS
+      kms_key_id: :KmsKeyId,
+      # KMS: AWS Secrets Manager
+      secrets_manager_secret_id: :SecretsManagerSecretId,
+      # KMS: HashiCorp Vault Transit
+      vault_addr: :VaultAddr,
+      vault_token: :VaultToken,
+      vault_auth_method: :VaultAuthMethod,
+      vault_auth_role: :VaultAuthRole,
+      vault_auth_mount: :VaultAuthMount,
+      vault_approle_role_id: :VaultApproleRoleId,
+      vault_approle_secret_id: :VaultApproleSecretId,
+      vault_client_cert: :VaultClientCert,
+      vault_client_key: :VaultClientKey,
+      vault_k8s_token_path: :VaultK8sTokenPath,
+      vault_transit_key: :VaultTransitKey,
+      vault_transit_mount: :VaultTransitMount,
     }.freeze
 
-    KMS_TYPES = ["static", "aws", "test-debug-static"].freeze
+    KMS_TYPES = ["static", "aws", "vault", "vault-transit", "secrets-manager", "test-debug-static"].freeze
     METASTORE_TYPES = ["rdbms", "dynamodb", "memory", "test-debug-memory"].freeze
     SQL_METASTORE_DB_TYPES = ["mysql", "postgres", "oracle"].freeze
 

@@ -26,6 +26,20 @@ public sealed class AsherahConfig
     public bool? EnableRegionSuffix { get; }
     public bool? EnableSessionCaching { get; }
     public bool? Verbose { get; }
+    public string? KmsKeyId { get; }
+    public string? SecretsManagerSecretId { get; }
+    public string? VaultAddr { get; }
+    public string? VaultToken { get; }
+    public string? VaultAuthMethod { get; }
+    public string? VaultAuthRole { get; }
+    public string? VaultAuthMount { get; }
+    public string? VaultApproleRoleId { get; }
+    public string? VaultApproleSecretId { get; }
+    public string? VaultClientCert { get; }
+    public string? VaultClientKey { get; }
+    public string? VaultK8sTokenPath { get; }
+    public string? VaultTransitKey { get; }
+    public string? VaultTransitMount { get; }
 
     private AsherahConfig(Builder builder)
     {
@@ -50,6 +64,20 @@ public sealed class AsherahConfig
         EnableRegionSuffix = builder.EnableRegionSuffix;
         EnableSessionCaching = builder.EnableSessionCaching;
         Verbose = builder.Verbose;
+        KmsKeyId = builder.KmsKeyId;
+        SecretsManagerSecretId = builder.SecretsManagerSecretId;
+        VaultAddr = builder.VaultAddr;
+        VaultToken = builder.VaultToken;
+        VaultAuthMethod = builder.VaultAuthMethod;
+        VaultAuthRole = builder.VaultAuthRole;
+        VaultAuthMount = builder.VaultAuthMount;
+        VaultApproleRoleId = builder.VaultApproleRoleId;
+        VaultApproleSecretId = builder.VaultApproleSecretId;
+        VaultClientCert = builder.VaultClientCert;
+        VaultClientKey = builder.VaultClientKey;
+        VaultK8sTokenPath = builder.VaultK8sTokenPath;
+        VaultTransitKey = builder.VaultTransitKey;
+        VaultTransitMount = builder.VaultTransitMount;
     }
 
     internal bool SessionCachingEnabled => EnableSessionCaching.GetValueOrDefault(true);
@@ -77,6 +105,20 @@ public sealed class AsherahConfig
             ["EnableRegionSuffix"] = EnableRegionSuffix,
             ["EnableSessionCaching"] = EnableSessionCaching,
             ["Verbose"] = Verbose,
+            ["KmsKeyId"] = KmsKeyId,
+            ["SecretsManagerSecretId"] = SecretsManagerSecretId,
+            ["VaultAddr"] = VaultAddr,
+            ["VaultToken"] = VaultToken,
+            ["VaultAuthMethod"] = VaultAuthMethod,
+            ["VaultAuthRole"] = VaultAuthRole,
+            ["VaultAuthMount"] = VaultAuthMount,
+            ["VaultApproleRoleId"] = VaultApproleRoleId,
+            ["VaultApproleSecretId"] = VaultApproleSecretId,
+            ["VaultClientCert"] = VaultClientCert,
+            ["VaultClientKey"] = VaultClientKey,
+            ["VaultK8sTokenPath"] = VaultK8sTokenPath,
+            ["VaultTransitKey"] = VaultTransitKey,
+            ["VaultTransitMount"] = VaultTransitMount,
         };
 
         var options = new JsonSerializerOptions
@@ -109,6 +151,20 @@ public sealed class AsherahConfig
         public bool? EnableRegionSuffix { get; private set; }
         public bool? EnableSessionCaching { get; private set; } = true;
         public bool? Verbose { get; private set; } = false;
+        public string? KmsKeyId { get; private set; }
+        public string? SecretsManagerSecretId { get; private set; }
+        public string? VaultAddr { get; private set; }
+        public string? VaultToken { get; private set; }
+        public string? VaultAuthMethod { get; private set; }
+        public string? VaultAuthRole { get; private set; }
+        public string? VaultAuthMount { get; private set; }
+        public string? VaultApproleRoleId { get; private set; }
+        public string? VaultApproleSecretId { get; private set; }
+        public string? VaultClientCert { get; private set; }
+        public string? VaultClientKey { get; private set; }
+        public string? VaultK8sTokenPath { get; private set; }
+        public string? VaultTransitKey { get; private set; }
+        public string? VaultTransitMount { get; private set; }
 
         internal Builder() {}
 
@@ -223,6 +279,90 @@ public sealed class AsherahConfig
         public Builder WithVerbose(bool? value)
         {
             Verbose = value;
+            return this;
+        }
+
+        public Builder WithKmsKeyId(string? value)
+        {
+            KmsKeyId = value;
+            return this;
+        }
+
+        public Builder WithSecretsManagerSecretId(string? value)
+        {
+            SecretsManagerSecretId = value;
+            return this;
+        }
+
+        public Builder WithVaultAddr(string? value)
+        {
+            VaultAddr = value;
+            return this;
+        }
+
+        public Builder WithVaultToken(string? value)
+        {
+            VaultToken = value;
+            return this;
+        }
+
+        public Builder WithVaultAuthMethod(string? value)
+        {
+            VaultAuthMethod = value;
+            return this;
+        }
+
+        public Builder WithVaultAuthRole(string? value)
+        {
+            VaultAuthRole = value;
+            return this;
+        }
+
+        public Builder WithVaultAuthMount(string? value)
+        {
+            VaultAuthMount = value;
+            return this;
+        }
+
+        public Builder WithVaultApproleRoleId(string? value)
+        {
+            VaultApproleRoleId = value;
+            return this;
+        }
+
+        public Builder WithVaultApproleSecretId(string? value)
+        {
+            VaultApproleSecretId = value;
+            return this;
+        }
+
+        public Builder WithVaultClientCert(string? value)
+        {
+            VaultClientCert = value;
+            return this;
+        }
+
+        public Builder WithVaultClientKey(string? value)
+        {
+            VaultClientKey = value;
+            return this;
+        }
+
+        public Builder WithVaultK8sTokenPath(string? value)
+        {
+            VaultK8sTokenPath = value;
+            return this;
+        }
+
+        public Builder WithVaultTransitKey(string? value)
+        {
+            VaultTransitKey = value;
+            return this;
+        }
+
+        public Builder WithVaultTransitMount(string? value)
+        {
+            VaultTransitMount = value;
             return this;
         }
 
