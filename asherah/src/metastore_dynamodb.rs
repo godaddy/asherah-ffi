@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_dynamodb::{config::Region, types::AttributeValue, Client};
 use base64::Engine;
+use tokio::sync::OnceCell;
 
 use crate::traits::Metastore;
 use crate::types::{EnvelopeKeyRecord, KeyMeta};
@@ -12,10 +13,17 @@ use anyhow::Context;
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
 pub struct DynamoDbMetastore {
-    client: Client,
+    /// Client for sync callers — created on the private runtime.
+    sync_client: Client,
+    /// Lazily-created client for async callers — created on the caller's
+    /// runtime on first async use. This avoids the hyper HTTP connector
+    /// being bound to the wrong runtime when setup() is sync but
+    /// decrypt_async() runs on a different runtime (e.g., napi's).
+    async_client: Arc<OnceCell<Client>>,
+    /// SDK config saved for lazy async client creation.
+    sdk_conf: aws_sdk_dynamodb::Config,
     table: String,
     /// Private runtime for sync callers (Python, Java, Go, etc.)
-    /// Async callers use the caller's runtime via `_async` methods.
     rt: Arc<tokio::runtime::Runtime>,
     region_suffix_enabled: bool,
     region_suffix: Option<String>,
@@ -59,7 +67,9 @@ impl DynamoDbMetastore {
             }
         };
         Ok(Self {
-            client,
+            sync_client: client,
+            async_client: Arc::new(OnceCell::new()),
+            sdk_conf: conf,
             table: table_name,
             rt: Arc::new(rt),
             region_suffix_enabled: with_suffix,
@@ -93,6 +103,8 @@ impl DynamoDbMetastore {
         // Private runtime for sync callers — Runtime::new() is safe from a tokio
         // worker (it creates the runtime without entering it).
         let rt = tokio::runtime::Runtime::new()?;
+        // Also create a sync client on the private runtime for sync callers
+        let sync_client = Client::from_conf(conf.clone());
         let with_suffix = std::env::var("DDB_REGION_SUFFIX")
             .ok()
             .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
@@ -110,13 +122,28 @@ impl DynamoDbMetastore {
                 t
             }
         };
+        // Pre-populate async_client since we're already on the right runtime
+        let async_cell = Arc::new(OnceCell::new());
+        async_cell
+            .set(client)
+            .unwrap_or_else(|_| unreachable!("OnceCell was just created"));
         Ok(Self {
-            client,
+            sync_client,
+            async_client: async_cell,
+            sdk_conf: conf,
             table: table_name,
             rt: Arc::new(rt),
             region_suffix_enabled: with_suffix,
             region_suffix: suffix,
         })
+    }
+
+    /// Get the client for async operations. If we were constructed sync,
+    /// lazily creates a new client on the caller's runtime.
+    async fn async_client(&self) -> &Client {
+        self.async_client
+            .get_or_init(async || Client::from_conf(self.sdk_conf.clone()))
+            .await
     }
 
     /// Block on a future, handling both tokio-worker and plain-thread contexts.
@@ -128,9 +155,9 @@ impl DynamoDbMetastore {
         }
     }
 
-    // ── Async implementations (shared by sync + async paths) ──
+    // ── Sync implementations (use sync_client on private runtime) ──
 
-    async fn load_impl(
+    async fn load_impl_sync(
         &self,
         id: &str,
         created: i64,
@@ -140,7 +167,7 @@ impl DynamoDbMetastore {
             self.table
         );
         let out = self
-            .client
+            .sync_client
             .get_item()
             .table_name(&self.table)
             .key("Id", AttributeValue::S(id.to_string()))
@@ -154,20 +181,16 @@ impl DynamoDbMetastore {
                     self.table
                 )
             })?;
-        if let Some(item) = out.item() {
-            if let Some(kr) = item.get("KeyRecord") {
-                if let Ok(m) = kr.as_m() {
-                    return Ok(Some(Self::decode_key_record(m, id)?));
-                }
-            }
-        }
-        Ok(None)
+        Self::parse_item(out.item(), id)
     }
 
-    async fn load_latest_impl(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+    async fn load_latest_impl_sync(
+        &self,
+        id: &str,
+    ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         log::debug!("dynamodb load_latest: table={} id={id}", self.table);
         let out = self
-            .client
+            .sync_client
             .query()
             .table_name(&self.table)
             .key_condition_expression("Id = :id")
@@ -178,8 +201,7 @@ impl DynamoDbMetastore {
             .send()
             .await
             .with_context(|| format!("DynamoDB Query failed for table={} id={id}", self.table))?;
-        let items = out.items();
-        if let Some(item) = items.first() {
+        if let Some(item) = out.items().first() {
             if let Some(kr) = item.get("KeyRecord").and_then(|v| v.as_m().ok()) {
                 return Ok(Some(Self::decode_key_record(kr, id)?));
             }
@@ -187,8 +209,98 @@ impl DynamoDbMetastore {
         Ok(None)
     }
 
-    async fn store_impl(
+    async fn store_impl_sync(
         &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<bool, anyhow::Error> {
+        Self::do_store(&self.sync_client, &self.table, id, created, ekr).await
+    }
+
+    // ── Async implementations (use async_client on caller's runtime) ──
+
+    async fn load_impl_async(
+        &self,
+        id: &str,
+        created: i64,
+    ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        let client = self.async_client().await;
+        log::debug!(
+            "dynamodb load_async: table={} id={id} created={created}",
+            self.table
+        );
+        let out = client
+            .get_item()
+            .table_name(&self.table)
+            .key("Id", AttributeValue::S(id.to_string()))
+            .key("Created", AttributeValue::N(created.to_string()))
+            .consistent_read(true)
+            .send()
+            .await
+            .with_context(|| {
+                format!(
+                    "DynamoDB GetItem failed for table={} id={id} created={created}",
+                    self.table
+                )
+            })?;
+        Self::parse_item(out.item(), id)
+    }
+
+    async fn load_latest_impl_async(
+        &self,
+        id: &str,
+    ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        let client = self.async_client().await;
+        log::debug!("dynamodb load_latest_async: table={} id={id}", self.table);
+        let out = client
+            .query()
+            .table_name(&self.table)
+            .key_condition_expression("Id = :id")
+            .expression_attribute_values(":id", AttributeValue::S(id.to_string()))
+            .scan_index_forward(false)
+            .limit(1)
+            .consistent_read(true)
+            .send()
+            .await
+            .with_context(|| format!("DynamoDB Query failed for table={} id={id}", self.table))?;
+        if let Some(item) = out.items().first() {
+            if let Some(kr) = item.get("KeyRecord").and_then(|v| v.as_m().ok()) {
+                return Ok(Some(Self::decode_key_record(kr, id)?));
+            }
+        }
+        Ok(None)
+    }
+
+    async fn store_impl_async(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<bool, anyhow::Error> {
+        let client = self.async_client().await;
+        Self::do_store(client, &self.table, id, created, ekr).await
+    }
+
+    // ── Shared helpers ──
+
+    fn parse_item(
+        item: Option<&std::collections::HashMap<String, AttributeValue>>,
+        id: &str,
+    ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
+        if let Some(item) = item {
+            if let Some(kr) = item.get("KeyRecord") {
+                if let Ok(m) = kr.as_m() {
+                    return Ok(Some(Self::decode_key_record(m, id)?));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    async fn do_store(
+        client: &Client,
+        table: &str,
         id: &str,
         created: i64,
         ekr: &EnvelopeKeyRecord,
@@ -216,14 +328,10 @@ impl DynamoDbMetastore {
             );
             key_record.insert("ParentKeyMeta".to_string(), AttributeValue::M(m));
         }
-        log::debug!(
-            "dynamodb store: table={} id={id} created={created}",
-            self.table
-        );
-        let out = self
-            .client
+        log::debug!("dynamodb store: table={table} id={id} created={created}");
+        let out = client
             .put_item()
-            .table_name(&self.table)
+            .table_name(table)
             .item("Id", AttributeValue::S(id.to_string()))
             .item("Created", AttributeValue::N(created.to_string()))
             .item("KeyRecord", AttributeValue::M(key_record))
@@ -242,12 +350,10 @@ impl DynamoDbMetastore {
                     Ok(false)
                 } else {
                     log::error!(
-                        "dynamodb store failed: table={} id={id} created={created}: {e:#}",
-                        self.table
+                        "dynamodb store failed: table={table} id={id} created={created}: {e:#}"
                     );
                     Err(anyhow::anyhow!(
-                        "DynamoDB PutItem failed for table={} id={id}: {e}",
-                        self.table
+                        "DynamoDB PutItem failed for table={table} id={id}: {e}"
                     ))
                 }
             }
@@ -301,13 +407,13 @@ impl DynamoDbMetastore {
 
 #[async_trait]
 impl Metastore for DynamoDbMetastore {
-    // Sync methods — use private runtime for non-tokio callers
+    // Sync methods — use sync_client on private runtime
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
-        Self::block_on_maybe(&self.rt, self.load_impl(id, created))
+        Self::block_on_maybe(&self.rt, self.load_impl_sync(id, created))
     }
 
     fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
-        Self::block_on_maybe(&self.rt, self.load_latest_impl(id))
+        Self::block_on_maybe(&self.rt, self.load_latest_impl_sync(id))
     }
 
     fn store(
@@ -316,7 +422,7 @@ impl Metastore for DynamoDbMetastore {
         created: i64,
         ekr: &EnvelopeKeyRecord,
     ) -> Result<bool, anyhow::Error> {
-        Self::block_on_maybe(&self.rt, self.store_impl(id, created, ekr))
+        Self::block_on_maybe(&self.rt, self.store_impl_sync(id, created, ekr))
     }
 
     fn region_suffix(&self) -> Option<String> {
@@ -327,20 +433,20 @@ impl Metastore for DynamoDbMetastore {
         }
     }
 
-    // Async methods — native .await, uses caller's runtime (napi/gRPC)
+    // Async methods — use async_client (lazily created on caller's runtime)
     async fn load_async(
         &self,
         id: &str,
         created: i64,
     ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
-        self.load_impl(id, created).await
+        self.load_impl_async(id, created).await
     }
 
     async fn load_latest_async(
         &self,
         id: &str,
     ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
-        self.load_latest_impl(id).await
+        self.load_latest_impl_async(id).await
     }
 
     async fn store_async(
@@ -349,6 +455,6 @@ impl Metastore for DynamoDbMetastore {
         created: i64,
         ekr: &EnvelopeKeyRecord,
     ) -> Result<bool, anyhow::Error> {
-        self.store_impl(id, created, ekr).await
+        self.store_impl_async(id, created, ekr).await
     }
 }

@@ -112,7 +112,7 @@ fn to_config_options(cfg: &AsherahConfig) -> asherah_config::ConfigOptions {
 pub fn setup(config: AsherahConfig) -> Result<()> {
     let opts = to_config_options(&config);
     let (factory, applied) = asherah_config::factory_from_config(&opts)
-        .map_err(|e| Error::from_reason(format!("setup error: {e}")))?;
+        .map_err(|e| Error::from_reason(format!("setup error: {e:#}")))?;
 
     let dbg_env = std::env::var("ASHERAH_NODE_DEBUG")
         .ok()
@@ -147,7 +147,7 @@ pub async fn setup_async(config: AsherahConfig) -> Result<()> {
     let opts = to_config_options(&config);
     let (factory, applied) = asherah_config::factory_from_config_async(&opts)
         .await
-        .map_err(|e| Error::from_reason(format!("setup error: {e}")))?;
+        .map_err(|e| Error::from_reason(format!("setup error: {e:#}")))?;
 
     let dbg_env = std::env::var("ASHERAH_NODE_DEBUG")
         .ok()
@@ -184,7 +184,7 @@ pub fn shutdown() -> Result<()> {
         state
             .factory
             .close()
-            .map_err(|e| Error::from_reason(format!("shutdown error: {e}")))?;
+            .map_err(|e| Error::from_reason(format!("shutdown error: {e:#}")))?;
     }
     DEBUG_ENABLED.store(false, Ordering::Relaxed);
     Ok(())
@@ -230,7 +230,7 @@ fn with_session<R>(partition_id: &str, fcall: impl FnOnce(&Session) -> Result<R>
             let result = fcall(&session);
             let close_result = session
                 .close()
-                .map_err(|e| Error::from_reason(format!("session close error: {e}")));
+                .map_err(|e| Error::from_reason(format!("session close error: {e:#}")));
             return match (result, close_result) {
                 (Ok(value), Ok(())) => Ok(value),
                 (Ok(_), Err(e)) | (Err(e), Ok(())) => Err(e),
@@ -297,7 +297,7 @@ pub fn encrypt(partition_id: String, data: Buffer) -> Result<String> {
         let t_core0 = Instant::now();
         let r = s
             .encrypt(&data)
-            .map_err(|e| Error::from_reason(format!("encrypt error: {e}")));
+            .map_err(|e| Error::from_reason(format!("encrypt error: {e:#}")));
         debug_log(&format!(
             "encrypt core {} us",
             t_core0.elapsed().as_micros()
@@ -320,7 +320,7 @@ pub async fn encrypt_async(partition_id: String, data: Buffer) -> Result<String>
     let drr = session
         .encrypt_async(&data)
         .await
-        .map_err(|e| Error::from_reason(format!("encrypt error: {e}")))?;
+        .map_err(|e| Error::from_reason(format!("encrypt error: {e:#}")))?;
     if !cached {
         drop(session.close());
     }
@@ -341,7 +341,7 @@ pub fn decrypt(partition_id: String, data_row_record: Buffer) -> Result<Buffer> 
         let t_core0 = Instant::now();
         let r = s
             .decrypt(drr)
-            .map_err(|e| Error::from_reason(format!("decrypt error: {e}")));
+            .map_err(|e| Error::from_reason(format!("decrypt error: {e:#}")));
         debug_log(&format!(
             "decrypt core {} us",
             t_core0.elapsed().as_micros()
@@ -360,7 +360,7 @@ pub async fn decrypt_async(partition_id: String, data_row_record: Buffer) -> Res
     let pt = session
         .decrypt_async(drr)
         .await
-        .map_err(|e| Error::from_reason(format!("decrypt error: {e}")))?;
+        .map_err(|e| Error::from_reason(format!("decrypt error: {e:#}")))?;
     if !cached {
         drop(session.close());
     }
@@ -444,7 +444,7 @@ impl SessionFactory {
         if let Some(factory) = guard.take() {
             factory
                 .close()
-                .map_err(|e| Error::from_reason(format!("factory close error: {e}")))?;
+                .map_err(|e| Error::from_reason(format!("factory close error: {e:#}")))?;
         }
         Ok(())
     }
@@ -473,7 +473,7 @@ impl AsherahSession {
             .ok_or_else(|| Error::from_reason("session is closed"))?;
         let drr = session
             .encrypt(&data)
-            .map_err(|e| Error::from_reason(format!("encrypt error: {e}")))?;
+            .map_err(|e| Error::from_reason(format!("encrypt error: {e:#}")))?;
         Ok(drr.to_json_fast())
     }
 
@@ -492,7 +492,7 @@ impl AsherahSession {
             .ok_or_else(|| Error::from_reason("session is closed"))?;
         let pt = session
             .decrypt(drr)
-            .map_err(|e| Error::from_reason(format!("decrypt error: {e}")))?;
+            .map_err(|e| Error::from_reason(format!("decrypt error: {e:#}")))?;
         Ok(Buffer::from(pt))
     }
 
@@ -508,7 +508,7 @@ impl AsherahSession {
         if let Some(session) = guard.take() {
             session
                 .close()
-                .map_err(|e| Error::from_reason(format!("session close error: {e}")))?;
+                .map_err(|e| Error::from_reason(format!("session close error: {e:#}")))?;
         }
         Ok(())
     }

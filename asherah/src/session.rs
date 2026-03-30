@@ -419,9 +419,9 @@ impl<
         } else {
             None
         };
-        let drr = loader
-            .load(key)?
-            .ok_or_else(|| anyhow::anyhow!("not found"))?;
+        let drr = loader.load(key)?.ok_or_else(|| {
+            anyhow::anyhow!("record not found in persistence store for the given key")
+        })?;
         let res = self.decrypt(drr);
         if let Some(start) = start {
             metrics::record_load(start);
@@ -937,9 +937,9 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         key: &serde_json::Value,
         loader: &T,
     ) -> anyhow::Result<Vec<u8>> {
-        let drr = loader
-            .load_ctx(ctx, key)?
-            .ok_or_else(|| anyhow::anyhow!("not found"))?;
+        let drr = loader.load_ctx(ctx, key)?.ok_or_else(|| {
+            anyhow::anyhow!("record not found in persistence store for the given key")
+        })?;
         self.decrypt_ctx(ctx, drr)
     }
 }

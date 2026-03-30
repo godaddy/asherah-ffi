@@ -108,9 +108,9 @@ const CONFIG_MAP = {
   CheckInterval: 'checkInterval',
   Metastore: 'metastore',
   ConnectionString: 'connectionString',
-  DynamoDBEndpoint: 'dynamoDBEndpoint',
-  DynamoDBRegion: 'dynamoDBRegion',
-  DynamoDBTableName: 'dynamoDBTableName',
+  DynamoDBEndpoint: 'dynamoDbEndpoint',
+  DynamoDBRegion: 'dynamoDbRegion',
+  DynamoDBTableName: 'dynamoDbTableName',
   SessionCacheMaxSize: 'sessionCacheMaxSize',
   SessionCacheDuration: 'sessionCacheDuration',
   KMS: 'kms',
@@ -119,7 +119,8 @@ const CONFIG_MAP = {
   EnableRegionSuffix: 'enableRegionSuffix',
   EnableSessionCaching: 'enableSessionCaching',
   Verbose: 'verbose',
-  SQLMetastoreDBType: 'sqlMetastoreDBType',
+  DynamoDBSigningRegion: 'dynamoDbSigningRegion',
+  SQLMetastoreDBType: 'sqlMetastoreDbType',
   ReplicaReadConsistency: 'replicaReadConsistency',
   DisableZeroCopy: 'disableZeroCopy',
   NullDataCheck: 'nullDataCheck',
@@ -173,6 +174,23 @@ function normalizeConfig(config) {
   if (typeof out.kms === 'string') {
     const lower = out.kms.toLowerCase();
     out.kms = KMS_ALIASES[lower] || lower;
+  }
+
+  // Normalize DynamoDB field names: dynamoDB* → dynamoDb* (napi-rs convention)
+  // Users and docs may use either casing; napi-rs only accepts the latter.
+  // napi-rs generates camelCase from Rust snake_case: dynamo_db → dynamoDb.
+  // Users may write "DB" (natural) instead of "Db" (napi-rs convention).
+  for (const [wrong, right] of [
+    ['dynamoDBEndpoint', 'dynamoDbEndpoint'],
+    ['dynamoDBRegion', 'dynamoDbRegion'],
+    ['dynamoDBTableName', 'dynamoDbTableName'],
+    ['dynamoDBSigningRegion', 'dynamoDbSigningRegion'],
+    ['sqlMetastoreDBType', 'sqlMetastoreDbType'],
+  ]) {
+    if (wrong in out && !(right in out)) {
+      out[right] = out[wrong];
+      delete out[wrong];
+    }
   }
 
   return out;

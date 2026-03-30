@@ -49,7 +49,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_factoryFromEnv
 ) -> jlong {
     env.with_env(|env| -> jni::errors::Result<jlong> {
         let factory = ael::builders::factory_from_env()
-            .map_err(|e| throw_err(env, format_args!("factory_from_env failed: {e}")))?;
+            .map_err(|e| throw_err(env, format_args!("factory_from_env failed: {e:#}")))?;
         Ok(Box::into_raw(Box::new(factory)) as jlong)
     })
     .resolve::<ThrowRuntimeExAndDefault>()
@@ -65,7 +65,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_factoryFromJso
         let cfg_str = get_jstring(env, &config_json)?;
         let (factory, _applied) = config::ConfigOptions::from_json(&cfg_str)
             .and_then(|cfg| config::factory_from_config(&cfg))
-            .map_err(|e| throw_err(env, format_args!("factory_from_json failed: {e}")))?;
+            .map_err(|e| throw_err(env, format_args!("factory_from_json failed: {e:#}")))?;
         Ok(Box::into_raw(Box::new(factory)) as jlong)
     })
     .resolve::<ThrowRuntimeExAndDefault>()
@@ -82,7 +82,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_closeFactory(
             .ok_or_else(|| throw_err(env, "factory handle is null"))?;
         factory
             .close()
-            .map_err(|e| throw_err(env, format_args!("factory close error: {e}")))?;
+            .map_err(|e| throw_err(env, format_args!("factory close error: {e:#}")))?;
         Ok(())
     })
     .resolve::<ThrowRuntimeExAndDefault>();
@@ -129,7 +129,8 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_setEnv(
 ) {
     env.with_env(|env| -> jni::errors::Result<()> {
         let payload = get_jstring(env, &env_json)?;
-        apply_env_json(&payload).map_err(|e| throw_err(env, format_args!("setEnv error: {e}")))?;
+        apply_env_json(&payload)
+            .map_err(|e| throw_err(env, format_args!("setEnv error: {e:#}")))?;
         Ok(())
     })
     .resolve::<ThrowRuntimeExAndDefault>();
@@ -163,7 +164,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_closeSession(
             .ok_or_else(|| throw_err(env, "session handle is null"))?;
         session
             .close()
-            .map_err(|e| throw_err(env, format_args!("session close error: {e}")))?;
+            .map_err(|e| throw_err(env, format_args!("session close error: {e:#}")))?;
         Ok(())
     })
     .resolve::<ThrowRuntimeExAndDefault>();
@@ -193,9 +194,9 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_encrypt<'calle
         let data = env.convert_byte_array(&plaintext)?;
         let drr = session
             .encrypt(&data)
-            .map_err(|e| throw_err(env, format_args!("encrypt error: {e}")))?;
+            .map_err(|e| throw_err(env, format_args!("encrypt error: {e:#}")))?;
         let ciphertext = serde_json::to_vec(&drr)
-            .map_err(|e| throw_err(env, format_args!("encrypt serialization error: {e}")))?;
+            .map_err(|e| throw_err(env, format_args!("encrypt serialization error: {e:#}")))?;
         let arr = env.byte_array_from_slice(&ciphertext)?;
         Ok(arr)
     })
@@ -217,7 +218,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decrypt<'calle
             .map_err(|e| throw_err(env, format_args!("invalid DataRowRecord JSON: {e}")))?;
         let plaintext = session
             .decrypt(drr)
-            .map_err(|e| throw_err(env, format_args!("decrypt error: {e}")))?;
+            .map_err(|e| throw_err(env, format_args!("decrypt error: {e:#}")))?;
         let arr = env.byte_array_from_slice(&plaintext)?;
         Ok(arr)
     })
@@ -256,7 +257,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_encryptAsync<'
         ASYNC_RT.spawn(async move {
             let session = unsafe { &*(session_addr as *const Session) };
             let result = match session.encrypt_async(&data).await {
-                Ok(drr) => serde_json::to_vec(&drr).map_err(|e| anyhow::anyhow!("{e}")),
+                Ok(drr) => serde_json::to_vec(&drr).map_err(|e| anyhow::anyhow!("{e:#}")),
                 Err(e) => Err(e),
             };
             complete_java_future(&jvm, &future_ref, result);
