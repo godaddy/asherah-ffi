@@ -42,10 +42,15 @@ are restarted.
 
 ## Important Limitations
 
-- **Not a true KMS** — this is a static key stored in a managed secret. The
-  key material is fetched and held in process memory, same as `KMS=static`.
-- **No transparent rotation** — rotating the master key requires re-encrypting
-  all data (see [Key Rotation](#key-rotation) below).
+- **Not a true KMS** — this is a static master key stored in a managed secret.
+  The key material is fetched and held in process memory, same as `KMS=static`.
+  Asherah's intermediate keys (IKs) and system keys (SKs) still rotate on
+  their normal policy schedule — only the **master key** at the top of the
+  hierarchy is static.
+- **No transparent master key rotation** — rotating the master key requires
+  re-encrypting all system keys in the metastore (see [Key Rotation](#key-rotation)
+  below). With AWS KMS or Vault Transit, master key rotation is transparent
+  because the KMS service handles key versioning internally.
 - **No audit trail on key usage** — Secrets Manager logs when the secret is
   *accessed*, but not when it's used for encryption/decryption. For per-operation
   audit logging, use AWS KMS or Vault Transit.
@@ -179,10 +184,12 @@ Confirm that all instances can still encrypt and decrypt data.
 
 ### Recommendation
 
-If you need key rotation, **migrate to AWS KMS or Vault Transit** instead.
-Both handle key versioning transparently — old ciphertexts are decrypted with
-the old key version, new encryptions use the latest version, no data migration
-required.
+If you need master key rotation, **migrate to AWS KMS or Vault Transit**
+instead. Both handle master key versioning transparently — old ciphertexts are
+decrypted with the old key version, new encryptions use the latest version, no
+data migration required. Note that Asherah's intermediate and system key
+rotation works normally regardless of KMS backend — it is only the master key
+at the top of the hierarchy that requires this manual procedure.
 
 ## Feature Flag
 
@@ -211,10 +218,11 @@ export PRODUCT_ID=my-product
 
 | Feature | Static | Secrets Manager | AWS KMS | Vault Transit |
 |---------|--------|----------------|---------|---------------|
-| Key storage | Env var / config | AWS Secrets Manager | AWS KMS HSM | Vault server |
-| Key leaves service? | Yes (in memory) | Yes (in memory) | Never | Never |
-| Transparent rotation | No | No | Yes | Yes |
+| Master key storage | Env var / config | AWS Secrets Manager | AWS KMS HSM | Vault server |
+| Master key leaves service? | Yes (in memory) | Yes (in memory) | Never | Never |
+| Master key rotation | Manual (re-encrypt SKs) | Manual (re-encrypt SKs) | Transparent | Transparent |
+| IK/SK rotation | Automatic (policy-based) | Automatic (policy-based) | Automatic (policy-based) | Automatic (policy-based) |
 | Per-operation audit | No | No | Yes (CloudTrail) | Yes (Vault audit) |
 | Access control | None | IAM policies | IAM + key policies | Vault policies |
 | Secret zero problem | Yes | No (IAM role) | No (IAM role) | Depends on auth |
-| Migration from static | n/a | Config change only | Re-encrypt all data | Re-encrypt all data |
+| Migration from static | n/a | Config change only | Re-encrypt SKs | Re-encrypt SKs |
