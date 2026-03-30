@@ -107,67 +107,95 @@ Asherah uses a four-level key hierarchy with envelope encryption:
               Your Data
 ```
 
-### Secure Memory Architecture
+### Secure Memory and Tiered Key Cache
 
-All key material is protected by a custom memory guard system:
+Keys are protected at rest by a three-tier cache with hardware-enforced
+memory protection:
 
 ```
-+------------------------------------------------------+
-|              mlock'd Page (4KB)                      |
-|         Pinned in RAM, never swapped to disk         |
-+------------------------------------------------------+
-| Slot 0: Coffer Left  (XOR'd master key half)         |
-| Slot 1: Coffer Right (random, key derivation)        |
-+------------------------------------------------------+
-| Slot 2..N: Shared pool                               |
-|                                                      |
-|   +----------------------------------------------+   |
-|   | Hot Cache: recently used keys (LRU eviction) |   |
-|   |   SK decrypt key -> slot 2                   |   |
-|   |   IK decrypt key -> slot 3                   |   |
-|   |   ...                                        |   |
-|   +----------------------------------------------+   |
-|   | Transient: acquired during crypto ops        |   |
-|   |   (released back to pool after use)          |   |
-|   +----------------------------------------------+   |
-|                                                      |
-+------------------------------------------------------+
+TIER 1: mlock'd Slab (hot cache, ~400ns access)
+========================================================
+
+  Guard Page [PROT_NONE -- segfaults on access]
+  +----------------------------------------------------+
+  | mlock'd Page (4KB, pinned in RAM, never swapped)   |
+  |                                                    |
+  | Slot 0: Coffer Left  (XOR'd master key half)       |
+  | Slot 1: Coffer Right (random, key derivation)      |
+  |         [neither half alone reveals the key]       |
+  |                                                    |
+  | Slot 2: SK decrypt key  <-- hot cache (LRU)       |
+  | Slot 3: IK decrypt key  <-- hot cache (LRU)       |
+  | Slot 4: [transient op]  <-- acquired/released     |
+  | ...                                                |
+  | Slot N: [free]                                     |
+  +----------------------------------------------------+
+  Guard Page [PROT_NONE -- segfaults on access]
+  Canary bytes between guard pages and data detect
+  buffer overflows at runtime.
+
+TIER 2: Encrypted Enclaves (cold cache, ~1us access)
+========================================================
+
+  Regular heap memory (not mlock'd, can be swapped)
+  +----------------------------------------------------+
+  | Enclave { id, ciphertext, data_len }               |
+  |   ciphertext = AES-256-GCM(key, coffer_master)     |
+  |   On access: decrypt into Tier 1 slab slot         |
+  |   Promoted to hot cache after first use             |
+  +----------------------------------------------------+
+  Each CryptoKey holds an Enclave. When the hot cache
+  is full, LRU eviction frees a slab slot. The evicted
+  key remains safe in its Enclave (encrypted at rest).
+
+TIER 3: Metastore (persistent, ~1ms access)
+========================================================
+
+  DynamoDB / MySQL / Postgres / SQLite
+  +----------------------------------------------------+
+  | EnvelopeKeyRecord { id, created, encrypted_key }   |
+  |   encrypted_key = AES-256-GCM(key, parent_key)     |
+  |   Loaded on cold start or cache miss               |
+  |   Decrypted through the key hierarchy (IK->SK->KMS)|
+  +----------------------------------------------------+
 ```
 
-**Hot cache hit** (typical encrypt/decrypt): The decrypted key is already in
-an mlock'd slot — zero crypto overhead, just a pointer read. This is why
-hot-cache encrypt is ~400ns.
+**Tier 1 hit** (typical encrypt/decrypt): The decrypted key is already in
+an mlock'd slab slot — zero crypto overhead, just a pointer read. This is
+why hot-cache encrypt is ~400ns.
 
-**Hot cache miss**: The key's Enclave (AES-256-GCM encrypted ciphertext in
-regular memory) is decrypted using the Coffer master key, placed in a free
-slot, and promoted to the hot cache. LRU eviction makes room if needed.
+**Tier 1 miss, Tier 2 hit**: The key's Enclave (AES-256-GCM encrypted
+ciphertext in heap memory) is decrypted using the Coffer master key from
+the slab, placed in a free slot, and promoted to the hot cache.
 
-**Coffer**: The master key for Enclave encryption is split across two slots
-using XOR + hash derivation. Neither slot alone reveals the key. The Coffer
-is initialized once at startup with OS-entropy randomness.
+**Tier 2 miss** (cold start): The key is loaded from the metastore,
+decrypted through the key hierarchy (KMS decrypts SK, SK decrypts IK),
+sealed into an Enclave, and promoted into the slab hot cache.
 
-### Multi-Level Cache Hierarchy
+**Coffer**: The master key for Enclave encryption is split across two
+mlock'd slots using XOR + hash derivation. Neither slot alone reveals the
+key. Initialized once at startup with OS entropy.
+
+### Session and Key Caches
+
+Above the memory tiers, Asherah maintains logical caches with
+stale-while-revalidate to prevent thundering herd on cache expiry:
 
 ```
 Request --> Session Cache (LRU, per-factory)
                 | miss
                 v
-            IK Cache (per-session or shared, stale-while-revalidate)
+            IK Cache (stale-while-revalidate)
                 | miss
                 v
-            SK Cache (shared across all sessions, stale-while-revalidate)
+            SK Cache (shared, stale-while-revalidate)
                 | miss
                 v
-            Metastore (DynamoDB / MySQL / Postgres)
-                | load + decrypt
-                v
-            KMS (decrypt system key with master key)
+            Metastore load --> Tier 2/1 promotion
 ```
 
-**Stale-while-revalidate**: On cache expiry, the stale key is returned
-immediately while a background refresh loads the latest from the metastore.
-This eliminates thundering herd stampedes on cache expiry under high
-concurrency.
+On cache expiry, the stale key is returned immediately while a background
+refresh loads the latest version from the metastore.
 
 ## Testing
 
