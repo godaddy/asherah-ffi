@@ -108,9 +108,9 @@ const CONFIG_MAP = {
   CheckInterval: 'checkInterval',
   Metastore: 'metastore',
   ConnectionString: 'connectionString',
-  DynamoDBEndpoint: 'dynamoDBEndpoint',
-  DynamoDBRegion: 'dynamoDBRegion',
-  DynamoDBTableName: 'dynamoDBTableName',
+  DynamoDBEndpoint: 'dynamoDbEndpoint',
+  DynamoDBRegion: 'dynamoDbRegion',
+  DynamoDBTableName: 'dynamoDbTableName',
   SessionCacheMaxSize: 'sessionCacheMaxSize',
   SessionCacheDuration: 'sessionCacheDuration',
   KMS: 'kms',
@@ -173,6 +173,20 @@ function normalizeConfig(config) {
   if (typeof out.kms === 'string') {
     const lower = out.kms.toLowerCase();
     out.kms = KMS_ALIASES[lower] || lower;
+  }
+
+  // Normalize DynamoDB field names: dynamoDB* → dynamoDb* (napi-rs convention)
+  // Users and docs may use either casing; napi-rs only accepts the latter.
+  for (const [wrong, right] of [
+    ['dynamoDBEndpoint', 'dynamoDbEndpoint'],
+    ['dynamoDBRegion', 'dynamoDbRegion'],
+    ['dynamoDBTableName', 'dynamoDbTableName'],
+    ['dynamoDBSigningRegion', 'dynamoDbSigningRegion'],
+  ]) {
+    if (wrong in out && !(right in out)) {
+      out[right] = out[wrong];
+      delete out[wrong];
+    }
   }
 
   return out;

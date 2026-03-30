@@ -8,8 +8,14 @@ export type AsherahConfig = {
   metastore: 'memory' | 'rdbms' | 'dynamodb';
   connectionString?: string | null;
   replicaReadConsistency?: string | null;
+  dynamoDbEndpoint?: string | null;
+  dynamoDbRegion?: string | null;
+  dynamoDbTableName?: string | null;
+  /** @deprecated Use dynamoDbEndpoint */
   dynamoDBEndpoint?: string | null;
+  /** @deprecated Use dynamoDbRegion */
   dynamoDBRegion?: string | null;
+  /** @deprecated Use dynamoDbTableName */
   dynamoDBTableName?: string | null;
   sessionCacheMaxSize?: number | null;
   sessionCacheDuration?: number | null;
