@@ -25,6 +25,9 @@ export type AsherahConfig = {
   enableRegionSuffix?: boolean | null;
   enableSessionCaching?: boolean | null;
   verbose?: boolean | null;
+  dynamoDbSigningRegion?: string | null;
+  sqlMetastoreDbType?: string | null;
+  /** @deprecated Use sqlMetastoreDbType */
   sqlMetastoreDBType?: string | null;
   disableZeroCopy?: boolean | null;
   nullDataCheck?: boolean | null;
