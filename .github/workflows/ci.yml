@@ -56,7 +56,7 @@ jobs:
             rust-tests-${{ runner.os }}-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
-      - uses: taiki-e/install-action@fd0f63e180a477d7434580b6d80817978b9ff2b8 # v2
+      - uses: taiki-e/install-action@6ef672efc2b5aabc787a9e94baf4989aa02a97df # v2
         with:
           tool: sccache@0.8.1
       - name: Install protoc
@@ -105,7 +105,7 @@ jobs:
           key: build-${{ runner.os }}-x86_64-rlib-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             build-${{ runner.os }}-x86_64-rlib-
-      - uses: taiki-e/install-action@fd0f63e180a477d7434580b6d80817978b9ff2b8 # v2
+      - uses: taiki-e/install-action@6ef672efc2b5aabc787a9e94baf4989aa02a97df # v2
         with:
           tool: sccache@0.8.1
       - name: Build FFI rlib (x86_64)
@@ -164,7 +164,7 @@ jobs:
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@fd0f63e180a477d7434580b6d80817978b9ff2b8 # v2
+      - uses: taiki-e/install-action@6ef672efc2b5aabc787a9e94baf4989aa02a97df # v2
         with:
           tool: sccache@0.8.1
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
@@ -265,7 +265,7 @@ jobs:
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@fd0f63e180a477d7434580b6d80817978b9ff2b8 # v2
+      - uses: taiki-e/install-action@6ef672efc2b5aabc787a9e94baf4989aa02a97df # v2
         with:
           tool: sccache@0.8.1
       - name: Build Java binding (x86_64)
@@ -311,7 +311,7 @@ jobs:
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@fd0f63e180a477d7434580b6d80817978b9ff2b8 # v2
+      - uses: taiki-e/install-action@6ef672efc2b5aabc787a9e94baf4989aa02a97df # v2
         with:
           tool: sccache@0.8.1
       - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
@@ -436,7 +436,7 @@ jobs:
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@fd0f63e180a477d7434580b6d80817978b9ff2b8 # v2
+      - uses: taiki-e/install-action@6ef672efc2b5aabc787a9e94baf4989aa02a97df # v2
         with:
           tool: sccache@0.8.1
       - name: Build asherah-cobhan (x86_64)
@@ -620,7 +620,7 @@ jobs:
           dotnet-version: |
             8.0.x
             10.0.x
-      - uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
         if: matrix.binding == 'go'
         with:
           go-version: '1.23'
@@ -652,7 +652,7 @@ jobs:
         uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           components: rustfmt
-      - uses: taiki-e/install-action@fd0f63e180a477d7434580b6d80817978b9ff2b8 # v2
+      - uses: taiki-e/install-action@6ef672efc2b5aabc787a9e94baf4989aa02a97df # v2
         with:
           tool: sccache@0.8.1
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
@@ -1189,7 +1189,7 @@ jobs:
         with:
           node-version: 20
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
-      - uses: taiki-e/install-action@fd0f63e180a477d7434580b6d80817978b9ff2b8 # v2
+      - uses: taiki-e/install-action@6ef672efc2b5aabc787a9e94baf4989aa02a97df # v2
         with:
           tool: cargo-zigbuild
       - name: Build asherah-node for x86_64-musl
@@ -1372,7 +1372,7 @@ jobs:
         with:
           node-version: 20
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
-      - uses: taiki-e/install-action@fd0f63e180a477d7434580b6d80817978b9ff2b8 # v2
+      - uses: taiki-e/install-action@6ef672efc2b5aabc787a9e94baf4989aa02a97df # v2
         with:
           tool: cargo-zigbuild
       - name: Build asherah-node for aarch64-musl
