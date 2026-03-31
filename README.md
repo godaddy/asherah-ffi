@@ -83,7 +83,7 @@ Asherah uses a four-level key hierarchy with envelope encryption:
 ```
 +------------------------------------------------------+
 |                   KMS Backend                        |
-|        (AWS KMS / Vault Transit / Static)            |
+|       (AWS KMS / HashiCorp Vault Transit API)        |
 |                                                      |
 | Master Key -- never exposed, encrypt/decrypt via API |
 +------------------+-----------------------------------+
@@ -100,7 +100,7 @@ Asherah uses a four-level key hierarchy with envelope encryption:
                    | encrypts
 +------------------v-----------------------------------+
 |          Data Row Key (DRK)                          |
-| Random per-record, inline in ciphertext (envelope)   |
+| Unique per write -- effectively rotated every time   |
 +------------------+-----------------------------------+
                    | encrypts
                    v
@@ -124,13 +124,14 @@ TIER 1: mlock'd Slab (hot cache, ~400ns access)
   | Slot 1: Coffer Right (random, key derivation)      |
   |         [neither half alone reveals the key]       |
   |                                                    |
-  | Slot 2: SK decrypt key  <-- hot cache (LRU)       |
-  | Slot 3: IK decrypt key  <-- hot cache (LRU)       |
-  | Slot 4: [transient op]  <-- acquired/released     |
+  | Slot 2: SK decrypt key  <-- hot cache (LRU)        |
+  | Slot 3: IK decrypt key  <-- hot cache (LRU)        |
+  | Slot 4: [transient op]  <-- acquired/released      |
   | ...                                                |
   | Slot N: [free]                                     |
   +----------------------------------------------------+
   Guard Page [PROT_NONE -- segfaults on access]
+
   Canary bytes between guard pages and data detect
   buffer overflows at runtime.
 
@@ -142,7 +143,7 @@ TIER 2: Encrypted Enclaves (cold cache, ~1us access)
   | Enclave { id, ciphertext, data_len }               |
   |   ciphertext = AES-256-GCM(key, coffer_master)     |
   |   On access: decrypt into Tier 1 slab slot         |
-  |   Promoted to hot cache after first use             |
+  |   Promoted to hot cache after first use            |
   +----------------------------------------------------+
   Each CryptoKey holds an Enclave. When the hot cache
   is full, LRU eviction frees a slab slot. The evicted
