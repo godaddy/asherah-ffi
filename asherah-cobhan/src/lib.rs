@@ -354,10 +354,12 @@ unsafe fn cobhan_string_to_buffer(s: &str, buf: *mut c_char) -> i32 {
 /// After shutdown, SetupJson can be called again to re-initialize.
 #[unsafe(no_mangle)]
 pub extern "C" fn Shutdown() {
-    if let Ok(mut guard) = FACTORY.write() {
-        let _ = guard.take();
-    }
-    ESTIMATED_INTERMEDIATE_KEY_OVERHEAD.store(0, Ordering::Relaxed);
+    drop(std::panic::catch_unwind(|| {
+        if let Ok(mut guard) = FACTORY.write() {
+            let _ = guard.take();
+        }
+        ESTIMATED_INTERMEDIATE_KEY_OVERHEAD.store(0, Ordering::Relaxed);
+    }));
 }
 
 /// Sets environment variables from a JSON object.
@@ -374,23 +376,31 @@ pub extern "C" fn Shutdown() {
 /// - `ERR_JSON_DECODE_FAILED` if JSON parsing fails
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn SetEnv(env_json: *const c_char) -> i32 {
-    if env_json.is_null() {
-        return ERR_NULL_PTR;
-    }
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if env_json.is_null() {
+            return ERR_NULL_PTR;
+        }
 
-    let env_map: HashMap<String, Option<String>> = match cobhan_buffer_to_json(env_json) {
-        Ok(m) => m,
-        Err(e) => return e,
-    };
+        let env_map: HashMap<String, Option<String>> = match cobhan_buffer_to_json(env_json) {
+            Ok(m) => m,
+            Err(e) => return e,
+        };
 
-    for (key, value) in env_map {
-        match value {
-            Some(v) => std::env::set_var(&key, &v),
-            None => std::env::remove_var(&key),
+        for (key, value) in env_map {
+            match value {
+                Some(v) => std::env::set_var(&key, &v),
+                None => std::env::remove_var(&key),
+            }
+        }
+
+        ERR_NONE
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            log::error!("internal panic in SetEnv");
+            ERR_PANIC
         }
     }
-
-    ERR_NONE
 }
 
 /// Initializes Asherah with the provided JSON configuration.
@@ -408,64 +418,72 @@ pub unsafe extern "C" fn SetEnv(env_json: *const c_char) -> i32 {
 /// - `ERR_NULL_PTR` if buffer is null
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn SetupJson(config_json: *const c_char) -> i32 {
-    if config_json.is_null() {
-        return ERR_NULL_PTR;
-    }
-
-    // Install error-only stderr sink immediately so setup errors are visible
-    let _ = asherah::logging::ensure_logger();
-    asherah::logging::set_sink(
-        "stderr",
-        Some(std::sync::Arc::new(StderrLogSink { verbose: false })),
-    );
-
-    let mut guard = match FACTORY.write() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-
-    // Check if already initialized
-    if guard.is_some() {
-        return ERR_ALREADY_INITIALIZED;
-    }
-
-    // Parse configuration
-    let config: ConfigOptions = match cobhan_buffer_to_json(config_json) {
-        Ok(c) => c,
-        Err(code) => {
-            log::error!(
-                "SetupJson: failed to parse config JSON (error code {})",
-                code
-            );
-            return ERR_BAD_CONFIG;
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if config_json.is_null() {
+            return ERR_NULL_PTR;
         }
-    };
 
-    // Track intermediate key overhead (matching Go behavior)
-    let product_id_len = config.product_id.as_ref().map_or(0, |s| s.len());
-    let service_name_len = config.service_name.as_ref().map_or(0, |s| s.len());
-    ESTIMATED_INTERMEDIATE_KEY_OVERHEAD.store(
-        (product_id_len + service_name_len) as i32,
-        Ordering::Relaxed,
-    );
+        // Install error-only stderr sink immediately so setup errors are visible
+        let _ = asherah::logging::ensure_logger();
+        asherah::logging::set_sink(
+            "stderr",
+            Some(std::sync::Arc::new(StderrLogSink { verbose: false })),
+        );
 
-    // Apply configuration and create factory
-    match asherah_config::factory_from_config(&config) {
-        Ok((factory, applied)) => {
-            // Upgrade to verbose sink if Verbose=true (debug+error to stderr)
-            if applied.verbose {
-                asherah::logging::set_sink(
-                    "stderr",
-                    Some(std::sync::Arc::new(StderrLogSink { verbose: true })),
+        let mut guard = match FACTORY.write() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+
+        // Check if already initialized
+        if guard.is_some() {
+            return ERR_ALREADY_INITIALIZED;
+        }
+
+        // Parse configuration
+        let config: ConfigOptions = match cobhan_buffer_to_json(config_json) {
+            Ok(c) => c,
+            Err(code) => {
+                log::error!(
+                    "SetupJson: failed to parse config JSON (error code {})",
+                    code
                 );
+                return ERR_BAD_CONFIG;
             }
-            set_canaries_enabled(applied.enable_canaries);
-            *guard = Some(factory);
-            ERR_NONE
+        };
+
+        // Track intermediate key overhead (matching Go behavior)
+        let product_id_len = config.product_id.as_ref().map_or(0, |s| s.len());
+        let service_name_len = config.service_name.as_ref().map_or(0, |s| s.len());
+        ESTIMATED_INTERMEDIATE_KEY_OVERHEAD.store(
+            (product_id_len + service_name_len) as i32,
+            Ordering::Relaxed,
+        );
+
+        // Apply configuration and create factory
+        match asherah_config::factory_from_config(&config) {
+            Ok((factory, applied)) => {
+                // Upgrade to verbose sink if Verbose=true (debug+error to stderr)
+                if applied.verbose {
+                    asherah::logging::set_sink(
+                        "stderr",
+                        Some(std::sync::Arc::new(StderrLogSink { verbose: true })),
+                    );
+                }
+                set_canaries_enabled(applied.enable_canaries);
+                *guard = Some(factory);
+                ERR_NONE
+            }
+            Err(e) => {
+                log::error!("SetupJson failed: {:#}", e);
+                ERR_BAD_CONFIG
+            }
         }
-        Err(e) => {
-            log::error!("SetupJson failed: {:#}", e);
-            ERR_BAD_CONFIG
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            log::error!("internal panic in SetupJson");
+            ERR_PANIC
         }
     }
 }
@@ -481,23 +499,32 @@ pub unsafe extern "C" fn SetupJson(config_json: *const c_char) -> i32 {
 /// - Estimated buffer size in bytes
 #[unsafe(no_mangle)]
 pub extern "C" fn EstimateBuffer(data_len: i32, partition_len: i32) -> i32 {
-    // Match Go formula:
-    // estimatedDataLen := ((int(dataLen) + EstimatedEncryptionOverhead + 2) / 3) * 4
-    // result := int32(BUFFER_HEADER_SIZE + EstimatedEnvelopeOverhead +
-    //           EstimatedIntermediateKeyOverhead + int(partitionLen) + estimatedDataLen)
-    let estimated_data_len = ((data_len as i64 + ESTIMATED_ENCRYPTION_OVERHEAD as i64 + 2) / 3) * 4;
-    let intermediate_key_overhead =
-        ESTIMATED_INTERMEDIATE_KEY_OVERHEAD.load(Ordering::Relaxed) as i64;
+    match std::panic::catch_unwind(|| {
+        // Match Go formula:
+        // estimatedDataLen := ((int(dataLen) + EstimatedEncryptionOverhead + 2) / 3) * 4
+        // result := int32(BUFFER_HEADER_SIZE + EstimatedEnvelopeOverhead +
+        //           EstimatedIntermediateKeyOverhead + int(partitionLen) + estimatedDataLen)
+        let estimated_data_len =
+            ((data_len as i64 + ESTIMATED_ENCRYPTION_OVERHEAD as i64 + 2) / 3) * 4;
+        let intermediate_key_overhead =
+            ESTIMATED_INTERMEDIATE_KEY_OVERHEAD.load(Ordering::Relaxed) as i64;
 
-    let result = BUFFER_HEADER_SIZE as i64
-        + ESTIMATED_ENVELOPE_OVERHEAD as i64
-        + intermediate_key_overhead
-        + partition_len as i64
-        + estimated_data_len;
-    if result > i32::MAX as i64 {
-        i32::MAX // clamp to max representable; caller should check
-    } else {
-        result as i32
+        let result = BUFFER_HEADER_SIZE as i64
+            + ESTIMATED_ENVELOPE_OVERHEAD as i64
+            + intermediate_key_overhead
+            + partition_len as i64
+            + estimated_data_len;
+        if result > i32::MAX as i64 {
+            i32::MAX // clamp to max representable; caller should check
+        } else {
+            result as i32
+        }
+    }) {
+        Ok(result) => result,
+        Err(_) => {
+            log::error!("internal panic in EstimateBuffer");
+            ERR_PANIC
+        }
     }
 }
 
@@ -530,95 +557,103 @@ pub unsafe extern "C" fn Encrypt(
     output_parent_key_id_ptr: *mut c_char,
     output_parent_key_created_ptr: *mut c_char,
 ) -> i32 {
-    // Validate inputs
-    if partition_id_ptr.is_null()
-        || data_ptr.is_null()
-        || output_encrypted_data_ptr.is_null()
-        || output_encrypted_key_ptr.is_null()
-        || output_created_ptr.is_null()
-        || output_parent_key_id_ptr.is_null()
-        || output_parent_key_created_ptr.is_null()
-    {
-        return ERR_NULL_PTR;
-    }
-
-    // Get factory
-    let guard = match FACTORY.read() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let factory = match guard.as_ref() {
-        Some(f) => f,
-        None => return ERR_NOT_INITIALIZED,
-    };
-
-    // Read inputs
-    let partition_id = match cobhan_buffer_borrow_str(partition_id_ptr) {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-
-    let data = match cobhan_buffer_borrow(data_ptr) {
-        Ok(d) => d,
-        Err(e) => return e,
-    };
-
-    // Get session and encrypt
-    let session = factory.get_session(partition_id);
-    let drr = match session.encrypt(data) {
-        Ok(d) => d,
-        Err(e) => {
-            log::error!("Encrypt failed: {e:#}");
-            return ERR_ENCRYPT_FAILED;
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // Validate inputs
+        if partition_id_ptr.is_null()
+            || data_ptr.is_null()
+            || output_encrypted_data_ptr.is_null()
+            || output_encrypted_key_ptr.is_null()
+            || output_created_ptr.is_null()
+            || output_parent_key_id_ptr.is_null()
+            || output_parent_key_created_ptr.is_null()
+        {
+            return ERR_NULL_PTR;
         }
-    };
 
-    // Extract components from DataRowRecord
-    let key_record = match drr.key {
-        Some(k) => k,
-        None => return ERR_ENCRYPT_FAILED,
-    };
+        // Get factory
+        let guard = match FACTORY.read() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let factory = match guard.as_ref() {
+            Some(f) => f,
+            None => return ERR_NOT_INITIALIZED,
+        };
 
-    // Write encrypted data (raw bytes, matching Go cobhan.BytesToBuffer)
-    let result = cobhan_bytes_to_buffer(&drr.data, output_encrypted_data_ptr);
-    if result != ERR_NONE {
-        return result;
-    }
+        // Read inputs
+        let partition_id = match cobhan_buffer_borrow_str(partition_id_ptr) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
 
-    // Write encrypted key (raw bytes, matching Go cobhan.BytesToBuffer)
-    let result = cobhan_bytes_to_buffer(&key_record.encrypted_key, output_encrypted_key_ptr);
-    if result != ERR_NONE {
-        return result;
-    }
+        let data = match cobhan_buffer_borrow(data_ptr) {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
 
-    // Write created timestamp (raw i64 at offset 0, matching Go cobhan.Int64ToBuffer)
-    let result = cobhan_int64_to_buffer(key_record.created, output_created_ptr);
-    if result != ERR_NONE {
-        return result;
-    }
+        // Get session and encrypt
+        let session = factory.get_session(partition_id);
+        let drr = match session.encrypt(data) {
+            Ok(d) => d,
+            Err(e) => {
+                log::error!("Encrypt failed: {e:#}");
+                return ERR_ENCRYPT_FAILED;
+            }
+        };
 
-    // Write parent key metadata
-    if let Some(parent_meta) = &key_record.parent_key_meta {
-        // Write parent key ID (matching Go cobhan.StringToBuffer)
-        let result = cobhan_string_to_buffer(&parent_meta.id, output_parent_key_id_ptr);
+        // Extract components from DataRowRecord
+        let key_record = match drr.key {
+            Some(k) => k,
+            None => return ERR_ENCRYPT_FAILED,
+        };
+
+        // Write encrypted data (raw bytes, matching Go cobhan.BytesToBuffer)
+        let result = cobhan_bytes_to_buffer(&drr.data, output_encrypted_data_ptr);
         if result != ERR_NONE {
             return result;
         }
 
-        let result = cobhan_int64_to_buffer(parent_meta.created, output_parent_key_created_ptr);
+        // Write encrypted key (raw bytes, matching Go cobhan.BytesToBuffer)
+        let result = cobhan_bytes_to_buffer(&key_record.encrypted_key, output_encrypted_key_ptr);
         if result != ERR_NONE {
             return result;
         }
-    } else {
-        // No parent key - write empty string and 0 timestamp
-        cobhan_buffer_set_length(output_parent_key_id_ptr, 0);
-        let result = cobhan_int64_to_buffer(0, output_parent_key_created_ptr);
+
+        // Write created timestamp (raw i64 at offset 0, matching Go cobhan.Int64ToBuffer)
+        let result = cobhan_int64_to_buffer(key_record.created, output_created_ptr);
         if result != ERR_NONE {
             return result;
+        }
+
+        // Write parent key metadata
+        if let Some(parent_meta) = &key_record.parent_key_meta {
+            // Write parent key ID (matching Go cobhan.StringToBuffer)
+            let result = cobhan_string_to_buffer(&parent_meta.id, output_parent_key_id_ptr);
+            if result != ERR_NONE {
+                return result;
+            }
+
+            let result = cobhan_int64_to_buffer(parent_meta.created, output_parent_key_created_ptr);
+            if result != ERR_NONE {
+                return result;
+            }
+        } else {
+            // No parent key - write empty string and 0 timestamp
+            cobhan_buffer_set_length(output_parent_key_id_ptr, 0);
+            let result = cobhan_int64_to_buffer(0, output_parent_key_created_ptr);
+            if result != ERR_NONE {
+                return result;
+            }
+        }
+
+        ERR_NONE
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            log::error!("internal panic in Encrypt");
+            ERR_PANIC
         }
     }
-
-    ERR_NONE
 }
 
 /// Decrypts data from components.
@@ -649,77 +684,85 @@ pub unsafe extern "C" fn Decrypt(
     parent_key_created: i64,
     output_decrypted_data_ptr: *mut c_char,
 ) -> i32 {
-    // Validate inputs
-    if partition_id_ptr.is_null()
-        || encrypted_data_ptr.is_null()
-        || encrypted_key_ptr.is_null()
-        || parent_key_id_ptr.is_null()
-        || output_decrypted_data_ptr.is_null()
-    {
-        return ERR_NULL_PTR;
-    }
-
-    // Get factory
-    let guard = match FACTORY.read() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let factory = match guard.as_ref() {
-        Some(f) => f,
-        None => return ERR_NOT_INITIALIZED,
-    };
-
-    // Read inputs - raw bytes, no base64 (matching Go cobhan.BufferToBytes)
-    let partition_id = match cobhan_buffer_borrow_str(partition_id_ptr) {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-
-    let encrypted_data = match cobhan_buffer_to_bytes(encrypted_data_ptr) {
-        Ok(d) => d,
-        Err(e) => return e,
-    };
-
-    let encrypted_key = match cobhan_buffer_to_bytes(encrypted_key_ptr) {
-        Ok(k) => k,
-        Err(e) => return e,
-    };
-
-    let parent_key_id = match cobhan_buffer_to_string(parent_key_id_ptr) {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-
-    // Build parent key metadata
-    let parent_key_meta = Some(KeyMeta {
-        id: parent_key_id,
-        created: parent_key_created,
-    });
-
-    // Build DataRowRecord
-    let drr = DataRowRecord {
-        data: encrypted_data,
-        key: Some(EnvelopeKeyRecord {
-            revoked: None,
-            id: String::new(),
-            created,
-            encrypted_key,
-            parent_key_meta,
-        }),
-    };
-
-    // Get session and decrypt
-    let session = factory.get_session(partition_id);
-    let plaintext = match session.decrypt(drr) {
-        Ok(p) => p,
-        Err(e) => {
-            log::error!("Decrypt failed: {e:#}");
-            return ERR_DECRYPT_FAILED;
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // Validate inputs
+        if partition_id_ptr.is_null()
+            || encrypted_data_ptr.is_null()
+            || encrypted_key_ptr.is_null()
+            || parent_key_id_ptr.is_null()
+            || output_decrypted_data_ptr.is_null()
+        {
+            return ERR_NULL_PTR;
         }
-    };
 
-    // Write output
-    cobhan_bytes_to_buffer(&plaintext, output_decrypted_data_ptr)
+        // Get factory
+        let guard = match FACTORY.read() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let factory = match guard.as_ref() {
+            Some(f) => f,
+            None => return ERR_NOT_INITIALIZED,
+        };
+
+        // Read inputs - raw bytes, no base64 (matching Go cobhan.BufferToBytes)
+        let partition_id = match cobhan_buffer_borrow_str(partition_id_ptr) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+
+        let encrypted_data = match cobhan_buffer_to_bytes(encrypted_data_ptr) {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+
+        let encrypted_key = match cobhan_buffer_to_bytes(encrypted_key_ptr) {
+            Ok(k) => k,
+            Err(e) => return e,
+        };
+
+        let parent_key_id = match cobhan_buffer_to_string(parent_key_id_ptr) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+
+        // Build parent key metadata
+        let parent_key_meta = Some(KeyMeta {
+            id: parent_key_id,
+            created: parent_key_created,
+        });
+
+        // Build DataRowRecord
+        let drr = DataRowRecord {
+            data: encrypted_data,
+            key: Some(EnvelopeKeyRecord {
+                revoked: None,
+                id: String::new(),
+                created,
+                encrypted_key,
+                parent_key_meta,
+            }),
+        };
+
+        // Get session and decrypt
+        let session = factory.get_session(partition_id);
+        let plaintext = match session.decrypt(drr) {
+            Ok(p) => p,
+            Err(e) => {
+                log::error!("Decrypt failed: {e:#}");
+                return ERR_DECRYPT_FAILED;
+            }
+        };
+
+        // Write output
+        cobhan_bytes_to_buffer(&plaintext, output_decrypted_data_ptr)
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            log::error!("internal panic in Decrypt");
+            ERR_PANIC
+        }
+    }
 }
 
 /// Encrypts data and returns the result as a JSON DataRowRecord.
@@ -742,45 +785,53 @@ pub unsafe extern "C" fn EncryptToJson(
     data_ptr: *const c_char,
     json_ptr: *mut c_char,
 ) -> i32 {
-    // Validate inputs
-    if partition_id_ptr.is_null() || data_ptr.is_null() || json_ptr.is_null() {
-        return ERR_NULL_PTR;
-    }
-
-    // Get factory
-    let guard = match FACTORY.read() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let factory = match guard.as_ref() {
-        Some(f) => f,
-        None => return ERR_NOT_INITIALIZED,
-    };
-
-    // Read inputs
-    let partition_id = match cobhan_buffer_borrow_str(partition_id_ptr) {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-
-    let data = match cobhan_buffer_borrow(data_ptr) {
-        Ok(d) => d,
-        Err(e) => return e,
-    };
-
-    // Get session and encrypt
-    let session = factory.get_session(partition_id);
-    let drr = match session.encrypt(data) {
-        Ok(d) => d,
-        Err(e) => {
-            log::error!("EncryptToJson failed: {e:#}");
-            return ERR_ENCRYPT_FAILED;
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // Validate inputs
+        if partition_id_ptr.is_null() || data_ptr.is_null() || json_ptr.is_null() {
+            return ERR_NULL_PTR;
         }
-    };
 
-    // Serialize using hand-written serializer (avoids serde overhead)
-    let json = drr.to_json_fast();
-    cobhan_bytes_to_buffer(json.as_bytes(), json_ptr)
+        // Get factory
+        let guard = match FACTORY.read() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let factory = match guard.as_ref() {
+            Some(f) => f,
+            None => return ERR_NOT_INITIALIZED,
+        };
+
+        // Read inputs
+        let partition_id = match cobhan_buffer_borrow_str(partition_id_ptr) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+
+        let data = match cobhan_buffer_borrow(data_ptr) {
+            Ok(d) => d,
+            Err(e) => return e,
+        };
+
+        // Get session and encrypt
+        let session = factory.get_session(partition_id);
+        let drr = match session.encrypt(data) {
+            Ok(d) => d,
+            Err(e) => {
+                log::error!("EncryptToJson failed: {e:#}");
+                return ERR_ENCRYPT_FAILED;
+            }
+        };
+
+        // Serialize using hand-written serializer (avoids serde overhead)
+        let json = drr.to_json_fast();
+        cobhan_bytes_to_buffer(json.as_bytes(), json_ptr)
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            log::error!("internal panic in EncryptToJson");
+            ERR_PANIC
+        }
+    }
 }
 
 /// Decrypts data from a JSON DataRowRecord.
@@ -803,48 +854,56 @@ pub unsafe extern "C" fn DecryptFromJson(
     json_ptr: *const c_char,
     data_ptr: *mut c_char,
 ) -> i32 {
-    // Validate inputs
-    if partition_id_ptr.is_null() || json_ptr.is_null() || data_ptr.is_null() {
-        return ERR_NULL_PTR;
-    }
-
-    // Get factory
-    let guard = match FACTORY.read() {
-        Ok(g) => g,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let factory = match guard.as_ref() {
-        Some(f) => f,
-        None => return ERR_NOT_INITIALIZED,
-    };
-
-    // Read inputs
-    let partition_id = match cobhan_buffer_borrow_str(partition_id_ptr) {
-        Ok(s) => s,
-        Err(e) => return e,
-    };
-
-    let json_bytes = match cobhan_buffer_borrow(json_ptr) {
-        Ok(b) => b,
-        Err(e) => return e,
-    };
-    let drr: DataRowRecord = match serde_json::from_slice(json_bytes) {
-        Ok(d) => d,
-        Err(_) => return ERR_JSON_DECODE_FAILED,
-    };
-
-    // Get session and decrypt
-    let session = factory.get_session(partition_id);
-    let plaintext = match session.decrypt(drr) {
-        Ok(p) => p,
-        Err(e) => {
-            log::error!("DecryptFromJson failed: {e:#}");
-            return ERR_DECRYPT_FAILED;
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // Validate inputs
+        if partition_id_ptr.is_null() || json_ptr.is_null() || data_ptr.is_null() {
+            return ERR_NULL_PTR;
         }
-    };
 
-    // Write output
-    cobhan_bytes_to_buffer(&plaintext, data_ptr)
+        // Get factory
+        let guard = match FACTORY.read() {
+            Ok(g) => g,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let factory = match guard.as_ref() {
+            Some(f) => f,
+            None => return ERR_NOT_INITIALIZED,
+        };
+
+        // Read inputs
+        let partition_id = match cobhan_buffer_borrow_str(partition_id_ptr) {
+            Ok(s) => s,
+            Err(e) => return e,
+        };
+
+        let json_bytes = match cobhan_buffer_borrow(json_ptr) {
+            Ok(b) => b,
+            Err(e) => return e,
+        };
+        let drr: DataRowRecord = match serde_json::from_slice(json_bytes) {
+            Ok(d) => d,
+            Err(_) => return ERR_JSON_DECODE_FAILED,
+        };
+
+        // Get session and decrypt
+        let session = factory.get_session(partition_id);
+        let plaintext = match session.decrypt(drr) {
+            Ok(p) => p,
+            Err(e) => {
+                log::error!("DecryptFromJson failed: {e:#}");
+                return ERR_DECRYPT_FAILED;
+            }
+        };
+
+        // Write output
+        cobhan_bytes_to_buffer(&plaintext, data_ptr)
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            log::error!("internal panic in DecryptFromJson");
+            ERR_PANIC
+        }
+    }
 }
 
 // ============================================================================

@@ -77,20 +77,31 @@ fn set_error(msg: impl Into<String>) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn asherah_last_error_message() -> *const c_char {
-    LAST_ERROR.with(|c| {
-        c.borrow()
-            .as_ref()
-            .map(|s| s.as_ptr())
-            .unwrap_or(std::ptr::null())
-    })
+    match std::panic::catch_unwind(|| {
+        LAST_ERROR.with(|c| {
+            c.borrow()
+                .as_ref()
+                .map(|s| s.as_ptr())
+                .unwrap_or(std::ptr::null())
+        })
+    }) {
+        Ok(result) => result,
+        Err(_) => std::ptr::null(),
+    }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn asherah_factory_new_from_env() -> *mut AsherahFactory {
-    match ael::builders::factory_from_env() {
+    match std::panic::catch_unwind(|| match ael::builders::factory_from_env() {
         Ok(f) => Box::into_raw(Box::new(AsherahFactory { inner: f })),
         Err(e) => {
             set_error(format!("{e:#}"));
+            null_mut()
+        }
+    }) {
+        Ok(result) => result,
+        Err(_) => {
+            set_error("internal panic in asherah_factory_new_from_env");
             null_mut()
         }
     }
@@ -108,10 +119,18 @@ fn factory_from_config_json(
 /// `config_json` must point to a valid, null-terminated UTF-8 string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_apply_config_json(config_json: *const c_char) -> c_int {
-    match factory_from_config_json(config_json) {
-        Ok((_factory, _applied)) => 0,
-        Err(e) => {
-            set_error(format!("{e:#}"));
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || match factory_from_config_json(config_json) {
+            Ok((_factory, _applied)) => 0,
+            Err(e) => {
+                set_error(format!("{e:#}"));
+                -1
+            }
+        },
+    )) {
+        Ok(result) => result,
+        Err(_) => {
+            set_error("internal panic in asherah_apply_config_json");
             -1
         }
     }
@@ -123,10 +142,18 @@ pub unsafe extern "C" fn asherah_apply_config_json(config_json: *const c_char) -
 pub unsafe extern "C" fn asherah_factory_new_with_config(
     config_json: *const c_char,
 ) -> *mut AsherahFactory {
-    match factory_from_config_json(config_json) {
-        Ok((factory, _applied)) => Box::into_raw(Box::new(AsherahFactory { inner: factory })),
-        Err(e) => {
-            set_error(format!("{e:#}"));
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || match factory_from_config_json(config_json) {
+            Ok((factory, _applied)) => Box::into_raw(Box::new(AsherahFactory { inner: factory })),
+            Err(e) => {
+                set_error(format!("{e:#}"));
+                null_mut()
+            }
+        },
+    )) {
+        Ok(result) => result,
+        Err(_) => {
+            set_error("internal panic in asherah_factory_new_with_config");
             null_mut()
         }
     }
@@ -136,10 +163,14 @@ pub unsafe extern "C" fn asherah_factory_new_with_config(
 /// `ptr` must be a factory pointer previously obtained from this module.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_factory_free(ptr: *mut AsherahFactory) {
-    if ptr.is_null() {
-        return;
-    }
-    drop(Box::from_raw(ptr));
+    drop(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || {
+            if ptr.is_null() {
+                return;
+            }
+            drop(Box::from_raw(ptr));
+        },
+    )));
 }
 
 /// # Safety
@@ -159,30 +190,42 @@ pub unsafe extern "C" fn asherah_factory_get_session(
     factory: *mut AsherahFactory,
     partition_id: *const c_char,
 ) -> *mut AsherahSession {
-    if factory.is_null() {
-        set_error("null factory");
-        return null_mut();
-    }
-    let f = &*factory;
-    let pid = match cstr_to_str(partition_id) {
-        Ok(s) => s,
-        Err(e) => {
-            set_error(format!("{e:#}"));
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if factory.is_null() {
+            set_error("null factory");
             return null_mut();
         }
-    };
-    let s = f.inner.get_session(pid);
-    Box::into_raw(Box::new(AsherahSession { inner: s }))
+        let f = &*factory;
+        let pid = match cstr_to_str(partition_id) {
+            Ok(s) => s,
+            Err(e) => {
+                set_error(format!("{e:#}"));
+                return null_mut();
+            }
+        };
+        let s = f.inner.get_session(pid);
+        Box::into_raw(Box::new(AsherahSession { inner: s }))
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            set_error("internal panic in asherah_factory_get_session");
+            null_mut()
+        }
+    }
 }
 
 /// # Safety
 /// `ptr` must be a session pointer previously obtained from this module.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_session_free(ptr: *mut AsherahSession) {
-    if ptr.is_null() {
-        return;
-    }
-    drop(Box::from_raw(ptr));
+    drop(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || {
+            if ptr.is_null() {
+                return;
+            }
+            drop(Box::from_raw(ptr));
+        },
+    )));
 }
 
 fn take_vec_into_buffer(v: Vec<u8>, out: *mut AsherahBuffer) -> c_int {
@@ -206,16 +249,20 @@ fn take_vec_into_buffer(v: Vec<u8>, out: *mut AsherahBuffer) -> c_int {
 /// `buf` must point to a valid `AsherahBuffer` initialized by this library.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_buffer_free(buf: *mut AsherahBuffer) {
-    if buf.is_null() {
-        return;
-    }
-    let b = &mut *buf;
-    if !b.data.is_null() && b.capacity > 0 {
-        drop(Vec::from_raw_parts(b.data, b.len, b.capacity));
-    }
-    b.data = null_mut();
-    b.len = 0;
-    b.capacity = 0;
+    drop(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        || {
+            if buf.is_null() {
+                return;
+            }
+            let b = &mut *buf;
+            if !b.data.is_null() && b.capacity > 0 {
+                drop(Vec::from_raw_parts(b.data, b.len, b.capacity));
+            }
+            b.data = null_mut();
+            b.len = 0;
+            b.capacity = 0;
+        },
+    )));
 }
 
 /// # Safety
@@ -227,27 +274,35 @@ pub unsafe extern "C" fn asherah_encrypt_to_json(
     len: usize,
     out: *mut AsherahBuffer,
 ) -> c_int {
-    if session.is_null() {
-        set_error("null session");
-        return -1;
-    }
-    if data.is_null() && len > 0 {
-        set_error("null data");
-        return -1;
-    }
-    let s = &*session;
-    let bytes = if data.is_null() {
-        &[]
-    } else {
-        std::slice::from_raw_parts(data, len)
-    };
-    match s.inner.encrypt(bytes) {
-        Ok(drr) => {
-            let v = drr.to_json_fast().into_bytes();
-            take_vec_into_buffer(v, out)
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if session.is_null() {
+            set_error("null session");
+            return -1;
         }
-        Err(e) => {
-            set_error(format!("{e:#}"));
+        if data.is_null() && len > 0 {
+            set_error("null data");
+            return -1;
+        }
+        let s = &*session;
+        let bytes = if data.is_null() {
+            &[]
+        } else {
+            std::slice::from_raw_parts(data, len)
+        };
+        match s.inner.encrypt(bytes) {
+            Ok(drr) => {
+                let v = drr.to_json_fast().into_bytes();
+                take_vec_into_buffer(v, out)
+            }
+            Err(e) => {
+                set_error(format!("{e:#}"));
+                -1
+            }
+        }
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            set_error("internal panic in asherah_encrypt_to_json");
             -1
         }
     }
@@ -262,30 +317,38 @@ pub unsafe extern "C" fn asherah_decrypt_from_json(
     len: usize,
     out: *mut AsherahBuffer,
 ) -> c_int {
-    if session.is_null() {
-        set_error("null session");
-        return -1;
-    }
-    if json.is_null() && len > 0 {
-        set_error("null json");
-        return -1;
-    }
-    let s = &*session;
-    let bytes = if json.is_null() {
-        &[]
-    } else {
-        std::slice::from_raw_parts(json, len)
-    };
-    match serde_json::from_slice::<ael::types::DataRowRecord>(bytes) {
-        Ok(drr) => match s.inner.decrypt(drr) {
-            Ok(pt) => take_vec_into_buffer(pt, out),
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if session.is_null() {
+            set_error("null session");
+            return -1;
+        }
+        if json.is_null() && len > 0 {
+            set_error("null json");
+            return -1;
+        }
+        let s = &*session;
+        let bytes = if json.is_null() {
+            &[]
+        } else {
+            std::slice::from_raw_parts(json, len)
+        };
+        match serde_json::from_slice::<ael::types::DataRowRecord>(bytes) {
+            Ok(drr) => match s.inner.decrypt(drr) {
+                Ok(pt) => take_vec_into_buffer(pt, out),
+                Err(e) => {
+                    set_error(format!("{e:#}"));
+                    -1
+                }
+            },
             Err(e) => {
                 set_error(format!("{e:#}"));
                 -1
             }
-        },
-        Err(e) => {
-            set_error(format!("{e:#}"));
+        }
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            set_error("internal panic in asherah_decrypt_from_json");
             -1
         }
     }
@@ -367,22 +430,30 @@ pub unsafe extern "C" fn asherah_encrypt_to_json_async(
     callback: AsherahCompletionFn,
     user_data: *mut c_void,
 ) -> c_int {
-    if session.is_null() {
-        set_error("null session");
-        return -1;
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if session.is_null() {
+            set_error("null session");
+            return -1;
+        }
+        if data.is_null() && len > 0 {
+            set_error("null data");
+            return -1;
+        }
+        // Copy input data — the caller's buffer may not outlive the async task.
+        let input = if data.is_null() {
+            Vec::new()
+        } else {
+            std::slice::from_raw_parts(data, len).to_vec()
+        };
+        spawn_encrypt_async(AsyncContext::new(session, callback, user_data), input);
+        0
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            set_error("internal panic in asherah_encrypt_to_json_async");
+            -1
+        }
     }
-    if data.is_null() && len > 0 {
-        set_error("null data");
-        return -1;
-    }
-    // Copy input data — the caller's buffer may not outlive the async task.
-    let input = if data.is_null() {
-        Vec::new()
-    } else {
-        std::slice::from_raw_parts(data, len).to_vec()
-    };
-    spawn_encrypt_async(AsyncContext::new(session, callback, user_data), input);
-    0
 }
 
 fn spawn_encrypt_async(ctx: AsyncContext, input: Vec<u8>) {
@@ -446,19 +517,86 @@ pub unsafe extern "C" fn asherah_decrypt_from_json_async(
     callback: AsherahCompletionFn,
     user_data: *mut c_void,
 ) -> c_int {
-    if session.is_null() {
-        set_error("null session");
-        return -1;
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        if session.is_null() {
+            set_error("null session");
+            return -1;
+        }
+        if json.is_null() && len > 0 {
+            set_error("null json");
+            return -1;
+        }
+        let input = if json.is_null() {
+            Vec::new()
+        } else {
+            std::slice::from_raw_parts(json, len).to_vec()
+        };
+        spawn_decrypt_async(AsyncContext::new(session, callback, user_data), input);
+        0
+    })) {
+        Ok(result) => result,
+        Err(_) => {
+            set_error("internal panic in asherah_decrypt_from_json_async");
+            -1
+        }
     }
-    if json.is_null() && len > 0 {
-        set_error("null json");
-        return -1;
+}
+
+#[cfg(test)]
+#[allow(unsafe_code, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+    use std::ptr::null;
+
+    #[test]
+    fn null_factory_free_does_not_crash() {
+        unsafe { asherah_factory_free(null_mut()) };
     }
-    let input = if json.is_null() {
-        Vec::new()
-    } else {
-        std::slice::from_raw_parts(json, len).to_vec()
-    };
-    spawn_decrypt_async(AsyncContext::new(session, callback, user_data), input);
-    0
+
+    #[test]
+    fn null_session_free_does_not_crash() {
+        unsafe { asherah_session_free(null_mut()) };
+    }
+
+    #[test]
+    fn null_buffer_free_does_not_crash() {
+        unsafe { asherah_buffer_free(null_mut()) };
+    }
+
+    #[test]
+    fn null_factory_get_session_returns_null() {
+        let partition = CString::new("test").unwrap();
+        let result = unsafe { asherah_factory_get_session(null_mut(), partition.as_ptr()) };
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn encrypt_with_null_session_returns_error() {
+        let data = b"test";
+        let result =
+            unsafe { asherah_encrypt_to_json(null_mut(), data.as_ptr(), data.len(), null_mut()) };
+        assert!(result != 0);
+    }
+
+    #[test]
+    fn decrypt_with_null_session_returns_error() {
+        let json = b"{}";
+        let result =
+            unsafe { asherah_decrypt_from_json(null_mut(), json.as_ptr(), json.len(), null_mut()) };
+        assert!(result != 0);
+    }
+
+    #[test]
+    fn invalid_config_returns_null_factory() {
+        let bad = CString::new("not json").unwrap();
+        let result = unsafe { asherah_factory_new_with_config(bad.as_ptr()) };
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn null_config_returns_null_factory() {
+        let result = unsafe { asherah_factory_new_with_config(null()) };
+        assert!(result.is_null());
+    }
 }

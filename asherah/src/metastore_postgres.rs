@@ -7,7 +7,7 @@ use postgres::Client;
 use std::sync::{Arc, Mutex};
 
 /// Default max open connections, matching our MySQL default.
-const DEFAULT_MAX_OPEN: usize = 10;
+const DEFAULT_MAX_OPEN: usize = 50;
 
 /// Default max idle connections, matching Go's database/sql MaxIdleConns default.
 const DEFAULT_MAX_IDLE: usize = 2;
@@ -166,54 +166,78 @@ impl PostgresMetastore {
     }
 
     fn client(&self) -> anyhow::Result<PgPooledClient> {
-        // Try to reuse an idle connection from the pool
-        {
-            let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
-            while let Some(client) = inner.conns.pop() {
-                if !client.is_closed() {
-                    inner.checked_out += 1;
-                    return Ok(PgPooledClient {
-                        pool: Arc::clone(&self.pool),
-                        client: Some(client),
-                    });
+        // Retry with backoff when the pool is exhausted, giving other threads
+        // time to return connections instead of failing immediately.
+        const MAX_RETRIES: u32 = 10;
+        const BASE_BACKOFF_MS: u64 = 5;
+
+        for attempt in 0..=MAX_RETRIES {
+            // Try to reuse an idle connection from the pool
+            {
+                let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
+                while let Some(client) = inner.conns.pop() {
+                    if !client.is_closed() {
+                        inner.checked_out += 1;
+                        return Ok(PgPooledClient {
+                            pool: Arc::clone(&self.pool),
+                            client: Some(client),
+                        });
+                    }
+                }
+
+                // No idle connection available — check if we can open a new one
+                let total = inner.checked_out + inner.conns.len();
+                if total >= self.pool.max_open {
+                    if attempt == MAX_RETRIES {
+                        anyhow::bail!(
+                            "Postgres connection pool exhausted after {} retries (max_open={})",
+                            MAX_RETRIES,
+                            self.pool.max_open
+                        );
+                    }
+                    // Drop the lock before sleeping
+                    drop(inner);
+                    let backoff = BASE_BACKOFF_MS * 2_u64.pow(attempt.min(6));
+                    log::warn!(
+                        "Postgres pool exhausted (attempt {}/{}), retrying in {}ms",
+                        attempt + 1,
+                        MAX_RETRIES,
+                        backoff
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(backoff));
+                    continue;
+                }
+                inner.checked_out += 1;
+            }
+
+            // Create a new connection (outside the lock)
+            let client = connect_client(&self.pool.url).map_err(|e| {
+                // Decrement checked_out since we failed to create the connection
+                let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
+                inner.checked_out -= 1;
+                log::error!("Postgres connection failed: {e:#}");
+                e
+            })?;
+
+            // Apply replica read consistency on new connections
+            let mut pooled = PgPooledClient {
+                pool: Arc::clone(&self.pool),
+                client: Some(client),
+            };
+            if let Some(ref consistency) = self.pool.replica_consistency {
+                if let Err(e) = pooled.batch_execute(&format!(
+                    "SET apg_write_forward.consistency_mode = '{consistency}'"
+                )) {
+                    // pooled will be dropped, which decrements checked_out
+                    return Err(e.into());
                 }
             }
 
-            // No idle connection available — check if we can open a new one
-            let total = inner.checked_out + inner.conns.len();
-            if total >= self.pool.max_open {
-                anyhow::bail!(
-                    "Postgres connection pool exhausted (max_open={})",
-                    self.pool.max_open
-                );
-            }
-            inner.checked_out += 1;
+            return Ok(pooled);
         }
 
-        // Create a new connection (outside the lock)
-        let client = connect_client(&self.pool.url).map_err(|e| {
-            // Decrement checked_out since we failed to create the connection
-            let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
-            inner.checked_out -= 1;
-            log::error!("Postgres connection failed: {e:#}");
-            e
-        })?;
-
-        // Apply replica read consistency on new connections
-        let mut pooled = PgPooledClient {
-            pool: Arc::clone(&self.pool),
-            client: Some(client),
-        };
-        if let Some(ref consistency) = self.pool.replica_consistency {
-            if let Err(e) = pooled.batch_execute(&format!(
-                "SET apg_write_forward.consistency_mode = '{consistency}'"
-            )) {
-                // pooled will be dropped, which decrements checked_out
-                return Err(e.into());
-            }
-        }
-
-        Ok(pooled)
+        // Unreachable — the loop either returns or bails on the last iteration
+        unreachable!()
     }
 }
 
