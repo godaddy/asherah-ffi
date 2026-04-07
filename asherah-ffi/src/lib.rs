@@ -541,3 +541,62 @@ pub unsafe extern "C" fn asherah_decrypt_from_json_async(
         }
     }
 }
+
+#[cfg(test)]
+#[allow(unsafe_code, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+    use std::ptr::null;
+
+    #[test]
+    fn null_factory_free_does_not_crash() {
+        unsafe { asherah_factory_free(null_mut()) };
+    }
+
+    #[test]
+    fn null_session_free_does_not_crash() {
+        unsafe { asherah_session_free(null_mut()) };
+    }
+
+    #[test]
+    fn null_buffer_free_does_not_crash() {
+        unsafe { asherah_buffer_free(null_mut()) };
+    }
+
+    #[test]
+    fn null_factory_get_session_returns_null() {
+        let partition = CString::new("test").unwrap();
+        let result = unsafe { asherah_factory_get_session(null_mut(), partition.as_ptr()) };
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn encrypt_with_null_session_returns_error() {
+        let data = b"test";
+        let result =
+            unsafe { asherah_encrypt_to_json(null_mut(), data.as_ptr(), data.len(), null_mut()) };
+        assert!(result != 0);
+    }
+
+    #[test]
+    fn decrypt_with_null_session_returns_error() {
+        let json = b"{}";
+        let result =
+            unsafe { asherah_decrypt_from_json(null_mut(), json.as_ptr(), json.len(), null_mut()) };
+        assert!(result != 0);
+    }
+
+    #[test]
+    fn invalid_config_returns_null_factory() {
+        let bad = CString::new("not json").unwrap();
+        let result = unsafe { asherah_factory_new_with_config(bad.as_ptr()) };
+        assert!(result.is_null());
+    }
+
+    #[test]
+    fn null_config_returns_null_factory() {
+        let result = unsafe { asherah_factory_new_with_config(null()) };
+        assert!(result.is_null());
+    }
+}

@@ -692,6 +692,51 @@ async fn mysql_concurrent_roundtrip() {
     .unwrap();
 }
 
+/// Verify that more threads than the old default pool size (10) can operate
+/// concurrently without deadlock or pool exhaustion. This locks in the fix
+/// for the thread-local connection pinning bug that caused silent process
+/// death in Sidekiq with 10+ threads.
+#[tokio::test]
+async fn mysql_pool_handles_high_concurrency() {
+    let url = match shared_mysql().await {
+        Some(v) => v,
+        None => return,
+    };
+
+    tokio::task::spawn_blocking(move || {
+        let store = connect_mysql_with_retries(&url);
+        let crypto = Arc::new(asherah::aead::AES256GCM::new());
+        let kms = Arc::new(asherah::kms::StaticKMS::new(crypto.clone(), vec![4_u8; 32]).unwrap());
+        let cfg = asherah::Config::new("pool-test-svc", "pool-test-prod");
+        let factory = Arc::new(asherah::api::new_session_factory(
+            cfg,
+            Arc::new(store),
+            kms,
+            crypto,
+        ));
+
+        // 20 threads — would have deadlocked with the old TL cache + pool_size=10
+        let mut handles = vec![];
+        for i in 0..20 {
+            let f = factory.clone();
+            handles.push(std::thread::spawn(move || {
+                for j in 0..5 {
+                    let session = f.get_session(&format!("pool-test-{i}"));
+                    let msg = format!("pool test {i}-{j}");
+                    let drr = session.encrypt(msg.as_bytes()).unwrap();
+                    let out = session.decrypt(drr).unwrap();
+                    assert_eq!(out, msg.as_bytes());
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+    })
+    .await
+    .unwrap();
+}
+
 /// Concurrent encrypt/decrypt against Postgres-backed SessionFactory.
 #[tokio::test]
 async fn postgres_concurrent_roundtrip() {
