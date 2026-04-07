@@ -9,7 +9,7 @@ import (
     "sync"
     "testing"
 
-    asherah "github.com/godaddy/asherah-go"
+    asherah "github.com/godaddy/asherah-ffi/asherah-go"
 )
 
 func TestEncryptDecryptRoundTrip(t *testing.T) {

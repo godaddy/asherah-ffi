@@ -10,7 +10,7 @@
 // This package uses purego for FFI (no CGO required) and loads a prebuilt
 // native library at runtime. Install the native library with:
 //
-//	go run github.com/godaddy/asherah-go/cmd/install-native@latest
+//	go run github.com/godaddy/asherah-ffi/asherah-go/cmd/install-native@latest
 //
 // # Quick Start
 //

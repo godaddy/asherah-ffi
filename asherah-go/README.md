@@ -7,7 +7,7 @@ Go bindings for [Asherah](https://github.com/godaddy/asherah-ffi) envelope encry
 ### 1. Add the module
 
 ```bash
-go get github.com/godaddy/asherah-go
+go get github.com/godaddy/asherah-ffi/asherah-go
 ```
 
 ### 2. Install the native library
@@ -15,7 +15,7 @@ go get github.com/godaddy/asherah-go
 The binding requires the prebuilt native library for your platform. Run this from your project directory:
 
 ```bash
-go run github.com/godaddy/asherah-go/cmd/install-native@latest
+go run github.com/godaddy/asherah-ffi/asherah-go/cmd/install-native@latest
 ```
 
 This downloads the correct binary for your OS/architecture from [GitHub Releases](https://github.com/godaddy/asherah-ffi/releases), verifies the SHA256 checksum, and places it in the current working directory. The loader finds it automatically -- no environment variables needed.
@@ -55,7 +55,7 @@ import (
     "fmt"
     "log"
 
-    asherah "github.com/godaddy/asherah-go"
+    asherah "github.com/godaddy/asherah-ffi/asherah-go"
 )
 
 func main() {
@@ -187,7 +187,7 @@ This replaces `github.com/godaddy/asherah/go/appencryption`. Key differences:
 
 Migration steps:
 
-1. Replace import `github.com/godaddy/asherah/go/appencryption` with `github.com/godaddy/asherah-go`
+1. Replace import `github.com/godaddy/asherah/go/appencryption` with `github.com/godaddy/asherah-ffi/asherah-go`
 2. Install the native library via `install-native`
 3. Either:
    - Use the new `Factory`/`Session` API directly, or

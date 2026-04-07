@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	asherah "github.com/godaddy/asherah-go"
+	asherah "github.com/godaddy/asherah-ffi/asherah-go"
 )
 
 var sizes = []int{64, 1024, 8192}

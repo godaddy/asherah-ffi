@@ -28,7 +28,7 @@ record.
 | .NET | `GoDaddy.Asherah.AppEncryption` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages) | [README](asherah-dotnet/) |
 | Java | `com.godaddy.asherah:appencryption` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages) | [README](asherah-java/) |
 | Ruby | `asherah` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages) | [README](asherah-ruby/) |
-| Go | [`github.com/godaddy/asherah-go`](https://pkg.go.dev/github.com/godaddy/asherah-go) | [README](asherah-go/) |
+| Go | [`github.com/godaddy/asherah-ffi/asherah-go`](https://pkg.go.dev/github.com/godaddy/asherah-ffi/asherah-go) | [README](asherah-go/) |
 
 ## Platform Support
 
