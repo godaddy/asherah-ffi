@@ -61,7 +61,7 @@
     "test:unit": "node test/roundtrip.js",
     "test:e2e": "node test/e2e-consumer.js",
     "test:e2e-aws": "node test/e2e-aws.js",
-    "test:bun": "bun test/roundtrip.js"
+    "test:bun": "bun test/roundtrip.js && bun test/e2e-consumer.js && bun test/bun-compat.js"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0"

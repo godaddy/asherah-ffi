@@ -601,7 +601,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        binding: [python, node, ruby, go, java, dotnet]
+        binding: [python, node, bun, ruby, go, java, dotnet]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Download all x86_64 binding artifacts
@@ -611,9 +611,13 @@ jobs:
           path: ${{ github.workspace }}/ci-artifacts
           merge-multiple: true
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6
-        if: matrix.binding == 'node'
+        if: matrix.binding == 'node' || matrix.binding == 'bun'
         with:
           node-version: 20
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        if: matrix.binding == 'bun'
+        with:
+          bun-version: latest
       - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
         if: matrix.binding == 'dotnet'
         with:
@@ -685,7 +689,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        binding: [python, node, ruby, go, java, dotnet]
+        binding: [python, node, bun, ruby, go, java, dotnet]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Restore workspace caches
