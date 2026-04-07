@@ -43,13 +43,13 @@ fn bench_encrypt(c: &mut Criterion) {
     // Warmup: populate SK cache
     {
         let session = factory.get_session("bench-warmup");
-        let _ = session.encrypt(&[0u8; 64]).expect("warmup encrypt");
+        let _ = session.encrypt(&[0_u8; 64]).expect("warmup encrypt");
         session.close().ok();
     }
 
     let mut group = c.benchmark_group("native_encrypt");
     for size in sizes {
-        let mut data = vec![0u8; size];
+        let mut data = vec![0_u8; size];
         rng.fill_bytes(&mut data);
 
         if cold {
@@ -90,7 +90,10 @@ fn bench_encrypt(c: &mut Criterion) {
             // Verify round-trip
             let drr = session.encrypt(&data).expect("verify encrypt");
             let decrypted = session.decrypt(drr).expect("verify decrypt");
-            assert_eq!(decrypted, data, "round-trip verification failed for {size}B");
+            assert_eq!(
+                decrypted, data,
+                "round-trip verification failed for {size}B"
+            );
 
             group.bench_function(BenchmarkId::new("rust_native", size), |b| {
                 b.iter(|| black_box(session.encrypt(black_box(&data)).expect("encrypt")))
@@ -111,7 +114,7 @@ fn bench_decrypt(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("native_decrypt");
     for size in sizes {
-        let mut data = vec![0u8; size];
+        let mut data = vec![0_u8; size];
         rng.fill_bytes(&mut data);
 
         if cold {
@@ -179,14 +182,16 @@ fn bench_decrypt_from_json(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("native_decrypt_from_json");
     for size in sizes {
-        let mut data = vec![0u8; size];
+        let mut data = vec![0_u8; size];
         rng.fill_bytes(&mut data);
         let drr = session.encrypt(&data).expect("encrypt for decrypt setup");
         let json = drr.to_json_fast();
 
         let drr_parsed: asherah::types::DataRowRecord =
             serde_json::from_str(&json).expect("verify json parse");
-        let decrypted = session.decrypt(drr_parsed).expect("verify decrypt from json");
+        let decrypted = session
+            .decrypt(drr_parsed)
+            .expect("verify decrypt from json");
         assert_eq!(
             decrypted, data,
             "JSON decrypt verification failed for {size}B"
@@ -217,13 +222,13 @@ fn bench_encrypt_async(c: &mut Criterion) {
     // Warmup: populate SK cache
     {
         let session = factory.get_session("bench-warmup-async");
-        let _ = session.encrypt(&[0u8; 64]).expect("warmup encrypt");
+        let _ = session.encrypt(&[0_u8; 64]).expect("warmup encrypt");
         session.close().ok();
     }
 
     let mut group = c.benchmark_group("native_encrypt_async");
     for size in sizes {
-        let mut data = vec![0u8; size];
+        let mut data = vec![0_u8; size];
         rng.fill_bytes(&mut data);
 
         let data = data.as_slice();
@@ -258,12 +263,20 @@ fn bench_encrypt_async(c: &mut Criterion) {
             let session = factory.get_session("bench-partition-async");
             let drr = session.encrypt(data).expect("verify encrypt");
             let decrypted = session.decrypt(drr).expect("verify decrypt");
-            assert_eq!(decrypted, data, "async round-trip verification failed for {size}B");
+            assert_eq!(
+                decrypted, data,
+                "async round-trip verification failed for {size}B"
+            );
 
             let session_ref = &session;
             group.bench_function(BenchmarkId::new("rust_native_async", size), |b| {
                 b.to_async(&rt).iter(|| async move {
-                    black_box(session_ref.encrypt_async(black_box(data)).await.expect("encrypt async"))
+                    black_box(
+                        session_ref
+                            .encrypt_async(black_box(data))
+                            .await
+                            .expect("encrypt async"),
+                    )
                 })
             });
             session.close().ok();
@@ -283,7 +296,7 @@ fn bench_decrypt_async(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("native_decrypt_async");
     for size in sizes {
-        let mut data = vec![0u8; size];
+        let mut data = vec![0_u8; size];
         rng.fill_bytes(&mut data);
 
         if cold {
@@ -321,14 +334,22 @@ fn bench_decrypt_async(c: &mut Criterion) {
             let session = factory.get_session("bench-partition-async");
             let drr = session.encrypt(&data).expect("encrypt for decrypt setup");
             let decrypted = session.decrypt(drr.clone()).expect("verify decrypt");
-            assert_eq!(decrypted, data, "async decrypt verification failed for {size}B");
+            assert_eq!(
+                decrypted, data,
+                "async decrypt verification failed for {size}B"
+            );
 
             let session_ref = &session;
             group.bench_function(BenchmarkId::new("rust_native_async", size), |b| {
                 b.to_async(&rt).iter(|| {
                     let drr_clone = drr.clone();
                     async move {
-                        black_box(session_ref.decrypt_async(black_box(drr_clone)).await.expect("decrypt async"))
+                        black_box(
+                            session_ref
+                                .decrypt_async(black_box(drr_clone))
+                                .await
+                                .expect("decrypt async"),
+                        )
                     }
                 })
             });
@@ -339,5 +360,12 @@ fn bench_decrypt_async(c: &mut Criterion) {
     factory.close().ok();
 }
 
-criterion_group!(benches, bench_encrypt, bench_decrypt, bench_decrypt_from_json, bench_encrypt_async, bench_decrypt_async);
+criterion_group!(
+    benches,
+    bench_encrypt,
+    bench_decrypt,
+    bench_decrypt_from_json,
+    bench_encrypt_async,
+    bench_decrypt_async
+);
 criterion_main!(benches);

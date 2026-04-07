@@ -1,5 +1,3 @@
-#![allow(unsafe_code)]
-
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use libloading::Library;
 use once_cell::sync::Lazy;
@@ -286,7 +284,7 @@ fn bench_encrypt(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("ffi_encrypt");
     for size in sizes {
-        let mut data = vec![0u8; size];
+        let mut data = vec![0_u8; size];
         rng.fill_bytes(&mut data);
 
         // Verify round-trip correctness before benchmarking
@@ -322,14 +320,22 @@ fn bench_decrypt(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("ffi_decrypt");
     for size in sizes {
-        let mut data = vec![0u8; size];
+        let mut data = vec![0_u8; size];
         rng.fill_bytes(&mut data);
         let rust_cipher = rust_ctx.encrypt(&data);
         let go_cipher = go_ctx.encrypt(&data);
 
         // Verify decrypt correctness before benchmarking
-        assert_eq!(rust_ctx.decrypt(&rust_cipher), data, "Rust FFI decrypt failed for {size}B");
-        assert_eq!(go_ctx.decrypt(&go_cipher), data, "Go FFI decrypt failed for {size}B");
+        assert_eq!(
+            rust_ctx.decrypt(&rust_cipher),
+            data,
+            "Rust FFI decrypt failed for {size}B"
+        );
+        assert_eq!(
+            go_ctx.decrypt(&go_cipher),
+            data,
+            "Go FFI decrypt failed for {size}B"
+        );
 
         group.bench_function(BenchmarkId::new("rust_ffi", rust_cipher.len()), |b| {
             b.iter(|| {
