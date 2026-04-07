@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	asherah "github.com/godaddy/asherah-go"
+	asherah "github.com/godaddy/asherah-ffi/asherah-go"
 )
 
 func Example() {

@@ -1,4 +1,4 @@
-module github.com/godaddy/asherah-go
+module github.com/godaddy/asherah-ffi/asherah-go
 
 go 1.23
 

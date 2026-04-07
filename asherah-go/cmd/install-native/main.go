@@ -2,9 +2,9 @@
 //
 // Usage:
 //
-//	go run github.com/godaddy/asherah-go/cmd/install-native@latest
-//	go run github.com/godaddy/asherah-go/cmd/install-native@latest --version v0.6.24
-//	go run github.com/godaddy/asherah-go/cmd/install-native@latest --output /usr/local/lib
+//	go run github.com/godaddy/asherah-ffi/asherah-go/cmd/install-native@latest
+//	go run github.com/godaddy/asherah-ffi/asherah-go/cmd/install-native@latest --version v0.6.24
+//	go run github.com/godaddy/asherah-ffi/asherah-go/cmd/install-native@latest --output /usr/local/lib
 package main
 
 import (

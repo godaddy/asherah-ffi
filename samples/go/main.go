@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	asherah "github.com/godaddy/asherah-go"
+	asherah "github.com/godaddy/asherah-ffi/asherah-go"
 )
 
 func main() {
