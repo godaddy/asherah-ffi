@@ -160,7 +160,7 @@ do_unit() {
     # Workspace feature unification enables mysql/postgres/dynamodb from binding
     # crates, which causes cargo to compile and include integration_containers.
     run_test "cargo test (workspace, excl. asherah core)" \
-        cargo test --workspace --exclude asherah --exclude asherah-node
+        cargo test --workspace --exclude asherah --exclude asherah-node --exclude asherah-bench
 
     # Run asherah crate unit tests: lib tests + all test files except
     # integration_containers (Docker) and cucumber (BDD framework).
