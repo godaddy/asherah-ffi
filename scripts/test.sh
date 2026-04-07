@@ -15,7 +15,7 @@ Usage: $(basename "$0") <mode> [options]
 Modes:
   --unit          Rust unit tests (cargo test --workspace)
   --integration   Integration tests with MySQL, Postgres, DynamoDB (Docker required)
-  --bindings      All language binding tests (Python, Node, Ruby, Go, Java, .NET)
+  --bindings      All language binding tests (Python, Node, Bun, Ruby, Go, Java, .NET)
   --interop       Cross-language interop tests
   --fuzz          Fuzz tests (requires cargo-fuzz + nightly; time-intensive)
   --sanitizers    Miri + AddressSanitizer + Valgrind
@@ -24,7 +24,7 @@ Modes:
   --all           Run everything (unit + integration + bindings + interop + fuzz + lint; includes time-intensive fuzz)
 
 Options:
-  --binding=NAME    Run only a specific binding test (python, node, ruby, go, java, dotnet)
+  --binding=NAME    Run only a specific binding test (python, node, bun, ruby, go, java, dotnet)
   --platform=ARCH   Target platform: x64, arm64 (default: auto-detect from uname -m)
   --fuzz-time=N     Fuzz duration per target in seconds (default: 30)
 
@@ -260,6 +260,15 @@ do_bindings() {
             run_test "Node.js" bash -c "cd asherah-node && npm test"
         else
             skip "Node.js tests (node not installed)"
+        fi
+    fi
+
+    # Bun (reuses the same native addon built for Node.js)
+    if [ "$binding" = "all" ] || [ "$binding" = "bun" ]; then
+        if command -v bun >/dev/null 2>&1; then
+            run_test "Bun" bash -c "cd asherah-node && npm run test:bun"
+        else
+            skip "Bun tests (bun not installed)"
         fi
     fi
 
