@@ -81,8 +81,11 @@ public class AsherahBenchmark {
 
     @Setup(Level.Trial)
     public void setup() {
-        System.setProperty("asherah.java.nativeLibraryPath",
-            System.getProperty("native.lib.path", "target/release"));
+        String existingPath = System.getProperty("asherah.java.nativeLibraryPath");
+        if (existingPath == null || existingPath.isBlank()) {
+            System.setProperty("asherah.java.nativeLibraryPath",
+                System.getProperty("native.lib.path", "target/release"));
+        }
 
         benchmarkMode = resolveMode();
         boolean enableSessionCaching = !benchmarkMode.equals("cold");
