@@ -26,7 +26,7 @@ struct SharedEnv {
 
 impl SharedEnv {
     fn new() -> Self {
-        let master_key = vec![0x22u8; 32];
+        let master_key = vec![0x22_u8; 32];
         let crypto = Arc::new(AES256GCM::new());
         let kms = Arc::new(StaticKMS::new(crypto.clone(), master_key).expect("kms"));
         let metastore = Arc::new(InMemoryMetastore::new());
@@ -60,7 +60,7 @@ fn bench_hot_decrypt(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("hot_cache_decrypt");
     for size in sizes {
-        let mut data = vec![0u8; size];
+        let mut data = vec![0_u8; size];
         rng.fill_bytes(&mut data);
         let drr = session.encrypt(&data).expect("encrypt");
 
@@ -94,7 +94,7 @@ fn bench_cold_decrypt(c: &mut Criterion) {
     // Pre-encrypt test data with factory A
     let mut test_data: Vec<(usize, Vec<u8>, asherah::types::DataRowRecord)> = Vec::new();
     for size in sizes {
-        let mut data = vec![0u8; size];
+        let mut data = vec![0_u8; size];
         rng.fill_bytes(&mut data);
         let drr = session_a.encrypt(&data).expect("encrypt");
 
@@ -104,7 +104,10 @@ fn bench_cold_decrypt(c: &mut Criterion) {
         let decrypted = session_b_verify
             .decrypt(drr.clone())
             .expect("cross-factory decrypt");
-        assert_eq!(decrypted, data, "cross-factory verification failed for {size}B");
+        assert_eq!(
+            decrypted, data,
+            "cross-factory verification failed for {size}B"
+        );
         session_b_verify.close().ok();
         factory_b_verify.close().ok();
 
@@ -118,8 +121,11 @@ fn bench_cold_decrypt(c: &mut Criterion) {
                 // Create a fresh factory + session each iteration = guaranteed cold cache
                 let factory_b = env.make_factory();
                 let session_b = factory_b.get_session("bench-partition");
-                let result =
-                    black_box(session_b.decrypt(black_box(drr.clone())).expect("cold decrypt"));
+                let result = black_box(
+                    session_b
+                        .decrypt(black_box(drr.clone()))
+                        .expect("cold decrypt"),
+                );
                 session_b.close().ok();
                 factory_b.close().ok();
                 result
@@ -146,7 +152,7 @@ fn bench_cold_decrypt_from_json(c: &mut Criterion) {
 
     let mut test_data: Vec<(usize, String)> = Vec::new();
     for size in sizes {
-        let mut data = vec![0u8; size];
+        let mut data = vec![0_u8; size];
         rng.fill_bytes(&mut data);
         let drr = session_a.encrypt(&data).expect("encrypt");
         let json = drr.to_json_fast();
@@ -161,8 +167,7 @@ fn bench_cold_decrypt_from_json(c: &mut Criterion) {
                 let session_b = factory_b.get_session("bench-partition");
                 let drr: asherah::types::DataRowRecord =
                     serde_json::from_str(black_box(json)).expect("json parse");
-                let result =
-                    black_box(session_b.decrypt(drr).expect("cold decrypt"));
+                let result = black_box(session_b.decrypt(drr).expect("cold decrypt"));
                 session_b.close().ok();
                 factory_b.close().ok();
                 result

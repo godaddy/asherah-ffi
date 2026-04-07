@@ -15,6 +15,7 @@ members = [
   "asherah-java",
   "asherah-config",
   "asherah-server",
+  "benchmarks/asherah-bench",
 ]
 exclude = ["samples/rust"]
 resolver = "2"

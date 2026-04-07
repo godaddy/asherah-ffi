@@ -68,7 +68,7 @@ fn build_go_wrapper(manifest: &Path) -> anyhow::Result<PathBuf> {
     let header_src = lib_path.with_extension("h");
     if header_src.exists() {
         let header_dst = out_dir.join("asherah_go_wrapper.h");
-        let _ = fs::copy(&header_src, header_dst);
+        drop(fs::copy(&header_src, header_dst));
     }
 
     Ok(lib_path)

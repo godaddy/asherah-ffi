@@ -32,7 +32,9 @@ static MYSQL: Lazy<MysqlEnv> = Lazy::new(|| {
     rt.block_on(async {
         let container = GenericImage::new("mysql", "8.1")
             .with_exposed_port(testcontainers::core::IntoContainerPort::tcp(3306))
-            .with_wait_for(testcontainers::core::WaitFor::message_on_stderr("port: 3306"))
+            .with_wait_for(testcontainers::core::WaitFor::message_on_stderr(
+                "port: 3306",
+            ))
             .with_env_var("MYSQL_DATABASE", "test")
             .with_env_var("MYSQL_ALLOW_EMPTY_PASSWORD", "yes")
             .with_startup_timeout(std::time::Duration::from_secs(120))
@@ -81,7 +83,13 @@ fn make_factory(url: &str) -> Factory {
     let metastore = Arc::new(MySqlMetastore::connect(url).expect("mysql connect"));
     let kms = Arc::new(StaticKMS::new(crypto.clone(), master_key).expect("kms"));
     let cfg = Config::new("bench-svc", "bench-prod");
-    new_session_factory_with_options(cfg, metastore, kms, crypto, &[FactoryOption::Metrics(false)])
+    new_session_factory_with_options(
+        cfg,
+        metastore,
+        kms,
+        crypto,
+        &[FactoryOption::Metrics(false)],
+    )
 }
 
 /// Hot cache: same factory, same session — measures steady-state with MySQL.
@@ -189,7 +197,13 @@ fn bench_mysql_warm_sk(c: &mut Criterion) {
     let kms = Arc::new(StaticKMS::new(crypto.clone(), master_key).expect("kms"));
     let mut cfg = Config::new("bench-svc", "bench-prod");
     cfg.policy.intermediate_key_cache_max_size = 1;
-    let factory = new_session_factory_with_options(cfg, metastore, kms, crypto, &[FactoryOption::Metrics(false)]);
+    let factory = new_session_factory_with_options(
+        cfg,
+        metastore,
+        kms,
+        crypto,
+        &[FactoryOption::Metrics(false)],
+    );
 
     // Pre-encrypt data on many distinct partitions so each decrypt is a new IK
     let mut rng = StdRng::seed_from_u64(99999);
@@ -228,10 +242,15 @@ fn bench_mysql_warm_sk(c: &mut Criterion) {
                 for _ in 0..iters {
                     // Each iteration uses a different partition, guaranteeing
                     // an IK cache miss (cache max=1, always evicted by prior).
-                    let idx = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % entries.len();
+                    let idx =
+                        counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % entries.len();
                     let (ref partition, ref drr) = entries[idx];
                     let session = factory.get_session(partition);
-                    black_box(session.decrypt(black_box(drr.clone())).expect("warm-sk decrypt"));
+                    black_box(
+                        session
+                            .decrypt(black_box(drr.clone()))
+                            .expect("warm-sk decrypt"),
+                    );
                     session.close().ok();
                 }
                 start.elapsed()
