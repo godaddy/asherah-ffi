@@ -22,7 +22,14 @@ fn shared_library_extension() -> &'static str {
 }
 
 fn build_rust_ffi(workspace: &Path) -> anyhow::Result<PathBuf> {
-    if env::var_os("ASHERAH_BENCH_SKIP_BUILD").is_none() {
+    let lib_name = format!("libasherah_ffi.{}", shared_library_extension());
+    let lib_path = workspace.join("target").join("release").join(&lib_name);
+
+    // Skip nested cargo build when:
+    // - ASHERAH_BENCH_SKIP_BUILD is set (benchmark.sh pre-builds), or
+    // - the library already exists (avoids deadlock when built as workspace member,
+    //   since the parent cargo holds the target directory lock)
+    if env::var_os("ASHERAH_BENCH_SKIP_BUILD").is_none() && !lib_path.exists() {
         let status = Command::new("cargo")
             .arg("build")
             .arg("--release")
@@ -35,8 +42,7 @@ fn build_rust_ffi(workspace: &Path) -> anyhow::Result<PathBuf> {
             anyhow::bail!("failed to build asherah-ffi");
         }
     }
-    let lib_name = format!("libasherah_ffi.{}", shared_library_extension());
-    Ok(workspace.join("target").join("release").join(lib_name))
+    Ok(lib_path)
 }
 
 fn build_go_wrapper(manifest: &Path) -> anyhow::Result<PathBuf> {
