@@ -6,8 +6,8 @@ use anyhow::Context;
 use postgres::Client;
 use std::sync::{Arc, Mutex};
 
-/// Default max open connections, matching our MySQL default.
-const DEFAULT_MAX_OPEN: usize = 50;
+/// Default max open connections — 0 means unlimited, matching Go's `database/sql`.
+const DEFAULT_MAX_OPEN: usize = 0;
 
 /// Default max idle connections, matching Go's database/sql MaxIdleConns default.
 const DEFAULT_MAX_IDLE: usize = 2;
@@ -145,11 +145,20 @@ impl PostgresMetastore {
             Err(_) => None,
         };
 
-        let max_open = std::env::var("ASHERAH_POOL_SIZE")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
+        fn env_usize(key: &str) -> Option<usize> {
+            std::env::var(key).ok().and_then(|v| v.parse().ok())
+        }
+        // ASHERAH_POOL_MAX_OPEN takes precedence; fall back to legacy ASHERAH_POOL_SIZE
+        let max_open = env_usize("ASHERAH_POOL_MAX_OPEN")
+            .or_else(|| env_usize("ASHERAH_POOL_SIZE"))
             .unwrap_or(DEFAULT_MAX_OPEN);
-        let max_idle = DEFAULT_MAX_IDLE.min(max_open);
+        let max_idle = env_usize("ASHERAH_POOL_MAX_IDLE").unwrap_or(DEFAULT_MAX_IDLE);
+        // Don't let max_idle exceed max_open (when max_open is bounded)
+        let max_idle = if max_open > 0 {
+            max_idle.min(max_open)
+        } else {
+            max_idle
+        };
 
         Ok(Self {
             pool: Arc::new(PgPool {
@@ -186,8 +195,9 @@ impl PostgresMetastore {
                 }
 
                 // No idle connection available — check if we can open a new one
+                // max_open == 0 means unlimited (matching Go's database/sql)
                 let total = inner.checked_out + inner.conns.len();
-                if total >= self.pool.max_open {
+                if self.pool.max_open > 0 && total >= self.pool.max_open {
                     if attempt == MAX_RETRIES {
                         anyhow::bail!(
                             "Postgres connection pool exhausted after {} retries (max_open={})",

@@ -68,6 +68,24 @@ pub struct ConfigOptions {
     #[serde(rename = "EnableCanaries")]
     pub enable_canaries: Option<bool>,
 
+    // --- Connection Pool ---
+    /// Maximum number of open database connections (0 = unlimited).
+    /// Alias for ASHERAH_POOL_SIZE. Env: ASHERAH_POOL_MAX_OPEN
+    #[serde(rename = "PoolMaxOpen")]
+    pub pool_max_open: Option<usize>,
+    /// Maximum number of idle connections to retain (default: 2).
+    /// Env: ASHERAH_POOL_MAX_IDLE
+    #[serde(rename = "PoolMaxIdle")]
+    pub pool_max_idle: Option<usize>,
+    /// Maximum lifetime of a connection in seconds (0 = unlimited).
+    /// Env: ASHERAH_POOL_MAX_LIFETIME
+    #[serde(rename = "PoolMaxLifetime")]
+    pub pool_max_lifetime: Option<u64>,
+    /// Maximum time in seconds a connection can sit idle (0 = unlimited).
+    /// Env: ASHERAH_POOL_MAX_IDLE_TIME
+    #[serde(rename = "PoolMaxIdleTime")]
+    pub pool_max_idle_time: Option<u64>,
+
     // --- KMS: AWS ---
     /// AWS KMS key ID or ARN (single-region mode).
     #[serde(rename = "KmsKeyId")]
@@ -139,6 +157,18 @@ fn set_env_opt_i64(key: &str, value: Option<i64>) {
 }
 
 fn set_env_opt_u32(key: &str, value: Option<u32>) {
+    if let Some(v) = value {
+        std::env::set_var(key, v.to_string());
+    }
+}
+
+fn set_env_opt_usize(key: &str, value: Option<usize>) {
+    if let Some(v) = value {
+        std::env::set_var(key, v.to_string());
+    }
+}
+
+fn set_env_opt_u64(key: &str, value: Option<u64>) {
     if let Some(v) = value {
         std::env::set_var(key, v.to_string());
     }
@@ -294,6 +324,12 @@ impl ConfigOptions {
         set_env_opt_str("VAULT_K8S_TOKEN_PATH", self.vault_k8s_token_path.as_deref());
         set_env_opt_str("VAULT_TRANSIT_KEY", self.vault_transit_key.as_deref());
         set_env_opt_str("VAULT_TRANSIT_MOUNT", self.vault_transit_mount.as_deref());
+
+        // Connection pool configuration
+        set_env_opt_usize("ASHERAH_POOL_MAX_OPEN", self.pool_max_open);
+        set_env_opt_usize("ASHERAH_POOL_MAX_IDLE", self.pool_max_idle);
+        set_env_opt_u64("ASHERAH_POOL_MAX_LIFETIME", self.pool_max_lifetime);
+        set_env_opt_u64("ASHERAH_POOL_MAX_IDLE_TIME", self.pool_max_idle_time);
 
         let verbose = self.verbose.unwrap_or(false);
         if verbose {
