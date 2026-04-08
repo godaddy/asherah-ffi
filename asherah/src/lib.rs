@@ -45,6 +45,8 @@ pub mod metastore_sqlite;
 pub mod metrics;
 pub mod partition;
 pub mod policy;
+#[cfg(feature = "mysql")]
+pub mod pool_mysql;
 pub mod session;
 pub mod session_cache;
 pub mod store;

@@ -1,11 +1,12 @@
 use async_trait::async_trait;
 
+use crate::pool_mysql::{self, ManagedPool, PoolConfig};
 use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
 use anyhow::Context;
 use mysql::prelude::Queryable;
-use mysql::{Opts, OptsBuilder, Pool, PoolConstraints, PoolOpts, PooledConn, SslOpts};
 use std::fmt::Write;
+use std::sync::Arc;
 
 /// Convert Unix epoch seconds to a "YYYY-MM-DD HH:MM:SS" UTC datetime string.
 ///
@@ -45,86 +46,33 @@ fn epoch_to_utc_datetime(epoch: i64) -> String {
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
 pub struct MySqlMetastore {
-    pool: Pool,
+    pool: Arc<ManagedPool>,
 }
 
 impl MySqlMetastore {
     pub fn connect(url: &str) -> anyhow::Result<Self> {
-        let opts: Opts = url.try_into()?;
+        let opts = pool_mysql::build_opts(url)?;
 
-        // Only override MySQL default pool (min=10, max=100) with saner defaults
-        // (min=1, max=50). If the user explicitly set pool_min/pool_max in their
-        // connection URL, those will differ from defaults and we respect them.
-        let constraints = opts.get_pool_opts().constraints();
-        let need_pool_defaults = constraints.min() == PoolConstraints::DEFAULT.min()
-            && constraints.max() == PoolConstraints::DEFAULT.max();
+        let max_open = std::env::var("ASHERAH_POOL_SIZE")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(50);
 
-        let mut builder = OptsBuilder::from_opts(opts);
+        let config = PoolConfig {
+            max_open,
+            ..Default::default()
+        };
 
-        // Apply TLS configuration from MYSQL_TLS_MODE env var.
-        // Values match Go go-sql-driver/mysql `tls` parameter:
-        //   "skip-verify" → TLS required, skip certificate verification
-        //   "true"        → TLS required with certificate verification
-        //   "false"       → TLS disabled (explicit)
-        //   "preferred"   → TLS required with verification (best-effort mapping)
-        if let Ok(tls_mode) = std::env::var("MYSQL_TLS_MODE") {
-            match tls_mode.as_str() {
-                "skip-verify" => {
-                    builder = builder.ssl_opts(Some(
-                        SslOpts::default()
-                            .with_danger_accept_invalid_certs(true)
-                            .with_danger_skip_domain_validation(true),
-                    ));
-                }
-                "false" => {
-                    builder = builder.ssl_opts(None::<SslOpts>);
-                }
-                // "true", "preferred", or any other value → require TLS with verification
-                _ => {
-                    builder = builder.ssl_opts(Some(SslOpts::default()));
-                }
-            }
-        }
+        let pool = ManagedPool::new(opts, config);
 
-        // Aurora MySQL write forwarding: set replica read consistency on each connection
-        if let Ok(consistency) = std::env::var("REPLICA_READ_CONSISTENCY") {
-            match consistency.as_str() {
-                "eventual" | "global" | "session" => {
-                    builder = builder.init(vec![format!(
-                        "SET aurora_replica_read_consistency = '{consistency}'"
-                    )]);
-                }
-                _ => {
-                    anyhow::bail!(
-                        "invalid REPLICA_READ_CONSISTENCY value: '{}' (expected eventual, global, or session)",
-                        consistency
-                    );
-                }
-            }
-        }
+        // Fail-fast: validate connectivity at setup time
+        pool.validate()?;
 
-        if need_pool_defaults {
-            // min=1 validates the connection at setup (fail-fast on bad URL/credentials)
-            // and keeps one warm connection ready. Max defaults to 50, configurable via
-            // ASHERAH_POOL_SIZE.
-            let max_pool = std::env::var("ASHERAH_POOL_SIZE")
-                .ok()
-                .and_then(|v| v.parse::<usize>().ok())
-                .unwrap_or(50);
-            builder = builder.pool_opts(PoolOpts::default().with_constraints(
-                PoolConstraints::new(1, max_pool.max(1)).expect("valid: min=1 <= max>=1"),
-            ));
-        }
-
-        let pool = Pool::new(builder)?;
         Ok(Self { pool })
     }
 
-    fn conn(&self) -> anyhow::Result<PooledConn> {
-        self.pool.get_conn().map_err(|e| {
-            log::error!("MySQL connection pool error: {e:#}");
-            anyhow::anyhow!("MySQL connection failed: {e}")
-        })
+    fn conn(&self) -> anyhow::Result<pool_mysql::ManagedConn> {
+        self.pool.get_conn()
     }
 }
 
