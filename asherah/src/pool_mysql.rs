@@ -18,8 +18,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
-/// Default max open connections.
-const DEFAULT_MAX_OPEN: usize = 50;
+/// Default max open connections — 0 means unlimited, matching Go's `database/sql`.
+const DEFAULT_MAX_OPEN: usize = 0;
 
 /// Default max idle connections — matches Go's `database/sql` default.
 const DEFAULT_MAX_IDLE: usize = 2;
@@ -38,6 +38,7 @@ struct IdleConn {
 #[derive(Clone, Debug)]
 pub struct PoolConfig {
     /// Maximum number of open connections (checked-out + idle).
+    /// 0 means unlimited, matching Go's `database/sql` default.
     pub max_open: usize,
     /// Maximum number of idle connections to retain. Surplus connections are
     /// closed on return rather than kept in the pool.
@@ -256,8 +257,9 @@ impl ManagedPool {
             }
 
             // No idle connections — can we create a new one?
+            // max_open == 0 means unlimited (matching Go's database/sql)
             let total = self.open_count.load(Ordering::Relaxed);
-            if total < self.config.max_open {
+            if self.config.max_open == 0 || total < self.config.max_open {
                 // Reserve a slot before dropping the lock
                 self.open_count.fetch_add(1, Ordering::Relaxed);
                 inner.checked_out += 1;
@@ -417,8 +419,7 @@ mod tests {
     fn config_defaults_match_go() {
         let cfg = PoolConfig::default();
         // Go defaults: MaxOpenConns=0 (unlimited), MaxIdleConns=2
-        // We default to 50 max_open (matching our existing behavior) and 2 max_idle
-        assert_eq!(cfg.max_open, 50);
+        assert_eq!(cfg.max_open, 0); // 0 = unlimited
         assert_eq!(cfg.max_idle, 2);
         assert!(cfg.max_lifetime.is_none());
         assert!(cfg.max_idle_time.is_none());

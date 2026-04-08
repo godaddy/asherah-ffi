@@ -53,15 +53,13 @@ impl MySqlMetastore {
     pub fn connect(url: &str) -> anyhow::Result<Self> {
         let opts = pool_mysql::build_opts(url)?;
 
-        let max_open = std::env::var("ASHERAH_POOL_SIZE")
+        let mut config = PoolConfig::default();
+        if let Some(max_open) = std::env::var("ASHERAH_POOL_SIZE")
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(50);
-
-        let config = PoolConfig {
-            max_open,
-            ..Default::default()
-        };
+        {
+            config.max_open = max_open;
+        }
 
         let pool = ManagedPool::new(opts, config);
 
