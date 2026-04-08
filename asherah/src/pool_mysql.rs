@@ -206,13 +206,7 @@ impl ManagedPool {
     /// Validate connectivity by creating and immediately returning one connection.
     /// Call after `new()` for fail-fast behavior.
     pub fn validate(self: &Arc<Self>) -> anyhow::Result<()> {
-        let conn = self.new_conn()?;
-        self.open_count.fetch_add(1, Ordering::Relaxed);
-        let managed = ManagedConn {
-            pool: Arc::clone(self),
-            conn: Some(conn),
-            created_at: Instant::now(),
-        };
+        let managed = self.get_conn()?;
         drop(managed); // Returns to pool
         Ok(())
     }
