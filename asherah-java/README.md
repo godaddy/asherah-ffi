@@ -189,6 +189,10 @@ All configuration is done through `AsherahConfig.builder()`:
 | `checkInterval` | `Long` | No | Key check interval in seconds |
 | `replicaReadConsistency` | `String` | No | DynamoDB read consistency |
 | `verbose` | `Boolean` | No | Enable verbose logging (default: false) |
+| `poolMaxOpen` | `Integer` | No | Max open DB connections (default: 0 = unlimited) |
+| `poolMaxIdle` | `Integer` | No | Max idle connections to retain (default: 2) |
+| `poolMaxLifetime` | `Long` | No | Max connection lifetime in seconds (default: 0 = unlimited) |
+| `poolMaxIdleTime` | `Long` | No | Max idle time per connection in seconds (default: 0 = unlimited) |
 
 You can also initialize from environment variables:
 

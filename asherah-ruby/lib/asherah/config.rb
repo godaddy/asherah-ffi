@@ -36,6 +36,11 @@ module Asherah
       expire_after: :ExpireAfter,
       check_interval: :CheckInterval,
       verbose: :Verbose,
+      # Connection pool
+      pool_max_open: :PoolMaxOpen,
+      pool_max_idle: :PoolMaxIdle,
+      pool_max_lifetime: :PoolMaxLifetime,
+      pool_max_idle_time: :PoolMaxIdleTime,
       # KMS: AWS
       kms_key_id: :KmsKeyId,
       # KMS: AWS Secrets Manager

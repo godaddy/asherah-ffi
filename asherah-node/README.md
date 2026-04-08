@@ -156,11 +156,19 @@ is auto-mapped for backward compatibility with the canonical Go-based package).
 | `enableCanaries` | `boolean` | | Enable canary key verification |
 | `disableZeroCopy` | `boolean` | | Disable zero-copy optimizations |
 | `nullDataCheck` | `boolean` | | Verify data is not null before decrypt |
+| `poolMaxOpen` | `number` | `0` | Max open DB connections (0 = unlimited) |
+| `poolMaxIdle` | `number` | `2` | Max idle connections to retain |
+| `poolMaxLifetime` | `number` | `0` | Max connection lifetime in seconds (0 = unlimited) |
+| `poolMaxIdleTime` | `number` | `0` | Max idle time per connection in seconds (0 = unlimited) |
 
 ### Environment Variables
 
 - `STATIC_MASTER_KEY_HEX` -- 64 hex chars (32 bytes) for static KMS. **Testing only.**
 - `ASHERAH_NODE_DEBUG=1` -- Enable native debug logging.
+- `ASHERAH_POOL_MAX_OPEN` -- Max open DB connections (overrides config).
+- `ASHERAH_POOL_MAX_IDLE` -- Max idle connections (overrides config).
+- `ASHERAH_POOL_MAX_LIFETIME` -- Max connection lifetime in seconds (overrides config).
+- `ASHERAH_POOL_MAX_IDLE_TIME` -- Max idle time per connection in seconds (overrides config).
 
 ## Performance
 

@@ -233,6 +233,10 @@ Benchmarked on Apple M4 Max, 64-byte payload, hot session cache:
 | `ExpireAfter` | `*int64` | No | Key expiration in milliseconds |
 | `CheckInterval` | `*int64` | No | Key check interval in milliseconds |
 | `Verbose` | `*bool` | No | Enable verbose logging |
+| `PoolMaxOpen` | `*int` | No | Max open DB connections (default: 0 = unlimited) |
+| `PoolMaxIdle` | `*int` | No | Max idle connections to retain (default: 2) |
+| `PoolMaxLifetime` | `*int64` | No | Max connection lifetime in seconds (default: 0 = unlimited) |
+| `PoolMaxIdleTime` | `*int64` | No | Max idle time per connection in seconds (default: 0 = unlimited) |
 
 You can also initialize from environment variables:
 

@@ -128,6 +128,10 @@ The `setup()` function accepts a dict (or any JSON-serializable object) with Pas
 | `EnableCanaries` | bool | No | Enable canary buffer overflow detection |
 | `NullDataCheck` | bool | No | Enable null data validation |
 | `DisableZeroCopy` | bool | No | Disable zero-copy optimization |
+| `PoolMaxOpen` | int | No | Max open DB connections (default: 0 = unlimited) |
+| `PoolMaxIdle` | int | No | Max idle connections to retain (default: 2) |
+| `PoolMaxLifetime` | int | No | Max connection lifetime in seconds (default: 0 = unlimited) |
+| `PoolMaxIdleTime` | int | No | Max idle time per connection in seconds (default: 0 = unlimited) |
 
 ### AWS KMS Example
 

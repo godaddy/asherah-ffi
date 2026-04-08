@@ -191,6 +191,12 @@ var config = AsherahConfig.CreateBuilder()
     .WithSessionCacheMaxSize(1000)
     .WithSessionCacheDuration(600)       // Seconds
 
+    // Connection pool (RDBMS metastore)
+    .WithPoolMaxOpen(10)                 // Max open connections (0 = unlimited)
+    .WithPoolMaxIdle(2)                  // Max idle connections (default: 2)
+    .WithPoolMaxLifetime(1800)           // Max connection lifetime in seconds (0 = unlimited)
+    .WithPoolMaxIdleTime(600)            // Max idle time in seconds (0 = unlimited)
+
     // Diagnostics
     .WithVerbose(true)
 
@@ -280,6 +286,10 @@ var config = AsherahConfig.CreateBuilder()
 | `WithSessionCacheMaxSize(int?)` | Max cached sessions |
 | `WithSessionCacheDuration(long?)` | Cache TTL in seconds |
 | `WithVerbose(bool?)` | Enable verbose logging |
+| `WithPoolMaxOpen(int?)` | Max open DB connections (default: 0 = unlimited) |
+| `WithPoolMaxIdle(int?)` | Max idle connections to retain (default: 2) |
+| `WithPoolMaxLifetime(long?)` | Max connection lifetime in seconds (default: 0 = unlimited) |
+| `WithPoolMaxIdleTime(long?)` | Max idle time per connection in seconds (default: 0 = unlimited) |
 | `Build()` | Build the immutable `AsherahConfig` |
 
 ## Building from Source

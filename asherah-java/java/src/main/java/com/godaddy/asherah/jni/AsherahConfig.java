@@ -24,6 +24,10 @@ public final class AsherahConfig {
   private final Boolean enableRegionSuffix;
   private final Boolean enableSessionCaching;
   private final Boolean verbose;
+  private final Integer poolMaxOpen;
+  private final Integer poolMaxIdle;
+  private final Long poolMaxLifetime;
+  private final Long poolMaxIdleTime;
   private final String kmsKeyId;
   private final String secretsManagerSecretId;
   private final String vaultAddr;
@@ -59,6 +63,10 @@ public final class AsherahConfig {
     this.enableRegionSuffix = builder.enableRegionSuffix;
     this.enableSessionCaching = builder.enableSessionCaching;
     this.verbose = builder.verbose;
+    this.poolMaxOpen = builder.poolMaxOpen;
+    this.poolMaxIdle = builder.poolMaxIdle;
+    this.poolMaxLifetime = builder.poolMaxLifetime;
+    this.poolMaxIdleTime = builder.poolMaxIdleTime;
     this.kmsKeyId = builder.kmsKeyId;
     this.secretsManagerSecretId = builder.secretsManagerSecretId;
     this.vaultAddr = builder.vaultAddr;
@@ -96,6 +104,10 @@ public final class AsherahConfig {
     json.put("EnableRegionSuffix", enableRegionSuffix);
     json.put("EnableSessionCaching", enableSessionCaching);
     json.put("Verbose", verbose);
+    json.put("PoolMaxOpen", poolMaxOpen);
+    json.put("PoolMaxIdle", poolMaxIdle);
+    json.put("PoolMaxLifetime", poolMaxLifetime);
+    json.put("PoolMaxIdleTime", poolMaxIdleTime);
     json.put("KmsKeyId", kmsKeyId);
     json.put("SecretsManagerSecretId", secretsManagerSecretId);
     json.put("VaultAddr", vaultAddr);
@@ -145,6 +157,10 @@ public final class AsherahConfig {
     private Boolean enableRegionSuffix;
     private Boolean enableSessionCaching = Boolean.TRUE;
     private Boolean verbose = Boolean.FALSE;
+    private Integer poolMaxOpen;
+    private Integer poolMaxIdle;
+    private Long poolMaxLifetime;
+    private Long poolMaxIdleTime;
     private String kmsKeyId;
     private String secretsManagerSecretId;
     private String vaultAddr;
@@ -254,6 +270,26 @@ public final class AsherahConfig {
 
     public Builder verbose(final Boolean value) {
       this.verbose = value;
+      return this;
+    }
+
+    public Builder poolMaxOpen(final Integer value) {
+      this.poolMaxOpen = value;
+      return this;
+    }
+
+    public Builder poolMaxIdle(final Integer value) {
+      this.poolMaxIdle = value;
+      return this;
+    }
+
+    public Builder poolMaxLifetime(final Long seconds) {
+      this.poolMaxLifetime = seconds;
+      return this;
+    }
+
+    public Builder poolMaxIdleTime(final Long seconds) {
+      this.poolMaxIdleTime = seconds;
       return this;
     }
 

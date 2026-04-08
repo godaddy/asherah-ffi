@@ -13,6 +13,9 @@ final class JsonUtil {
     boolean first = true;
     while (iter.hasNext()) {
       final Map.Entry<String, ?> entry = iter.next();
+      if (entry.getValue() == null) {
+        continue;
+      }
       if (!first) {
         sb.append(',');
       }
@@ -26,9 +29,7 @@ final class JsonUtil {
   }
 
   static void appendValue(final StringBuilder sb, final Object value) {
-    if (value == null) {
-      sb.append("null");
-    } else if (value instanceof String) {
+    if (value instanceof String) {
       appendEscapedString(sb, (String) value);
     } else if (value instanceof Number || value instanceof Boolean) {
       sb.append(value.toString());
