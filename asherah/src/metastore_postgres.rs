@@ -145,15 +145,19 @@ impl PostgresMetastore {
             Err(_) => None,
         };
 
-        let max_open = std::env::var("ASHERAH_POOL_SIZE")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
+        fn env_usize(key: &str) -> Option<usize> {
+            std::env::var(key).ok().and_then(|v| v.parse().ok())
+        }
+        // ASHERAH_POOL_MAX_OPEN takes precedence; fall back to legacy ASHERAH_POOL_SIZE
+        let max_open = env_usize("ASHERAH_POOL_MAX_OPEN")
+            .or_else(|| env_usize("ASHERAH_POOL_SIZE"))
             .unwrap_or(DEFAULT_MAX_OPEN);
-        // When max_open is 0 (unlimited), don't cap max_idle
-        let max_idle = if max_open == 0 {
-            DEFAULT_MAX_IDLE
+        let max_idle = env_usize("ASHERAH_POOL_MAX_IDLE").unwrap_or(DEFAULT_MAX_IDLE);
+        // Don't let max_idle exceed max_open (when max_open is bounded)
+        let max_idle = if max_open > 0 {
+            max_idle.min(max_open)
         } else {
-            DEFAULT_MAX_IDLE.min(max_open)
+            max_idle
         };
 
         Ok(Self {

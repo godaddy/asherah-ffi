@@ -78,6 +78,11 @@ pub struct AsherahConfig {
     pub disable_zero_copy: Option<bool>,
     pub null_data_check: Option<bool>,
     pub enable_canaries: Option<bool>,
+    // Connection pool
+    pub pool_max_open: Option<u32>,
+    pub pool_max_idle: Option<u32>,
+    pub pool_max_lifetime: Option<u32>,
+    pub pool_max_idle_time: Option<u32>,
     // KMS: AWS
     pub kms_key_id: Option<String>,
     // KMS: Secrets Manager
@@ -122,6 +127,10 @@ fn to_config_options(cfg: &AsherahConfig) -> asherah_config::ConfigOptions {
         disable_zero_copy: cfg.disable_zero_copy,
         null_data_check: cfg.null_data_check,
         enable_canaries: cfg.enable_canaries,
+        pool_max_open: cfg.pool_max_open.map(|v| v as usize),
+        pool_max_idle: cfg.pool_max_idle.map(|v| v as usize),
+        pool_max_lifetime: cfg.pool_max_lifetime.map(|v| v as u64),
+        pool_max_idle_time: cfg.pool_max_idle_time.map(|v| v as u64),
         kms_key_id: cfg.kms_key_id.clone(),
         secrets_manager_secret_id: cfg.secrets_manager_secret_id.clone(),
         vault_addr: cfg.vault_addr.clone(),

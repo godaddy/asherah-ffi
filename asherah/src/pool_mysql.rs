@@ -57,6 +57,52 @@ pub struct PoolConfig {
     pub reset_on_return: bool,
 }
 
+impl PoolConfig {
+    /// Build a `PoolConfig` from environment variables, falling back to defaults.
+    ///
+    /// Env vars:
+    /// - `ASHERAH_POOL_MAX_OPEN` (or legacy `ASHERAH_POOL_SIZE`): max open connections (0=unlimited)
+    /// - `ASHERAH_POOL_MAX_IDLE`: max idle connections retained
+    /// - `ASHERAH_POOL_MAX_LIFETIME`: max connection lifetime in seconds (0=unlimited)
+    /// - `ASHERAH_POOL_MAX_IDLE_TIME`: max idle time in seconds (0=unlimited)
+    pub fn from_env() -> Self {
+        let mut cfg = Self::default();
+
+        // ASHERAH_POOL_MAX_OPEN takes precedence; fall back to legacy ASHERAH_POOL_SIZE
+        if let Some(v) = Self::env_usize("ASHERAH_POOL_MAX_OPEN")
+            .or_else(|| Self::env_usize("ASHERAH_POOL_SIZE"))
+        {
+            cfg.max_open = v;
+        }
+        if let Some(v) = Self::env_usize("ASHERAH_POOL_MAX_IDLE") {
+            cfg.max_idle = v;
+        }
+        if let Some(v) = Self::env_secs("ASHERAH_POOL_MAX_LIFETIME") {
+            cfg.max_lifetime = v;
+        }
+        if let Some(v) = Self::env_secs("ASHERAH_POOL_MAX_IDLE_TIME") {
+            cfg.max_idle_time = v;
+        }
+        cfg
+    }
+
+    fn env_usize(key: &str) -> Option<usize> {
+        std::env::var(key).ok().and_then(|v| v.parse().ok())
+    }
+
+    /// Parse an env var as seconds → `Option<Duration>`. Returns `Some(None)`
+    /// for 0 (meaning "unlimited"), `Some(Some(dur))` for positive values,
+    /// and `None` when the env var is unset.
+    fn env_secs(key: &str) -> Option<Option<Duration>> {
+        let val: u64 = std::env::var(key).ok().and_then(|v| v.parse().ok())?;
+        if val == 0 {
+            Some(None) // explicit unlimited
+        } else {
+            Some(Some(Duration::from_secs(val)))
+        }
+    }
+}
+
 impl Default for PoolConfig {
     fn default() -> Self {
         Self {
