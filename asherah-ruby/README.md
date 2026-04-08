@@ -188,6 +188,10 @@ Keys are PascalCase strings matching the Asherah configuration format:
 | `ExpireAfter` | `Integer` | No | Key expiration in seconds |
 | `CheckInterval` | `Integer` | No | Key check interval in seconds |
 | `Verbose` | `Boolean` | No | Enable verbose logging (default: false) |
+| `PoolMaxOpen` | `Integer` | No | Max open DB connections (default: 0 = unlimited) |
+| `PoolMaxIdle` | `Integer` | No | Max idle connections to retain (default: 2) |
+| `PoolMaxLifetime` | `Integer` | No | Max connection lifetime in seconds (default: 0 = unlimited) |
+| `PoolMaxIdleTime` | `Integer` | No | Max idle time per connection in seconds (default: 0 = unlimited) |
 
 ### `configure` (block style)
 
@@ -212,6 +216,10 @@ Uses snake_case attribute accessors:
 | `expire_after` | `ExpireAfter` |
 | `check_interval` | `CheckInterval` |
 | `verbose` | `Verbose` |
+| `pool_max_open` | `PoolMaxOpen` |
+| `pool_max_idle` | `PoolMaxIdle` |
+| `pool_max_lifetime` | `PoolMaxLifetime` |
+| `pool_max_idle_time` | `PoolMaxIdleTime` |
 
 ## API Reference
 

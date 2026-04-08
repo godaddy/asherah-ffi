@@ -26,6 +26,10 @@ public sealed class AsherahConfig
     public bool? EnableRegionSuffix { get; }
     public bool? EnableSessionCaching { get; }
     public bool? Verbose { get; }
+    public int? PoolMaxOpen { get; }
+    public int? PoolMaxIdle { get; }
+    public long? PoolMaxLifetime { get; }
+    public long? PoolMaxIdleTime { get; }
     public string? KmsKeyId { get; }
     public string? SecretsManagerSecretId { get; }
     public string? VaultAddr { get; }
@@ -64,6 +68,10 @@ public sealed class AsherahConfig
         EnableRegionSuffix = builder.EnableRegionSuffix;
         EnableSessionCaching = builder.EnableSessionCaching;
         Verbose = builder.Verbose;
+        PoolMaxOpen = builder.PoolMaxOpen;
+        PoolMaxIdle = builder.PoolMaxIdle;
+        PoolMaxLifetime = builder.PoolMaxLifetime;
+        PoolMaxIdleTime = builder.PoolMaxIdleTime;
         KmsKeyId = builder.KmsKeyId;
         SecretsManagerSecretId = builder.SecretsManagerSecretId;
         VaultAddr = builder.VaultAddr;
@@ -105,6 +113,10 @@ public sealed class AsherahConfig
             ["EnableRegionSuffix"] = EnableRegionSuffix,
             ["EnableSessionCaching"] = EnableSessionCaching,
             ["Verbose"] = Verbose,
+            ["PoolMaxOpen"] = PoolMaxOpen,
+            ["PoolMaxIdle"] = PoolMaxIdle,
+            ["PoolMaxLifetime"] = PoolMaxLifetime,
+            ["PoolMaxIdleTime"] = PoolMaxIdleTime,
             ["KmsKeyId"] = KmsKeyId,
             ["SecretsManagerSecretId"] = SecretsManagerSecretId,
             ["VaultAddr"] = VaultAddr,
@@ -151,6 +163,10 @@ public sealed class AsherahConfig
         public bool? EnableRegionSuffix { get; private set; }
         public bool? EnableSessionCaching { get; private set; } = true;
         public bool? Verbose { get; private set; } = false;
+        public int? PoolMaxOpen { get; private set; }
+        public int? PoolMaxIdle { get; private set; }
+        public long? PoolMaxLifetime { get; private set; }
+        public long? PoolMaxIdleTime { get; private set; }
         public string? KmsKeyId { get; private set; }
         public string? SecretsManagerSecretId { get; private set; }
         public string? VaultAddr { get; private set; }
@@ -279,6 +295,30 @@ public sealed class AsherahConfig
         public Builder WithVerbose(bool? value)
         {
             Verbose = value;
+            return this;
+        }
+
+        public Builder WithPoolMaxOpen(int? value)
+        {
+            PoolMaxOpen = value;
+            return this;
+        }
+
+        public Builder WithPoolMaxIdle(int? value)
+        {
+            PoolMaxIdle = value;
+            return this;
+        }
+
+        public Builder WithPoolMaxLifetime(long? seconds)
+        {
+            PoolMaxLifetime = seconds;
+            return this;
+        }
+
+        public Builder WithPoolMaxIdleTime(long? seconds)
+        {
+            PoolMaxIdleTime = seconds;
             return this;
         }
 

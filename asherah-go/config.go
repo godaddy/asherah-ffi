@@ -23,6 +23,12 @@ type Config struct {
 	EnableSessionCaching   *bool             `json:"EnableSessionCaching,omitempty"`
 	Verbose                *bool             `json:"Verbose,omitempty"`
 
+	// Connection pool
+	PoolMaxOpen     *int    `json:"PoolMaxOpen,omitempty"`
+	PoolMaxIdle     *int    `json:"PoolMaxIdle,omitempty"`
+	PoolMaxLifetime *int64  `json:"PoolMaxLifetime,omitempty"`
+	PoolMaxIdleTime *int64  `json:"PoolMaxIdleTime,omitempty"`
+
 	// KMS: AWS
 	KmsKeyID *string `json:"KmsKeyId,omitempty"`
 
