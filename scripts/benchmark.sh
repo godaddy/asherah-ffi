@@ -398,6 +398,7 @@ if [ "$HAVE_RUST" = 1 ] && [ "$FFI_LIB_EXISTS" = 0 ]; then
 elif [ "$FFI_LIB_EXISTS" = 1 ]; then
     log "Using existing Rust FFI library in $FFI_LIB_DIR"
 fi
+export ASHERAH_BENCH_SKIP_BUILD=1
 export ASHERAH_DOTNET_NATIVE="$FFI_LIB_DIR"
 export ASHERAH_RUBY_NATIVE="$FFI_LIB_DIR"
 export ASHERAH_GO_NATIVE="$FFI_LIB_DIR"
