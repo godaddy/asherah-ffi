@@ -86,6 +86,11 @@ pub struct ConfigOptions {
     #[serde(rename = "PoolMaxIdleTime")]
     pub pool_max_idle_time: Option<u64>,
 
+    // --- KMS: Static ---
+    /// Hex-encoded static master key (for KMS=static).
+    #[serde(rename = "StaticMasterKeyHex")]
+    pub static_master_key_hex: Option<String>,
+
     // --- KMS: AWS ---
     /// AWS KMS key ID or ARN (single-region mode).
     #[serde(rename = "KmsKeyId")]
@@ -295,6 +300,12 @@ impl ConfigOptions {
         let kms = normalize_alias(kms_raw);
         std::env::set_var("KMS", &kms);
         set_env_opt_str("PREFERRED_REGION", self.preferred_region.as_deref());
+
+        // KMS: Static
+        set_env_opt_str(
+            "STATIC_MASTER_KEY_HEX",
+            self.static_master_key_hex.as_deref(),
+        );
 
         // KMS: AWS
         set_env_opt_str("KMS_KEY_ID", self.kms_key_id.as_deref());

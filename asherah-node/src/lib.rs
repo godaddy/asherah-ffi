@@ -118,6 +118,7 @@ fn to_config_options(cfg: &AsherahConfig) -> asherah_config::ConfigOptions {
         session_cache_max_size: cfg.session_cache_max_size,
         session_cache_duration: cfg.session_cache_duration,
         kms: cfg.kms.clone(),
+        static_master_key_hex: None,
         region_map: cfg.region_map.clone(),
         preferred_region: cfg.preferred_region.clone(),
         enable_region_suffix: cfg.enable_region_suffix,

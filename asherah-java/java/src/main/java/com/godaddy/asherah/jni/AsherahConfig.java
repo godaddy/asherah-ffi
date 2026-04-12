@@ -19,6 +19,7 @@ public final class AsherahConfig {
   private final Integer sessionCacheMaxSize;
   private final Long sessionCacheDuration;
   private final String kms;
+  private final String staticMasterKeyHex;
   private final Map<String, String> regionMap;
   private final String preferredRegion;
   private final Boolean enableRegionSuffix;
@@ -58,6 +59,7 @@ public final class AsherahConfig {
     this.sessionCacheMaxSize = builder.sessionCacheMaxSize;
     this.sessionCacheDuration = builder.sessionCacheDuration;
     this.kms = builder.kms;
+    this.staticMasterKeyHex = builder.staticMasterKeyHex;
     this.regionMap = builder.regionMap;
     this.preferredRegion = builder.preferredRegion;
     this.enableRegionSuffix = builder.enableRegionSuffix;
@@ -99,6 +101,7 @@ public final class AsherahConfig {
     json.put("SessionCacheMaxSize", sessionCacheMaxSize);
     json.put("SessionCacheDuration", sessionCacheDuration);
     json.put("KMS", kms);
+    json.put("StaticMasterKeyHex", staticMasterKeyHex);
     json.put("RegionMap", regionMap == null ? null : new LinkedHashMap<>(regionMap));
     json.put("PreferredRegion", preferredRegion);
     json.put("EnableRegionSuffix", enableRegionSuffix);
@@ -152,6 +155,7 @@ public final class AsherahConfig {
     private Integer sessionCacheMaxSize;
     private Long sessionCacheDuration;
     private String kms = "static";
+    private String staticMasterKeyHex;
     private Map<String, String> regionMap;
     private String preferredRegion;
     private Boolean enableRegionSuffix;
@@ -245,6 +249,11 @@ public final class AsherahConfig {
 
     public Builder kms(final String value) {
       this.kms = value;
+      return this;
+    }
+
+    public Builder staticMasterKeyHex(final String value) {
+      this.staticMasterKeyHex = value;
       return this;
     }
 

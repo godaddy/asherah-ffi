@@ -172,13 +172,8 @@ public class SessionFactory implements AutoCloseable {
                 cryptoPolicy.applyConfig(cb);
             }
 
-            // Apply KMS config. For StaticKMS, also set the env var.
-            if (kms instanceof StaticKeyManagementServiceImpl) {
-                final StaticKeyManagementServiceImpl staticKms = (StaticKeyManagementServiceImpl) kms;
-                kms.applyConfig(cb);
-                // Ensure the hex key is available as env var for the native layer
-                System.setProperty("STATIC_MASTER_KEY_HEX", staticKms.getMasterKeyHex());
-            } else if (kms != null) {
+            // Apply KMS config
+            if (kms != null) {
                 kms.applyConfig(cb);
             }
 
