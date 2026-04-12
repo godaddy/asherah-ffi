@@ -146,10 +146,15 @@ the rand 0.8.5 dependency) and `cargo update` (rand 0.9.2 → 0.9.3,
 
 ---
 
-## 4. Java Static Facade Global Lock (Finding 14)
+## 4. Java Static Facade Global Lock (Finding 14) — RESOLVED
 
 **Severity:** Medium  
 **Scope:** `asherah-java/java/src/main/java/com/godaddy/asherah/jni/Asherah.java`
+
+**Resolution:** Replaced `synchronized(LOCK)` with `ReentrantReadWriteLock`.
+Setup/shutdown take write lock (exclusive); encrypt/decrypt take read lock
+(concurrent). Session cache upgraded to `ConcurrentHashMap`. Async methods
+delegate to session-level async API instead of wrapping sync.
 
 ### Problem
 
