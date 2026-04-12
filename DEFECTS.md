@@ -1,0 +1,232 @@
+# Known Defects — Deferred Remediation
+
+Identified 2026-04-12 via full-repository code review. These issues require
+design-level changes and should be addressed in separate, focused PRs.
+
+---
+
+## 1. Async Session Lifetime Safety (Findings 9, 10, 11)
+
+**Severity:** High  
+**Scope:** `asherah-ffi/src/lib.rs`, `asherah-java/src/lib.rs`,
+`asherah-dotnet/src/GoDaddy.Asherah.AppEncryption/AsherahSession.cs`,
+`asherah-dotnet/src/GoDaddy.Asherah.AppEncryption/Asherah.cs`,
+`asherah-ruby/lib/asherah/session.rb`
+
+### Problem
+
+The async encrypt/decrypt paths across C FFI, Java JNI, .NET, and Ruby all
+store a raw native session pointer (cast to `usize`) and reconstruct a borrowed
+reference on a tokio worker thread. Nothing prevents the caller from freeing
+the session while async work is still in flight. If that happens, the tokio
+worker dereferences freed memory.
+
+Each binding has a slightly different manifestation:
+
+- **C FFI** (`asherah-ffi/src/lib.rs`): `AsyncContext` stores `session: usize`,
+  reconstructs `&AsherahSession` via `unsafe { &*(addr as *const _) }`. The doc
+  comment says the caller must keep the session alive, but the API does not
+  enforce it.
+- **Java JNI** (`asherah-java/src/lib.rs`): `encryptAsync` / `decryptAsync`
+  capture the session address as `usize`, spawn a tokio task, and later cast
+  back to `&Session`. `AsherahSession.close()` frees the handle independently.
+- **.NET** (`AsherahSession.cs`, `Asherah.cs`): Uses `DangerousGetHandle()` to
+  pass raw `IntPtr` into P/Invoke async calls without
+  `DangerousAddRef`/`DangerousRelease`. `Dispose()` / `Shutdown()` can free the
+  handle while the async callback is pending.
+- **Ruby** (`session.rb`): Passes `@pointer` to the C FFI async entry point,
+  then `close()` sets `@pointer = NULL` and calls `asherah_session_free` under a
+  mutex — but the mutex does not cover in-flight async operations.
+
+### Remediation Plan
+
+#### Phase 1: Ref-counted session handle in the FFI layer
+
+1. Add an `Arc<AsherahSession>` wrapper (e.g., `SharedSession`) that the FFI
+   layer owns. Each `asherah_factory_get_session` returns a pointer to a
+   `Box<SharedSession>` instead of a raw `AsherahSession`.
+2. Change `AsyncContext` to clone the `Arc` and move it into the spawned task.
+   The session lives as long as the last `Arc` reference, so freeing the
+   caller's handle cannot cause use-after-free while async work is outstanding.
+3. `asherah_session_free` drops the caller's `Arc` clone. If async work still
+   holds a clone, the underlying session is freed only when the last reference
+   drops.
+
+#### Phase 2: Update each binding wrapper
+
+- **Java**: Change `encryptAsync`/`decryptAsync` JNI functions to clone the
+  `Arc` before spawning. `closeSession` drops the JNI-side clone. No change to
+  the Java API surface.
+- **.NET**: Either pass `SafeSessionHandle` directly through marshalling (so the
+  CLR prevents premature release), or bracket every native call with
+  `DangerousAddRef`/`DangerousRelease`. Add a pending-operation counter so
+  `Dispose()` waits for or rejects in-flight work.
+- **Ruby**: Add an in-flight operation counter under `@close_mu`. `close()`
+  waits until the counter reaches zero before freeing.
+
+#### Phase 3: Tests
+
+- Per-binding stress test that starts async encrypt, immediately closes the
+  session from another thread, and asserts deterministic behavior (either
+  blocks, returns an error, or completes — no crash/ASAN violation).
+- C FFI direct test that races `asherah_session_free` against
+  `asherah_encrypt_to_json_async` callback completion.
+
+---
+
+## 2. Config Env Transport Leaks Stale State (Findings 7, 12)
+
+**Severity:** High  
+**Scope:** `asherah-config/src/lib.rs`
+
+### Problem
+
+`ConfigOptions::apply_env()` writes config values into process-global
+environment variables. The `set_env_opt_*` helpers intentionally preserve
+prior values when a field is `None`:
+
+```rust
+fn set_env_opt_i64(key: &str, value: Option<i64>) {
+    if let Some(v) = value {
+        std::env::set_var(key, v.to_string());
+    }
+    // None → no-op, prior value persists
+}
+```
+
+This means sequential factory builds in the same process can inherit stale
+settings from earlier builds. Affected variables include `EXPIRE_AFTER_SECS`,
+`REVOKE_CHECK_INTERVAL_SECS`, `SESSION_CACHE_DURATION_SECS`,
+`SESSION_CACHE_MAX_SIZE`, `PREFERRED_REGION`, `KMS_KEY_ID`,
+`SECRETS_MANAGER_SECRET_ID`, `VAULT_*`, and `ASHERAH_POOL_*`.
+
+The async variant (`factory_from_config_async`) compounds the problem: it
+releases the config lock before the async build completes, so concurrent async
+setup calls can read each other's env state.
+
+### Remediation Plan
+
+#### Phase 1: Short-term containment — clear on None
+
+Change all `set_env_opt_*` helpers so `None` removes the variable:
+
+```rust
+fn set_env_opt_i64(key: &str, value: Option<i64>) {
+    match value {
+        Some(v) => std::env::set_var(key, v.to_string()),
+        None => std::env::remove_var(key),
+    }
+}
+```
+
+This eliminates cross-build leakage. Update
+`test_optional_int_fields_none_preserves_env` to assert the new clearing
+behavior. Add a sequential two-config test that proves isolation.
+
+#### Phase 2: Structured config plumbing (eliminates env transport)
+
+1. Add a `ResolvedConfig` struct that holds all typed fields needed by
+   `factory_from_env()` / `factory_from_env_async()`.
+2. Change `factory_from_config()` to build factories directly from
+   `ResolvedConfig` without touching environment variables.
+3. Keep `factory_from_env()` as a separate entry point that reads env vars
+   once and converts to `ResolvedConfig`.
+4. Remove `apply_env()` entirely.
+
+This also fixes the async race (Finding 12) because there are no shared
+globals to contend over.
+
+#### Phase 3: Binding updates
+
+Each binding that calls `factory_from_config` / `factory_from_config_async`
+gets the fix for free. Verify with per-binding tests that call setup twice
+with different configs in the same process.
+
+---
+
+## 3. Transitive `rand` Advisory (Finding 13)
+
+**Severity:** Medium  
+**Scope:** `Cargo.lock` (transitive dependencies)
+
+### Problem
+
+`cargo audit` reports `RUSTSEC-2026-0097` against `rand` versions `0.8.5`,
+`0.9.2`, and `0.10.0`, entering through `tower`, `tonic`, `reqwest`,
+`tokio-postgres`, and other transitive chains. The advisory is
+warning-level (unsoundness with a custom logger using `rand::rng()`), not a
+hard vulnerability, and this project does not use custom loggers with rand.
+
+### Remediation Plan
+
+1. **Monitor upstream**: Track when `rand` releases a patched version and
+   when downstream crates (`tower`, `tonic`, `reqwest`, `tokio-postgres`)
+   update their dependency bounds.
+2. **Attempt `cargo update`**: Run `cargo update` periodically to pick up
+   patched transitive versions as they become available.
+3. **Document acceptance**: If the advisory must be temporarily accepted,
+   add an `audit.toml` with an explicit ignore entry and rationale:
+   ```toml
+   [[advisories.ignore]]
+   id = "RUSTSEC-2026-0097"
+   reason = "Conditional unsoundness with custom logger; not applicable to this project"
+   ```
+4. **CI gate**: Add `cargo audit` to CI so future advisories are caught
+   automatically rather than discovered ad-hoc.
+
+---
+
+## 4. Java Static Facade Global Lock (Finding 14)
+
+**Severity:** Medium  
+**Scope:** `asherah-java/java/src/main/java/com/godaddy/asherah/jni/Asherah.java`
+
+### Problem
+
+The static facade (`Asherah.encrypt`, `Asherah.decrypt`, and the static async
+variants) holds a single `synchronized (LOCK)` monitor for the entire
+operation — session acquire, encrypt/decrypt, session release. The async
+methods just wrap the sync methods in `CompletableFuture.supplyAsync(...)`, so
+all work is serialized regardless of partition.
+
+This is correct (no data races) but limits throughput: concurrent callers on
+different partitions queue behind the same lock, and async callers burn
+`ForkJoinPool.commonPool()` threads waiting for synchronized access.
+
+The lock also serves a safety purpose: it serializes `shutdown()` against
+session use, preventing use-after-free. Narrowing the lock without addressing
+this creates a lifetime race.
+
+### Remediation Plan
+
+**Prerequisite:** Fix the async session lifetime issue (Defect 1 above)
+first. Without ref-counted session handles, relaxing the lock is unsafe.
+
+#### Option A: Operation leasing (preferred)
+
+1. Replace the single `LOCK` with two concerns:
+   - A `ReadWriteLock` for setup/shutdown state (write-locked during
+     `setup()` and `shutdown()`, read-locked during operations).
+   - A `ConcurrentHashMap` for the session cache with per-partition
+     granularity.
+2. `encrypt`/`decrypt` acquire a read lock (non-exclusive), get/create a
+   session from the cache, perform the operation, and release.
+3. `shutdown()` acquires the write lock (exclusive), waits for in-flight
+   read locks to drain, then clears the cache and frees resources.
+4. The static async methods delegate to the session-level async API
+   (`session.encryptBytesAsync`) instead of wrapping sync methods.
+
+#### Option B: Steer users to session-level API
+
+If the static facade is intended as a convenience for low-concurrency use:
+
+1. Document the serialization behavior in the README and Javadoc.
+2. Add a throughput-focused example using the session-level API directly.
+3. Keep the static facade conservative and tested as-is.
+
+#### Tests
+
+- Concurrent throughput test: N threads on different partitions, measure
+  that operations overlap (not serialized).
+- Shutdown-during-operations test: start async work, call `shutdown()`,
+  assert defined behavior.
