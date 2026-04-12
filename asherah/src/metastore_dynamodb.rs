@@ -30,7 +30,13 @@ pub struct DynamoDbMetastore {
 }
 
 impl DynamoDbMetastore {
-    pub fn new(table: impl Into<String>, region: Option<String>) -> anyhow::Result<Self> {
+    /// Construct with explicit config — no env var reads.
+    pub fn new_with(
+        table: impl Into<String>,
+        region: Option<String>,
+        endpoint: Option<String>,
+        region_suffix: bool,
+    ) -> anyhow::Result<Self> {
         let rt = tokio::runtime::Runtime::new()?;
         let region_provider = if let Some(r) = region.clone() {
             RegionProviderChain::first_try(Region::new(r))
@@ -43,17 +49,13 @@ impl DynamoDbMetastore {
                 .load()
                 .await;
             let mut b = aws_sdk_dynamodb::config::Builder::from(&cfg);
-            if let Ok(url) = std::env::var("AWS_ENDPOINT_URL") {
+            if let Some(ref url) = endpoint {
                 b = b.endpoint_url(url);
             }
             b.build()
         });
         let client = Client::from_conf(conf.clone());
-        let with_suffix = std::env::var("DDB_REGION_SUFFIX")
-            .ok()
-            .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-            .unwrap_or(false);
-        let suffix = if with_suffix {
+        let suffix = if region_suffix {
             conf.region().map(|r| r.to_string())
         } else {
             None
@@ -72,16 +74,27 @@ impl DynamoDbMetastore {
             sdk_conf: conf,
             table: table_name,
             rt: Arc::new(rt),
-            region_suffix_enabled: with_suffix,
+            region_suffix_enabled: region_suffix,
             region_suffix: suffix,
         })
     }
 
-    /// Async constructor — loads AWS config on the caller's tokio runtime.
-    /// The private runtime is still created for sync callers (load/store).
-    pub async fn new_async(
+    /// Construct using env vars for endpoint/region_suffix (legacy entry point).
+    pub fn new(table: impl Into<String>, region: Option<String>) -> anyhow::Result<Self> {
+        let endpoint = std::env::var("AWS_ENDPOINT_URL").ok();
+        let with_suffix = std::env::var("DDB_REGION_SUFFIX")
+            .ok()
+            .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .unwrap_or(false);
+        Self::new_with(table, region, endpoint, with_suffix)
+    }
+
+    /// Async constructor with explicit config — no env var reads.
+    pub async fn new_with_async(
         table: impl Into<String>,
         region: Option<String>,
+        endpoint: Option<String>,
+        region_suffix: bool,
     ) -> anyhow::Result<Self> {
         let region_provider = if let Some(r) = region.clone() {
             RegionProviderChain::first_try(Region::new(r))
@@ -94,22 +107,15 @@ impl DynamoDbMetastore {
                 .load()
                 .await;
             let mut b = aws_sdk_dynamodb::config::Builder::from(&cfg);
-            if let Ok(url) = std::env::var("AWS_ENDPOINT_URL") {
+            if let Some(ref url) = endpoint {
                 b = b.endpoint_url(url);
             }
             b.build()
         };
         let client = Client::from_conf(conf.clone());
-        // Private runtime for sync callers — Runtime::new() is safe from a tokio
-        // worker (it creates the runtime without entering it).
         let rt = tokio::runtime::Runtime::new()?;
-        // Also create a sync client on the private runtime for sync callers
         let sync_client = Client::from_conf(conf.clone());
-        let with_suffix = std::env::var("DDB_REGION_SUFFIX")
-            .ok()
-            .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
-            .unwrap_or(false);
-        let suffix = if with_suffix {
+        let suffix = if region_suffix {
             conf.region().map(|r| r.to_string())
         } else {
             None
@@ -133,9 +139,22 @@ impl DynamoDbMetastore {
             sdk_conf: conf,
             table: table_name,
             rt: Arc::new(rt),
-            region_suffix_enabled: with_suffix,
+            region_suffix_enabled: region_suffix,
             region_suffix: suffix,
         })
+    }
+
+    /// Async constructor using env vars (legacy entry point).
+    pub async fn new_async(
+        table: impl Into<String>,
+        region: Option<String>,
+    ) -> anyhow::Result<Self> {
+        let endpoint = std::env::var("AWS_ENDPOINT_URL").ok();
+        let with_suffix = std::env::var("DDB_REGION_SUFFIX")
+            .ok()
+            .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            .unwrap_or(false);
+        Self::new_with_async(table, region, endpoint, with_suffix).await
     }
 
     /// Get the client for async operations. If we were constructed sync,

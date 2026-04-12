@@ -147,48 +147,7 @@ pub struct AppliedConfig {
     pub enable_canaries: bool,
 }
 
-fn set_env_opt_str(key: &str, value: Option<&str>) {
-    match value {
-        Some(v) if !v.is_empty() => std::env::set_var(key, v),
-        _ => std::env::remove_var(key),
-    }
-}
-
-fn set_env_opt_i64(key: &str, value: Option<i64>) {
-    match value {
-        Some(v) => std::env::set_var(key, v.to_string()),
-        None => std::env::remove_var(key),
-    }
-}
-
-fn set_env_opt_u32(key: &str, value: Option<u32>) {
-    match value {
-        Some(v) => std::env::set_var(key, v.to_string()),
-        None => std::env::remove_var(key),
-    }
-}
-
-fn set_env_opt_usize(key: &str, value: Option<usize>) {
-    match value {
-        Some(v) => std::env::set_var(key, v.to_string()),
-        None => std::env::remove_var(key),
-    }
-}
-
-fn set_env_opt_u64(key: &str, value: Option<u64>) {
-    match value {
-        Some(v) => std::env::set_var(key, v.to_string()),
-        None => std::env::remove_var(key),
-    }
-}
-
-fn set_env_opt_bool(key: &str, value: Option<bool>) {
-    match value {
-        Some(true) => std::env::set_var(key, "1"),
-        Some(false) => std::env::set_var(key, "0"),
-        None => std::env::remove_var(key),
-    }
-}
+use asherah::builders::{KmsConfig, MetastoreConfig, PolicyConfig, PoolConfig, ResolvedConfig};
 
 impl ConfigOptions {
     pub fn from_json(json: &str) -> Result<Self> {
@@ -196,8 +155,8 @@ impl ConfigOptions {
         Ok(cfg)
     }
 
-    pub fn apply_env(&self) -> Result<AppliedConfig> {
-        // Normalize legacy/debug aliases to supported values.
+    /// Resolve into a structured config — no env var reads or writes.
+    pub fn resolve(&self) -> Result<(ResolvedConfig, AppliedConfig)> {
         fn normalize_alias(value: &str) -> String {
             match value.to_lowercase().as_str() {
                 "test-debug-memory" => "memory".to_string(),
@@ -210,155 +169,136 @@ impl ConfigOptions {
         let service_name = self
             .service_name
             .as_ref()
-            .ok_or_else(|| anyhow!("ServiceName is required"))?;
+            .ok_or_else(|| anyhow!("ServiceName is required"))?
+            .clone();
         let product_id = self
             .product_id
             .as_ref()
-            .ok_or_else(|| anyhow!("ProductID is required"))?;
+            .ok_or_else(|| anyhow!("ProductID is required"))?
+            .clone();
         let metastore_raw = self
             .metastore
             .as_ref()
             .ok_or_else(|| anyhow!("Metastore is required"))?;
-        let metastore = normalize_alias(metastore_raw);
+        let metastore_kind = normalize_alias(metastore_raw);
 
-        set_env_opt_str("SERVICE_NAME", Some(service_name));
-        set_env_opt_str("PRODUCT_ID", Some(product_id));
+        let pool = PoolConfig {
+            max_open: self.pool_max_open,
+            max_idle: self.pool_max_idle,
+            max_lifetime_s: self.pool_max_lifetime,
+            max_idle_time_s: self.pool_max_idle_time,
+        };
 
-        set_env_opt_i64("EXPIRE_AFTER_SECS", self.expire_after);
-        set_env_opt_i64("REVOKE_CHECK_INTERVAL_SECS", self.check_interval);
-        set_env_opt_i64("SESSION_CACHE_DURATION_SECS", self.session_cache_duration);
-        set_env_opt_u32("SESSION_CACHE_MAX_SIZE", self.session_cache_max_size);
-        set_env_opt_str(
-            "REPLICA_READ_CONSISTENCY",
-            self.replica_read_consistency.as_deref(),
-        );
-
-        let enable_session_caching = self.enable_session_caching.unwrap_or(true);
-        set_env_opt_bool("SESSION_CACHE", Some(enable_session_caching));
-
-        std::env::set_var("Metastore", &metastore);
-        match metastore.as_str() {
-            "memory" => {
-                std::env::remove_var("SQLITE_PATH");
-                std::env::remove_var("POSTGRES_URL");
-                std::env::remove_var("MYSQL_URL");
-                std::env::remove_var("MYSQL_TLS_MODE");
-                std::env::remove_var("DDB_TABLE");
-            }
+        let metastore = match metastore_kind.as_str() {
+            "memory" => MetastoreConfig::Memory,
             "sqlite" => {
-                if let Some(conn) = &self.connection_string {
-                    std::env::set_var("SQLITE_PATH", normalize_sqlite_path(conn));
-                } else {
-                    return Err(anyhow!(
-                        "ConnectionString is required when Metastore is sqlite"
-                    ));
+                let conn = self.connection_string.as_ref().ok_or_else(|| {
+                    anyhow!("ConnectionString is required when Metastore is sqlite")
+                })?;
+                MetastoreConfig::Sqlite {
+                    path: normalize_sqlite_path(conn),
                 }
-                std::env::remove_var("POSTGRES_URL");
-                std::env::remove_var("MYSQL_URL");
-                std::env::remove_var("MYSQL_TLS_MODE");
-                std::env::remove_var("DDB_TABLE");
             }
             "rdbms" => {
-                if let Some(conn) = &self.connection_string {
-                    apply_rdbms_connection(conn, self.sql_metastore_db_type.as_deref())?;
-                } else {
-                    return Err(anyhow!(
-                        "ConnectionString is required when Metastore is rdbms"
-                    ));
-                }
-                std::env::remove_var("DDB_TABLE");
+                let conn = self.connection_string.as_ref().ok_or_else(|| {
+                    anyhow!("ConnectionString is required when Metastore is rdbms")
+                })?;
+                resolve_rdbms_connection(
+                    conn,
+                    self.sql_metastore_db_type.as_deref(),
+                    self.replica_read_consistency.clone(),
+                    pool.clone(),
+                )?
             }
             "dynamodb" => {
-                set_env_opt_str("DDB_TABLE", self.dynamo_db_table_name.as_deref());
-                // When a custom endpoint is used with a separate signing region,
-                // use the signing region as AWS_REGION (the AWS SDK uses the
-                // region for request signing, not service routing).
                 let effective_region = self
                     .dynamo_db_signing_region
                     .as_deref()
-                    .or(self.dynamo_db_region.as_deref());
-                set_env_opt_str("AWS_REGION", effective_region);
-                set_env_opt_str("AWS_ENDPOINT_URL", self.dynamo_db_endpoint.as_deref());
-                set_env_opt_bool("DDB_REGION_SUFFIX", self.enable_region_suffix);
-                std::env::remove_var("SQLITE_PATH");
-                std::env::remove_var("POSTGRES_URL");
-                std::env::remove_var("MYSQL_URL");
-                std::env::remove_var("MYSQL_TLS_MODE");
+                    .or(self.dynamo_db_region.as_deref())
+                    .map(String::from);
+                MetastoreConfig::DynamoDb {
+                    table: self
+                        .dynamo_db_table_name
+                        .clone()
+                        .unwrap_or_else(|| "EncryptionKey".to_string()),
+                    region: effective_region,
+                    endpoint: self.dynamo_db_endpoint.clone(),
+                    region_suffix: self.enable_region_suffix.unwrap_or(false),
+                }
             }
             other => {
                 return Err(anyhow!("Unsupported Metastore value: {other}"));
             }
-        }
-
-        set_env_opt_str("CONNECTION_STRING", self.connection_string.as_deref());
-
-        if let Some(region_map) = &self.region_map {
-            let as_json = serde_json::to_string(region_map).context("RegionMap JSON")?;
-            std::env::set_var("REGION_MAP", as_json);
-        } else {
-            std::env::remove_var("REGION_MAP");
-        }
+        };
 
         let kms_raw = self.kms.as_deref().unwrap_or("static");
-        let kms = normalize_alias(kms_raw);
-        std::env::set_var("KMS", &kms);
-        set_env_opt_str("PREFERRED_REGION", self.preferred_region.as_deref());
+        let kms_kind = normalize_alias(kms_raw);
+        let kms = match kms_kind.as_str() {
+            "static" => KmsConfig::Static {
+                key_hex: self.static_master_key_hex.clone().unwrap_or_default(),
+            },
+            "aws" => KmsConfig::Aws {
+                region_map: self.region_map.clone(),
+                preferred_region: self.preferred_region.clone(),
+                key_id: self.kms_key_id.clone(),
+                region: self
+                    .dynamo_db_signing_region
+                    .as_deref()
+                    .or(self.dynamo_db_region.as_deref())
+                    .map(String::from),
+            },
+            "secrets-manager" => KmsConfig::SecretsManager {
+                secret_id: self.secrets_manager_secret_id.clone().ok_or_else(|| {
+                    anyhow!("SecretsManagerSecretId required for KMS=secrets-manager")
+                })?,
+                region: None,
+            },
+            "vault" | "vault-transit" => KmsConfig::Vault {
+                addr: self
+                    .vault_addr
+                    .clone()
+                    .ok_or_else(|| anyhow!("VaultAddr required for KMS=vault"))?,
+                transit_key: self
+                    .vault_transit_key
+                    .clone()
+                    .ok_or_else(|| anyhow!("VaultTransitKey required for KMS=vault"))?,
+                transit_mount: self.vault_transit_mount.clone(),
+            },
+            other => {
+                anyhow::bail!("Unknown KMS type '{other}'");
+            }
+        };
 
-        // KMS: Static
-        set_env_opt_str(
-            "STATIC_MASTER_KEY_HEX",
-            self.static_master_key_hex.as_deref(),
-        );
+        let policy = PolicyConfig {
+            expire_key_after_s: self.expire_after,
+            create_date_precision_s: None,
+            revoke_check_interval_s: self.check_interval,
+            session_cache_max_size: self.session_cache_max_size.map(|v| v as usize),
+            session_cache_ttl_s: self.session_cache_duration,
+            shared_intermediate_key_cache: None,
+            intermediate_key_cache_max_size: None,
+        };
 
-        // KMS: AWS
-        set_env_opt_str("KMS_KEY_ID", self.kms_key_id.as_deref());
-
-        // KMS: AWS Secrets Manager
-        set_env_opt_str(
-            "SECRETS_MANAGER_SECRET_ID",
-            self.secrets_manager_secret_id.as_deref(),
-        );
-
-        // KMS: Vault Transit
-        set_env_opt_str("VAULT_ADDR", self.vault_addr.as_deref());
-        set_env_opt_str("VAULT_TOKEN", self.vault_token.as_deref());
-        set_env_opt_str("VAULT_AUTH_METHOD", self.vault_auth_method.as_deref());
-        set_env_opt_str("VAULT_AUTH_ROLE", self.vault_auth_role.as_deref());
-        set_env_opt_str("VAULT_AUTH_MOUNT", self.vault_auth_mount.as_deref());
-        set_env_opt_str(
-            "VAULT_APPROLE_ROLE_ID",
-            self.vault_approle_role_id.as_deref(),
-        );
-        set_env_opt_str(
-            "VAULT_APPROLE_SECRET_ID",
-            self.vault_approle_secret_id.as_deref(),
-        );
-        set_env_opt_str("VAULT_CLIENT_CERT", self.vault_client_cert.as_deref());
-        set_env_opt_str("VAULT_CLIENT_KEY", self.vault_client_key.as_deref());
-        set_env_opt_str("VAULT_K8S_TOKEN_PATH", self.vault_k8s_token_path.as_deref());
-        set_env_opt_str("VAULT_TRANSIT_KEY", self.vault_transit_key.as_deref());
-        set_env_opt_str("VAULT_TRANSIT_MOUNT", self.vault_transit_mount.as_deref());
-
-        // Connection pool configuration
-        set_env_opt_usize("ASHERAH_POOL_MAX_OPEN", self.pool_max_open);
-        set_env_opt_usize("ASHERAH_POOL_MAX_IDLE", self.pool_max_idle);
-        set_env_opt_u64("ASHERAH_POOL_MAX_LIFETIME", self.pool_max_lifetime);
-        set_env_opt_u64("ASHERAH_POOL_MAX_IDLE_TIME", self.pool_max_idle_time);
-
+        let enable_session_caching = self.enable_session_caching.unwrap_or(true);
         let verbose = self.verbose.unwrap_or(false);
-        if verbose {
-            std::env::set_var("ASHERAH_VERBOSE", "1");
-        } else {
-            std::env::remove_var("ASHERAH_VERBOSE");
-        }
-
         let enable_canaries = self.enable_canaries.unwrap_or(false);
 
-        Ok(AppliedConfig {
+        let resolved = ResolvedConfig {
+            service_name,
+            product_id,
+            region_suffix: None,
+            metastore,
+            kms,
+            policy,
+        };
+
+        let applied = AppliedConfig {
             verbose,
             enable_session_caching,
             enable_canaries,
-        })
+        };
+
+        Ok((resolved, applied))
     }
 }
 
@@ -385,16 +325,15 @@ fn extract_go_mysql_tls(conn: &str) -> Option<String> {
     None
 }
 
-fn apply_rdbms_connection(conn: &str, db_type_hint: Option<&str>) -> Result<()> {
+fn resolve_rdbms_connection(
+    conn: &str,
+    db_type_hint: Option<&str>,
+    replica_consistency: Option<String>,
+    pool: PoolConfig,
+) -> Result<MetastoreConfig> {
     use asherah::builders::{classify_connection_string, DbKind};
 
-    std::env::remove_var("SQLITE_PATH");
-    std::env::remove_var("POSTGRES_URL");
-    std::env::remove_var("MYSQL_URL");
-    std::env::remove_var("MYSQL_TLS_MODE");
-
     let kind = classify_connection_string(conn);
-    // Use SQLMetastoreDBType hint to resolve Unknown connection strings
     let kind = match kind {
         DbKind::Unknown(s) => match db_type_hint.map(|h| h.to_lowercase()).as_deref() {
             Some("mysql") => DbKind::Mysql(format!("mysql://{s}")),
@@ -405,15 +344,21 @@ fn apply_rdbms_connection(conn: &str, db_type_hint: Option<&str>) -> Result<()> 
     };
 
     match kind {
-        DbKind::Postgres(url) => std::env::set_var("POSTGRES_URL", url),
+        DbKind::Postgres(url) => Ok(MetastoreConfig::Postgres {
+            url,
+            replica_consistency,
+            pool,
+        }),
         DbKind::Mysql(url) => {
-            std::env::set_var("MYSQL_URL", url);
-            // Pass through Go tls= parameter as MYSQL_TLS_MODE for MySqlMetastore
-            if let Some(tls_mode) = extract_go_mysql_tls(conn) {
-                std::env::set_var("MYSQL_TLS_MODE", tls_mode);
-            }
+            let tls_mode = extract_go_mysql_tls(conn);
+            Ok(MetastoreConfig::Mysql {
+                url,
+                tls_mode,
+                replica_consistency,
+                pool,
+            })
         }
-        DbKind::Sqlite(path) => std::env::set_var("SQLITE_PATH", path),
+        DbKind::Sqlite(path) => Ok(MetastoreConfig::Sqlite { path }),
         DbKind::Unknown(s) => {
             anyhow::bail!(
                 "Unrecognized RDBMS connection string format: '{s}'. \
@@ -422,39 +367,18 @@ fn apply_rdbms_connection(conn: &str, db_type_hint: Option<&str>) -> Result<()> 
             );
         }
     }
-    Ok(())
 }
 
-/// Mutex to serialize factory_from_config calls, since apply_env uses
-/// process-global env vars as a config transport mechanism.
-static FACTORY_BUILD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
+/// Build a factory from structured config — no env var side effects.
 pub fn factory_from_config(config: &ConfigOptions) -> Result<(Factory, AppliedConfig)> {
-    let _guard = FACTORY_BUILD_LOCK
-        .lock()
-        .map_err(|_| anyhow!("factory build lock poisoned"))?;
-    let applied = config.apply_env()?;
-    let factory = asherah::builders::factory_from_env()?;
+    let (resolved, applied) = config.resolve()?;
+    let factory = asherah::builders::factory_from_resolved(&resolved)?;
     Ok((factory, applied))
 }
 
-/// Async variant — uses async constructors for DynamoDB/KMS.
-/// Postgres construction uses spawn_blocking internally.
-///
-/// **Not safe for concurrent use.** The lock is released before the async
-/// factory build, so concurrent calls with different configs could read each
-/// other's env vars. In practice this is not an issue because setup is
-/// called exactly once per application lifecycle.
+/// Async variant — safe for concurrent use since no env vars are touched.
 pub async fn factory_from_config_async(config: &ConfigOptions) -> Result<(Factory, AppliedConfig)> {
-    // apply_env uses process-global env vars as config transport.
-    // We cannot hold a std::sync::Mutex across .await, so the lock is
-    // scoped to apply_env only. This is safe because setup is single-call.
-    let applied = {
-        let _guard = FACTORY_BUILD_LOCK
-            .lock()
-            .map_err(|_| anyhow!("factory build lock poisoned"))?;
-        config.apply_env()?
-    };
-    let factory = asherah::builders::factory_from_env_async().await?;
+    let (resolved, applied) = config.resolve()?;
+    let factory = asherah::builders::factory_from_resolved_async(&resolved).await?;
     Ok((factory, applied))
 }

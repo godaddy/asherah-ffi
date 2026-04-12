@@ -131,29 +131,26 @@ fn connect_client(url: &str) -> anyhow::Result<Client> {
 }
 
 impl PostgresMetastore {
-    pub fn connect(url: &str) -> anyhow::Result<Self> {
-        let replica_consistency = match std::env::var("REPLICA_READ_CONSISTENCY") {
-            Ok(c) => match c.as_str() {
-                "eventual" | "global" | "session" => Some(c),
+    /// Connect with explicit config — no env var reads.
+    pub fn connect_with(
+        url: &str,
+        max_open: Option<usize>,
+        max_idle: Option<usize>,
+        replica_consistency: Option<String>,
+    ) -> anyhow::Result<Self> {
+        if let Some(ref c) = replica_consistency {
+            match c.as_str() {
+                "eventual" | "global" | "session" => {}
                 _ => {
                     anyhow::bail!(
                         "invalid REPLICA_READ_CONSISTENCY value: '{}' (expected eventual, global, or session)",
                         c
                     );
                 }
-            },
-            Err(_) => None,
-        };
-
-        fn env_usize(key: &str) -> Option<usize> {
-            std::env::var(key).ok().and_then(|v| v.parse().ok())
+            }
         }
-        // ASHERAH_POOL_MAX_OPEN takes precedence; fall back to legacy ASHERAH_POOL_SIZE
-        let max_open = env_usize("ASHERAH_POOL_MAX_OPEN")
-            .or_else(|| env_usize("ASHERAH_POOL_SIZE"))
-            .unwrap_or(DEFAULT_MAX_OPEN);
-        let max_idle = env_usize("ASHERAH_POOL_MAX_IDLE").unwrap_or(DEFAULT_MAX_IDLE);
-        // Don't let max_idle exceed max_open (when max_open is bounded)
+        let max_open = max_open.unwrap_or(DEFAULT_MAX_OPEN);
+        let max_idle = max_idle.unwrap_or(DEFAULT_MAX_IDLE);
         let max_idle = if max_open > 0 {
             max_idle.min(max_open)
         } else {
@@ -172,6 +169,31 @@ impl PostgresMetastore {
                 max_open,
             }),
         })
+    }
+
+    /// Connect using env vars for pool config (legacy entry point).
+    pub fn connect(url: &str) -> anyhow::Result<Self> {
+        let replica_consistency = match std::env::var("REPLICA_READ_CONSISTENCY") {
+            Ok(c) => match c.as_str() {
+                "eventual" | "global" | "session" => Some(c),
+                _ => {
+                    anyhow::bail!(
+                        "invalid REPLICA_READ_CONSISTENCY value: '{}' (expected eventual, global, or session)",
+                        c
+                    );
+                }
+            },
+            Err(_) => None,
+        };
+
+        fn env_usize(key: &str) -> Option<usize> {
+            std::env::var(key).ok().and_then(|v| v.parse().ok())
+        }
+        let max_open =
+            env_usize("ASHERAH_POOL_MAX_OPEN").or_else(|| env_usize("ASHERAH_POOL_SIZE"));
+        let max_idle = env_usize("ASHERAH_POOL_MAX_IDLE");
+
+        Self::connect_with(url, max_open, max_idle, replica_consistency)
     }
 
     fn client(&self) -> anyhow::Result<PgPooledClient> {
