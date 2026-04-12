@@ -78,10 +78,16 @@ Each binding has a slightly different manifestation:
 
 ---
 
-## 2. Config Env Transport Leaks Stale State (Findings 7, 12)
+## 2. Config Env Transport Leaks Stale State (Findings 7, 12) — RESOLVED
 
 **Severity:** High  
 **Scope:** `asherah-config/src/lib.rs`
+
+**Resolution:** `factory_from_config()` now uses `ConfigOptions::resolve()` →
+`ResolvedConfig` → `factory_from_resolved()` with zero env var side effects.
+The `FACTORY_BUILD_LOCK`, `apply_env()`, and all `set_env_opt_*` helpers have
+been removed. The async variant is now safe for concurrent use. See
+`docs/design-resolved-config.md`.
 
 ### Problem
 
@@ -112,12 +118,7 @@ setup calls can read each other's env state.
 
 #### Phase 1: Short-term containment — clear on None (DONE)
 
-All `set_env_opt_*` helpers now remove the variable when `None`.
-`test_optional_int_fields_none_clears_env` asserts the new behavior.
-`test_sequential_factory_builds_isolated` proves two sequential factory
-builds with different configs do not leak state.
-
-#### Phase 2: Structured config plumbing (eliminates env transport)
+#### Phase 2: Structured config plumbing (DONE)
 
 1. Add a `ResolvedConfig` struct that holds all typed fields needed by
    `factory_from_env()` / `factory_from_env_async()`.
