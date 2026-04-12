@@ -106,22 +106,12 @@ setup calls can read each other's env state.
 
 ### Remediation Plan
 
-#### Phase 1: Short-term containment — clear on None
+#### Phase 1: Short-term containment — clear on None (DONE)
 
-Change all `set_env_opt_*` helpers so `None` removes the variable:
-
-```rust
-fn set_env_opt_i64(key: &str, value: Option<i64>) {
-    match value {
-        Some(v) => std::env::set_var(key, v.to_string()),
-        None => std::env::remove_var(key),
-    }
-}
-```
-
-This eliminates cross-build leakage. Update
-`test_optional_int_fields_none_preserves_env` to assert the new clearing
-behavior. Add a sequential two-config test that proves isolation.
+All `set_env_opt_*` helpers now remove the variable when `None`.
+`test_optional_int_fields_none_clears_env` asserts the new behavior.
+`test_sequential_factory_builds_isolated` proves two sequential factory
+builds with different configs do not leak state.
 
 #### Phase 2: Structured config plumbing (eliminates env transport)
 
