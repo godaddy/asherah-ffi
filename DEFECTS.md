@@ -134,35 +134,11 @@ with different configs in the same process.
 
 ---
 
-## 3. Transitive `rand` Advisory (Finding 13)
+## 3. Transitive `rand` Advisory (Finding 13) — RESOLVED
 
-**Severity:** Medium  
-**Scope:** `Cargo.lock` (transitive dependencies)
-
-### Problem
-
-`cargo audit` reports `RUSTSEC-2026-0097` against `rand` versions `0.8.5`,
-`0.9.2`, and `0.10.0`, entering through `tower`, `tonic`, `reqwest`,
-`tokio-postgres`, and other transitive chains. The advisory is
-warning-level (unsoundness with a custom logger using `rand::rng()`), not a
-hard vulnerability, and this project does not use custom loggers with rand.
-
-### Remediation Plan
-
-1. **Monitor upstream**: Track when `rand` releases a patched version and
-   when downstream crates (`tower`, `tonic`, `reqwest`, `tokio-postgres`)
-   update their dependency bounds.
-2. **Attempt `cargo update`**: Run `cargo update` periodically to pick up
-   patched transitive versions as they become available.
-3. **Document acceptance**: If the advisory must be temporarily accepted,
-   add an `audit.toml` with an explicit ignore entry and rationale:
-   ```toml
-   [[advisories.ignore]]
-   id = "RUSTSEC-2026-0097"
-   reason = "Conditional unsoundness with custom logger; not applicable to this project"
-   ```
-4. **CI gate**: Add `cargo audit` to CI so future advisories are caught
-   automatically rather than discovered ad-hoc.
+Resolved by upgrading tonic 0.12 → 0.14 (which pulls tower 0.5, dropping
+the rand 0.8.5 dependency) and `cargo update` (rand 0.9.2 → 0.9.3,
+0.10.0 → 0.10.1). `cargo audit` is now clean.
 
 ---
 
