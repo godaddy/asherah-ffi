@@ -516,9 +516,15 @@ do_e2e() {
         skip "E2E npm (directory or node not available)"
     fi
 
-    # PyPI package
+    # PyPI package (install in an isolated venv, matching e2e/README.md)
     if [ -d e2e/pypi ] && command -v python3 >/dev/null 2>&1; then
-        run_test "E2E PyPI" bash -c "cd e2e/pypi && python3 test_asherah.py"
+        run_test "E2E PyPI" bash -c '
+            VENV="$(mktemp -d)/asherah-e2e-pypi"
+            python3 -m venv "$VENV" &&
+            "$VENV/bin/python" -m pip install -q -U pip asherah &&
+            cd e2e/pypi && "$VENV/bin/python" test_asherah.py &&
+            rm -rf "$VENV"
+        '
     else
         skip "E2E PyPI (directory or python3 not available)"
     fi
