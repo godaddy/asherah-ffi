@@ -5,13 +5,17 @@ design-level changes and should be addressed in separate, focused PRs.
 
 ---
 
-## 1. Async Session Lifetime Safety (Findings 9, 10, 11)
+## 1. Async Session Lifetime Safety (Findings 9, 10, 11) — RESOLVED
 
 **Severity:** High  
 **Scope:** `asherah-ffi/src/lib.rs`, `asherah-java/src/lib.rs`,
 `asherah-dotnet/src/GoDaddy.Asherah.AppEncryption/AsherahSession.cs`,
-`asherah-dotnet/src/GoDaddy.Asherah.AppEncryption/Asherah.cs`,
 `asherah-ruby/lib/asherah/session.rb`
+
+**Resolution:** Arc-wrapped sessions in C FFI and Java JNI layers prevent
+native use-after-free. .NET and Ruby wrappers add pending-ops counters so
+Dispose/close waits for in-flight callbacks. See
+`docs/design-async-session-lifetime.md` for full design.
 
 ### Problem
 
@@ -165,8 +169,8 @@ this creates a lifetime race.
 
 ### Remediation Plan
 
-**Prerequisite:** Fix the async session lifetime issue (Defect 1 above)
-first. Without ref-counted session handles, relaxing the lock is unsafe.
+**Prerequisite:** Defect 1 (async session lifetime) is now resolved.
+The Arc-wrapped sessions make it safe to narrow the lock scope.
 
 #### Option A: Operation leasing (preferred)
 
