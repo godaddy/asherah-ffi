@@ -17,6 +17,7 @@ use std::fmt;
 use std::mem::ManuallyDrop;
 use std::os::raw::{c_char, c_int, c_void};
 use std::ptr::null_mut;
+use std::sync::Arc;
 
 use asherah as ael;
 use asherah_config as config;
@@ -45,9 +46,14 @@ pub struct AsherahBuffer {
 pub struct AsherahFactory {
     inner: Factory,
 }
-#[repr(C)]
 pub struct AsherahSession {
     inner: Session,
+}
+
+/// Shared session handle returned to FFI callers. Wraps `Arc<AsherahSession>`
+/// so async tasks can hold an owned reference that outlives a premature free.
+pub struct SharedSession {
+    session: Arc<AsherahSession>,
 }
 
 impl fmt::Debug for AsherahFactory {
@@ -59,6 +65,12 @@ impl fmt::Debug for AsherahFactory {
 impl fmt::Debug for AsherahSession {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("AsherahSession { .. }")
+    }
+}
+
+impl fmt::Debug for SharedSession {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SharedSession { .. }")
     }
 }
 
@@ -189,7 +201,7 @@ unsafe fn cstr_to_str<'ptr>(s: *const c_char) -> Result<&'ptr str, anyhow::Error
 pub unsafe extern "C" fn asherah_factory_get_session(
     factory: *mut AsherahFactory,
     partition_id: *const c_char,
-) -> *mut AsherahSession {
+) -> *mut SharedSession {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         if factory.is_null() {
             set_error("null factory");
@@ -204,7 +216,10 @@ pub unsafe extern "C" fn asherah_factory_get_session(
             }
         };
         let s = f.inner.get_session(pid);
-        Box::into_raw(Box::new(AsherahSession { inner: s }))
+        let shared = SharedSession {
+            session: Arc::new(AsherahSession { inner: s }),
+        };
+        Box::into_raw(Box::new(shared))
     })) {
         Ok(result) => result,
         Err(_) => {
@@ -216,8 +231,10 @@ pub unsafe extern "C" fn asherah_factory_get_session(
 
 /// # Safety
 /// `ptr` must be a session pointer previously obtained from this module.
+/// If async operations still hold an `Arc` clone, the underlying session
+/// remains alive until those operations complete.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn asherah_session_free(ptr: *mut AsherahSession) {
+pub unsafe extern "C" fn asherah_session_free(ptr: *mut SharedSession) {
     drop(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
         || {
             if ptr.is_null() {
@@ -269,7 +286,7 @@ pub unsafe extern "C" fn asherah_buffer_free(buf: *mut AsherahBuffer) {
 /// `session` must be valid, `data` must reference `len` bytes, and `out` must be non-null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_encrypt_to_json(
-    session: *mut AsherahSession,
+    session: *mut SharedSession,
     data: *const u8,
     len: usize,
     out: *mut AsherahBuffer,
@@ -283,7 +300,7 @@ pub unsafe extern "C" fn asherah_encrypt_to_json(
             set_error("null data");
             return -1;
         }
-        let s = &*session;
+        let s = &(*session).session;
         let bytes = if data.is_null() {
             &[]
         } else {
@@ -312,7 +329,7 @@ pub unsafe extern "C" fn asherah_encrypt_to_json(
 /// `session` must be valid, `json` must reference `len` bytes, and `out` must be non-null.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_decrypt_from_json(
-    session: *mut AsherahSession,
+    session: *mut SharedSession,
     json: *const u8,
     len: usize,
     out: *mut AsherahBuffer,
@@ -326,7 +343,7 @@ pub unsafe extern "C" fn asherah_decrypt_from_json(
             set_error("null json");
             return -1;
         }
-        let s = &*session;
+        let s = &(*session).session;
         let bytes = if json.is_null() {
             &[]
         } else {
@@ -360,37 +377,35 @@ pub unsafe extern "C" fn asherah_decrypt_from_json(
 // The callback is invoked on a tokio worker thread when the operation completes.
 // The result buffer is valid only for the duration of the callback.
 
-/// Send-safe wrapper for async FFI context. Converts all pointer types to usize
-/// so the async task can be spawned on the tokio runtime. The caller guarantees
-/// the session pointer remains valid until the callback fires.
+/// Async FFI context. Holds an `Arc` clone of the session so the underlying
+/// session cannot be freed while the tokio task is in flight.
 struct AsyncContext {
-    session: usize,
+    session: Arc<AsherahSession>,
     callback: usize,
     user_data: usize,
 }
 
-// All fields are usize — trivially Send.
+// callback and user_data are just integers (function pointer and opaque pointer
+// cast to usize). Arc<AsherahSession> is Send. So AsyncContext is Send.
 unsafe impl Send for AsyncContext {}
 
 impl AsyncContext {
     fn new(
-        session: *mut AsherahSession,
+        session: Arc<AsherahSession>,
         callback: AsherahCompletionFn,
         user_data: *mut c_void,
     ) -> Self {
         Self {
-            session: session as usize,
+            session,
             callback: callback as usize,
             user_data: user_data as usize,
         }
     }
 
-    /// Restore the session reference and callback. User data stays as usize
-    /// until the callback call site to avoid holding a *mut c_void across await points.
-    unsafe fn restore(&self) -> (&AsherahSession, AsherahCompletionFn, usize) {
-        let session = &*(self.session as *const AsherahSession);
+    /// Restore the callback function pointer and user data for invocation.
+    unsafe fn restore_callback(&self) -> (AsherahCompletionFn, usize) {
         let callback: AsherahCompletionFn = std::mem::transmute(self.callback);
-        (session, callback, self.user_data)
+        (callback, self.user_data)
     }
 }
 
@@ -419,12 +434,14 @@ pub type AsherahCompletionFn = unsafe extern "C" fn(
 );
 
 /// # Safety
-/// `session` must be a valid session pointer that outlives the async operation.
+/// `session` must be a valid session pointer. The session is kept alive by an
+/// internal `Arc` clone until the async operation completes — callers may free
+/// their handle before the callback fires.
 /// `data` must reference `len` bytes. `callback` must be a valid function pointer.
 /// `user_data` is passed through to the callback unchanged.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_encrypt_to_json_async(
-    session: *mut AsherahSession,
+    session: *mut SharedSession,
     data: *const u8,
     len: usize,
     callback: AsherahCompletionFn,
@@ -439,13 +456,15 @@ pub unsafe extern "C" fn asherah_encrypt_to_json_async(
             set_error("null data");
             return -1;
         }
+        // Clone the Arc so the session outlives a premature free.
+        let arc = Arc::clone(&(*session).session);
         // Copy input data — the caller's buffer may not outlive the async task.
         let input = if data.is_null() {
             Vec::new()
         } else {
             std::slice::from_raw_parts(data, len).to_vec()
         };
-        spawn_encrypt_async(AsyncContext::new(session, callback, user_data), input);
+        spawn_encrypt_async(AsyncContext::new(arc, callback, user_data), input);
         0
     })) {
         Ok(result) => result,
@@ -458,8 +477,8 @@ pub unsafe extern "C" fn asherah_encrypt_to_json_async(
 
 fn spawn_encrypt_async(ctx: AsyncContext, input: Vec<u8>) {
     ASYNC_RT.spawn(async move {
-        let (session_ref, cb, ud) = unsafe { ctx.restore() };
-        match session_ref.inner.encrypt_async(&input).await {
+        let (cb, ud) = unsafe { ctx.restore_callback() };
+        match ctx.session.inner.encrypt_async(&input).await {
             Ok(drr) => {
                 let json = drr.to_json_fast();
                 let bytes = json.as_bytes();
@@ -483,7 +502,7 @@ fn spawn_encrypt_async(ctx: AsyncContext, input: Vec<u8>) {
 
 fn spawn_decrypt_async(ctx: AsyncContext, input: Vec<u8>) {
     ASYNC_RT.spawn(async move {
-        let (session_ref, cb, ud) = unsafe { ctx.restore() };
+        let (cb, ud) = unsafe { ctx.restore_callback() };
         let drr = match serde_json::from_slice::<ael::types::DataRowRecord>(&input) {
             Ok(d) => d,
             Err(e) => {
@@ -493,7 +512,7 @@ fn spawn_decrypt_async(ctx: AsyncContext, input: Vec<u8>) {
                 return;
             }
         };
-        match session_ref.inner.decrypt_async(drr).await {
+        match ctx.session.inner.decrypt_async(drr).await {
             Ok(pt) => {
                 unsafe { cb(ud as *mut c_void, pt.as_ptr(), pt.len(), std::ptr::null()) };
             }
@@ -507,11 +526,12 @@ fn spawn_decrypt_async(ctx: AsyncContext, input: Vec<u8>) {
 }
 
 /// # Safety
-/// `session` must be a valid session pointer that outlives the async operation.
+/// `session` must be a valid session pointer. The session is kept alive by an
+/// internal `Arc` clone until the async operation completes.
 /// `json` must reference `len` bytes. `callback` must be a valid function pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_decrypt_from_json_async(
-    session: *mut AsherahSession,
+    session: *mut SharedSession,
     json: *const u8,
     len: usize,
     callback: AsherahCompletionFn,
@@ -526,12 +546,13 @@ pub unsafe extern "C" fn asherah_decrypt_from_json_async(
             set_error("null json");
             return -1;
         }
+        let arc = Arc::clone(&(*session).session);
         let input = if json.is_null() {
             Vec::new()
         } else {
             std::slice::from_raw_parts(json, len).to_vec()
         };
-        spawn_decrypt_async(AsyncContext::new(session, callback, user_data), input);
+        spawn_decrypt_async(AsyncContext::new(arc, callback, user_data), input);
         0
     })) {
         Ok(result) => result,
