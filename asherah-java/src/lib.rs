@@ -11,6 +11,7 @@ use jni::sys::jlong;
 use jni::{EnvUnowned, JavaVM};
 use once_cell::sync::Lazy;
 use serde_json::{self, Value};
+use std::sync::Arc;
 
 type Factory = ael::session::PublicFactory<
     ael::aead::AES256GCM,
@@ -22,6 +23,12 @@ type Session = ael::session::PublicSession<
     ael::builders::DynKms,
     ael::builders::DynMetastore,
 >;
+
+/// Shared session handle. Wraps `Arc<Session>` so async tokio tasks can hold
+/// an owned reference that outlives a premature `freeSession` call.
+struct SharedJniSession {
+    session: Arc<Session>,
+}
 
 unsafe fn from_handle<'handle, T>(handle: jlong) -> Option<&'handle T> {
     (handle as *const T).as_ref()
@@ -148,7 +155,10 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_getSession(
             .ok_or_else(|| throw_err(env, "factory handle is null"))?;
         let partition = get_jstring(env, &partition_id)?;
         let session = factory.get_session(&partition);
-        Ok(Box::into_raw(Box::new(session)) as jlong)
+        let shared = SharedJniSession {
+            session: Arc::new(session),
+        };
+        Ok(Box::into_raw(Box::new(shared)) as jlong)
     })
     .resolve::<ThrowRuntimeExAndDefault>()
 }
@@ -160,9 +170,10 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_closeSession(
     session_handle: jlong,
 ) {
     env.with_env(|env| -> jni::errors::Result<()> {
-        let session = unsafe { from_handle::<Session>(session_handle) }
+        let shared = unsafe { from_handle::<SharedJniSession>(session_handle) }
             .ok_or_else(|| throw_err(env, "session handle is null"))?;
-        session
+        shared
+            .session
             .close()
             .map_err(|e| throw_err(env, format_args!("session close error: {e:#}")))?;
         Ok(())
@@ -170,6 +181,8 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_closeSession(
     .resolve::<ThrowRuntimeExAndDefault>();
 }
 
+/// Free the caller's session handle. If async tasks still hold Arc clones,
+/// the underlying session remains alive until those tasks complete.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_freeSession(
     _env: EnvUnowned<'_>,
@@ -177,7 +190,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_freeSession(
     session_handle: jlong,
 ) {
     if session_handle != 0 {
-        unsafe { drop(Box::from_raw(session_handle as *mut Session)) }
+        unsafe { drop(Box::from_raw(session_handle as *mut SharedJniSession)) }
     }
 }
 
@@ -189,10 +202,11 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_encrypt<'calle
     plaintext: JByteArray<'caller>,
 ) -> JByteArray<'caller> {
     env.with_env(|env| -> jni::errors::Result<JByteArray<'caller>> {
-        let session = unsafe { from_handle::<Session>(session_handle) }
+        let shared = unsafe { from_handle::<SharedJniSession>(session_handle) }
             .ok_or_else(|| throw_err(env, "session handle is null"))?;
         let data = env.convert_byte_array(&plaintext)?;
-        let drr = session
+        let drr = shared
+            .session
             .encrypt(&data)
             .map_err(|e| throw_err(env, format_args!("encrypt error: {e:#}")))?;
         let ciphertext = serde_json::to_vec(&drr)
@@ -211,12 +225,13 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decrypt<'calle
     ciphertext: JByteArray<'caller>,
 ) -> JByteArray<'caller> {
     env.with_env(|env| -> jni::errors::Result<JByteArray<'caller>> {
-        let session = unsafe { from_handle::<Session>(session_handle) }
+        let shared = unsafe { from_handle::<SharedJniSession>(session_handle) }
             .ok_or_else(|| throw_err(env, "session handle is null"))?;
         let data = env.convert_byte_array(&ciphertext)?;
         let drr: ael::types::DataRowRecord = serde_json::from_slice(&data)
             .map_err(|e| throw_err(env, format_args!("invalid DataRowRecord JSON: {e}")))?;
-        let plaintext = session
+        let plaintext = shared
+            .session
             .decrypt(drr)
             .map_err(|e| throw_err(env, format_args!("decrypt error: {e:#}")))?;
         let arr = env.byte_array_from_slice(&plaintext)?;
@@ -237,6 +252,7 @@ static ASYNC_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
 });
 
 /// Async encrypt. Accepts a CompletableFuture<byte[]> and completes it on a tokio worker thread.
+/// The session is kept alive by an Arc clone until the async operation completes.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_encryptAsync<'caller>(
     mut env: EnvUnowned<'caller>,
@@ -246,17 +262,15 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_encryptAsync<'
     future: JObject<'caller>,
 ) {
     env.with_env(|env| -> jni::errors::Result<()> {
-        let session = unsafe { from_handle::<Session>(session_handle) }
+        let shared = unsafe { from_handle::<SharedJniSession>(session_handle) }
             .ok_or_else(|| throw_err(env, "session handle is null"))?;
         let data = env.convert_byte_array(&plaintext)?;
         let jvm = env.get_java_vm()?;
         let future_ref = env.new_global_ref(&future)?;
-        let session_ptr: *const Session = session;
-        let session_addr = session_ptr as usize;
+        let session_arc = Arc::clone(&shared.session);
 
         ASYNC_RT.spawn(async move {
-            let session = unsafe { &*(session_addr as *const Session) };
-            let result = match session.encrypt_async(&data).await {
+            let result = match session_arc.encrypt_async(&data).await {
                 Ok(drr) => serde_json::to_vec(&drr).map_err(|e| anyhow::anyhow!("{e:#}")),
                 Err(e) => Err(e),
             };
@@ -268,6 +282,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_encryptAsync<'
 }
 
 /// Async decrypt. Accepts a CompletableFuture<byte[]> and completes it on a tokio worker thread.
+/// The session is kept alive by an Arc clone until the async operation completes.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decryptAsync<'caller>(
     mut env: EnvUnowned<'caller>,
@@ -277,16 +292,14 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decryptAsync<'
     future: JObject<'caller>,
 ) {
     env.with_env(|env| -> jni::errors::Result<()> {
-        let session = unsafe { from_handle::<Session>(session_handle) }
+        let shared = unsafe { from_handle::<SharedJniSession>(session_handle) }
             .ok_or_else(|| throw_err(env, "session handle is null"))?;
         let data = env.convert_byte_array(&ciphertext)?;
         let jvm = env.get_java_vm()?;
         let future_ref = env.new_global_ref(&future)?;
-        let session_ptr: *const Session = session;
-        let session_addr = session_ptr as usize;
+        let session_arc = Arc::clone(&shared.session);
 
         ASYNC_RT.spawn(async move {
-            let session = unsafe { &*(session_addr as *const Session) };
             let drr = match serde_json::from_slice::<ael::types::DataRowRecord>(&data) {
                 Ok(d) => d,
                 Err(e) => {
@@ -298,7 +311,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decryptAsync<'
                     return;
                 }
             };
-            let result = session.decrypt_async(drr).await;
+            let result = session_arc.decrypt_async(drr).await;
             complete_java_future(&jvm, &future_ref, result);
         });
         Ok(())
