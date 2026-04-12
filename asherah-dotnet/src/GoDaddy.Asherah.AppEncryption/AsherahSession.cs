@@ -2,6 +2,7 @@ using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace GoDaddy.Asherah;
@@ -9,6 +10,7 @@ namespace GoDaddy.Asherah;
 public sealed class AsherahSession : IAsherahSession
 {
     private readonly SafeSessionHandle _handle;
+    private int _pendingOps;
     private bool _disposed;
 
     internal AsherahSession(SafeSessionHandle handle)
@@ -105,9 +107,10 @@ public sealed class AsherahSession : IAsherahSession
             throw new ArgumentNullException(nameof(plaintext));
         }
         EnsureNotDisposed();
+        Interlocked.Increment(ref _pendingOps);
 
         var tcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var gcHandle = GCHandle.Alloc(tcs);
+        var gcHandle = GCHandle.Alloc(new AsyncCallbackState(tcs, this));
 
         fixed (byte* ptr = plaintext)
         {
@@ -121,6 +124,7 @@ public sealed class AsherahSession : IAsherahSession
             if (status != 0)
             {
                 gcHandle.Free();
+                Interlocked.Decrement(ref _pendingOps);
                 throw NativeError.Create("encrypt_to_json_async");
             }
         }
@@ -149,9 +153,10 @@ public sealed class AsherahSession : IAsherahSession
             throw new ArgumentNullException(nameof(ciphertextJson));
         }
         EnsureNotDisposed();
+        Interlocked.Increment(ref _pendingOps);
 
         var tcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var gcHandle = GCHandle.Alloc(tcs);
+        var gcHandle = GCHandle.Alloc(new AsyncCallbackState(tcs, this));
 
         fixed (byte* ptr = ciphertextJson)
         {
@@ -165,6 +170,7 @@ public sealed class AsherahSession : IAsherahSession
             if (status != 0)
             {
                 gcHandle.Free();
+                Interlocked.Decrement(ref _pendingOps);
                 throw NativeError.Create("decrypt_from_json_async");
             }
         }
@@ -188,6 +194,12 @@ public sealed class AsherahSession : IAsherahSession
         if (_disposed)
         {
             return;
+        }
+        // Wait for in-flight async operations before releasing the handle.
+        var spin = new SpinWait();
+        while (Volatile.Read(ref _pendingOps) > 0)
+        {
+            spin.SpinOnce();
         }
         _handle.Dispose();
         _disposed = true;
@@ -214,9 +226,11 @@ public sealed class AsherahSession : IAsherahSession
         return managed;
     }
 
+    private sealed record AsyncCallbackState(TaskCompletionSource<byte[]> Tcs, AsherahSession Session);
+
     /// <summary>
     /// Callback invoked by Rust on a tokio worker thread when an async operation completes.
-    /// Resolves the TaskCompletionSource stored in userData.
+    /// Resolves the TaskCompletionSource and decrements the pending-ops counter.
     /// </summary>
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void AsyncCompletionCallback(
@@ -226,24 +240,31 @@ public sealed class AsherahSession : IAsherahSession
         IntPtr errorMessage)
     {
         var gcHandle = GCHandle.FromIntPtr(userData);
-        var tcs = (TaskCompletionSource<byte[]>)gcHandle.Target!;
+        var state = (AsyncCallbackState)gcHandle.Target!;
         gcHandle.Free();
 
-        if (errorMessage != IntPtr.Zero)
+        try
         {
-            var error = Marshal.PtrToStringUTF8(errorMessage) ?? "unknown async error";
-            tcs.SetException(new AsherahException(error));
+            if (errorMessage != IntPtr.Zero)
+            {
+                var error = Marshal.PtrToStringUTF8(errorMessage) ?? "unknown async error";
+                state.Tcs.SetException(new AsherahException(error));
+            }
+            else if (resultData == IntPtr.Zero || resultLen == UIntPtr.Zero)
+            {
+                state.Tcs.SetResult(Array.Empty<byte>());
+            }
+            else
+            {
+                var length = checked((int)resultLen.ToUInt64());
+                var managed = new byte[length];
+                Marshal.Copy(resultData, managed, 0, length);
+                state.Tcs.SetResult(managed);
+            }
         }
-        else if (resultData == IntPtr.Zero || resultLen == UIntPtr.Zero)
+        finally
         {
-            tcs.SetResult(Array.Empty<byte>());
-        }
-        else
-        {
-            var length = checked((int)resultLen.ToUInt64());
-            var managed = new byte[length];
-            Marshal.Copy(resultData, managed, 0, length);
-            tcs.SetResult(managed);
+            Interlocked.Decrement(ref state.Session._pendingOps);
         }
     }
 }
