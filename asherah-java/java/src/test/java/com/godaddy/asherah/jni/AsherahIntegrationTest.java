@@ -21,7 +21,7 @@ class AsherahIntegrationTest {
   @BeforeAll
   static void configureLibraryPath() {
     if (System.getProperty("asherah.java.nativeLibraryPath") == null) {
-      final Path defaultDir = Paths.get("..", "target", "debug").toAbsolutePath().normalize();
+      final Path defaultDir = Paths.get("..", "..", "target", "debug").toAbsolutePath().normalize();
       System.setProperty("asherah.java.nativeLibraryPath", defaultDir.toString());
     }
     System.setProperty("SERVICE_NAME", "svc");
