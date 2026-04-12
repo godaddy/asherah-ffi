@@ -367,7 +367,7 @@ if [ -z "${JAVA_HOME:-}" ]; then
 fi
 HAVE_JAVA=0; command -v java >/dev/null 2>&1 && "$JAVA_HOME/bin/java" --version >/dev/null 2>&1 && HAVE_JAVA=1
 HAVE_GO=0; command -v go >/dev/null 2>&1 && HAVE_GO=1
-HAVE_PYTHON=0; python3 -c "import asherah" 2>/dev/null && HAVE_PYTHON=1
+HAVE_PYTHON=0; python3 -c "from asherah import SessionFactory" 2>/dev/null && HAVE_PYTHON=1
 HAVE_NODE=0; command -v node >/dev/null 2>&1 && HAVE_NODE=1
 
 RUBY_CMD="ruby"
