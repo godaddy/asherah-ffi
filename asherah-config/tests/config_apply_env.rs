@@ -292,8 +292,8 @@ fn test_optional_int_fields_set() {
     assert_eq!(get_env("SESSION_CACHE_MAX_SIZE").as_deref(), Some("50"));
 }
 
-fn test_optional_int_fields_none_preserves_env() {
-    // Pre-set env vars
+fn test_optional_int_fields_none_clears_env() {
+    // Pre-set env vars to simulate a prior factory build
     std::env::set_var("EXPIRE_AFTER_SECS", "999");
     std::env::set_var("REVOKE_CHECK_INTERVAL_SECS", "888");
 
@@ -306,16 +306,49 @@ fn test_optional_int_fields_none_preserves_env() {
     };
     let _applied = cfg.apply_env().unwrap();
 
-    // None fields should leave pre-set env vars alone
-    assert_eq!(get_env("EXPIRE_AFTER_SECS").as_deref(), Some("999"));
-    assert_eq!(
-        get_env("REVOKE_CHECK_INTERVAL_SECS").as_deref(),
-        Some("888")
-    );
+    // None fields must clear stale env vars from prior builds
+    assert_eq!(get_env("EXPIRE_AFTER_SECS"), None);
+    assert_eq!(get_env("REVOKE_CHECK_INTERVAL_SECS"), None);
+    assert_eq!(get_env("SESSION_CACHE_DURATION_SECS"), None);
+    assert_eq!(get_env("SESSION_CACHE_MAX_SIZE"), None);
+}
 
-    // Clean up
-    std::env::remove_var("EXPIRE_AFTER_SECS");
-    std::env::remove_var("REVOKE_CHECK_INTERVAL_SECS");
+fn test_sequential_factory_builds_isolated() {
+    // First build sets policy/KMS/pool fields
+    let cfg_a = ConfigOptions {
+        expire_after: Some(7200),
+        check_interval: Some(120),
+        preferred_region: Some("us-east-1".into()),
+        pool_max_open: Some(50),
+        pool_max_idle: Some(10),
+        pool_max_lifetime: Some(3600),
+        pool_max_idle_time: Some(600),
+        ..base_config()
+    };
+    let _applied = cfg_a.apply_env().unwrap();
+    assert_eq!(get_env("EXPIRE_AFTER_SECS").as_deref(), Some("7200"));
+    assert_eq!(get_env("PREFERRED_REGION").as_deref(), Some("us-east-1"));
+    assert_eq!(get_env("ASHERAH_POOL_MAX_OPEN").as_deref(), Some("50"));
+
+    // Second build omits those fields — they must not carry over
+    let cfg_b = ConfigOptions {
+        expire_after: None,
+        check_interval: None,
+        preferred_region: None,
+        pool_max_open: None,
+        pool_max_idle: None,
+        pool_max_lifetime: None,
+        pool_max_idle_time: None,
+        ..base_config()
+    };
+    let _applied = cfg_b.apply_env().unwrap();
+    assert_eq!(get_env("EXPIRE_AFTER_SECS"), None);
+    assert_eq!(get_env("REVOKE_CHECK_INTERVAL_SECS"), None);
+    assert_eq!(get_env("PREFERRED_REGION"), None);
+    assert_eq!(get_env("ASHERAH_POOL_MAX_OPEN"), None);
+    assert_eq!(get_env("ASHERAH_POOL_MAX_IDLE"), None);
+    assert_eq!(get_env("ASHERAH_POOL_MAX_LIFETIME"), None);
+    assert_eq!(get_env("ASHERAH_POOL_MAX_IDLE_TIME"), None);
 }
 
 fn test_region_map_set() {
@@ -637,8 +670,12 @@ fn main() {
     );
     run_test("test_optional_int_fields_set", test_optional_int_fields_set);
     run_test(
-        "test_optional_int_fields_none_preserves_env",
-        test_optional_int_fields_none_preserves_env,
+        "test_optional_int_fields_none_clears_env",
+        test_optional_int_fields_none_clears_env,
+    );
+    run_test(
+        "test_sequential_factory_builds_isolated",
+        test_sequential_factory_builds_isolated,
     );
     run_test("test_region_map_set", test_region_map_set);
     run_test("test_region_map_none", test_region_map_none);
@@ -691,5 +728,5 @@ fn main() {
         test_memory_metastore_clears_mysql_tls_mode,
     );
 
-    println!("\ntest result: ok. 36 passed; 0 failed");
+    println!("\ntest result: ok. 37 passed; 0 failed");
 }
