@@ -462,7 +462,26 @@ function testFactorySessionApi() {
   }
 }
 
+function testStaticMasterKeyConfig() {
+  // Regression: Node AsherahConfig must accept staticMasterKeyHex and
+  // propagate it to the native config. Without this field, the Rust layer
+  // falls back to a built-in test key, breaking cross-language interop.
+  addon.setup({
+    serviceName: 'static-key-svc',
+    productId: 'static-key-prod',
+    metastore: 'memory',
+    kms: 'static',
+    staticMasterKeyHex: '22'.repeat(32),
+    enableSessionCaching: false,
+  });
+  const ct = addon.encryptString('sk-part', 'static-key-test');
+  assert.strictEqual(addon.decryptString('sk-part', ct), 'static-key-test');
+  addon.shutdown();
+  console.log('asherah-node staticMasterKeyHex config OK');
+}
+
 main();
+testStaticMasterKeyConfig();
 testCompatApi();
 testFactorySessionApi();
 

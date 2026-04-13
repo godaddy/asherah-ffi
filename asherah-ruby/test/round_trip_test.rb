@@ -435,4 +435,28 @@ class AsyncSessionTest < Minitest::Test
       factory.close
     end
   end
+
+  # Regression: close() must wait for in-flight async ops (pending_ops counter).
+  # Without this, the native session pointer could be freed while the tokio
+  # task is still using it, causing use-after-free.
+  def test_close_waits_for_pending_async_ops
+    factory = make_factory
+    begin
+      session = factory.get_session("async-close-wait")
+      # Start async op in a thread
+      thread = Thread.new do
+        session.encrypt_bytes_async("async-while-closing".b)
+      end
+      # Give the async op a moment to start
+      sleep 0.01
+      # close() should wait for pending ops
+      session.close
+      assert session.closed?
+      # The thread should complete without error
+      result = thread.value
+      refute_nil result
+    ensure
+      factory.close
+    end
+  end
 end

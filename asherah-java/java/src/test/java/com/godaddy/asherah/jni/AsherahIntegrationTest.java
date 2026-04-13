@@ -2,6 +2,7 @@ package com.godaddy.asherah.jni;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.nio.charset.StandardCharsets;
@@ -9,6 +10,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -313,6 +315,64 @@ class AsherahIntegrationTest {
       String ciphertext = session.encryptStringAsync(plaintext).get();
       String decrypted = session.decryptStringAsync(ciphertext).get();
       assertEquals(plaintext, decrypted);
+    }
+  }
+
+  // Regression: closing a session while async futures are in flight must not
+  // crash — the Arc-wrapped native session keeps it alive until all tasks complete.
+  @Test
+  void asyncCloseWhileInflight() throws Exception {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig())) {
+      AsherahSession session = factory.getSession("async-close-test");
+      List<CompletableFuture<byte[]>> futures = new ArrayList<>();
+      for (int i = 0; i < 5; i++) {
+        futures.add(session.encryptBytesAsync(
+            ("async-close-" + i).getBytes(StandardCharsets.UTF_8)));
+      }
+      // Close while async ops may be in flight
+      session.close();
+      // All futures must complete without exception
+      for (CompletableFuture<byte[]> f : futures) {
+        assertNotNull(f.get());
+      }
+    }
+  }
+
+  // Regression: the static facade must allow concurrent encrypt/decrypt
+  // across partitions (ReadWriteLock, not synchronized).
+  @Test
+  void concurrentStaticFacade() throws Exception {
+    final AsherahConfig config =
+        AsherahConfig.builder()
+            .serviceName("concurrent-facade")
+            .productId("prod")
+            .metastore("memory")
+            .kms("static")
+            .enableSessionCaching(Boolean.FALSE)
+            .build();
+    Asherah.setup(config);
+    try {
+      ExecutorService executor = Executors.newFixedThreadPool(10);
+      List<Future<Void>> futures = new ArrayList<>();
+      for (int t = 0; t < 10; t++) {
+        final int threadId = t;
+        futures.add(executor.submit(() -> {
+          for (int i = 0; i < 50; i++) {
+            String data = "thread-" + threadId + "-iter-" + i;
+            String ct = Asherah.encryptString("facade-" + threadId, data);
+            byte[] pt = Asherah.decrypt("facade-" + threadId,
+                ct.getBytes(StandardCharsets.UTF_8));
+            assertArrayEquals(data.getBytes(StandardCharsets.UTF_8), pt);
+          }
+          return null;
+        }));
+      }
+      executor.shutdown();
+      for (Future<Void> f : futures) {
+        f.get();
+      }
+    } finally {
+      Asherah.shutdown();
     }
   }
 

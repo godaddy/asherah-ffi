@@ -568,6 +568,30 @@ fn test_no_env_side_effects() {
     std::env::remove_var("SERVICE_NAME");
 }
 
+fn test_concurrent_resolves_are_safe() {
+    // Defect #12: factory_from_config_async must be concurrency-safe.
+    // With env transport eliminated, concurrent resolves must not interfere.
+    let handles: Vec<_> = (0..10)
+        .map(|i| {
+            std::thread::spawn(move || {
+                let cfg = ConfigOptions {
+                    service_name: Some(format!("concurrent-svc-{i}")),
+                    ..base_config()
+                };
+                let resolved = resolve(&cfg);
+                assert_eq!(
+                    resolved.service_name,
+                    format!("concurrent-svc-{i}"),
+                    "thread {i} got wrong service_name"
+                );
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+}
+
 // ============================================================================
 // Test runner (harness=false)
 // ============================================================================
@@ -685,6 +709,10 @@ fn main() {
     );
     run_test!("test_static_master_key_hex", test_static_master_key_hex);
     run_test!("test_no_env_side_effects", test_no_env_side_effects);
+    run_test!(
+        "test_concurrent_resolves_are_safe",
+        test_concurrent_resolves_are_safe
+    );
 
     println!("\ntest result: ok. {pass} passed; {fail} failed");
     if fail > 0 {

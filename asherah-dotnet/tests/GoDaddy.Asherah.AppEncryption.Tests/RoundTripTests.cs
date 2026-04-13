@@ -486,6 +486,28 @@ public class RoundTripTests
             Asherah.EncryptString("no-setup", "should fail"));
     }
 
+    // Regression: Dispose must wait for in-flight async ops (pending-ops counter).
+    // Without this, the SafeHandle could be freed while native async callbacks
+    // are still running, causing use-after-free.
+    [Fact]
+    public async Task Session_DisposeWaitsForAsyncOps()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateConfig());
+        var session = factory.GetSession("async-dispose-test");
+
+        // Launch several async ops before disposing
+        var tasks = Enumerable.Range(0, 5).Select(i =>
+            session.EncryptBytesAsync(Encoding.UTF8.GetBytes($"dispose-payload-{i}"))
+        ).ToArray();
+
+        // Dispose while ops are in flight — must not crash
+        session.Dispose();
+
+        // All tasks must complete successfully
+        var results = await Task.WhenAll(tasks);
+        Assert.All(results, r => Assert.NotNull(r));
+    }
+
     private static string LocateRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
