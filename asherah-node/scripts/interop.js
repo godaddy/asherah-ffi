@@ -54,6 +54,7 @@ function configFromEnv() {
     sessionCacheMaxSize: process.env.SESSION_CACHE_MAX_SIZE ? Number(process.env.SESSION_CACHE_MAX_SIZE) : undefined,
     sessionCacheDuration: process.env.SESSION_CACHE_DURATION_SECS ? Number(process.env.SESSION_CACHE_DURATION_SECS) : undefined,
     kms: process.env.KMS || 'static',
+    staticMasterKeyHex: process.env.STATIC_MASTER_KEY_HEX,
     regionMap: process.env.REGION_MAP ? JSON.parse(process.env.REGION_MAP) : undefined,
     preferredRegion: process.env.PREFERRED_REGION,
     enableRegionSuffix: process.env.DDB_REGION_SUFFIX ? process.env.DDB_REGION_SUFFIX === '1' : undefined,

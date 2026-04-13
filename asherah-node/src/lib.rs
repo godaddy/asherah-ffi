@@ -100,6 +100,8 @@ pub struct AsherahConfig {
     pub vault_k8s_token_path: Option<String>,
     pub vault_transit_key: Option<String>,
     pub vault_transit_mount: Option<String>,
+    // KMS: Static
+    pub static_master_key_hex: Option<String>,
 }
 
 fn to_config_options(cfg: &AsherahConfig) -> asherah_config::ConfigOptions {
@@ -118,7 +120,7 @@ fn to_config_options(cfg: &AsherahConfig) -> asherah_config::ConfigOptions {
         session_cache_max_size: cfg.session_cache_max_size,
         session_cache_duration: cfg.session_cache_duration,
         kms: cfg.kms.clone(),
-        static_master_key_hex: None,
+        static_master_key_hex: cfg.static_master_key_hex.clone(),
         region_map: cfg.region_map.clone(),
         preferred_region: cfg.preferred_region.clone(),
         enable_region_suffix: cfg.enable_region_suffix,

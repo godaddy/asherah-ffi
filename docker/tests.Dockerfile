@@ -44,7 +44,7 @@ RUN curl -fsSL https://bun.sh/install | bash \
     && ln -s /root/.bun/bin/bun /usr/local/bin/bun
 
 # Python tooling
-RUN pip3 install --break-system-packages --no-cache-dir maturin==1.9.4 pytest==8.4.1
+RUN pip3 install --break-system-packages --no-cache-dir maturin==1.9.4 pytest==8.4.1 pytest-asyncio==1.3.0
 
 RUN rustup component add rustfmt clippy
 

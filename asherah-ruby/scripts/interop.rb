@@ -25,6 +25,8 @@ config = {
   "Verbose" => false
 }
 
+config["StaticMasterKeyHex"] = ENV["STATIC_MASTER_KEY_HEX"] if ENV.key?("STATIC_MASTER_KEY_HEX")
+
 if ENV.key?("CONNECTION_STRING")
   config["ConnectionString"] = ENV["CONNECTION_STRING"]
 elsif ENV.key?("SQLITE_PATH")
