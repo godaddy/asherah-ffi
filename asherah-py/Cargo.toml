@@ -19,8 +19,9 @@ workspace = true
 
 
 [dependencies]
-pyo3 = { version = "0.28", features = ["extension-module", "abi3-py38", "generate-import-lib", "serde"] }
+pyo3 = { version = "0.28", features = ["extension-module", "abi3-py38", "generate-import-lib", "serde", "experimental-async"] }
 asherah = { path = "../asherah", features = ["sqlite", "mysql", "postgres", "dynamodb"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync"] }
 asherah-config = { path = "../asherah-config" }
 serde_json = "1.0"
 anyhow = "1.0"

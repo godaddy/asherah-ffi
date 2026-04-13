@@ -359,3 +359,61 @@ def test_multiple_partitions_global_api():
             asherah.decrypt_bytes("global-part-a", ct_b)
     finally:
         asherah.shutdown()
+
+
+# ── Async tests (Session-level, native tokio coroutines) ───────────
+
+
+@pytest.mark.asyncio
+async def test_async_encrypt_decrypt_roundtrip():
+    pytest.importorskip("asherah")
+    import asherah
+
+    _configure_env()
+    factory = asherah.SessionFactory()
+    session = factory.get_session("async-roundtrip")
+
+    payload = b"async test payload"
+    ciphertext = await session.encrypt_bytes_async(payload)
+    assert isinstance(ciphertext, str)
+
+    recovered = await session.decrypt_bytes_async(ciphertext)
+    assert recovered == payload
+
+    factory.close()
+
+
+@pytest.mark.asyncio
+async def test_async_empty_payload():
+    pytest.importorskip("asherah")
+    import asherah
+
+    _configure_env()
+    factory = asherah.SessionFactory()
+    session = factory.get_session("async-empty")
+
+    ciphertext = await session.encrypt_bytes_async(b"")
+    recovered = await session.decrypt_bytes_async(ciphertext)
+    assert recovered == b""
+
+    factory.close()
+
+
+@pytest.mark.asyncio
+async def test_async_concurrent():
+    pytest.importorskip("asherah")
+    import asyncio
+    import asherah
+
+    _configure_env()
+    factory = asherah.SessionFactory()
+
+    async def worker(i):
+        session = factory.get_session(f"async-concurrent-{i}")
+        payload = f"async-data-{i}".encode()
+        ct = await session.encrypt_bytes_async(payload)
+        recovered = await session.decrypt_bytes_async(ct)
+        assert recovered == payload
+
+    await asyncio.gather(*[worker(i) for i in range(10)])
+    factory.close()

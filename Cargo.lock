@@ -228,6 +228,7 @@ dependencies = [
  "parking_lot",
  "pyo3",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
