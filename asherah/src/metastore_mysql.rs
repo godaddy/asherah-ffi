@@ -50,15 +50,25 @@ pub struct MySqlMetastore {
 }
 
 impl MySqlMetastore {
+    /// Connect with explicit config — no env var reads.
+    pub fn connect_with(
+        url: &str,
+        pool_config: PoolConfig,
+        tls_mode: Option<&str>,
+        replica_consistency: Option<&str>,
+    ) -> anyhow::Result<Self> {
+        let opts = pool_mysql::build_opts_with(url, tls_mode, replica_consistency)?;
+        let pool = ManagedPool::new(opts, pool_config);
+        pool.validate()?;
+        Ok(Self { pool })
+    }
+
+    /// Connect using env vars for pool/TLS config (legacy entry point).
     pub fn connect(url: &str) -> anyhow::Result<Self> {
         let opts = pool_mysql::build_opts(url)?;
         let config = PoolConfig::from_env();
-
         let pool = ManagedPool::new(opts, config);
-
-        // Fail-fast: validate connectivity at setup time
         pool.validate()?;
-
         Ok(Self { pool })
     }
 

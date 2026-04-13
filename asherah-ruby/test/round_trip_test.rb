@@ -362,3 +362,77 @@ class CanonicalCompatTest < Minitest::Test
     assert_equal "memory", parsed["Metastore"]
   end
 end
+
+# --- Async tests (Session-level, tokio-backed) ---
+
+class AsyncSessionTest < Minitest::Test
+  CONFIG = {
+    "ServiceName" => "svc",
+    "ProductID" => "prod",
+    "Metastore" => "memory",
+    "KMS" => "static",
+    "EnableSessionCaching" => true,
+    "Verbose" => false
+  }.freeze
+
+  def make_factory
+    pointer = Asherah::Native.asherah_factory_new_with_config(JSON.generate(CONFIG))
+    Asherah::SessionFactory.new(pointer)
+  end
+
+  def test_async_encrypt_decrypt_roundtrip
+    factory = make_factory
+    begin
+      session = factory.get_session("async-rt")
+      begin
+        plaintext = "async ruby secret".b
+        json = session.encrypt_bytes_async(plaintext)
+        refute_nil json
+        recovered = session.decrypt_bytes_async(json)
+        assert_equal plaintext, recovered
+      ensure
+        session.close
+      end
+    ensure
+      factory.close
+    end
+  end
+
+  def test_async_empty_payload
+    factory = make_factory
+    begin
+      session = factory.get_session("async-empty")
+      begin
+        json = session.encrypt_bytes_async("".b)
+        recovered = session.decrypt_bytes_async(json)
+        assert_equal "".b.bytes, recovered.bytes
+      ensure
+        session.close
+      end
+    ensure
+      factory.close
+    end
+  end
+
+  def test_async_concurrent
+    factory = make_factory
+    begin
+      threads = 8.times.map do |i|
+        Thread.new do
+          session = factory.get_session("async-concurrent-#{i}")
+          begin
+            plaintext = "async-thread-#{i}".b
+            json = session.encrypt_bytes_async(plaintext)
+            recovered = session.decrypt_bytes_async(json)
+            assert_equal plaintext, recovered
+          ensure
+            session.close
+          end
+        end
+      end
+      threads.each(&:join)
+    ensure
+      factory.close
+    end
+  end
+end

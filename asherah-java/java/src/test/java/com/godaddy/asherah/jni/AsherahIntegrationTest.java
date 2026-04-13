@@ -21,7 +21,7 @@ class AsherahIntegrationTest {
   @BeforeAll
   static void configureLibraryPath() {
     if (System.getProperty("asherah.java.nativeLibraryPath") == null) {
-      final Path defaultDir = Paths.get("..", "target", "debug").toAbsolutePath().normalize();
+      final Path defaultDir = Paths.get("..", "..", "target", "debug").toAbsolutePath().normalize();
       System.setProperty("asherah.java.nativeLibraryPath", defaultDir.toString());
     }
     System.setProperty("SERVICE_NAME", "svc");
@@ -256,6 +256,63 @@ class AsherahIntegrationTest {
       for (Future<Void> f : futures) {
         f.get();
       }
+    }
+  }
+
+  // --- Async API Tests ---
+
+  @Test
+  void asyncEncryptDecryptRoundTrip() throws Exception {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession session = factory.getSession("async-roundtrip")) {
+      byte[] plaintext = "async-roundtrip".getBytes(StandardCharsets.UTF_8);
+      byte[] ciphertext = session.encryptBytesAsync(plaintext).get();
+      byte[] decrypted = session.decryptBytesAsync(ciphertext).get();
+      assertArrayEquals(plaintext, decrypted);
+    }
+  }
+
+  @Test
+  void asyncEmptyPayload() throws Exception {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession session = factory.getSession("async-empty")) {
+      byte[] ciphertext = session.encryptBytesAsync(new byte[0]).get();
+      byte[] decrypted = session.decryptBytesAsync(ciphertext).get();
+      assertArrayEquals(new byte[0], decrypted);
+    }
+  }
+
+  @Test
+  void asyncConcurrent() throws Exception {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig())) {
+      List<java.util.concurrent.CompletableFuture<Void>> futures = new ArrayList<>();
+      List<AsherahSession> sessions = new ArrayList<>();
+      for (int t = 0; t < 10; t++) {
+        final int threadId = t;
+        AsherahSession session = factory.getSession("async-concurrent-" + threadId);
+        sessions.add(session);
+        byte[] plaintext = ("async-data-" + threadId).getBytes(StandardCharsets.UTF_8);
+        futures.add(
+            session.encryptBytesAsync(plaintext)
+                .thenCompose(ct -> session.decryptBytesAsync(ct))
+                .thenAccept(recovered -> assertArrayEquals(plaintext, recovered)));
+      }
+      java.util.concurrent.CompletableFuture.allOf(
+          futures.toArray(new java.util.concurrent.CompletableFuture[0])).get();
+      for (AsherahSession s : sessions) {
+        s.close();
+      }
+    }
+  }
+
+  @Test
+  void asyncStringRoundTrip() throws Exception {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession session = factory.getSession("async-string")) {
+      String plaintext = "async string test 🦀";
+      String ciphertext = session.encryptStringAsync(plaintext).get();
+      String decrypted = session.decryptStringAsync(ciphertext).get();
+      assertEquals(plaintext, decrypted);
     }
   }
 

@@ -17,8 +17,9 @@ path = "src/main.rs"
 [dependencies]
 asherah = { path = "../asherah" }
 asherah-config = { path = "../asherah-config" }
-tonic = "0.12"
-prost = "0.13"
+tonic = "0.14"
+tonic-prost = "0.14"
+prost = "0.14"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal"] }
 tokio-stream = { version = "0.1", features = ["net"] }
 clap = { version = "4", features = ["derive", "env"] }
@@ -28,10 +29,10 @@ log = "0.4"
 env_logger = "0.11"
 
 [build-dependencies]
-tonic-build = "0.12"
+tonic-prost-build = "0.14"
 
 [dev-dependencies]
-tower = "0.4"
+tower = "0.5"
 hyper-util = "0.1"
 serial_test = "3"
 

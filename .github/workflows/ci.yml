@@ -672,7 +672,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo gem install ffi --no-document
-          pip3 install pytest maturin
+          pip3 install pytest pytest-asyncio maturin
           cd asherah-node && npm install
       - name: Interop tests
         run: scripts/test.sh --interop

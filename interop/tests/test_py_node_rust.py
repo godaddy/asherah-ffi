@@ -85,19 +85,38 @@ def build_artifacts():
     if shutil.which("python3") is None:
         pytest.skip("python3 interpreter required")
 
-    maturin_cmd = env.get("MATURIN_BIN", "python3 -m maturin")
+    maturin_cmd = env.get("MATURIN_BIN", "")
+    if not maturin_cmd:
+        # Try python3 -m maturin first, then fall back to plain maturin binary
+        for candidate in ("python3 -m maturin", "maturin"):
+            try:
+                subprocess.run(
+                    shlex.split(candidate) + ["--version"],
+                    cwd=ROOT,
+                    env=env,
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                maturin_cmd = candidate
+                break
+            except (FileNotFoundError, subprocess.CalledProcessError):
+                continue
+        if not maturin_cmd:
+            pytest.skip("maturin is required for Python interop tests")
+    else:
+        try:
+            subprocess.run(
+                shlex.split(maturin_cmd) + ["--version"],
+                cwd=ROOT,
+                env=env,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            pytest.skip(f"maturin not available via MATURIN_BIN={maturin_cmd}")
     maturin_args = shlex.split(maturin_cmd)
-    try:
-        subprocess.run(
-            maturin_args + ["--version"],
-            cwd=ROOT,
-            env=env,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-    except FileNotFoundError:
-        pytest.skip("maturin is required for Python interop tests")
 
     LOGGER.info("building Python wheel with maturin")
     subprocess.run(

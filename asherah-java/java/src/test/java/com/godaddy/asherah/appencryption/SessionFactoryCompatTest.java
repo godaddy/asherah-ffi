@@ -292,6 +292,55 @@ class SessionFactoryCompatTest {
     }
 
     @Test
+    void customStaticKeyRoundTrip() {
+        // Use a non-default 32-byte key to prove the key is transmitted through
+        // the config JSON to the native layer, not silently falling back to the
+        // built-in test key ("thisIsAStaticMasterKeyForTesting").
+        String customKey = "customKeyForAsherahTestingXX!@#$";  // exactly 32 bytes
+        factory = SessionFactory.newBuilder("product", "service")
+                .withInMemoryMetastore()
+                .withNeverExpiredCryptoPolicy()
+                .withStaticKeyManagementService(customKey)
+                .build();
+
+        try (Session<byte[], byte[]> session = factory.getSessionBytes("custom-key-test")) {
+            byte[] payload = "custom key payload".getBytes(StandardCharsets.UTF_8);
+            byte[] encrypted = session.encrypt(payload);
+            byte[] decrypted = session.decrypt(encrypted);
+            assertArrayEquals(payload, decrypted);
+        }
+    }
+
+    @Test
+    void customStaticKeyCrossFactoryIsolation() {
+        // Ciphertext from one key must not decrypt with a different key
+        String keyA = "staticMasterKeyAlphaForTestAAA!!";  // exactly 32 bytes
+        factory = SessionFactory.newBuilder("product", "service")
+                .withInMemoryMetastore()
+                .withNeverExpiredCryptoPolicy()
+                .withStaticKeyManagementService(keyA)
+                .build();
+
+        byte[] encrypted;
+        try (Session<byte[], byte[]> session = factory.getSessionBytes("isolation-test")) {
+            encrypted = session.encrypt("secret".getBytes(StandardCharsets.UTF_8));
+        }
+        factory.close();
+
+        String keyB = "staticMasterKeyBravoForTestBBB!!";  // exactly 32 bytes
+        factory = SessionFactory.newBuilder("product", "service")
+                .withInMemoryMetastore()
+                .withNeverExpiredCryptoPolicy()
+                .withStaticKeyManagementService(keyB)
+                .build();
+
+        try (Session<byte[], byte[]> session = factory.getSessionBytes("isolation-test")) {
+            final byte[] ct = encrypted;
+            assertThrows(Exception.class, () -> session.decrypt(ct));
+        }
+    }
+
+    @Test
     void multipleSessionsSameFactory() {
         factory = SessionFactory.newBuilder("product", "service")
                 .withInMemoryMetastore()

@@ -398,96 +398,677 @@ impl Metastore for DynMetastore {
     }
 }
 
-// Build a full PublicFactory from environment.
-// Supported env:
-//  SERVICE_NAME, PRODUCT_ID, REGION_SUFFIX
-//  KMS: "static" | "aws" (default: static)
-//  STATIC_MASTER_KEY_HEX (required if KMS=static)
-//  Metastore: "rdbms" | "dynamodb" | "memory" (default: memory)
-//  CONNECTION_STRING (for rdbms)
-//  DDB_TABLE (for dynamodb)
-//  AWS_REGION (for aws kms / ddb)
-pub fn factory_from_env(
-) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
-    let cfg = config_from_env();
-    let (store_dyn, _svc, _prod, _sfx) = metastore_from_env()?;
-    let metastore = Arc::new(DynMetastore(store_dyn));
-    let crypto = Arc::new(crate::aead::AES256GCM::new());
-    let kms_kind = std::env::var("KMS")
-        .unwrap_or_else(|_| "static".into())
-        .to_lowercase();
-    let kms_dyn: Arc<dyn crate::traits::KeyManagementService> = match kms_kind.as_str() {
-        "aws" => {
-            // Envelope-compatible KMS: single region via KMS_KEY_ID, multi-region via REGION_MAP (+ PREFERRED_REGION)
-            if let Ok(map_json) = std::env::var("REGION_MAP") {
-                let regions: std::collections::HashMap<String, String> =
-                    serde_json::from_str(&map_json)?;
-                let preferred = std::env::var("PREFERRED_REGION").ok();
+// ── ResolvedConfig ──────────────────────────────────────────────────
+//
+// Structured config for building factories without env var side effects.
+
+#[derive(Clone, Debug, Default)]
+pub struct PoolConfig {
+    pub max_open: Option<usize>,
+    pub max_idle: Option<usize>,
+    pub max_lifetime_s: Option<u64>,
+    pub max_idle_time_s: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
+pub enum MetastoreConfig {
+    Memory,
+    Sqlite {
+        path: String,
+    },
+    Postgres {
+        url: String,
+        replica_consistency: Option<String>,
+        pool: PoolConfig,
+    },
+    Mysql {
+        url: String,
+        tls_mode: Option<String>,
+        replica_consistency: Option<String>,
+        pool: PoolConfig,
+    },
+    DynamoDb {
+        table: String,
+        region: Option<String>,
+        endpoint: Option<String>,
+        region_suffix: bool,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub enum KmsConfig {
+    Static {
+        key_hex: String,
+    },
+    Aws {
+        region_map: Option<std::collections::HashMap<String, String>>,
+        preferred_region: Option<String>,
+        key_id: Option<String>,
+        region: Option<String>,
+    },
+    SecretsManager {
+        secret_id: String,
+        region: Option<String>,
+    },
+    Vault {
+        addr: String,
+        transit_key: String,
+        transit_mount: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct PolicyConfig {
+    pub expire_key_after_s: Option<i64>,
+    pub create_date_precision_s: Option<i64>,
+    pub revoke_check_interval_s: Option<i64>,
+    pub session_cache_max_size: Option<usize>,
+    pub session_cache_ttl_s: Option<i64>,
+    pub shared_intermediate_key_cache: Option<bool>,
+    pub intermediate_key_cache_max_size: Option<usize>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ResolvedConfig {
+    pub service_name: String,
+    pub product_id: String,
+    pub region_suffix: Option<String>,
+    pub metastore: MetastoreConfig,
+    pub kms: KmsConfig,
+    pub policy: PolicyConfig,
+}
+
+fn build_config_from_policy(
+    service: &str,
+    product: &str,
+    region_suffix: Option<&str>,
+    policy: &PolicyConfig,
+) -> crate::Config {
+    let mut cfg = crate::Config::new(service.to_string(), product.to_string());
+    if let Some(sfx) = region_suffix {
+        cfg = cfg.with_region_suffix(sfx.to_string());
+    }
+    if let Some(v) = policy.expire_key_after_s {
+        cfg.policy.expire_key_after_s = v;
+    }
+    if let Some(v) = policy.create_date_precision_s {
+        cfg.policy.create_date_precision_s = v;
+    }
+    if let Some(v) = policy.revoke_check_interval_s {
+        cfg.policy.revoke_check_interval_s = v;
+    }
+    if let Some(v) = policy.session_cache_max_size {
+        cfg.policy.session_cache_max_size = v;
+    }
+    if let Some(v) = policy.session_cache_ttl_s {
+        cfg.policy.session_cache_ttl_s = v;
+    }
+    if let Some(b) = policy.shared_intermediate_key_cache {
+        cfg.policy.shared_intermediate_key_cache = b;
+    }
+    cfg.policy.enforce_minimums();
+    if let Some(v) = policy.intermediate_key_cache_max_size {
+        cfg.policy.intermediate_key_cache_max_size = v;
+        if cfg.policy.intermediate_key_cache_eviction_policy == "simple" {
+            cfg.policy.intermediate_key_cache_eviction_policy = "lru".to_string();
+        }
+    }
+    cfg
+}
+
+#[allow(unused_variables)]
+fn build_metastore(ms: &MetastoreConfig) -> anyhow::Result<Arc<dyn Metastore>> {
+    match ms {
+        MetastoreConfig::Memory => Ok(Arc::new(crate::metastore::InMemoryMetastore::new())),
+        MetastoreConfig::Sqlite { path } => {
+            #[cfg(feature = "sqlite")]
+            {
+                Ok(Arc::new(crate::metastore_sqlite::SqliteMetastore::open(
+                    path,
+                )?))
+            }
+            #[cfg(not(feature = "sqlite"))]
+            anyhow::bail!("Enable feature 'sqlite' to use SQLite metastore")
+        }
+        MetastoreConfig::Postgres {
+            url,
+            replica_consistency,
+            pool,
+        } => {
+            #[cfg(feature = "postgres")]
+            {
+                Ok(Arc::new(
+                    crate::metastore_postgres::PostgresMetastore::connect_with(
+                        url,
+                        pool.max_open,
+                        pool.max_idle,
+                        replica_consistency.clone(),
+                    )?,
+                ))
+            }
+            #[cfg(not(feature = "postgres"))]
+            anyhow::bail!("Enable feature 'postgres' to use Postgres metastore")
+        }
+        MetastoreConfig::Mysql {
+            url,
+            tls_mode,
+            replica_consistency,
+            pool,
+        } => {
+            #[cfg(feature = "mysql")]
+            {
+                let pool_cfg = crate::pool_mysql::PoolConfig::from_values(
+                    pool.max_open,
+                    pool.max_idle,
+                    pool.max_lifetime_s,
+                    pool.max_idle_time_s,
+                );
+                Ok(Arc::new(
+                    crate::metastore_mysql::MySqlMetastore::connect_with(
+                        url,
+                        pool_cfg,
+                        tls_mode.as_deref(),
+                        replica_consistency.as_deref(),
+                    )?,
+                ))
+            }
+            #[cfg(not(feature = "mysql"))]
+            anyhow::bail!("Enable feature 'mysql' to use MySQL metastore")
+        }
+        MetastoreConfig::DynamoDb {
+            table,
+            region,
+            endpoint,
+            region_suffix,
+        } => {
+            #[cfg(feature = "dynamodb")]
+            {
+                Ok(Arc::new(
+                    crate::metastore_dynamodb::DynamoDbMetastore::new_with(
+                        table.clone(),
+                        region.clone(),
+                        endpoint.clone(),
+                        *region_suffix,
+                    )?,
+                ))
+            }
+            #[cfg(not(feature = "dynamodb"))]
+            anyhow::bail!("Enable feature 'dynamodb' to use DynamoDB metastore")
+        }
+    }
+}
+
+#[allow(unused_variables)]
+async fn build_metastore_async(ms: &MetastoreConfig) -> anyhow::Result<Arc<dyn Metastore>> {
+    match ms {
+        MetastoreConfig::Memory => Ok(Arc::new(crate::metastore::InMemoryMetastore::new())),
+        MetastoreConfig::Sqlite { path } => {
+            #[cfg(feature = "sqlite")]
+            {
+                Ok(Arc::new(crate::metastore_sqlite::SqliteMetastore::open(
+                    path,
+                )?))
+            }
+            #[cfg(not(feature = "sqlite"))]
+            anyhow::bail!("Enable feature 'sqlite' to use SQLite metastore")
+        }
+        MetastoreConfig::Postgres {
+            url,
+            replica_consistency,
+            pool,
+        } => {
+            #[cfg(feature = "postgres")]
+            {
+                let url = url.clone();
+                let max_open = pool.max_open;
+                let max_idle = pool.max_idle;
+                let replica_consistency = replica_consistency.clone();
+                let pg = tokio::task::spawn_blocking(move || {
+                    crate::metastore_postgres::PostgresMetastore::connect_with(
+                        &url,
+                        max_open,
+                        max_idle,
+                        replica_consistency,
+                    )
+                })
+                .await
+                .map_err(|e| anyhow::anyhow!("postgres connect join error: {e}"))??;
+                Ok(Arc::new(pg))
+            }
+            #[cfg(not(feature = "postgres"))]
+            anyhow::bail!("Enable feature 'postgres' to use Postgres metastore")
+        }
+        MetastoreConfig::Mysql {
+            url,
+            tls_mode,
+            replica_consistency,
+            pool,
+        } => {
+            #[cfg(feature = "mysql")]
+            {
+                let url = url.clone();
+                let pool_cfg = crate::pool_mysql::PoolConfig::from_values(
+                    pool.max_open,
+                    pool.max_idle,
+                    pool.max_lifetime_s,
+                    pool.max_idle_time_s,
+                );
+                let tls_mode = tls_mode.clone();
+                let replica_consistency = replica_consistency.clone();
+                let my = tokio::task::spawn_blocking(move || {
+                    crate::metastore_mysql::MySqlMetastore::connect_with(
+                        &url,
+                        pool_cfg,
+                        tls_mode.as_deref(),
+                        replica_consistency.as_deref(),
+                    )
+                })
+                .await
+                .map_err(|e| anyhow::anyhow!("mysql connect join error: {e}"))??;
+                Ok(Arc::new(my))
+            }
+            #[cfg(not(feature = "mysql"))]
+            anyhow::bail!("Enable feature 'mysql' to use MySQL metastore")
+        }
+        MetastoreConfig::DynamoDb {
+            table,
+            region,
+            endpoint,
+            region_suffix,
+        } => {
+            #[cfg(feature = "dynamodb")]
+            {
+                Ok(Arc::new(
+                    crate::metastore_dynamodb::DynamoDbMetastore::new_with_async(
+                        table.clone(),
+                        region.clone(),
+                        endpoint.clone(),
+                        *region_suffix,
+                    )
+                    .await?,
+                ))
+            }
+            #[cfg(not(feature = "dynamodb"))]
+            anyhow::bail!("Enable feature 'dynamodb' to use DynamoDB metastore")
+        }
+    }
+}
+
+fn decode_static_key_hex(hex: &str) -> anyhow::Result<Vec<u8>> {
+    if !hex.len().is_multiple_of(2) {
+        anyhow::bail!(
+            "STATIC_MASTER_KEY_HEX has odd length ({}) — must be even",
+            hex.len()
+        );
+    }
+    let mut key = vec![0_u8; hex.len() / 2];
+    for i in 0..key.len() {
+        key[i] = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).map_err(|_| {
+            anyhow::anyhow!(
+                "STATIC_MASTER_KEY_HEX contains invalid hex at position {}",
+                2 * i
+            )
+        })?;
+    }
+    Ok(key)
+}
+
+#[allow(unused_variables)]
+fn build_kms(
+    kms: &KmsConfig,
+    crypto: &Arc<crate::aead::AES256GCM>,
+) -> anyhow::Result<Arc<dyn crate::traits::KeyManagementService>> {
+    match kms {
+        KmsConfig::Static { key_hex } => {
+            log::warn!(
+                "Using static master key. \
+                 This is for testing only — do NOT use in production."
+            );
+            let hex = if key_hex.is_empty() {
+                "746869734973415374617469634d61737465724b6579466f7254657374696e67"
+            } else {
+                key_hex.as_str()
+            };
+            let key = decode_static_key_hex(hex)?;
+            Ok(Arc::new(crate::kms::StaticKMS::new(crypto.clone(), key)?))
+        }
+        KmsConfig::Aws {
+            region_map,
+            preferred_region,
+            key_id,
+            region,
+        } => {
+            if let Some(regions) = region_map {
                 let mut entries: Vec<(String, String)> = Vec::new();
                 let mut pref_idx = 0_usize;
-                for (i, (region, key)) in regions.iter().enumerate() {
-                    if preferred.as_ref() == Some(region) {
+                for (i, (r, k)) in regions.iter().enumerate() {
+                    if preferred_region.as_ref() == Some(r) {
                         pref_idx = i;
                     }
-                    entries.push((region.clone(), key.clone()));
+                    entries.push((r.clone(), k.clone()));
                 }
                 let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_multi(
                     crypto.clone(),
                     pref_idx,
                     entries,
                 )?;
-                Arc::new(kms)
+                Ok(Arc::new(kms))
             } else {
-                let key_id = std::env::var("KMS_KEY_ID")
-                    .map_err(|_| anyhow::anyhow!("KMS_KEY_ID required for KMS=aws"))?;
-                let region = std::env::var("AWS_REGION").ok();
+                let key_id = key_id
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("KMS_KEY_ID required for KMS=aws"))?;
                 let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_single(
                     crypto.clone(),
-                    key_id,
-                    region,
+                    key_id.clone(),
+                    region.clone(),
                 )?;
-                Arc::new(kms)
+                Ok(Arc::new(kms))
             }
         }
-        "static" | "test-debug-static" => {
-            log::warn!(
-                "Using static master key (KMS={kms_kind}). \
-                 This is for testing only — do NOT use in production."
-            );
-            let hex = std::env::var("STATIC_MASTER_KEY_HEX").unwrap_or_else(|_| {
-                // Default matches Go asherah's hardcoded key "thisIsAStaticMasterKeyForTesting"
-                "746869734973415374617469634d61737465724b6579466f7254657374696e67".to_string()
-            });
-            if !hex.len().is_multiple_of(2) {
+        KmsConfig::SecretsManager { secret_id, region } => {
+            #[cfg(feature = "secrets-manager")]
+            {
+                let kms = crate::kms_secrets_manager::SecretsManagerKMS::new(
+                    crypto.clone(),
+                    secret_id.clone(),
+                    region.clone(),
+                )?;
+                Ok(Arc::new(kms))
+            }
+            #[cfg(not(feature = "secrets-manager"))]
+            anyhow::bail!("Enable feature 'secrets-manager' to use Secrets Manager KMS")
+        }
+        KmsConfig::Vault {
+            addr,
+            transit_key,
+            transit_mount,
+        } => {
+            #[cfg(feature = "vault")]
+            {
+                let kms = crate::kms_vault_transit::VaultTransitKms::new(
+                    addr.clone(),
+                    transit_key,
+                    transit_mount.as_deref(),
+                )?;
+                Ok(Arc::new(kms))
+            }
+            #[cfg(not(feature = "vault"))]
+            anyhow::bail!("Enable feature 'vault' to use Vault Transit KMS")
+        }
+    }
+}
+
+#[allow(unused_variables)]
+async fn build_kms_async(
+    kms: &KmsConfig,
+    crypto: &Arc<crate::aead::AES256GCM>,
+) -> anyhow::Result<Arc<dyn crate::traits::KeyManagementService>> {
+    match kms {
+        KmsConfig::Static { .. } => build_kms(kms, crypto),
+        KmsConfig::Aws {
+            region_map,
+            preferred_region,
+            key_id,
+            region,
+        } => {
+            if let Some(regions) = region_map {
+                let mut entries: Vec<(String, String)> = Vec::new();
+                let mut pref_idx = 0_usize;
+                for (i, (r, k)) in regions.iter().enumerate() {
+                    if preferred_region.as_ref() == Some(r) {
+                        pref_idx = i;
+                    }
+                    entries.push((r.clone(), k.clone()));
+                }
+                let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_multi_async(
+                    crypto.clone(),
+                    pref_idx,
+                    entries,
+                )
+                .await?;
+                Ok(Arc::new(kms))
+            } else {
+                let key_id = key_id
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("KMS_KEY_ID required for KMS=aws"))?;
+                let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_single_async(
+                    crypto.clone(),
+                    key_id.clone(),
+                    region.clone(),
+                )
+                .await?;
+                Ok(Arc::new(kms))
+            }
+        }
+        KmsConfig::SecretsManager { secret_id, region } => {
+            #[cfg(feature = "secrets-manager")]
+            {
+                let kms = crate::kms_secrets_manager::SecretsManagerKMS::new_async(
+                    crypto.clone(),
+                    secret_id.clone(),
+                    region.clone(),
+                )
+                .await?;
+                Ok(Arc::new(kms))
+            }
+            #[cfg(not(feature = "secrets-manager"))]
+            anyhow::bail!("Enable feature 'secrets-manager' to use Secrets Manager KMS")
+        }
+        KmsConfig::Vault {
+            addr,
+            transit_key,
+            transit_mount,
+        } => {
+            #[cfg(feature = "vault")]
+            {
+                let kms = crate::kms_vault_transit::VaultTransitKms::new_async(
+                    addr.clone(),
+                    transit_key,
+                    transit_mount.as_deref(),
+                )
+                .await?;
+                Ok(Arc::new(kms))
+            }
+            #[cfg(not(feature = "vault"))]
+            anyhow::bail!("Enable feature 'vault' to use Vault Transit KMS")
+        }
+    }
+}
+
+/// Build a factory from fully resolved config — no env var reads or writes.
+pub fn factory_from_resolved(
+    config: &ResolvedConfig,
+) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
+    let cfg = build_config_from_policy(
+        &config.service_name,
+        &config.product_id,
+        config.region_suffix.as_deref(),
+        &config.policy,
+    );
+    let store_dyn = build_metastore(&config.metastore)?;
+    let metastore = Arc::new(DynMetastore(store_dyn));
+    let crypto = Arc::new(crate::aead::AES256GCM::new());
+    let kms_dyn = build_kms(&config.kms, &crypto)?;
+    let kms = Arc::new(DynKms(kms_dyn));
+    Ok(crate::api::new_session_factory(cfg, metastore, kms, crypto))
+}
+
+/// Async variant of factory_from_resolved.
+pub async fn factory_from_resolved_async(
+    config: &ResolvedConfig,
+) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
+    let cfg = build_config_from_policy(
+        &config.service_name,
+        &config.product_id,
+        config.region_suffix.as_deref(),
+        &config.policy,
+    );
+    let store_dyn = build_metastore_async(&config.metastore).await?;
+    let metastore = Arc::new(DynMetastore(store_dyn));
+    let crypto = Arc::new(crate::aead::AES256GCM::new());
+    let kms_dyn = build_kms_async(&config.kms, &crypto).await?;
+    let kms = Arc::new(DynKms(kms_dyn));
+    Ok(crate::api::new_session_factory(cfg, metastore, kms, crypto))
+}
+
+/// Parse environment variables into a `ResolvedConfig`.
+#[allow(unused_variables)]
+pub fn resolve_from_env() -> anyhow::Result<ResolvedConfig> {
+    fn get_i64(k: &str) -> Option<i64> {
+        std::env::var(k).ok().and_then(|v| v.parse::<i64>().ok())
+    }
+    fn get_usize(k: &str) -> Option<usize> {
+        std::env::var(k).ok().and_then(|v| v.parse::<usize>().ok())
+    }
+    fn get_bool(k: &str) -> Option<bool> {
+        std::env::var(k)
+            .ok()
+            .and_then(|v| match v.to_lowercase().as_str() {
+                "1" | "true" | "yes" | "on" => Some(true),
+                "0" | "false" | "no" | "off" => Some(false),
+                _ => None,
+            })
+    }
+    fn get_u64(k: &str) -> Option<u64> {
+        std::env::var(k).ok().and_then(|v| v.parse::<u64>().ok())
+    }
+
+    let service_name = std::env::var("SERVICE_NAME").unwrap_or_else(|_| "service".to_string());
+    let product_id = std::env::var("PRODUCT_ID").unwrap_or_else(|_| "product".to_string());
+    let region_suffix = std::env::var("REGION_SUFFIX").ok();
+
+    let pool = PoolConfig {
+        max_open: get_usize("ASHERAH_POOL_MAX_OPEN").or_else(|| get_usize("ASHERAH_POOL_SIZE")),
+        max_idle: get_usize("ASHERAH_POOL_MAX_IDLE"),
+        max_lifetime_s: get_u64("ASHERAH_POOL_MAX_LIFETIME"),
+        max_idle_time_s: get_u64("ASHERAH_POOL_MAX_IDLE_TIME"),
+    };
+    let replica_consistency = std::env::var("REPLICA_READ_CONSISTENCY").ok();
+
+    let mchoice = std::env::var("Metastore")
+        .unwrap_or_else(|_| "memory".to_string())
+        .to_lowercase();
+
+    let metastore = if mchoice == "sqlite" || std::env::var("SQLITE_PATH").is_ok() {
+        #[cfg(feature = "sqlite")]
+        {
+            let path = std::env::var("SQLITE_PATH").unwrap_or_else(|_| ":memory:".to_string());
+            MetastoreConfig::Sqlite { path }
+        }
+        #[cfg(not(feature = "sqlite"))]
+        anyhow::bail!("Enable feature 'sqlite' to use SQLite metastore")
+    } else if mchoice == "dynamodb" || std::env::var("DDB_TABLE").is_ok() {
+        #[cfg(feature = "dynamodb")]
+        {
+            MetastoreConfig::DynamoDb {
+                table: std::env::var("DDB_TABLE").unwrap_or_else(|_| "EncryptionKey".to_string()),
+                region: std::env::var("AWS_REGION").ok(),
+                endpoint: std::env::var("AWS_ENDPOINT_URL").ok(),
+                region_suffix: get_bool("DDB_REGION_SUFFIX").unwrap_or(false),
+            }
+        }
+        #[cfg(not(feature = "dynamodb"))]
+        anyhow::bail!("Enable feature 'dynamodb' to use DynamoDB metastore")
+    } else if mchoice == "rdbms" || std::env::var("POSTGRES_URL").is_ok() {
+        #[cfg(feature = "postgres")]
+        if let Ok(url) = std::env::var("POSTGRES_URL") {
+            MetastoreConfig::Postgres {
+                url,
+                replica_consistency: replica_consistency.clone(),
+                pool: pool.clone(),
+            }
+        } else {
+            #[cfg(feature = "mysql")]
+            if let Ok(url) = std::env::var("MYSQL_URL") {
+                MetastoreConfig::Mysql {
+                    url,
+                    tls_mode: std::env::var("MYSQL_TLS_MODE").ok(),
+                    replica_consistency: replica_consistency.clone(),
+                    pool: pool.clone(),
+                }
+            } else {
                 anyhow::bail!(
-                    "STATIC_MASTER_KEY_HEX has odd length ({}) — must be even",
-                    hex.len()
-                );
+                    "Metastore=rdbms requires POSTGRES_URL or MYSQL_URL to be set \
+                     (and the corresponding feature enabled)"
+                )
             }
-            let mut key = vec![0_u8; hex.len() / 2];
-            for i in 0..key.len() {
-                key[i] = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).map_err(|_| {
-                    anyhow::anyhow!(
-                        "STATIC_MASTER_KEY_HEX contains invalid hex at position {}",
-                        2 * i
-                    )
-                })?;
+            #[cfg(not(feature = "mysql"))]
+            anyhow::bail!(
+                "Metastore=rdbms requires POSTGRES_URL or MYSQL_URL to be set \
+                 (and the corresponding feature enabled)"
+            )
+        }
+        #[cfg(not(feature = "postgres"))]
+        if std::env::var("POSTGRES_URL").is_ok() {
+            anyhow::bail!("Enable feature 'postgres' to use Postgres metastore")
+        } else {
+            #[cfg(feature = "mysql")]
+            if let Ok(url) = std::env::var("MYSQL_URL") {
+                MetastoreConfig::Mysql {
+                    url,
+                    tls_mode: std::env::var("MYSQL_TLS_MODE").ok(),
+                    replica_consistency: replica_consistency.clone(),
+                    pool: pool.clone(),
+                }
+            } else {
+                anyhow::bail!(
+                    "Metastore=rdbms requires POSTGRES_URL or MYSQL_URL to be set \
+                     (and the corresponding feature enabled)"
+                )
             }
-            let kms = crate::kms::StaticKMS::new(crypto.clone(), key)?;
-            Arc::new(kms)
+            #[cfg(not(feature = "mysql"))]
+            anyhow::bail!(
+                "Metastore=rdbms requires POSTGRES_URL or MYSQL_URL to be set \
+                 (and the corresponding feature enabled)"
+            )
+        }
+    } else if let Ok(url) = std::env::var("MYSQL_URL") {
+        #[cfg(feature = "mysql")]
+        {
+            MetastoreConfig::Mysql {
+                url,
+                tls_mode: std::env::var("MYSQL_TLS_MODE").ok(),
+                replica_consistency: replica_consistency.clone(),
+                pool: pool.clone(),
+            }
+        }
+        #[cfg(not(feature = "mysql"))]
+        {
+            let _ = url;
+            anyhow::bail!("Enable feature 'mysql' to use MySQL metastore")
+        }
+    } else {
+        MetastoreConfig::Memory
+    };
+
+    let kms_kind = std::env::var("KMS")
+        .unwrap_or_else(|_| "static".into())
+        .to_lowercase();
+    let kms = match kms_kind.as_str() {
+        "static" | "test-debug-static" => KmsConfig::Static {
+            key_hex: std::env::var("STATIC_MASTER_KEY_HEX").unwrap_or_default(),
+        },
+        "aws" => {
+            let region_map = std::env::var("REGION_MAP")
+                .ok()
+                .map(|j| serde_json::from_str(&j))
+                .transpose()?;
+            KmsConfig::Aws {
+                region_map,
+                preferred_region: std::env::var("PREFERRED_REGION").ok(),
+                key_id: std::env::var("KMS_KEY_ID").ok(),
+                region: std::env::var("AWS_REGION").ok(),
+            }
         }
         #[cfg(feature = "secrets-manager")]
         "secrets-manager" => {
             let secret_id = std::env::var("SECRETS_MANAGER_SECRET_ID").map_err(|_| {
                 anyhow::anyhow!("SECRETS_MANAGER_SECRET_ID required for KMS=secrets-manager")
             })?;
-            let region = std::env::var("AWS_REGION").ok();
-            let kms = crate::kms_secrets_manager::SecretsManagerKMS::new(
-                crypto.clone(),
+            KmsConfig::SecretsManager {
                 secret_id,
-                region,
-            )?;
-            Arc::new(kms)
+                region: std::env::var("AWS_REGION").ok(),
+            }
         }
         #[cfg(not(feature = "secrets-manager"))]
         "secrets-manager" => {
@@ -495,17 +1076,15 @@ pub fn factory_from_env(
         }
         #[cfg(feature = "vault")]
         "vault" | "vault-transit" => {
-            let vault_addr = std::env::var("VAULT_ADDR")
+            let addr = std::env::var("VAULT_ADDR")
                 .map_err(|_| anyhow::anyhow!("VAULT_ADDR required for KMS=vault"))?;
-            let vault_key = std::env::var("VAULT_TRANSIT_KEY")
+            let transit_key = std::env::var("VAULT_TRANSIT_KEY")
                 .map_err(|_| anyhow::anyhow!("VAULT_TRANSIT_KEY required for KMS=vault"))?;
-            let vault_mount = std::env::var("VAULT_TRANSIT_MOUNT").ok();
-            let kms = crate::kms_vault_transit::VaultTransitKms::new(
-                vault_addr,
-                &vault_key,
-                vault_mount.as_deref(),
-            )?;
-            Arc::new(kms)
+            KmsConfig::Vault {
+                addr,
+                transit_key,
+                transit_mount: std::env::var("VAULT_TRANSIT_MOUNT").ok(),
+            }
         }
         #[cfg(not(feature = "vault"))]
         "vault" | "vault-transit" => {
@@ -515,8 +1094,32 @@ pub fn factory_from_env(
             anyhow::bail!("Unknown KMS type '{other}'. Valid values: 'aws', 'static', 'secrets-manager', 'vault'");
         }
     };
-    let kms = Arc::new(DynKms(kms_dyn));
-    Ok(crate::api::new_session_factory(cfg, metastore, kms, crypto))
+
+    let policy = PolicyConfig {
+        expire_key_after_s: get_i64("EXPIRE_AFTER_SECS"),
+        create_date_precision_s: get_i64("CREATE_DATE_PRECISION_SECS"),
+        revoke_check_interval_s: get_i64("REVOKE_CHECK_INTERVAL_SECS"),
+        session_cache_max_size: get_usize("SESSION_CACHE_MAX_SIZE"),
+        session_cache_ttl_s: get_i64("SESSION_CACHE_DURATION_SECS"),
+        shared_intermediate_key_cache: get_bool("SHARED_INTERMEDIATE_KEY_CACHE"),
+        intermediate_key_cache_max_size: get_usize("INTERMEDIATE_KEY_CACHE_MAX_SIZE"),
+    };
+
+    Ok(ResolvedConfig {
+        service_name,
+        product_id,
+        region_suffix,
+        metastore,
+        kms,
+        policy,
+    })
+}
+
+/// Build a full PublicFactory from environment variables.
+pub fn factory_from_env(
+) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
+    let resolved = resolve_from_env()?;
+    factory_from_resolved(&resolved)
 }
 
 /// Async variant of metastore_from_env — uses async constructors for DynamoDB.
@@ -595,116 +1198,8 @@ pub async fn metastore_from_env_async() -> anyhow::Result<MetastoreEnvResult> {
 /// Async variant of factory_from_env — uses async constructors for DynamoDB/KMS.
 pub async fn factory_from_env_async(
 ) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
-    let cfg = config_from_env();
-    let (store_dyn, _svc, _prod, _sfx) = metastore_from_env_async().await?;
-    let metastore = Arc::new(DynMetastore(store_dyn));
-    let crypto = Arc::new(crate::aead::AES256GCM::new());
-    let kms_kind = std::env::var("KMS")
-        .unwrap_or_else(|_| "static".into())
-        .to_lowercase();
-    let kms_dyn: Arc<dyn crate::traits::KeyManagementService> = match kms_kind.as_str() {
-        "aws" => {
-            if let Ok(map_json) = std::env::var("REGION_MAP") {
-                let regions: std::collections::HashMap<String, String> =
-                    serde_json::from_str(&map_json)?;
-                let preferred = std::env::var("PREFERRED_REGION").ok();
-                let mut entries: Vec<(String, String)> = Vec::new();
-                let mut pref_idx = 0_usize;
-                for (i, (region, key)) in regions.iter().enumerate() {
-                    if preferred.as_ref() == Some(region) {
-                        pref_idx = i;
-                    }
-                    entries.push((region.clone(), key.clone()));
-                }
-                let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_multi_async(
-                    crypto.clone(),
-                    pref_idx,
-                    entries,
-                )
-                .await?;
-                Arc::new(kms)
-            } else {
-                let key_id = std::env::var("KMS_KEY_ID")
-                    .map_err(|_| anyhow::anyhow!("KMS_KEY_ID required for KMS=aws"))?;
-                let region = std::env::var("AWS_REGION").ok();
-                let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_single_async(
-                    crypto.clone(),
-                    key_id,
-                    region,
-                )
-                .await?;
-                Arc::new(kms)
-            }
-        }
-        "static" | "test-debug-static" => {
-            log::warn!(
-                "Using static master key (KMS={kms_kind}). \
-                 This is for testing only — do NOT use in production."
-            );
-            let hex = std::env::var("STATIC_MASTER_KEY_HEX").unwrap_or_else(|_| {
-                "746869734973415374617469634d61737465724b6579466f7254657374696e67".to_string()
-            });
-            if !hex.len().is_multiple_of(2) {
-                anyhow::bail!(
-                    "STATIC_MASTER_KEY_HEX has odd length ({}) — must be even",
-                    hex.len()
-                );
-            }
-            let mut key = vec![0_u8; hex.len() / 2];
-            for i in 0..key.len() {
-                key[i] = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).map_err(|_| {
-                    anyhow::anyhow!(
-                        "STATIC_MASTER_KEY_HEX contains invalid hex at position {}",
-                        2 * i
-                    )
-                })?;
-            }
-            let kms = crate::kms::StaticKMS::new(crypto.clone(), key)?;
-            Arc::new(kms)
-        }
-        #[cfg(feature = "secrets-manager")]
-        "secrets-manager" => {
-            let secret_id = std::env::var("SECRETS_MANAGER_SECRET_ID").map_err(|_| {
-                anyhow::anyhow!("SECRETS_MANAGER_SECRET_ID required for KMS=secrets-manager")
-            })?;
-            let region = std::env::var("AWS_REGION").ok();
-            let kms = crate::kms_secrets_manager::SecretsManagerKMS::new_async(
-                crypto.clone(),
-                secret_id,
-                region,
-            )
-            .await?;
-            Arc::new(kms)
-        }
-        #[cfg(not(feature = "secrets-manager"))]
-        "secrets-manager" => {
-            anyhow::bail!("Enable feature 'secrets-manager' to use Secrets Manager KMS");
-        }
-        #[cfg(feature = "vault")]
-        "vault" | "vault-transit" => {
-            let vault_addr = std::env::var("VAULT_ADDR")
-                .map_err(|_| anyhow::anyhow!("VAULT_ADDR required for KMS=vault"))?;
-            let vault_key = std::env::var("VAULT_TRANSIT_KEY")
-                .map_err(|_| anyhow::anyhow!("VAULT_TRANSIT_KEY required for KMS=vault"))?;
-            let vault_mount = std::env::var("VAULT_TRANSIT_MOUNT").ok();
-            let kms = crate::kms_vault_transit::VaultTransitKms::new_async(
-                vault_addr,
-                &vault_key,
-                vault_mount.as_deref(),
-            )
-            .await?;
-            Arc::new(kms)
-        }
-        #[cfg(not(feature = "vault"))]
-        "vault" | "vault-transit" => {
-            anyhow::bail!("Enable feature 'vault' to use Vault Transit KMS");
-        }
-        other => {
-            anyhow::bail!("Unknown KMS type '{other}'. Valid values: 'aws', 'static', 'secrets-manager', 'vault'");
-        }
-    };
-    let kms = Arc::new(DynKms(kms_dyn));
-    Ok(crate::api::new_session_factory(cfg, metastore, kms, crypto))
+    let resolved = resolve_from_env()?;
+    factory_from_resolved_async(&resolved).await
 }
 
 #[cfg(test)]

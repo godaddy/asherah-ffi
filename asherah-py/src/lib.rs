@@ -146,6 +146,39 @@ fn decrypt_string(partition_id: &str, data_row_record: &str) -> PyResult<String>
     })
 }
 
+/// Module-level async encrypt — runs on Rust's tokio runtime, returns a Python coroutine.
+#[pyfunction]
+async fn encrypt_bytes_async(partition_id: String, data: Vec<u8>) -> PyResult<String> {
+    let session = with_manager(|mgr| Ok(mgr.get_or_create_session(&partition_id)))?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    ASYNC_RT.spawn(async move {
+        let result = session
+            .encrypt_async(&data)
+            .await
+            .and_then(|drr| serde_json::to_string(&drr).map_err(|e| anyhow::anyhow!("json: {e}")));
+        drop(tx.send(result));
+    });
+    rx.await
+        .map_err(|_| PyRuntimeError::new_err("async encrypt cancelled"))?
+        .map_err(anyhow_to_py)
+}
+
+/// Module-level async decrypt — runs on Rust's tokio runtime, returns a Python coroutine.
+#[pyfunction]
+async fn decrypt_bytes_async(partition_id: String, data_row_record: String) -> PyResult<Vec<u8>> {
+    let session = with_manager(|mgr| Ok(mgr.get_or_create_session(&partition_id)))?;
+    let drr: ael::types::DataRowRecord =
+        serde_json::from_str(&data_row_record).map_err(json_parse_err)?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    ASYNC_RT.spawn(async move {
+        let result = session.decrypt_async(drr).await;
+        drop(tx.send(result));
+    });
+    rx.await
+        .map_err(|_| PyRuntimeError::new_err("async decrypt cancelled"))?
+        .map_err(anyhow_to_py)
+}
+
 struct FactoryManager {
     factory: Arc<Factory>,
     sessions: Mutex<HashMap<String, Arc<SessionHandle>>>,
@@ -209,6 +242,16 @@ where
     f(manager)
 }
 
+/// Shared tokio runtime for async Python operations.
+static ASYNC_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("asherah-py-async")
+        .enable_all()
+        .build()
+        .expect("failed to create async Python tokio runtime")
+});
+
 #[pyclass(module = "asherah", frozen, name = "SessionFactory")]
 #[allow(missing_debug_implementations)]
 pub struct PySessionFactory {
@@ -230,7 +273,9 @@ impl PySessionFactory {
 
     pub fn get_session(&self, partition_id: &str) -> PyResult<PySession> {
         let session = self.inner.get_session(partition_id);
-        Ok(PySession { inner: session })
+        Ok(PySession {
+            inner: Arc::new(session),
+        })
     }
 
     pub fn close(&self) -> PyResult<()> {
@@ -255,7 +300,7 @@ impl PySessionFactory {
 #[pyclass(module = "asherah", frozen, name = "Session")]
 #[allow(missing_debug_implementations)]
 pub struct PySession {
-    inner: SessionHandle,
+    inner: Arc<SessionHandle>,
 }
 
 #[pymethods]
@@ -281,6 +326,36 @@ impl PySession {
     pub fn decrypt_text(&self, data_row_record: &str) -> PyResult<String> {
         let bytes = self.decrypt_raw(data_row_record)?;
         String::from_utf8(bytes).map_err(|e| PyRuntimeError::new_err(format!("utf8 error: {e}")))
+    }
+
+    /// True async encrypt — runs on Rust's tokio runtime, returns a Python coroutine.
+    pub async fn encrypt_bytes_async(&self, data: Vec<u8>) -> PyResult<String> {
+        let session = Arc::clone(&self.inner);
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        ASYNC_RT.spawn(async move {
+            let result = session.encrypt_async(&data).await.and_then(|drr| {
+                serde_json::to_string(&drr).map_err(|e| anyhow::anyhow!("json error: {e}"))
+            });
+            drop(tx.send(result));
+        });
+        rx.await
+            .map_err(|_| PyRuntimeError::new_err("async encrypt cancelled"))?
+            .map_err(anyhow_to_py)
+    }
+
+    /// True async decrypt — runs on Rust's tokio runtime, returns a Python coroutine.
+    pub async fn decrypt_bytes_async(&self, data_row_record: String) -> PyResult<Vec<u8>> {
+        let session = Arc::clone(&self.inner);
+        let drr: ael::types::DataRowRecord =
+            serde_json::from_str(&data_row_record).map_err(json_parse_err)?;
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        ASYNC_RT.spawn(async move {
+            let result = session.decrypt_async(drr).await;
+            drop(tx.send(result));
+        });
+        rx.await
+            .map_err(|_| PyRuntimeError::new_err("async decrypt cancelled"))?
+            .map_err(anyhow_to_py)
     }
 
     pub fn close(&self) -> PyResult<()> {
@@ -460,6 +535,8 @@ fn _asherah(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(encrypt_string, m)?)?;
     m.add_function(wrap_pyfunction!(decrypt_bytes, m)?)?;
     m.add_function(wrap_pyfunction!(decrypt_string, m)?)?;
+    m.add_function(wrap_pyfunction!(encrypt_bytes_async, m)?)?;
+    m.add_function(wrap_pyfunction!(decrypt_bytes_async, m)?)?;
     m.add_class::<PySessionFactory>()?;
     m.add_class::<PySession>()?;
     m.add_function(wrap_pyfunction!(set_metrics_hook, m)?)?;

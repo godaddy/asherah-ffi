@@ -27,8 +27,7 @@ public class StaticKeyManagementServiceImpl implements KeyManagementService {
     @Override
     public void applyConfig(final AsherahConfig.Builder builder) {
         builder.kms("static");
-        // Set the hex-encoded master key via system property for the native layer
-        System.setProperty("STATIC_MASTER_KEY_HEX", masterKeyHex);
+        builder.staticMasterKeyHex(masterKeyHex);
     }
 
     public String getMasterKeyHex() {

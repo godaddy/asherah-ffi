@@ -101,6 +101,37 @@ impl PoolConfig {
             Some(Some(Duration::from_secs(val)))
         }
     }
+
+    /// Build from explicit values, falling back to defaults for None.
+    pub fn from_values(
+        max_open: Option<usize>,
+        max_idle: Option<usize>,
+        max_lifetime_s: Option<u64>,
+        max_idle_time_s: Option<u64>,
+    ) -> Self {
+        let mut cfg = Self::default();
+        if let Some(v) = max_open {
+            cfg.max_open = v;
+        }
+        if let Some(v) = max_idle {
+            cfg.max_idle = v;
+        }
+        if let Some(v) = max_lifetime_s {
+            cfg.max_lifetime = if v == 0 {
+                None
+            } else {
+                Some(Duration::from_secs(v))
+            };
+        }
+        if let Some(v) = max_idle_time_s {
+            cfg.max_idle_time = if v == 0 {
+                None
+            } else {
+                Some(Duration::from_secs(v))
+            };
+        }
+        cfg
+    }
 }
 
 impl Default for PoolConfig {
@@ -397,17 +428,20 @@ impl ManagedPool {
 ///
 /// This extracts the connection option setup from `MySqlMetastore::connect`
 /// so it can be reused by the managed pool.
-pub fn build_opts(url: &str) -> anyhow::Result<Opts> {
+/// Build `mysql::Opts` from explicit parameters.
+pub fn build_opts_with(
+    url: &str,
+    tls_mode: Option<&str>,
+    replica_consistency: Option<&str>,
+) -> anyhow::Result<Opts> {
     let opts: Opts = url
         .try_into()
         .map_err(|e: mysql::UrlError| anyhow::anyhow!("invalid MySQL URL: {e}"))?;
 
     let mut builder = OptsBuilder::from_opts(opts);
 
-    // TLS configuration from MYSQL_TLS_MODE env var.
-    // Values match Go go-sql-driver/mysql `tls` parameter.
-    if let Ok(tls_mode) = std::env::var("MYSQL_TLS_MODE") {
-        match tls_mode.as_str() {
+    if let Some(tls_mode) = tls_mode {
+        match tls_mode {
             "skip-verify" => {
                 builder = builder.ssl_opts(Some(
                     SslOpts::default()
@@ -424,9 +458,8 @@ pub fn build_opts(url: &str) -> anyhow::Result<Opts> {
         }
     }
 
-    // Aurora MySQL write forwarding: set replica read consistency on each connection
-    if let Ok(consistency) = std::env::var("REPLICA_READ_CONSISTENCY") {
-        match consistency.as_str() {
+    if let Some(consistency) = replica_consistency {
+        match consistency {
             "eventual" | "global" | "session" => {
                 builder = builder.init(vec![format!(
                     "SET aurora_replica_read_consistency = '{consistency}'"
@@ -442,6 +475,15 @@ pub fn build_opts(url: &str) -> anyhow::Result<Opts> {
     }
 
     Ok(builder.into())
+}
+
+/// Build `mysql::Opts` from env vars (legacy entry point).
+pub fn build_opts(url: &str) -> anyhow::Result<Opts> {
+    build_opts_with(
+        url,
+        std::env::var("MYSQL_TLS_MODE").ok().as_deref(),
+        std::env::var("REPLICA_READ_CONSISTENCY").ok().as_deref(),
+    )
 }
 
 #[cfg(test)]

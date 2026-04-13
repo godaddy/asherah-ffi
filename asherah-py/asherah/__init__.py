@@ -8,6 +8,8 @@ from asherah._asherah import (  # noqa: F401
     encrypt_string,
     decrypt_bytes,
     decrypt_string,
+    encrypt_bytes_async,
+    decrypt_bytes_async,
     setenv,
     set_metrics_hook,
     set_log_hook,
@@ -15,7 +17,13 @@ from asherah._asherah import (  # noqa: F401
 )
 
 import asyncio as _asyncio
-import functools as _functools
+
+# encrypt_bytes_async and decrypt_bytes_async are native PyO3 coroutines
+# that run on Rust's tokio runtime — no thread pool overhead.
+# Session.encrypt_bytes_async and Session.decrypt_bytes_async are the same.
+
+# setup/shutdown async wrappers still use run_in_executor because they are
+# one-shot operations where thread pool overhead is irrelevant.
 
 
 async def setup_async(config):
@@ -28,32 +36,14 @@ async def shutdown_async():
     return await loop.run_in_executor(None, shutdown)
 
 
-async def encrypt_bytes_async(partition_id, data):
-    loop = _asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None, _functools.partial(encrypt_bytes, partition_id, data)
-    )
-
-
 async def encrypt_string_async(partition_id, text):
-    loop = _asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None, _functools.partial(encrypt_string, partition_id, text)
-    )
-
-
-async def decrypt_bytes_async(partition_id, data_row_record):
-    loop = _asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None, _functools.partial(decrypt_bytes, partition_id, data_row_record)
-    )
+    result = await encrypt_bytes_async(partition_id, text.encode("utf-8"))
+    return result
 
 
 async def decrypt_string_async(partition_id, data_row_record):
-    loop = _asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None, _functools.partial(decrypt_string, partition_id, data_row_record)
-    )
+    result = await decrypt_bytes_async(partition_id, data_row_record)
+    return result.decode("utf-8") if isinstance(result, bytes) else result
 
 
 __all__ = [

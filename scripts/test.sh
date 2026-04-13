@@ -212,9 +212,9 @@ do_bindings() {
             if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then
                 # CI: install pre-built wheel
                 PIP_BSP=""; python3 -m pip install --break-system-packages --help &>/dev/null && PIP_BSP="--break-system-packages"
-                python3 -m pip install $PIP_BSP -U pytest 2>&1 | tail -1 || true
+                python3 -m pip install $PIP_BSP -U pytest pytest-asyncio 2>&1 | tail -1 || true
                 python3 -m pip install $PIP_BSP --force-reinstall --no-deps "$BINDING_ARTIFACTS_DIR"/python/*.whl 2>&1 | tail -1
-            elif ! python3 -c "import asherah" 2>/dev/null; then
+            elif ! python3 -c "from asherah import SessionFactory" 2>/dev/null; then
                 log "Installing Python binding (maturin develop)..."
                 if command -v maturin >/dev/null 2>&1; then
                     maturin develop --release --manifest-path asherah-py/Cargo.toml 2>&1 | tail -1
@@ -516,9 +516,15 @@ do_e2e() {
         skip "E2E npm (directory or node not available)"
     fi
 
-    # PyPI package
+    # PyPI package (install in an isolated venv, matching e2e/README.md)
     if [ -d e2e/pypi ] && command -v python3 >/dev/null 2>&1; then
-        run_test "E2E PyPI" bash -c "cd e2e/pypi && python3 test_asherah.py"
+        run_test "E2E PyPI" bash -c '
+            VENV="$(mktemp -d)/asherah-e2e-pypi"
+            python3 -m venv "$VENV" &&
+            "$VENV/bin/python" -m pip install -q -U pip asherah &&
+            cd e2e/pypi && "$VENV/bin/python" test_asherah.py &&
+            rm -rf "$VENV"
+        '
     else
         skip "E2E PyPI (directory or python3 not available)"
     fi
