@@ -118,15 +118,22 @@ def node_module_cli(flavour: str, action: str, partition: str, payload: bytes) -
     return base64.b64decode(result.stdout.strip())
 
 
+def _apply_test_env_to_process():
+    """Apply BASE_ENV (and SQLITE_DB if set) to os.environ so the asherah
+    Python module picks up the test fixture's config."""
+    import conftest  # accessed at call time so SQLITE_DB reflects fixture state
+
+    for k, v in conftest.BASE_ENV.items():
+        os.environ[k] = v
+    if conftest.SQLITE_DB is not None:
+        os.environ["SQLITE_PATH"] = str(conftest.SQLITE_DB)
+        os.environ["CONNECTION_STRING"] = str(conftest.SQLITE_DB)
+
+
 def python_encrypt(partition: str, data: bytes) -> str:
     import asherah
 
-    for k, v in BASE_ENV.items():
-        os.environ[k] = v
-    if SQLITE_DB is not None:
-        os.environ["SQLITE_PATH"] = str(SQLITE_DB)
-        os.environ["CONNECTION_STRING"] = str(SQLITE_DB)
-
+    _apply_test_env_to_process()
     factory = asherah.SessionFactory()
     session = factory.get_session(partition)
     try:
@@ -139,12 +146,7 @@ def python_encrypt(partition: str, data: bytes) -> str:
 def python_decrypt(partition: str, drr_json: str) -> bytes:
     import asherah
 
-    for k, v in BASE_ENV.items():
-        os.environ[k] = v
-    if SQLITE_DB is not None:
-        os.environ["SQLITE_PATH"] = str(SQLITE_DB)
-        os.environ["CONNECTION_STRING"] = str(SQLITE_DB)
-
+    _apply_test_env_to_process()
     factory = asherah.SessionFactory()
     session = factory.get_session(partition)
     try:
