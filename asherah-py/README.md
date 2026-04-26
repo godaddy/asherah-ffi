@@ -99,6 +99,32 @@ asyncio.run(main())
 
 For CPU-bound batch encryption, use the sync API directly.
 
+## Input contract
+
+**Partition ID** (`None`, `""`): always rejected as programming errors
+with `TypeError` (None) or `ValueError`/`Exception` ("partition id
+cannot be empty"). No row is ever written to the metastore under a
+degenerate partition ID.
+
+**Plaintext** to encrypt:
+- `None` → `TypeError` from PyO3 type conversion before any native
+  call.
+- Empty `str` (`""`) and empty `bytes` (`b""`) are **valid**
+  plaintexts. `encrypt_string` / `encrypt_bytes` produce a real
+  `DataRowRecord` envelope; `decrypt_string` / `decrypt_bytes` return
+  exactly `""` or `b""`.
+
+**Ciphertext** to decrypt:
+- `None` → `TypeError`.
+- Empty `str` / `bytes` → exception from JSON parse (not valid
+  `DataRowRecord`).
+
+**Do not short-circuit empty plaintext encryption in caller code** —
+empty data is real data, encrypting it produces a genuine envelope, and
+skipping encryption leaks the fact that the value was empty. See
+[docs/input-contract.md](../docs/input-contract.md) for the full
+rationale.
+
 ## Configuration
 
 The `setup()` function accepts a dict (or any JSON-serializable object) with PascalCase keys matching the Go canonical API:

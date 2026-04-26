@@ -486,6 +486,261 @@ public class RoundTripTests
             Asherah.EncryptString("no-setup", "should fail"));
     }
 
+    // ============================================================
+    // Null and empty input handling
+    //
+    // Contract:
+    //   - null arguments are programming errors → ArgumentNullException
+    //     thrown by the binding before reaching native code.
+    //   - empty string / empty byte[] is a valid cryptographic operation
+    //     and must round-trip back to empty.
+    //   - decrypting an empty string is invalid JSON and must throw.
+    // ============================================================
+
+    [Fact]
+    public void Session_EncryptBytes_Null_Throws()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateConfig());
+        using var session = factory.GetSession("null-bytes");
+        Assert.Throws<ArgumentNullException>(() => session.EncryptBytes(null!));
+    }
+
+    [Fact]
+    public void Session_EncryptString_Null_Throws()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateConfig());
+        using var session = factory.GetSession("null-string");
+        Assert.Throws<ArgumentNullException>(() => session.EncryptString(null!));
+    }
+
+    [Fact]
+    public void Session_DecryptBytes_Null_Throws()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateConfig());
+        using var session = factory.GetSession("null-decrypt-bytes");
+        Assert.Throws<ArgumentNullException>(() => session.DecryptBytes(null!));
+    }
+
+    [Fact]
+    public void Session_DecryptString_Null_Throws()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateConfig());
+        using var session = factory.GetSession("null-decrypt-string");
+        Assert.Throws<ArgumentNullException>(() => session.DecryptString(null!));
+    }
+
+    [Fact]
+    public async Task Session_EncryptBytesAsync_Null_Throws()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateConfig());
+        using var session = factory.GetSession("null-bytes-async");
+        await Assert.ThrowsAsync<ArgumentNullException>(() => session.EncryptBytesAsync(null!));
+    }
+
+    [Fact]
+    public async Task Session_EncryptStringAsync_Null_Throws()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateConfig());
+        using var session = factory.GetSession("null-string-async");
+        await Assert.ThrowsAsync<ArgumentNullException>(() => session.EncryptStringAsync(null!));
+    }
+
+    [Fact]
+    public async Task Session_DecryptBytesAsync_Null_Throws()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateConfig());
+        using var session = factory.GetSession("null-decrypt-bytes-async");
+        await Assert.ThrowsAsync<ArgumentNullException>(() => session.DecryptBytesAsync(null!));
+    }
+
+    [Fact]
+    public async Task Session_DecryptStringAsync_Null_Throws()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateConfig());
+        using var session = factory.GetSession("null-decrypt-string-async");
+        await Assert.ThrowsAsync<ArgumentNullException>(() => session.DecryptStringAsync(null!));
+    }
+
+    [Fact]
+    public void Factory_GetSession_Null_Throws()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateConfig());
+        Assert.Throws<ArgumentNullException>(() => factory.GetSession(null!));
+    }
+
+    [Fact]
+    public void StaticApi_Encrypt_NullPartition_Throws()
+    {
+        Asherah.Setup(CreateConfig());
+        try
+        {
+            Assert.Throws<ArgumentNullException>(() =>
+                Asherah.Encrypt(null!, Encoding.UTF8.GetBytes("x")));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public void StaticApi_Encrypt_NullPlaintext_Throws()
+    {
+        Asherah.Setup(CreateConfig());
+        try
+        {
+            Assert.Throws<ArgumentNullException>(() =>
+                Asherah.Encrypt("p", null!));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public void StaticApi_EncryptString_NullPlaintext_Throws()
+    {
+        Asherah.Setup(CreateConfig());
+        try
+        {
+            Assert.Throws<ArgumentNullException>(() =>
+                Asherah.EncryptString("p", null!));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public void StaticApi_Decrypt_NullPartition_Throws()
+    {
+        Asherah.Setup(CreateConfig());
+        try
+        {
+            Assert.Throws<ArgumentNullException>(() =>
+                Asherah.Decrypt(null!, new byte[] { 0 }));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public void StaticApi_Decrypt_NullCiphertext_Throws()
+    {
+        Asherah.Setup(CreateConfig());
+        try
+        {
+            Assert.Throws<ArgumentNullException>(() => Asherah.Decrypt("p", null!));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public void StaticApi_DecryptString_NullCiphertext_Throws()
+    {
+        Asherah.Setup(CreateConfig());
+        try
+        {
+            Assert.Throws<ArgumentNullException>(() =>
+                Asherah.DecryptString("p", null!));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public async Task StaticApi_EncryptAsync_NullPlaintext_Throws()
+    {
+        Asherah.Setup(CreateConfig());
+        try
+        {
+            await Assert.ThrowsAsync<ArgumentNullException>(() =>
+                Asherah.EncryptAsync("p", null!));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public async Task StaticApi_DecryptAsync_NullCiphertext_Throws()
+    {
+        Asherah.Setup(CreateConfig());
+        try
+        {
+            await Assert.ThrowsAsync<ArgumentNullException>(() =>
+                Asherah.DecryptAsync("p", null!));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public void Session_EmptyString_RoundTrip()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateConfig());
+        using var session = factory.GetSession("empty-string");
+
+        var ct = session.EncryptString(string.Empty);
+        Assert.NotEqual(string.Empty, ct); // ciphertext envelope is non-empty
+        Assert.Equal(string.Empty, session.DecryptString(ct));
+    }
+
+    [Fact]
+    public void Session_EmptyBytes_RoundTrip_StaticApi()
+    {
+        Asherah.Setup(CreateConfig());
+        try
+        {
+            var ct = Asherah.Encrypt("empty-bytes-static", Array.Empty<byte>());
+            Assert.NotEmpty(ct);
+            Assert.Empty(Asherah.Decrypt("empty-bytes-static", ct));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public void Session_EmptyString_RoundTrip_StaticApi()
+    {
+        Asherah.Setup(CreateConfig());
+        try
+        {
+            var ct = Asherah.EncryptString("empty-string-static", string.Empty);
+            Assert.NotEqual(string.Empty, ct);
+            Assert.Equal(string.Empty, Asherah.DecryptString("empty-string-static", ct));
+        }
+        finally { Asherah.Shutdown(); }
+    }
+
+    [Fact]
+    public async Task Session_EmptyBytes_RoundTripAsync()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateConfig());
+        using var session = factory.GetSession("empty-bytes-async");
+
+        var ct = await session.EncryptBytesAsync(Array.Empty<byte>());
+        Assert.NotEmpty(ct);
+        Assert.Empty(await session.DecryptBytesAsync(ct));
+    }
+
+    [Fact]
+    public async Task Session_EmptyString_RoundTripAsync()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateConfig());
+        using var session = factory.GetSession("empty-string-async");
+
+        var ct = await session.EncryptStringAsync(string.Empty);
+        Assert.NotEqual(string.Empty, ct);
+        Assert.Equal(string.Empty, await session.DecryptStringAsync(ct));
+    }
+
+    [Fact]
+    public void Session_DecryptEmptyString_Throws()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateConfig());
+        using var session = factory.GetSession("decrypt-empty");
+
+        // Empty input is not a valid DataRowRecord — must throw, not return empty.
+        Assert.ThrowsAny<Exception>(() => session.DecryptString(string.Empty));
+    }
+
+    [Fact]
+    public void Session_DecryptEmptyBytes_Throws()
+    {
+        using var factory = Asherah.FactoryFromConfig(CreateConfig());
+        using var session = factory.GetSession("decrypt-empty-bytes");
+
+        Assert.ThrowsAny<Exception>(() => session.DecryptBytes(Array.Empty<byte>()));
+    }
+
     private static string LocateRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

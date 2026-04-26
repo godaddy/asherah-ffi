@@ -96,6 +96,33 @@ The .NET async methods use **true async callbacks** from the Rust tokio runtime.
 
 **Overhead:** ~9.8us async vs ~0.7us sync (64B payload, hot cache). Use async for ASP.NET Core request handlers; use sync for batch processing.
 
+## Input contract
+
+**Partition ID** (`null`, `""`, whitespace-only): `null` and `""` are
+always rejected as programming errors with `ArgumentNullException` /
+`InvalidOperationException`. No row is ever written to the metastore
+under a degenerate partition ID. (Canonical `GoDaddy.Asherah.AppEncryption`
+v0.11.0 accepts both silently and persists `_IK__service_product` rows;
+this binding is deliberately stricter.)
+
+**Plaintext** to encrypt:
+- `null` → `ArgumentNullException` (sync) / rejected `Task` (async).
+- Empty `string` (`""`) and empty `byte[]` (`Array.Empty<byte>()`) are
+  **valid** plaintexts. `Encrypt(...)` produces a real `DataRowRecord`
+  envelope; the matching `Decrypt(...)` returns exactly `""` or
+  `Array.Empty<byte>()`.
+
+**Ciphertext** to decrypt:
+- `null` → `ArgumentNullException`.
+- Empty `string` / `byte[]` → `AsherahException` (not valid
+  `DataRowRecord` JSON).
+
+**Do not short-circuit empty plaintext encryption in caller code** —
+empty data is real data, encrypting it produces a genuine envelope, and
+skipping encryption leaks the fact that the value was empty. See
+[docs/input-contract.md](../docs/input-contract.md) for the full
+rationale.
+
 ## Migration from Canonical (`GoDaddy.Asherah.AppEncryption` v0.2.x)
 
 The `GoDaddy.Asherah.AppEncryption.Compat` NuGet package provides a drop-in compatible API surface matching the canonical C# SDK:

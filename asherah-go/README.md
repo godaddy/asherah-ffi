@@ -172,6 +172,31 @@ for _, partition := range partitions {
 wg.Wait()
 ```
 
+## Input contract
+
+**Partition ID** (`""`): rejected as a programming error with `error`
+`"asherah-go: partition ID cannot be empty"` before any FFI call. No
+row is ever written to the metastore under a degenerate partition ID.
+(Go strings can't be `nil`, so there is no nil case for partition ID.)
+
+**Plaintext** to encrypt:
+- `nil []byte` and `[]byte{}` are interchangeable per Go convention.
+  Both are **valid** plaintexts that round-trip through
+  `Encrypt`/`Decrypt` to a zero-length slice.
+- Empty `string` (`""`) is a **valid** plaintext: `EncryptString(...)`
+  produces a real `DataRowRecord` envelope; `DecryptString(...)`
+  returns exactly `""`.
+
+**Ciphertext** to decrypt:
+- `nil`, `[]byte{}`, or empty `string` on `Decrypt`/`DecryptString`
+  returns an `error` (not valid `DataRowRecord` JSON).
+
+**Do not short-circuit empty plaintext encryption in caller code** —
+empty data is real data, encrypting it produces a genuine envelope, and
+skipping encryption leaks the fact that the value was empty. See
+[docs/input-contract.md](https://github.com/godaddy/asherah-ffi/blob/main/docs/input-contract.md)
+for the full rationale.
+
 ## Migration from Canonical Go SDK
 
 This replaces `github.com/godaddy/asherah/go/appencryption`. Key differences:

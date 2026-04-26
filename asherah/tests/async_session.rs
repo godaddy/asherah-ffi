@@ -131,3 +131,13 @@ async fn async_large_payload() {
     let out = session.decrypt_async(drr).await.unwrap();
     assert_eq!(out, data);
 }
+
+#[tokio::test]
+async fn async_encrypt_decrypt_empty_data() {
+    let factory = make_factory();
+    let session = factory.get_session("p-empty-async");
+
+    let drr = session.encrypt_async(b"").await.unwrap();
+    let out = session.decrypt_async(drr).await.unwrap();
+    assert_eq!(out, b"");
+}

@@ -620,4 +620,102 @@ mod tests {
         let result = unsafe { asherah_factory_new_with_config(null()) };
         assert!(result.is_null());
     }
+
+    fn make_factory_and_session() -> (*mut AsherahFactory, *mut SharedSession) {
+        let cfg = CString::new(
+            r#"{
+                "ServiceName": "test-service",
+                "ProductID": "test-product",
+                "Metastore": "memory",
+                "KMS": "static",
+                "EnableSessionCaching": false
+            }"#,
+        )
+        .unwrap();
+        let factory = unsafe { asherah_factory_new_with_config(cfg.as_ptr()) };
+        assert!(!factory.is_null(), "factory creation failed");
+        let pid = CString::new("partition-1").unwrap();
+        let session = unsafe { asherah_factory_get_session(factory, pid.as_ptr()) };
+        assert!(!session.is_null(), "session creation failed");
+        (factory, session)
+    }
+
+    fn free_factory_and_session(factory: *mut AsherahFactory, session: *mut SharedSession) {
+        unsafe {
+            asherah_session_free(session);
+            asherah_factory_free(factory);
+        }
+    }
+
+    fn empty_buffer() -> AsherahBuffer {
+        AsherahBuffer {
+            data: null_mut(),
+            len: 0,
+            capacity: 0,
+        }
+    }
+
+    #[test]
+    fn encrypt_null_data_zero_len_succeeds() {
+        // Allowed: null pointer with len=0 is treated as empty plaintext.
+        let (factory, session) = make_factory_and_session();
+        let mut out = empty_buffer();
+        let rc = unsafe { asherah_encrypt_to_json(session, null(), 0, &mut out) };
+        assert_eq!(rc, 0, "encrypt empty should succeed");
+        assert!(!out.data.is_null());
+        assert!(out.len > 0, "encrypted JSON should be non-empty");
+        unsafe { asherah_buffer_free(&mut out) };
+        free_factory_and_session(factory, session);
+    }
+
+    #[test]
+    fn encrypt_null_data_nonzero_len_returns_error() {
+        let (factory, session) = make_factory_and_session();
+        let mut out = empty_buffer();
+        let rc = unsafe { asherah_encrypt_to_json(session, null(), 4, &mut out) };
+        assert_ne!(rc, 0, "null data with len>0 must fail");
+        free_factory_and_session(factory, session);
+    }
+
+    #[test]
+    fn decrypt_null_json_nonzero_len_returns_error() {
+        let (factory, session) = make_factory_and_session();
+        let mut out = empty_buffer();
+        let rc = unsafe { asherah_decrypt_from_json(session, null(), 4, &mut out) };
+        assert_ne!(rc, 0, "null json with len>0 must fail");
+        free_factory_and_session(factory, session);
+    }
+
+    #[test]
+    fn decrypt_empty_json_returns_error() {
+        // Empty input is not valid DataRowRecord JSON — must be rejected.
+        let (factory, session) = make_factory_and_session();
+        let mut out = empty_buffer();
+        let rc = unsafe { asherah_decrypt_from_json(session, null(), 0, &mut out) };
+        assert_ne!(rc, 0, "empty json must be rejected as invalid");
+        free_factory_and_session(factory, session);
+    }
+
+    #[test]
+    fn encrypt_empty_then_decrypt_round_trip() {
+        // Empty plaintext must round-trip through encrypt/decrypt to empty bytes.
+        let (factory, session) = make_factory_and_session();
+
+        let mut ct = empty_buffer();
+        let empty: [u8; 0] = [];
+        let rc = unsafe { asherah_encrypt_to_json(session, empty.as_ptr(), 0, &mut ct) };
+        assert_eq!(rc, 0);
+        assert!(ct.len > 0);
+
+        let mut pt = empty_buffer();
+        let rc = unsafe { asherah_decrypt_from_json(session, ct.data, ct.len, &mut pt) };
+        assert_eq!(rc, 0);
+        assert_eq!(pt.len, 0, "decrypt of empty-encrypt must be empty");
+
+        unsafe {
+            asherah_buffer_free(&mut ct);
+            asherah_buffer_free(&mut pt);
+        }
+        free_factory_and_session(factory, session);
+    }
 }

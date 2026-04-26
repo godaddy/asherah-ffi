@@ -3,201 +3,43 @@ from __future__ import annotations
 import base64
 import logging
 import os
-import shutil
 import subprocess
-import tempfile
 from pathlib import Path
-import shlex
 
 import pytest
 
+# build_artifacts (autouse, session-scoped) lives in conftest.py and is
+# applied to every test in this directory automatically. We import the
+# whole module (rather than `from conftest import …`) so that mutable
+# module-level state set by the fixture — notably SQLITE_DB — is read
+# fresh at each access instead of captured at import time.
+import conftest
 
 LOGGER = logging.getLogger("interop")
 
-ROOT = Path(__file__).resolve().parents[2]
-NODE_DIR = ROOT / "asherah-node"
-PY_DIR = ROOT / "asherah-py"
-NODE_SCRIPT = NODE_DIR / "scripts" / "interop.js"
-NODE_COMPAT_SCRIPT = ROOT / "interop" / "scripts" / "node_module_runner.js"
-RUST_BIN_DEBUG = ROOT / "target" / "debug" / "asherah-interop"
-RUST_BIN_RELEASE = ROOT / "target" / "release" / "asherah-interop"
+NODE_SCRIPT = conftest.NODE_DIR / "scripts" / "interop.js"
+NODE_COMPAT_SCRIPT = conftest.ROOT / "interop" / "scripts" / "node_module_runner.js"
+RUST_BIN_DEBUG = conftest.ROOT / "target" / "debug" / "asherah-interop"
+RUST_BIN_RELEASE = conftest.ROOT / "target" / "release" / "asherah-interop"
 # Also consider explicit CARGO_TARGET_DIR paths (e.g., target/<triple>/...)
-_CARGO_TARGET_DIR = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
+_CARGO_TARGET_DIR = Path(os.environ.get("CARGO_TARGET_DIR", conftest.ROOT / "target"))
 RUST_TRIPLE_DEBUG = _CARGO_TARGET_DIR / "debug" / "asherah-interop"
 RUST_TRIPLE_RELEASE = _CARGO_TARGET_DIR / "release" / "asherah-interop"
-RUBY_DIR = ROOT / "asherah-ruby"
+RUBY_DIR = conftest.ROOT / "asherah-ruby"
 RUBY_SCRIPT = RUBY_DIR / "scripts" / "interop.rb"
-LEGACY_NODE_DIR = ROOT / "interop" / "legacy-node"
 
 # Prefer Homebrew Ruby over macOS system Ruby (2.6, missing gems)
 _HOMEBREW_RUBY = Path("/opt/homebrew/opt/ruby/bin/ruby")
 RUBY_CMD = str(_HOMEBREW_RUBY) if _HOMEBREW_RUBY.exists() else "ruby"
 
-SQLITE_DB: Path | None = None
-
-BASE_ENV = {
-    "SERVICE_NAME": "service",
-    "PRODUCT_ID": "product",
-    "KMS": "static",
-    "STATIC_MASTER_KEY_HEX": "22" * 32,
-    "Metastore": "sqlite",
-    "SESSION_CACHE": "0",
-}
-
-
-def ensure_env(target_env):
-    env = os.environ.copy()
-    for k, v in BASE_ENV.items():
-        env[k] = v
-    if SQLITE_DB is not None:
-        env["SQLITE_PATH"] = str(SQLITE_DB)
-        env["CONNECTION_STRING"] = str(SQLITE_DB)
-    ruby_native = env.get("ASHERAH_RUBY_NATIVE")
-    if not ruby_native:
-        env["ASHERAH_RUBY_NATIVE"] = str(ROOT / "target" / "debug")
-    env.update(target_env)
-    return env
-
-
-@pytest.fixture(scope="session", autouse=True)
-def build_artifacts():
-    env = ensure_env({})
-
-    global SQLITE_DB
-    db_path = ROOT / "target" / "interop_metastore.sqlite"
-    if db_path.exists():
-        db_path.unlink()
-    SQLITE_DB = db_path
-    env["SQLITE_PATH"] = str(db_path)
-    env["CONNECTION_STRING"] = str(db_path)
-
-    # Build Node addon via napi
-    npm_env = env.copy()
-    tmp_types = Path(tempfile.gettempdir()) / "napi-types"
-    tmp_types.mkdir(parents=True, exist_ok=True)
-    npm_env["NAPI_TYPE_DEF_TMP_FOLDER"] = str(tmp_types)
-    npm_env["CARGO_TARGET_DIR"] = str(ROOT / "target")
-    LOGGER.info("building asherah-node addon via napi")
-    subprocess.run(["npm", "install"], cwd=NODE_DIR, env=npm_env, check=True)
-    subprocess.run(["npm", "run", "build"], cwd=NODE_DIR, env=npm_env, check=True)
-
-    # Build and install Python wheel
-    if shutil.which("python3") is None:
-        pytest.skip("python3 interpreter required")
-
-    maturin_cmd = env.get("MATURIN_BIN", "")
-    if not maturin_cmd:
-        # Try python3 -m maturin first, then fall back to plain maturin binary
-        for candidate in ("python3 -m maturin", "maturin"):
-            try:
-                subprocess.run(
-                    shlex.split(candidate) + ["--version"],
-                    cwd=ROOT,
-                    env=env,
-                    check=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                )
-                maturin_cmd = candidate
-                break
-            except (FileNotFoundError, subprocess.CalledProcessError):
-                continue
-        if not maturin_cmd:
-            pytest.skip("maturin is required for Python interop tests")
-    else:
-        try:
-            subprocess.run(
-                shlex.split(maturin_cmd) + ["--version"],
-                cwd=ROOT,
-                env=env,
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-        except (FileNotFoundError, subprocess.CalledProcessError):
-            pytest.skip(f"maturin not available via MATURIN_BIN={maturin_cmd}")
-    maturin_args = shlex.split(maturin_cmd)
-
-    LOGGER.info("building Python wheel with maturin")
-    subprocess.run(
-        maturin_args
-        + [
-            "build",
-            "--profile",
-            "dev",
-            "--manifest-path",
-            str(PY_DIR / "Cargo.toml"),
-        ],
-        cwd=ROOT,
-        env=env,
-        check=True,
-    )
-    target_dir = Path(env.get("CARGO_TARGET_DIR", ROOT / "target"))
-    wheel_dir = target_dir / "wheels"
-    wheels = sorted(wheel_dir.glob("asherah*.whl"))
-    if not wheels:
-        raise RuntimeError("maturin did not produce a wheel")
-    wheel_path = wheels[-1]
-    LOGGER.info("installing freshly built Python wheel")
-    subprocess.run(
-        [
-            "python3",
-            "-m",
-            "pip",
-            "install",
-            "--force-reinstall",
-            "--no-deps",
-            str(wheel_path),
-        ],
-        cwd=ROOT,
-        env=env,
-        check=True,
-    )
-
-    LOGGER.info("building asherah-ffi for Ruby tests")
-    subprocess.run(
-        [
-            "cargo",
-            "build",
-            "-p",
-            "asherah-ffi",
-        ],
-        cwd=ROOT,
-        env=env,
-        check=True,
-    )
-
-    # Build Rust interop binary (debug is fine for tests)
-    LOGGER.info("building asherah-interop Rust CLI")
-    subprocess.run(
-        [
-            "cargo",
-            "build",
-            "--bin",
-            "asherah-interop",
-            "--manifest-path",
-            str(ROOT / "asherah" / "Cargo.toml"),
-            "--features",
-            "sqlite",
-        ],
-        cwd=ROOT,
-        env=env,
-        check=True,
-    )
-
-    LOGGER.info("installing legacy npm package asherah@3.0.12")
-    subprocess.run(["npm", "install"], cwd=LEGACY_NODE_DIR, env=env, check=True)
-
-    return wheel_path
-
 
 def node_cli(action: str, partition: str, payload: bytes) -> bytes:
     payload_b64 = base64.b64encode(payload).decode()
-    env = ensure_env({})
+    env = conftest.ensure_env({})
     LOGGER.info("node addon %s partition=%s payload=%d bytes", action, partition, len(payload))
     result = subprocess.run(
         ["node", str(NODE_SCRIPT), action, partition, payload_b64],
-        cwd=NODE_DIR,
+        cwd=conftest.NODE_DIR,
         env=env,
         check=True,
         capture_output=True,
@@ -208,7 +50,7 @@ def node_cli(action: str, partition: str, payload: bytes) -> bytes:
 
 def rust_cli(action: str, partition: str, payload: bytes) -> bytes:
     payload_b64 = base64.b64encode(payload).decode()
-    env = ensure_env({})
+    env = conftest.ensure_env({})
     # Prefer plain target/debug, then target/<triple>/debug, then releases.
     if RUST_BIN_DEBUG.exists():
         bin_path = RUST_BIN_DEBUG
@@ -221,7 +63,7 @@ def rust_cli(action: str, partition: str, payload: bytes) -> bytes:
     LOGGER.info("rust cli %s partition=%s payload=%d bytes", action, partition, len(payload))
     result = subprocess.run(
         [str(bin_path), action, partition, payload_b64],
-        cwd=ROOT,
+        cwd=conftest.ROOT,
         env=env,
         check=True,
         capture_output=True,
@@ -232,7 +74,7 @@ def rust_cli(action: str, partition: str, payload: bytes) -> bytes:
 
 def ruby_cli(action: str, partition: str, payload: bytes) -> bytes:
     payload_b64 = base64.b64encode(payload).decode()
-    env = ensure_env({})
+    env = conftest.ensure_env({})
     # Ensure Homebrew Ruby's gem path is on PATH (system Ruby 2.6 lacks gems)
     if _HOMEBREW_RUBY.exists():
         ruby_paths = "/opt/homebrew/opt/ruby/bin:/opt/homebrew/lib/ruby/gems/4.0.0/bin"
@@ -251,10 +93,10 @@ def ruby_cli(action: str, partition: str, payload: bytes) -> bytes:
 
 def node_module_cli(flavour: str, action: str, partition: str, payload: bytes) -> bytes:
     payload_b64 = base64.b64encode(payload).decode()
-    env = ensure_env({"Metastore": "memory"})
+    env = conftest.ensure_env({"Metastore": "memory"})
     env.pop("CONNECTION_STRING", None)
     env.pop("SQLITE_PATH", None)
-    cwd = LEGACY_NODE_DIR if flavour == "legacy" else NODE_DIR
+    cwd = conftest.LEGACY_NODE_DIR if flavour == "legacy" else conftest.NODE_DIR
     LOGGER.info(
         "node %s %s partition=%s payload=%d bytes",
         flavour,
@@ -273,15 +115,22 @@ def node_module_cli(flavour: str, action: str, partition: str, payload: bytes) -
     return base64.b64decode(result.stdout.strip())
 
 
+def _apply_test_env_to_process():
+    """Apply BASE_ENV (and SQLITE_DB if set) to os.environ so the asherah
+    Python module picks up the test fixture's config. We reference the
+    conftest module's attributes directly so SQLITE_DB reflects whatever
+    the autouse fixture has set (it is None until build_artifacts runs)."""
+    for k, v in conftest.BASE_ENV.items():
+        os.environ[k] = v
+    if conftest.SQLITE_DB is not None:
+        os.environ["SQLITE_PATH"] = str(conftest.SQLITE_DB)
+        os.environ["CONNECTION_STRING"] = str(conftest.SQLITE_DB)
+
+
 def python_encrypt(partition: str, data: bytes) -> str:
     import asherah
 
-    for k, v in BASE_ENV.items():
-        os.environ[k] = v
-    if SQLITE_DB is not None:
-        os.environ["SQLITE_PATH"] = str(SQLITE_DB)
-        os.environ["CONNECTION_STRING"] = str(SQLITE_DB)
-
+    _apply_test_env_to_process()
     factory = asherah.SessionFactory()
     session = factory.get_session(partition)
     try:
@@ -294,12 +143,7 @@ def python_encrypt(partition: str, data: bytes) -> str:
 def python_decrypt(partition: str, drr_json: str) -> bytes:
     import asherah
 
-    for k, v in BASE_ENV.items():
-        os.environ[k] = v
-    if SQLITE_DB is not None:
-        os.environ["SQLITE_PATH"] = str(SQLITE_DB)
-        os.environ["CONNECTION_STRING"] = str(SQLITE_DB)
-
+    _apply_test_env_to_process()
     factory = asherah.SessionFactory()
     session = factory.get_session(partition)
     try:
@@ -414,3 +258,34 @@ def test_node_legacy_compatibility(build_artifacts):
 
     recovered_legacy = node_module_cli("legacy", "roundtrip", partition, payload)
     assert recovered_legacy == payload
+
+
+def test_node_legacy_empty_payload_roundtrip(build_artifacts):
+    """The canonical asherah-node (Go cobhan core) must accept empty
+    plaintext on encrypt and round-trip it back to empty on decrypt.
+
+    This proves behavioral parity with our impl: empty plaintext is a
+    valid cryptographic operation in both implementations. (Cross-impl
+    decrypt requires a shared metastore so the IK is visible to both
+    addons; canonical asherah-cobhan only supports MySQL/Postgres for
+    rdbms metastore, not SQLite, so this test runs the canonical
+    addon's own roundtrip rather than crossing the impl boundary.)"""
+    partition = "legacy-empty"
+    payload = b""
+
+    # Encrypt + decrypt within the canonical addon, in one subprocess.
+    recovered = node_module_cli("legacy", "roundtrip", partition, payload)
+    assert recovered == payload, (
+        "canonical asherah-node must round-trip empty plaintext to empty"
+    )
+
+
+def test_node_legacy_decrypt_empty_input_rejected(build_artifacts):
+    """The canonical asherah-node must reject an empty-byte ciphertext
+    rather than silently returning empty plaintext — same contract as
+    our impl."""
+    try:
+        node_module_cli("legacy", "decrypt", "legacy-empty-decrypt", b"")
+        assert False, "canonical decrypt of empty bytes should have errored"
+    except subprocess.CalledProcessError:
+        pass  # expected: canonical errors on invalid/empty input

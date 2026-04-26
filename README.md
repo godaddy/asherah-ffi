@@ -64,6 +64,30 @@ asherah.shutdown();
 See each binding's README for complete examples including async APIs,
 session-based usage, and production configuration.
 
+## Input contract
+
+There are two argument categories with different rules:
+
+- **Partition ID** (the tenancy/isolation identifier): `null`, `nil`,
+  `undefined`, and the empty string `""` are **always programming errors**.
+  Bindings reject them at the API boundary with the language-native
+  exception type — no row is ever written to the metastore under a
+  degenerate ID. (Stricter than canonical asherah-csharp / asherah-java,
+  which silently accept null and persist `_IK__service_product` rows.)
+- **Plaintext** (input to encrypt): `null`/`nil`/`undefined` is rejected
+  as a programming error. Empty `String` and empty byte array are
+  **valid** plaintexts that produce a real `DataRowRecord` envelope and
+  round-trip back to empty on decrypt. **Do not short-circuit empty
+  plaintext encryption in caller code** — empty data is real data,
+  encrypting it is a real cryptographic operation, and skipping it leaks
+  the fact that the value was empty as a side channel.
+- **Ciphertext** (input to decrypt): `null`/`nil`/`undefined` and empty
+  string/bytes are all rejected — empty input cannot be a valid
+  `DataRowRecord` JSON envelope.
+
+See [docs/input-contract.md](docs/input-contract.md) for the full
+per-binding behavior matrix, exception types, and rationale.
+
 ## Performance
 
 The Rust core delivers sub-microsecond encrypt/decrypt. All language bindings

@@ -132,6 +132,53 @@ class RoundTripTest < Minitest::Test
       Asherah.decrypt("partition-b", json)
     end
   end
+
+  # ── Null and empty input handling ──
+  #
+  # Contract:
+  #   - nil arguments are programming errors → ArgumentError raised by
+  #     the binding before reaching native code.
+  #   - empty String / empty bytes is a valid encrypt that round-trips
+  #     back to empty.
+  #   - decrypting an empty String is invalid JSON and must raise.
+
+  def test_encrypt_nil_partition_raises
+    assert_raises(ArgumentError) { Asherah.encrypt(nil, "x".b) }
+  end
+
+  def test_encrypt_nil_payload_raises
+    assert_raises(ArgumentError) { Asherah.encrypt("p", nil) }
+  end
+
+  def test_encrypt_string_nil_text_raises
+    assert_raises(ArgumentError) { Asherah.encrypt_string("p", nil) }
+  end
+
+  def test_decrypt_nil_partition_raises
+    assert_raises(ArgumentError) { Asherah.decrypt(nil, "x") }
+  end
+
+  def test_decrypt_nil_data_raises
+    assert_raises(ArgumentError) { Asherah.decrypt("p", nil) }
+  end
+
+  def test_decrypt_string_nil_data_raises
+    assert_raises(ArgumentError) { Asherah.decrypt_string("p", nil) }
+  end
+
+  def test_empty_string_round_trip
+    text = ""
+    json = Asherah.encrypt_string("ruby-empty-str", text)
+    refute_nil json
+    assert json.length > 0
+    recovered = Asherah.decrypt_string("ruby-empty-str", json).force_encoding("UTF-8")
+    assert_equal text, recovered
+  end
+
+  def test_decrypt_empty_string_raises
+    assert_raises(Asherah::Error) { Asherah.decrypt("ruby-empty-decrypt", "") }
+    assert_raises(Asherah::Error) { Asherah.decrypt_string("ruby-empty-decrypt", "") }
+  end
 end
 
 class FactorySessionTest < Minitest::Test
@@ -267,6 +314,52 @@ class FactorySessionTest < Minitest::Test
         end
       end
       threads.each(&:join)
+    ensure
+      factory.close
+    end
+  end
+
+  def test_session_nil_args_raise
+    factory = make_factory
+    begin
+      session = factory.get_session("session-nil")
+      begin
+        assert_raises(ArgumentError) { session.encrypt_bytes(nil) }
+        assert_raises(ArgumentError) { session.decrypt_bytes(nil) }
+      ensure
+        session.close
+      end
+    ensure
+      factory.close
+    end
+  end
+
+  def test_session_empty_payload_round_trip
+    factory = make_factory
+    begin
+      session = factory.get_session("session-empty")
+      begin
+        json = session.encrypt_bytes("".b)
+        refute_nil json
+        recovered = session.decrypt_bytes(json)
+        assert_equal 0, recovered.bytesize
+      ensure
+        session.close
+      end
+    ensure
+      factory.close
+    end
+  end
+
+  def test_session_decrypt_empty_string_raises
+    factory = make_factory
+    begin
+      session = factory.get_session("session-empty-decrypt")
+      begin
+        assert_raises(Asherah::Error) { session.decrypt_bytes("") }
+      ensure
+        session.close
+      end
     ensure
       factory.close
     end
@@ -431,6 +524,21 @@ class AsyncSessionTest < Minitest::Test
         end
       end
       threads.each(&:join)
+    ensure
+      factory.close
+    end
+  end
+
+  def test_async_nil_args_raise
+    factory = make_factory
+    begin
+      session = factory.get_session("async-nil")
+      begin
+        assert_raises(ArgumentError) { session.encrypt_bytes_async(nil) }
+        assert_raises(ArgumentError) { session.decrypt_bytes_async(nil) }
+      ensure
+        session.close
+      end
     ensure
       factory.close
     end
