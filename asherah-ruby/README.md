@@ -136,6 +136,31 @@ However, the implementation uses `Queue#pop` to synchronize the callback result 
 
 The static-level async methods (`Asherah.encrypt_async`, `Asherah.decrypt_async`) simply run the sync operation in a new `Thread`.
 
+## Input contract
+
+**Partition ID** (`nil`, `""`): always rejected as programming errors
+with `ArgumentError` (`"partition_id cannot be empty"`). No row is ever
+written to the metastore under a degenerate partition ID.
+
+**Plaintext** to encrypt:
+- `nil` → `ArgumentError` from explicit guards in the public API before
+  any FFI call.
+- Empty `String` (`""`) and empty bytes (`"".b`) are **valid**
+  plaintexts. `Asherah.encrypt_string` / `session.encrypt_bytes`
+  produce a real `DataRowRecord` envelope; the matching decrypt returns
+  exactly `""` or empty bytes.
+
+**Ciphertext** to decrypt:
+- `nil` → `ArgumentError`.
+- Empty `String` → `Asherah::Error::DecryptFailed` (not valid
+  `DataRowRecord` JSON).
+
+**Do not short-circuit empty plaintext encryption in caller code** —
+empty data is real data, encrypting it produces a genuine envelope, and
+skipping encryption leaks the fact that the value was empty. See
+[docs/input-contract.md](../docs/input-contract.md) for the full
+rationale.
+
 ## Migration from Canonical Ruby SDK
 
 This replaces the original `asherah` gem which was built on Go via Cobhan FFI. The API is drop-in compatible:

@@ -126,6 +126,32 @@ per async call vs ~1us for sync (hot cache, 64B payload). Use sync in tight
 loops where latency matters; use async when you need to keep the event loop
 responsive.
 
+## Input contract
+
+**Partition ID** (`null`, `undefined`, `""`): always rejected as
+programming errors with `TypeError` (sync) or rejected `Promise`
+(async). No row is ever written to the metastore under a degenerate
+partition ID.
+
+**Plaintext** to encrypt:
+- `null` / `undefined` → `TypeError` from N-API marshalling (sync) or
+  rejected `Promise` (async).
+- Empty `string` (`""`) and `Buffer.alloc(0)` are **valid** plaintexts.
+  `encrypt(...)` / `encryptString(...)` produces a real `DataRowRecord`
+  envelope; the matching `decrypt(...)` returns exactly `""` or an
+  empty `Buffer`.
+
+**Ciphertext** to decrypt:
+- `null` / `undefined` → `TypeError`.
+- Empty `string` / empty `Buffer` → `Error` from native layer (not
+  valid `DataRowRecord` JSON).
+
+**Do not short-circuit empty plaintext encryption in caller code** —
+empty data is real data, encrypting it produces a genuine envelope, and
+skipping encryption leaks the fact that the value was empty. See
+[docs/input-contract.md](../docs/input-contract.md) for the full
+rationale.
+
 ## Configuration
 
 Pass a config object to `setup()`, `setupAsync()`, or the `SessionFactory`

@@ -134,6 +134,33 @@ The static-level async methods (`Asherah.encryptAsync`, `Asherah.decryptAsync`) 
 
 Overhead: approximately 8 microseconds for async vs 1.1 microseconds for sync (64B hot cache). Use async when you need non-blocking behavior; use sync for lowest latency.
 
+## Input contract
+
+**Partition ID** (`null`, `""`): always rejected as programming errors
+with `NullPointerException` / `IllegalArgumentException`. No row is
+ever written to the metastore under a degenerate partition ID.
+(Canonical `com.godaddy.asherah:appencryption` v0.4.0 accepts `null`
+partitions and persists `_IK_null_service_product` rows; this binding
+is deliberately stricter.)
+
+**Plaintext** to encrypt:
+- `null` → `NullPointerException` (sync) / rejected `CompletableFuture`
+  (async).
+- Empty `String` (`""`) and `new byte[0]` are **valid** plaintexts.
+  `encrypt(...)` produces a real `DataRowRecord` envelope; the matching
+  `decrypt(...)` returns exactly `""` or `new byte[0]`.
+
+**Ciphertext** to decrypt:
+- `null` → `NullPointerException`.
+- Empty `String` / `byte[]` → runtime exception from JSON parse (not
+  valid `DataRowRecord`).
+
+**Do not short-circuit empty plaintext encryption in caller code** —
+empty data is real data, encrypting it produces a genuine envelope, and
+skipping encryption leaks the fact that the value was empty. See
+[docs/input-contract.md](../docs/input-contract.md) for the full
+rationale.
+
 ## Migration from Canonical Java SDK
 
 This replaces the canonical `com.godaddy.asherah:appencryption` (v0.3.3), which is a pure Java implementation using Protobuf serialization. This Rust-backed binding is wire-compatible (reads/writes the same metastore format) and significantly faster.

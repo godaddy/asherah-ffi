@@ -364,20 +364,46 @@ async def test_async_none_args_raise():
 
 
 @pytest.mark.asyncio
-async def test_async_empty_string_round_trip():
+async def test_session_async_empty_bytes_round_trip():
+    """Session-level async API is bytes-only by design (no encrypt_text_async
+    on Session). Verify empty bytes round-trip works asynchronously."""
     pytest.importorskip("asherah")
     import asherah
 
     _configure_env()
     factory = asherah.SessionFactory()
     try:
-        session = factory.get_session("py-async-empty-str")
+        session = factory.get_session("py-async-empty-bytes")
         ct = await session.encrypt_bytes_async(b"")
         assert isinstance(ct, str) and len(ct) > 0
         recovered = await session.decrypt_bytes_async(ct)
         assert recovered == b""
     finally:
         factory.close()
+
+
+@pytest.mark.asyncio
+async def test_module_async_empty_string_round_trip():
+    """Module-level async string helpers wrap encrypt_bytes_async with
+    UTF-8 encoding. Verify empty string round-trips through them."""
+    pytest.importorskip("asherah")
+    import asherah
+
+    _configure_env()
+    config = {
+        "ServiceName": "svc",
+        "ProductID": "prod",
+        "Metastore": "memory",
+        "KMS": "static",
+    }
+    asherah.setup(config)
+    try:
+        ct = await asherah.encrypt_string_async("py-async-empty-mod-str", "")
+        assert isinstance(ct, str) and len(ct) > 0
+        recovered = await asherah.decrypt_string_async("py-async-empty-mod-str", ct)
+        assert recovered == ""
+    finally:
+        asherah.shutdown()
 
 
 def test_decrypt_wrong_partition():
