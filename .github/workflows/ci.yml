@@ -301,7 +301,7 @@ jobs:
             .cache/rustup
             .cache/dotnet
             .cache/sccache
-          key: build-${{ runner.os }}-x86_64-dotnet-${{ hashFiles('**/Cargo.lock', 'asherah-dotnet/**/*.csproj') }}
+          key: build-${{ runner.os }}-x86_64-dotnet-${{ hashFiles('**/Cargo.lock', 'asherah-dotnet/**/*.csproj', 'asherah-dotnet/Directory.Packages.props', 'asherah-dotnet/**/packages.lock.json') }}
           restore-keys: |
             build-${{ runner.os }}-x86_64-dotnet-
       - name: Download x86_64 rlib artifacts
@@ -360,10 +360,12 @@ jobs:
 
           dotnet pack src/GoDaddy.Asherah.AppEncryption/GoDaddy.Asherah.AppEncryption.csproj -c Release \
             /p:Version="0.0.0-dryrun" \
-            /p:PackageOutputPath="$GITHUB_WORKSPACE/dist"
+            /p:PackageOutputPath="$GITHUB_WORKSPACE/dist" \
+            /p:RestoreLockedMode=true
           dotnet pack src/GoDaddy.Asherah.AppEncryption.Compat/GoDaddy.Asherah.AppEncryption.Compat.csproj -c Release \
             /p:Version="0.0.0-dryrun" \
-            /p:PackageOutputPath="$GITHUB_WORKSPACE/dist"
+            /p:PackageOutputPath="$GITHUB_WORKSPACE/dist" \
+            /p:RestoreLockedMode=true
       - name: Verify packages
         run: |
           echo "=== Packed packages ==="
@@ -702,7 +704,7 @@ jobs:
             .cache/npm
             .cache/maven
             .cache/dotnet
-          key: tests-${{ runner.os }}-arm64-${{ matrix.binding }}-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj') }}
+          key: tests-${{ runner.os }}-arm64-${{ matrix.binding }}-${{ hashFiles('**/Cargo.lock', 'asherah-node/package-lock.json', 'asherah-py/Cargo.toml', 'asherah-py/pyproject.toml', 'asherah-java/java/pom.xml', 'asherah-dotnet/**/*.csproj', 'asherah-dotnet/Directory.Packages.props', 'asherah-dotnet/**/packages.lock.json') }}
           restore-keys: |
             tests-${{ runner.os }}-arm64-${{ matrix.binding }}-
             tests-${{ runner.os }}-arm64-
@@ -1030,7 +1032,7 @@ jobs:
             .cache/rustup
             .cache/dotnet
             .cache/sccache
-          key: build-${{ runner.os }}-arm64-dotnet-${{ hashFiles('**/Cargo.lock', 'asherah-dotnet/**/*.csproj') }}
+          key: build-${{ runner.os }}-arm64-dotnet-${{ hashFiles('**/Cargo.lock', 'asherah-dotnet/**/*.csproj', 'asherah-dotnet/Directory.Packages.props', 'asherah-dotnet/**/packages.lock.json') }}
           restore-keys: |
             build-${{ runner.os }}-arm64-dotnet-
       - name: Download arm64 rlib artifacts

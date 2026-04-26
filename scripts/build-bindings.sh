@@ -297,12 +297,14 @@ if should_build dotnet || should_build all; then
   # injecting the csproj twice via a response file (MSB1008).
   dotnet msbuild "$_csproj" /t:Restore \
     /p:Configuration=Release \
-    /p:RuntimeIdentifiers="$DOTNET_RID"
+    /p:RuntimeIdentifiers="$DOTNET_RID" \
+    /p:RestoreLockedMode=true
   dotnet msbuild "$_csproj" /t:Pack \
     /p:Configuration=Release \
     /p:ContinuousIntegrationBuild=true \
     /p:RuntimeIdentifiers="$DOTNET_RID" \
     /p:PackageOutputPath="$OUT_DIR/dotnet" \
+    /p:RestoreLockedMode=true \
     /p:_IsPacking=true
 fi
 
