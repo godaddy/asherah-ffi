@@ -21,20 +21,39 @@
 const path = require('path');
 
 function loadNewAddon() {
-  const binaryName = 'asherah_node.node';
-  const candidates = [
-    process.env.NAPI_RS_CARGO_TARGET_DIR && path.resolve(process.env.NAPI_RS_CARGO_TARGET_DIR, 'debug', binaryName),
-    process.env.NAPI_RS_CARGO_TARGET_DIR && path.resolve(process.env.NAPI_RS_CARGO_TARGET_DIR, 'release', binaryName),
-    process.env.CARGO_TARGET_DIR && path.resolve(process.env.CARGO_TARGET_DIR, 'debug', binaryName),
-    process.env.CARGO_TARGET_DIR && path.resolve(process.env.CARGO_TARGET_DIR, 'release', binaryName),
-    path.resolve(__dirname, '..', '..', 'target', 'debug', binaryName),
-    path.resolve(__dirname, '..', '..', 'target', 'release', binaryName),
+  // Mirror the path search used by node_module_runner.js / interop.js.
+  // CI builds the addon via `npm run build` in asherah-node which writes
+  // index.node alongside the package. The named binaries (asherah.node,
+  // asherah_node.node) live in cargo target dirs depending on build flow.
+  const envTarget = process.env.NAPI_RS_CARGO_TARGET_DIR || process.env.CARGO_TARGET_DIR;
+  const candidates = [];
+  for (const binaryName of ['asherah.node', 'asherah_node.node']) {
+    if (envTarget) {
+      candidates.push(
+        path.resolve(envTarget, 'debug', binaryName),
+        path.resolve(envTarget, 'release', binaryName),
+      );
+    }
+    candidates.push(
+      path.resolve(__dirname, '..', '..', 'target', 'debug', binaryName),
+      path.resolve(__dirname, '..', '..', 'target', 'release', binaryName),
+      path.resolve(__dirname, '..', '..', 'asherah-node', 'target', 'debug', binaryName),
+      path.resolve(__dirname, '..', '..', 'asherah-node', 'target', 'release', binaryName),
+      path.resolve(__dirname, '..', '..', 'asherah-node', 'dist', binaryName),
+      path.resolve(__dirname, '..', '..', 'asherah-node', 'npm', binaryName),
+    );
+  }
+  candidates.push(
     path.resolve(__dirname, '..', '..', 'asherah-node', 'index.node'),
-  ].filter(Boolean);
+    path.resolve(__dirname, '..', '..', 'asherah-node', 'npm', 'index.js'),
+  );
   for (const candidate of candidates) {
     try { return require(candidate); } catch (_) {}
   }
-  throw new Error('Could not locate compiled asherah-node addon');
+  throw new Error(
+    'Could not locate compiled asherah-node addon. Searched: ' +
+    candidates.join(', ')
+  );
 }
 
 function loadLegacyAddon() {

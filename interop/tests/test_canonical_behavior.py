@@ -220,10 +220,31 @@ def _run_canonical_java() -> dict[str, str]:
     return out
 
 
+def _java_major_version():
+    """Return JDK major version (e.g. 17, 11) by parsing `java -version`."""
+    try:
+        out = subprocess.run(
+            ["java", "-version"], capture_output=True, text=True, check=True
+        ).stderr
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+    import re
+    m = re.search(r'version "(\d+)', out)
+    if not m:
+        return None
+    return int(m.group(1))
+
+
 @pytest.fixture(scope="module")
 def java_built():
     if shutil.which("mvn") is None:
         pytest.skip("mvn required")
+    # canonical com.godaddy.asherah:appencryption@0.4.0 is compiled with
+    # JDK 17 (class file 61.0); skip cleanly on older JDKs rather than
+    # producing a confusing "wrong class file version" build error.
+    major = _java_major_version()
+    if major is None or major < 17:
+        pytest.skip(f"JDK 17+ required for canonical 0.4.0 probe (found {major})")
     subprocess.run(
         ["mvn", "-B", "-q", "package", "-DskipTests"],
         cwd=CANONICAL_JAVA,
