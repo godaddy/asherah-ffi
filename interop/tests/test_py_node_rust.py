@@ -414,3 +414,34 @@ def test_node_legacy_compatibility(build_artifacts):
 
     recovered_legacy = node_module_cli("legacy", "roundtrip", partition, payload)
     assert recovered_legacy == payload
+
+
+def test_node_legacy_empty_payload_roundtrip(build_artifacts):
+    """The canonical asherah-node (Go cobhan core) must accept empty
+    plaintext on encrypt and round-trip it back to empty on decrypt.
+
+    This proves behavioral parity with our impl: empty plaintext is a
+    valid cryptographic operation in both implementations. (Cross-impl
+    decrypt requires a shared metastore so the IK is visible to both
+    addons; canonical asherah-cobhan only supports MySQL/Postgres for
+    rdbms metastore, not SQLite, so this test runs the canonical
+    addon's own roundtrip rather than crossing the impl boundary.)"""
+    partition = "legacy-empty"
+    payload = b""
+
+    # Encrypt + decrypt within the canonical addon, in one subprocess.
+    recovered = node_module_cli("legacy", "roundtrip", partition, payload)
+    assert recovered == payload, (
+        "canonical asherah-node must round-trip empty plaintext to empty"
+    )
+
+
+def test_node_legacy_decrypt_empty_input_rejected(build_artifacts):
+    """The canonical asherah-node must reject an empty-byte ciphertext
+    rather than silently returning empty plaintext — same contract as
+    our impl."""
+    try:
+        node_module_cli("legacy", "decrypt", "legacy-empty-decrypt", b"")
+        assert False, "canonical decrypt of empty bytes should have errored"
+    except subprocess.CalledProcessError:
+        pass  # expected: canonical errors on invalid/empty input
