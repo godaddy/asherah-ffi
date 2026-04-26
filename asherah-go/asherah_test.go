@@ -468,6 +468,145 @@ func TestFactoryClosePreventsSessions(t *testing.T) {
 	}
 }
 
+// --- Null and empty input handling ---
+//
+// Go's []byte has no real distinction between nil and []byte{} — most APIs
+// treat them interchangeably. So the contract here is:
+//   - empty partition string → error (programming error)
+//   - nil or []byte{} plaintext → valid empty encrypt that round-trips
+//   - empty string plaintext → valid empty encrypt that round-trips
+//   - nil/empty/empty-string ciphertext → error (invalid DataRowRecord JSON)
+
+func TestEncryptEmptyPartitionFails(t *testing.T) {
+	setupForBoundary(t)
+	defer asherah.Shutdown()
+
+	if _, err := asherah.Encrypt("", []byte("x")); err == nil {
+		t.Fatal("expected error for empty partition")
+	}
+	if _, err := asherah.EncryptString("", "x"); err == nil {
+		t.Fatal("expected error for empty partition (EncryptString)")
+	}
+	if _, err := asherah.Decrypt("", []byte("{}")); err == nil {
+		t.Fatal("expected error for empty partition (Decrypt)")
+	}
+	if _, err := asherah.DecryptString("", "{}"); err == nil {
+		t.Fatal("expected error for empty partition (DecryptString)")
+	}
+}
+
+func TestEncryptNilPlaintextRoundTrips(t *testing.T) {
+	setupForBoundary(t)
+	defer asherah.Shutdown()
+
+	// In Go, nil []byte is conventionally equivalent to []byte{} — treat
+	// it as a valid empty plaintext, not an error.
+	ct, err := asherah.Encrypt("go-nil-pt", nil)
+	if err != nil {
+		t.Fatalf("Encrypt(nil) failed: %v", err)
+	}
+	if len(ct) == 0 {
+		t.Fatal("ciphertext was empty")
+	}
+	recovered, err := asherah.Decrypt("go-nil-pt", ct)
+	if err != nil {
+		t.Fatalf("Decrypt failed: %v", err)
+	}
+	if len(recovered) != 0 {
+		t.Fatalf("expected empty recovered, got %d bytes", len(recovered))
+	}
+}
+
+func TestEmptyStringRoundTrip(t *testing.T) {
+	setupForBoundary(t)
+	defer asherah.Shutdown()
+
+	ct, err := asherah.EncryptString("go-empty-str", "")
+	if err != nil {
+		t.Fatalf("EncryptString(\"\") failed: %v", err)
+	}
+	if ct == "" {
+		t.Fatal("ciphertext was empty")
+	}
+	recovered, err := asherah.DecryptString("go-empty-str", ct)
+	if err != nil {
+		t.Fatalf("DecryptString failed: %v", err)
+	}
+	if recovered != "" {
+		t.Fatalf("expected empty string, got %q", recovered)
+	}
+}
+
+func TestDecryptNilOrEmptyFails(t *testing.T) {
+	setupForBoundary(t)
+	defer asherah.Shutdown()
+
+	// nil and zero-length byte slices must be rejected as invalid JSON,
+	// not silently treated as empty plaintext.
+	if _, err := asherah.Decrypt("go-empty-decrypt", nil); err == nil {
+		t.Fatal("expected error for nil ciphertext")
+	}
+	if _, err := asherah.Decrypt("go-empty-decrypt", []byte{}); err == nil {
+		t.Fatal("expected error for empty ciphertext")
+	}
+	if _, err := asherah.DecryptString("go-empty-decrypt", ""); err == nil {
+		t.Fatal("expected error for empty string ciphertext")
+	}
+}
+
+func TestSessionNilAndEmptyInputs(t *testing.T) {
+	factory := newTestFactory(t)
+	defer factory.Close()
+
+	// GetSession with empty partition must fail
+	if _, err := factory.GetSession(""); err == nil {
+		t.Fatal("expected error for GetSession(\"\")")
+	}
+
+	session, err := factory.GetSession("go-session-null-empty")
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	defer session.Close()
+
+	// nil plaintext is a valid empty encrypt
+	ct, err := session.Encrypt(nil)
+	if err != nil {
+		t.Fatalf("session.Encrypt(nil) failed: %v", err)
+	}
+	recovered, err := session.Decrypt(ct)
+	if err != nil {
+		t.Fatalf("session.Decrypt failed: %v", err)
+	}
+	if len(recovered) != 0 {
+		t.Fatalf("expected empty, got %d bytes", len(recovered))
+	}
+
+	// empty string round-trip
+	ctStr, err := session.EncryptString("")
+	if err != nil {
+		t.Fatalf("session.EncryptString(\"\") failed: %v", err)
+	}
+	recoveredStr, err := session.DecryptString(ctStr)
+	if err != nil {
+		t.Fatalf("session.DecryptString failed: %v", err)
+	}
+	if recoveredStr != "" {
+		t.Fatalf("expected empty string, got %q", recoveredStr)
+	}
+
+	// nil/empty ciphertext on decrypt must error
+	if _, err := session.Decrypt(nil); err == nil {
+		t.Fatal("expected error for session.Decrypt(nil)")
+	}
+	if _, err := session.Decrypt([]byte{}); err == nil {
+		t.Fatal("expected error for session.Decrypt([]byte{})")
+	}
+	if _, err := session.DecryptString(""); err == nil {
+		t.Fatal("expected error for session.DecryptString(\"\")")
+	}
+}
+
 func TestConcurrentEncryptDecrypt(t *testing.T) {
 	factory := newTestFactory(t)
 	defer factory.Close()

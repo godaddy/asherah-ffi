@@ -226,6 +226,160 @@ def test_decrypt_invalid_json():
         asherah.shutdown()
 
 
+# ── Null / None / empty input contract ─────────────────────────────────
+#
+# Contract:
+#   - None for str/bytes parameter is a programming error → TypeError
+#     (raised by PyO3 type conversion before reaching native code).
+#   - empty str / empty bytes is a valid encrypt that round-trips back
+#     to empty.
+#   - decrypting empty input is invalid JSON and must raise.
+
+
+def test_module_encrypt_none_partition_raises():
+    asherah = _setup_module_api()
+    try:
+        with pytest.raises(TypeError):
+            asherah.encrypt_bytes(None, b"x")
+    finally:
+        asherah.shutdown()
+
+
+def test_module_encrypt_none_data_raises():
+    asherah = _setup_module_api()
+    try:
+        with pytest.raises(TypeError):
+            asherah.encrypt_bytes("p", None)
+    finally:
+        asherah.shutdown()
+
+
+def test_module_encrypt_string_none_text_raises():
+    asherah = _setup_module_api()
+    try:
+        with pytest.raises(TypeError):
+            asherah.encrypt_string("p", None)
+    finally:
+        asherah.shutdown()
+
+
+def test_module_decrypt_none_raises():
+    asherah = _setup_module_api()
+    try:
+        with pytest.raises(TypeError):
+            asherah.decrypt_bytes("p", None)
+        with pytest.raises(TypeError):
+            asherah.decrypt_string("p", None)
+    finally:
+        asherah.shutdown()
+
+
+def test_module_empty_string_round_trip():
+    asherah = _setup_module_api()
+    try:
+        ct = asherah.encrypt_string("py-empty-str", "")
+        assert isinstance(ct, str) and len(ct) > 0
+        assert asherah.decrypt_string("py-empty-str", ct) == ""
+    finally:
+        asherah.shutdown()
+
+
+def test_module_decrypt_empty_string_raises():
+    asherah = _setup_module_api()
+    try:
+        with pytest.raises(Exception):
+            asherah.decrypt_string("py-empty-decrypt", "")
+        with pytest.raises(Exception):
+            asherah.decrypt_bytes("py-empty-decrypt", "")
+    finally:
+        asherah.shutdown()
+
+
+def test_session_none_args_raise():
+    pytest.importorskip("asherah")
+    import asherah
+
+    _configure_env()
+    factory = asherah.SessionFactory()
+    try:
+        session = factory.get_session("py-session-null")
+        with pytest.raises(TypeError):
+            session.encrypt_bytes(None)
+        with pytest.raises(TypeError):
+            session.encrypt_text(None)
+        with pytest.raises(TypeError):
+            session.decrypt_bytes(None)
+        with pytest.raises(TypeError):
+            session.decrypt_text(None)
+    finally:
+        factory.close()
+
+
+def test_session_empty_string_round_trip():
+    pytest.importorskip("asherah")
+    import asherah
+
+    _configure_env()
+    factory = asherah.SessionFactory()
+    try:
+        session = factory.get_session("py-empty-session-str")
+        ct = session.encrypt_text("")
+        assert isinstance(ct, str) and len(ct) > 0
+        assert session.decrypt_text(ct) == ""
+    finally:
+        factory.close()
+
+
+def test_session_decrypt_empty_string_raises():
+    pytest.importorskip("asherah")
+    import asherah
+
+    _configure_env()
+    factory = asherah.SessionFactory()
+    try:
+        session = factory.get_session("py-empty-decrypt-sess")
+        with pytest.raises(Exception):
+            session.decrypt_text("")
+        with pytest.raises(Exception):
+            session.decrypt_bytes("")
+    finally:
+        factory.close()
+
+
+@pytest.mark.asyncio
+async def test_async_none_args_raise():
+    pytest.importorskip("asherah")
+    import asherah
+
+    _configure_env()
+    factory = asherah.SessionFactory()
+    try:
+        session = factory.get_session("py-async-null")
+        with pytest.raises(TypeError):
+            await session.encrypt_bytes_async(None)
+        with pytest.raises(TypeError):
+            await session.decrypt_bytes_async(None)
+    finally:
+        factory.close()
+
+
+@pytest.mark.asyncio
+async def test_async_empty_string_round_trip():
+    pytest.importorskip("asherah")
+    import asherah
+
+    _configure_env()
+    factory = asherah.SessionFactory()
+    try:
+        session = factory.get_session("py-async-empty-str")
+        ct = await session.encrypt_bytes_async(b"")
+        assert isinstance(ct, str) and len(ct) > 0
+        recovered = await session.decrypt_bytes_async(ct)
+        assert recovered == b""
+    finally:
+        factory.close()
+
+
 def test_decrypt_wrong_partition():
     asherah = _setup_module_api()
     try:

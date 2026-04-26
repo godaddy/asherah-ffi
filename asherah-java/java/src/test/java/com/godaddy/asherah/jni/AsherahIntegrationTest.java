@@ -2,6 +2,7 @@ package com.godaddy.asherah.jni;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.nio.charset.StandardCharsets;
@@ -313,6 +314,182 @@ class AsherahIntegrationTest {
       String ciphertext = session.encryptStringAsync(plaintext).get();
       String decrypted = session.decryptStringAsync(ciphertext).get();
       assertEquals(plaintext, decrypted);
+    }
+  }
+
+  // --- Null and empty input handling ---
+  //
+  // Contract:
+  //   - null arguments are programming errors → NullPointerException
+  //     thrown by the binding before reaching native code.
+  //   - empty String / empty byte[] is a valid encrypt that round-trips
+  //     back to empty.
+  //   - decrypting empty input is invalid JSON and must throw.
+
+  @Test
+  void sessionEncryptBytesNullThrows() {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession session = factory.getSession("null-bytes")) {
+      assertThrows(NullPointerException.class, () -> session.encryptBytes(null));
+    }
+  }
+
+  @Test
+  void sessionEncryptStringNullThrows() {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession session = factory.getSession("null-string")) {
+      assertThrows(NullPointerException.class, () -> session.encryptString(null));
+    }
+  }
+
+  @Test
+  void sessionDecryptBytesNullThrows() {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession session = factory.getSession("null-decrypt-bytes")) {
+      assertThrows(NullPointerException.class, () -> session.decryptBytes(null));
+    }
+  }
+
+  @Test
+  void sessionDecryptStringNullThrows() {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession session = factory.getSession("null-decrypt-string")) {
+      assertThrows(NullPointerException.class, () -> session.decryptString(null));
+    }
+  }
+
+  @Test
+  void sessionEncryptBytesAsyncNullThrows() {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession session = factory.getSession("null-bytes-async")) {
+      assertThrows(NullPointerException.class, () -> session.encryptBytesAsync(null));
+    }
+  }
+
+  @Test
+  void sessionDecryptBytesAsyncNullThrows() {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession session = factory.getSession("null-decrypt-bytes-async")) {
+      assertThrows(NullPointerException.class, () -> session.decryptBytesAsync(null));
+    }
+  }
+
+  @Test
+  void factoryGetSessionNullThrows() {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig())) {
+      assertThrows(NullPointerException.class, () -> factory.getSession(null));
+    }
+  }
+
+  @Test
+  void staticEncryptNullPartitionThrows() {
+    withSetup(() -> {
+      assertThrows(NullPointerException.class,
+          () -> Asherah.encrypt(null, "x".getBytes(StandardCharsets.UTF_8)));
+    });
+  }
+
+  @Test
+  void staticEncryptNullPlaintextThrows() {
+    withSetup(() -> {
+      assertThrows(NullPointerException.class, () -> Asherah.encrypt("p", null));
+    });
+  }
+
+  @Test
+  void staticEncryptStringNullPlaintextThrows() {
+    withSetup(() -> {
+      assertThrows(NullPointerException.class, () -> Asherah.encryptString("p", null));
+    });
+  }
+
+  @Test
+  void staticDecryptNullPartitionThrows() {
+    withSetup(() -> {
+      assertThrows(NullPointerException.class, () -> Asherah.decrypt(null, new byte[]{0}));
+    });
+  }
+
+  @Test
+  void staticDecryptNullCiphertextThrows() {
+    withSetup(() -> {
+      assertThrows(NullPointerException.class, () -> Asherah.decrypt("p", null));
+    });
+  }
+
+  @Test
+  void staticDecryptStringNullCiphertextThrows() {
+    withSetup(() -> {
+      assertThrows(NullPointerException.class, () -> Asherah.decryptString("p", null));
+    });
+  }
+
+  @Test
+  void staticEncryptAsyncNullPlaintextThrows() {
+    withSetup(() -> {
+      assertThrows(NullPointerException.class, () -> Asherah.encryptAsync("p", null));
+    });
+  }
+
+  @Test
+  void staticDecryptAsyncNullCiphertextThrows() {
+    withSetup(() -> {
+      assertThrows(NullPointerException.class, () -> Asherah.decryptAsync("p", null));
+    });
+  }
+
+  @Test
+  void sessionEmptyStringRoundTrip() {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession session = factory.getSession("empty-string")) {
+      String ct = session.encryptString("");
+      assertNotNull(ct);
+      assertEquals("", session.decryptString(ct));
+    }
+  }
+
+  @Test
+  void sessionEmptyBytesRoundTrip() {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession session = factory.getSession("empty-bytes-explicit")) {
+      String ct = session.encryptToJson(new byte[0]);
+      byte[] recovered = session.decryptFromJson(ct);
+      assertEquals(0, recovered.length);
+    }
+  }
+
+  @Test
+  void staticEmptyStringRoundTrip() {
+    withSetup(() -> {
+      String ct = Asherah.encryptString("empty-static-str", "");
+      assertEquals("", Asherah.decryptString("empty-static-str", ct));
+    });
+  }
+
+  @Test
+  void staticEmptyBytesRoundTrip() {
+    withSetup(() -> {
+      byte[] ct = Asherah.encrypt("empty-static-bytes", new byte[0]);
+      byte[] recovered = Asherah.decrypt("empty-static-bytes", ct);
+      assertEquals(0, recovered.length);
+    });
+  }
+
+  @Test
+  void sessionEmptyStringRoundTripAsync() throws Exception {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession session = factory.getSession("empty-string-async")) {
+      String ct = session.encryptStringAsync("").get();
+      assertEquals("", session.decryptStringAsync(ct).get());
+    }
+  }
+
+  @Test
+  void sessionDecryptEmptyStringThrows() {
+    try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
+        AsherahSession session = factory.getSession("decrypt-empty")) {
+      assertThrows(Exception.class, () -> session.decryptString(""));
+      assertThrows(Exception.class, () -> session.decryptBytes(new byte[0]));
     }
   }
 

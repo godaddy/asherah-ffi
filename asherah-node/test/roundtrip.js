@@ -462,14 +462,130 @@ function testFactorySessionApi() {
   }
 }
 
+function testNullAndEmptyInputs() {
+  // Contract:
+  //   - null/undefined plaintext or partition is a programming error and must throw.
+  //   - empty Buffer / empty string is a valid encrypt that round-trips back to empty.
+  //   - decrypting an empty Buffer/string is invalid JSON and must throw.
+
+  const cfg = {
+    serviceName: 'null-empty-svc',
+    productId: 'null-empty-prod',
+    metastore: 'memory',
+    kms: 'static',
+    enableSessionCaching: false,
+  };
+  addon.setup(cfg);
+
+  const pid = 'null-empty';
+
+  // ── null/undefined arguments must throw ──
+  const throwsCases = [
+    () => addon.encrypt(null, Buffer.from('x')),
+    () => addon.encrypt(pid, null),
+    () => addon.encrypt(undefined, Buffer.from('x')),
+    () => addon.encrypt(pid, undefined),
+    () => addon.encryptString(null, 'x'),
+    () => addon.encryptString(pid, null),
+    () => addon.decrypt(null, Buffer.from('x')),
+    () => addon.decrypt(pid, null),
+    () => addon.decryptString(null, 'x'),
+    () => addon.decryptString(pid, null),
+  ];
+  for (const [i, fn] of throwsCases.entries()) {
+    let threw = false;
+    try { fn(); } catch (_) { threw = true; }
+    assert.ok(threw, `null/undefined case ${i} should throw`);
+  }
+  console.log('asherah-node null/undefined args throw OK');
+
+  // ── empty Buffer round-trip ──
+  const emptyBufCt = addon.encrypt(pid, Buffer.alloc(0));
+  assert.ok(typeof emptyBufCt === 'string' && emptyBufCt.length > 0);
+  const emptyBufPt = addon.decrypt(pid, emptyBufCt);
+  assert.ok(Buffer.isBuffer(emptyBufPt));
+  assert.strictEqual(emptyBufPt.length, 0);
+
+  // ── empty string round-trip ──
+  const emptyStrCt = addon.encryptString(pid, '');
+  assert.ok(typeof emptyStrCt === 'string' && emptyStrCt.length > 0);
+  const emptyStrPt = addon.decryptString(pid, emptyStrCt);
+  assert.strictEqual(emptyStrPt, '');
+  console.log('asherah-node empty string/Buffer round-trip OK');
+
+  // ── decrypt of empty input must reject (not valid DataRowRecord JSON) ──
+  let caught = false;
+  try { addon.decryptString(pid, ''); } catch (_) { caught = true; }
+  assert.ok(caught, 'decryptString("") must throw');
+
+  caught = false;
+  try { addon.decrypt(pid, Buffer.alloc(0)); } catch (_) { caught = true; }
+  assert.ok(caught, 'decrypt(empty Buffer) must throw');
+  console.log('asherah-node decrypt of empty input rejected OK');
+
+  addon.shutdown();
+}
+
+async function testNullAndEmptyAsync() {
+  const cfg = {
+    serviceName: 'null-empty-async-svc',
+    productId: 'null-empty-async-prod',
+    metastore: 'memory',
+    kms: 'static',
+    enableSessionCaching: false,
+  };
+  await addon.setupAsync(cfg);
+  const pid = 'null-empty-async';
+
+  // null/undefined args must reject (sync throw or rejected Promise both acceptable)
+  const asyncThrowCases = [
+    () => addon.encryptAsync(null, Buffer.from('x')),
+    () => addon.encryptAsync(pid, null),
+    () => addon.encryptStringAsync(null, 'x'),
+    () => addon.encryptStringAsync(pid, null),
+    () => addon.decryptAsync(null, Buffer.from('x')),
+    () => addon.decryptAsync(pid, null),
+    () => addon.decryptStringAsync(null, 'x'),
+    () => addon.decryptStringAsync(pid, null),
+  ];
+  for (const [i, fn] of asyncThrowCases.entries()) {
+    let rejected = false;
+    try {
+      const r = fn();
+      if (r && typeof r.then === 'function') {
+        await r;
+      }
+    } catch (_) {
+      rejected = true;
+    }
+    assert.ok(rejected, `async null/undefined case ${i} should reject/throw`);
+  }
+  console.log('asherah-node async null/undefined args reject OK');
+
+  // empty Buffer round-trip (async)
+  const emptyBufCt = await addon.encryptAsync(pid, Buffer.alloc(0));
+  const emptyBufPt = await addon.decryptAsync(pid, emptyBufCt);
+  assert.strictEqual(emptyBufPt.length, 0);
+
+  // empty string round-trip (async)
+  const emptyStrCt = await addon.encryptStringAsync(pid, '');
+  const emptyStrPt = await addon.decryptStringAsync(pid, emptyStrCt);
+  assert.strictEqual(emptyStrPt, '');
+  console.log('asherah-node async empty string/Buffer round-trip OK');
+
+  await addon.shutdownAsync();
+}
+
 main();
 testCompatApi();
 testFactorySessionApi();
+testNullAndEmptyInputs();
 
 // Async tests — these run on the event loop / tokio runtime and must not
 // panic with "Cannot start a runtime from within a runtime"
 Promise.resolve()
   .then(() => testNullConfigAsync())
+  .then(() => testNullAndEmptyAsync())
   .then(() => testAsyncFromAsyncContext())
   .catch(err => { console.error('FAIL:', err); process.exit(1); });
 
