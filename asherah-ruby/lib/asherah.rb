@@ -136,20 +136,24 @@ module Asherah
     alias_method :set_env, :setenv
 
     def encrypt(partition_id, payload)
+      raise ArgumentError, "payload cannot be nil" if payload.nil?
       session = resolve_session(partition_id)
       session.encrypt_bytes(payload)
     end
 
     def encrypt_string(partition_id, text)
-      encrypt(partition_id, text.to_s)
+      raise ArgumentError, "text cannot be nil" if text.nil?
+      encrypt(partition_id, text)
     end
 
     def decrypt(partition_id, data_row_record)
+      raise ArgumentError, "data_row_record cannot be nil" if data_row_record.nil?
       session = resolve_session(partition_id)
       session.decrypt_bytes(data_row_record).force_encoding(Encoding::UTF_8)
     end
 
     def decrypt_string(partition_id, data_row_record)
+      raise ArgumentError, "data_row_record cannot be nil" if data_row_record.nil?
       decrypt(partition_id, data_row_record).force_encoding(Encoding::UTF_8)
     end
 

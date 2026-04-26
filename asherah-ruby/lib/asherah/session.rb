@@ -12,6 +12,7 @@ module Asherah
     end
 
     def encrypt_bytes(data)
+      raise ArgumentError, "data cannot be nil" if data.nil?
       raise Asherah::Error::EncryptFailed, "session closed" if @pointer.null?
       buf = thread_local_buffer
       status = Native.asherah_encrypt_to_json(@pointer, data, data.bytesize, buf.pointer)
@@ -22,6 +23,7 @@ module Asherah
     end
 
     def decrypt_bytes(json)
+      raise ArgumentError, "json cannot be nil" if json.nil?
       raise Asherah::Error::DecryptFailed, "session closed" if @pointer.null?
       buf = thread_local_buffer
       status = Native.asherah_decrypt_from_json(@pointer, json, json.bytesize, buf.pointer)
@@ -34,6 +36,7 @@ module Asherah
     # True async encrypt — runs on Rust's tokio runtime, does not block the Ruby thread.
     # Returns the result; internally uses a Queue to wait for the tokio callback.
     def encrypt_bytes_async(data)
+      raise ArgumentError, "data cannot be nil" if data.nil?
       raise Asherah::Error::EncryptFailed, "session closed" if @pointer.null?
       @close_mu.synchronize { @pending_ops += 1 }
       queue = Queue.new
@@ -61,6 +64,7 @@ module Asherah
 
     # True async decrypt — runs on Rust's tokio runtime, does not block the Ruby thread.
     def decrypt_bytes_async(json)
+      raise ArgumentError, "json cannot be nil" if json.nil?
       raise Asherah::Error::DecryptFailed, "session closed" if @pointer.null?
       @close_mu.synchronize { @pending_ops += 1 }
       queue = Queue.new
