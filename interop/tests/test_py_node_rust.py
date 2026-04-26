@@ -9,26 +9,23 @@ from pathlib import Path
 import pytest
 
 # build_artifacts (autouse, session-scoped) lives in conftest.py and is
-# applied to every test in this directory automatically. Helpers we still
-# define locally below.
-from conftest import (  # noqa: F401  (build_artifacts re-exported for explicit use)
-    ROOT,
-    NODE_DIR,
-    LEGACY_NODE_DIR,
-    ensure_env,
-)
+# applied to every test in this directory automatically. We import the
+# whole module (rather than `from conftest import …`) so that mutable
+# module-level state set by the fixture — notably SQLITE_DB — is read
+# fresh at each access instead of captured at import time.
+import conftest
 
 LOGGER = logging.getLogger("interop")
 
-NODE_SCRIPT = NODE_DIR / "scripts" / "interop.js"
-NODE_COMPAT_SCRIPT = ROOT / "interop" / "scripts" / "node_module_runner.js"
-RUST_BIN_DEBUG = ROOT / "target" / "debug" / "asherah-interop"
-RUST_BIN_RELEASE = ROOT / "target" / "release" / "asherah-interop"
+NODE_SCRIPT = conftest.NODE_DIR / "scripts" / "interop.js"
+NODE_COMPAT_SCRIPT = conftest.ROOT / "interop" / "scripts" / "node_module_runner.js"
+RUST_BIN_DEBUG = conftest.ROOT / "target" / "debug" / "asherah-interop"
+RUST_BIN_RELEASE = conftest.ROOT / "target" / "release" / "asherah-interop"
 # Also consider explicit CARGO_TARGET_DIR paths (e.g., target/<triple>/...)
-_CARGO_TARGET_DIR = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target"))
+_CARGO_TARGET_DIR = Path(os.environ.get("CARGO_TARGET_DIR", conftest.ROOT / "target"))
 RUST_TRIPLE_DEBUG = _CARGO_TARGET_DIR / "debug" / "asherah-interop"
 RUST_TRIPLE_RELEASE = _CARGO_TARGET_DIR / "release" / "asherah-interop"
-RUBY_DIR = ROOT / "asherah-ruby"
+RUBY_DIR = conftest.ROOT / "asherah-ruby"
 RUBY_SCRIPT = RUBY_DIR / "scripts" / "interop.rb"
 
 # Prefer Homebrew Ruby over macOS system Ruby (2.6, missing gems)
@@ -38,11 +35,11 @@ RUBY_CMD = str(_HOMEBREW_RUBY) if _HOMEBREW_RUBY.exists() else "ruby"
 
 def node_cli(action: str, partition: str, payload: bytes) -> bytes:
     payload_b64 = base64.b64encode(payload).decode()
-    env = ensure_env({})
+    env = conftest.ensure_env({})
     LOGGER.info("node addon %s partition=%s payload=%d bytes", action, partition, len(payload))
     result = subprocess.run(
         ["node", str(NODE_SCRIPT), action, partition, payload_b64],
-        cwd=NODE_DIR,
+        cwd=conftest.NODE_DIR,
         env=env,
         check=True,
         capture_output=True,
@@ -53,7 +50,7 @@ def node_cli(action: str, partition: str, payload: bytes) -> bytes:
 
 def rust_cli(action: str, partition: str, payload: bytes) -> bytes:
     payload_b64 = base64.b64encode(payload).decode()
-    env = ensure_env({})
+    env = conftest.ensure_env({})
     # Prefer plain target/debug, then target/<triple>/debug, then releases.
     if RUST_BIN_DEBUG.exists():
         bin_path = RUST_BIN_DEBUG
@@ -66,7 +63,7 @@ def rust_cli(action: str, partition: str, payload: bytes) -> bytes:
     LOGGER.info("rust cli %s partition=%s payload=%d bytes", action, partition, len(payload))
     result = subprocess.run(
         [str(bin_path), action, partition, payload_b64],
-        cwd=ROOT,
+        cwd=conftest.ROOT,
         env=env,
         check=True,
         capture_output=True,
@@ -77,7 +74,7 @@ def rust_cli(action: str, partition: str, payload: bytes) -> bytes:
 
 def ruby_cli(action: str, partition: str, payload: bytes) -> bytes:
     payload_b64 = base64.b64encode(payload).decode()
-    env = ensure_env({})
+    env = conftest.ensure_env({})
     # Ensure Homebrew Ruby's gem path is on PATH (system Ruby 2.6 lacks gems)
     if _HOMEBREW_RUBY.exists():
         ruby_paths = "/opt/homebrew/opt/ruby/bin:/opt/homebrew/lib/ruby/gems/4.0.0/bin"
@@ -96,10 +93,10 @@ def ruby_cli(action: str, partition: str, payload: bytes) -> bytes:
 
 def node_module_cli(flavour: str, action: str, partition: str, payload: bytes) -> bytes:
     payload_b64 = base64.b64encode(payload).decode()
-    env = ensure_env({"Metastore": "memory"})
+    env = conftest.ensure_env({"Metastore": "memory"})
     env.pop("CONNECTION_STRING", None)
     env.pop("SQLITE_PATH", None)
-    cwd = LEGACY_NODE_DIR if flavour == "legacy" else NODE_DIR
+    cwd = conftest.LEGACY_NODE_DIR if flavour == "legacy" else conftest.NODE_DIR
     LOGGER.info(
         "node %s %s partition=%s payload=%d bytes",
         flavour,
@@ -120,9 +117,9 @@ def node_module_cli(flavour: str, action: str, partition: str, payload: bytes) -
 
 def _apply_test_env_to_process():
     """Apply BASE_ENV (and SQLITE_DB if set) to os.environ so the asherah
-    Python module picks up the test fixture's config."""
-    import conftest  # accessed at call time so SQLITE_DB reflects fixture state
-
+    Python module picks up the test fixture's config. We reference the
+    conftest module's attributes directly so SQLITE_DB reflects whatever
+    the autouse fixture has set (it is None until build_artifacts runs)."""
     for k, v in conftest.BASE_ENV.items():
         os.environ[k] = v
     if conftest.SQLITE_DB is not None:

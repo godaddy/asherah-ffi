@@ -85,7 +85,8 @@ Probe("Roundtrip_empty_bytes", () =>
     using var s = factory.GetSessionBytes("p1");
     var ct = s.Encrypt(Array.Empty<byte>());
     var pt = s.Decrypt(ct);
-    return $"recovered_len={pt.Length} null={pt == null}";
+    var ptLen = pt == null ? -1 : pt.Length;
+    return $"recovered_len={ptLen} null={pt == null}";
 });
 
 // 6) Decrypt with null

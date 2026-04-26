@@ -75,7 +75,8 @@ public class Probe {
                 try (Session<byte[], byte[]> s = factory.getSessionBytes("p1")) {
                     byte[] ct = s.encrypt(new byte[0]);
                     byte[] pt = s.decrypt(ct);
-                    return "recovered_len=" + pt.length + " null=" + (pt == null);
+                    int ptLen = (pt == null ? -1 : pt.length);
+                    return "recovered_len=" + ptLen + " null=" + (pt == null);
                 }
             });
 

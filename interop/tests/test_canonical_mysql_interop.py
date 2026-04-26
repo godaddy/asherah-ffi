@@ -117,15 +117,18 @@ def mysql_metastore():
 
     # Ensure the encryption_key table exists (canonical asherah-cobhan creates
     # it automatically, but our addon expects it to be present).
+    create_table_sql = (
+        "CREATE TABLE IF NOT EXISTS encryption_key ("
+        "id VARCHAR(255) NOT NULL, "
+        "created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+        "key_record JSON NOT NULL, "
+        "PRIMARY KEY(id, created), "
+        "INDEX(created)"
+        ") ENGINE=InnoDB"
+    )
     subprocess.run(
-        ["docker", "exec", cid, "mysql", "-h", "127.0.0.1", "-u", "root", "test", "-e",
-         "CREATE TABLE IF NOT EXISTS encryption_key ("
-         "id VARCHAR(255) NOT NULL,"
-         "created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,"
-         "key_record JSON NOT NULL,"
-         "PRIMARY KEY(id, created),"
-         "INDEX(created)"
-         ") ENGINE=InnoDB"],
+        ["docker", "exec", cid, "mysql", "-h", "127.0.0.1", "-u", "root", "test",
+         "-e", create_table_sql],
         check=True, capture_output=True,
     )
     yield {"url": url, "dsn": dsn, "container": cid}
