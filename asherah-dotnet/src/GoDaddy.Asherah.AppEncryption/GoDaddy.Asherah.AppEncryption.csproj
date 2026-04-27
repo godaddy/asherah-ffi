@@ -10,6 +10,12 @@
     <Description>Asherah application-layer encryption for .NET with automatic key rotation, powered by the native Rust implementation.</Description>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Industry-standard logging abstraction. Lets callers register an
+         ILogger / ILoggerFactory directly via Asherah.SetLogHook(...). -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
   <!-- Include native libraries for all supported platforms.
        These are placed by the publish-nuget workflow before dotnet pack. -->
   <ItemGroup>

@@ -1034,7 +1034,7 @@ pub fn resolve_from_env() -> anyhow::Result<ResolvedConfig> {
         }
         #[cfg(not(feature = "mysql"))]
         {
-            let _ = url;
+            drop(url);
             anyhow::bail!("Enable feature 'mysql' to use MySQL metastore")
         }
     } else {

@@ -40,8 +40,8 @@ use std::time::Duration;
 
 use parking_lot::Mutex;
 
-use asherah::logging::{self, LogSink};
-use asherah::metrics::{self, MetricsSink};
+use asherah::logging::{self, AsyncLogConfig, AsyncLogSink, LogSink};
+use asherah::metrics::{self, AsyncMetricsConfig, AsyncMetricsSink, MetricsSink};
 
 // ─── Log hook ─────────────────────────────────────────────────────────────
 
@@ -51,6 +51,13 @@ pub const ASHERAH_LOG_DEBUG: i32 = 1;
 pub const ASHERAH_LOG_INFO: i32 = 2;
 pub const ASHERAH_LOG_WARN: i32 = 3;
 pub const ASHERAH_LOG_ERROR: i32 = 4;
+/// Filter sentinel: drop every record. Useful when a binding's standard
+/// log-level enum has values higher than Error (e.g. Microsoft.Extensions.
+/// Logging.LogLevel.Critical/None) and the caller wants those to translate
+/// to "deliver nothing" rather than "deliver everything (the unknown-value
+/// fallback)". Only meaningful as a `min_level` argument to `_with_config`/
+/// `_sync`; never appears in a delivered LogEvent.
+pub const ASHERAH_LOG_OFF: i32 = 5;
 
 /// Log callback signature. Strings are NUL-terminated UTF-8 valid for the
 /// callback's lifetime only.
@@ -122,6 +129,74 @@ impl LogSink for CallbackLogSink {
     }
 }
 
+// Default queue size for the async dispatcher. Sized to absorb a few
+// thousand encrypts worth of records on a hot path before the queue starts
+// dropping. Override per-hook via `asherah_set_log_hook_with_config`.
+const DEFAULT_LOG_QUEUE_CAPACITY: usize = 4096;
+// Default min level — Warn and above. Trace/Debug/Info are dropped at the
+// producer thread so they never reach the queue. Callers who want the
+// verbose records pass `ASHERAH_LOG_TRACE` (or any other level constant)
+// to `_with_config` / `_sync` explicitly.
+const DEFAULT_LOG_MIN_LEVEL: i32 = ASHERAH_LOG_WARN;
+
+// Synchronous variant of `CallbackLogSink` that applies a per-hook level
+// filter. Async mode does the filter inside `AsyncLogSink::log` to avoid
+// even materialising the record; sync mode does it here so the user's
+// callback only sees records at or above their configured threshold.
+struct SyncFilteredLogSink {
+    min_level: log::LevelFilter,
+}
+
+impl LogSink for SyncFilteredLogSink {
+    fn log(&self, record: &log::Record<'_>) {
+        if record.level() > self.min_level {
+            return;
+        }
+        CallbackLogSink.log(record);
+    }
+}
+
+fn map_log_level(value: i32) -> log::LevelFilter {
+    // Anything outside the documented range is treated as "deliver everything"
+    // (the caller likely passed 0 / -1 / a sentinel value, and over-delivering
+    // is preferable to silently dropping). `ASHERAH_LOG_OFF` is the explicit
+    // "deliver nothing" sentinel.
+    match value {
+        ASHERAH_LOG_DEBUG => log::LevelFilter::Debug,
+        ASHERAH_LOG_INFO => log::LevelFilter::Info,
+        ASHERAH_LOG_WARN => log::LevelFilter::Warn,
+        ASHERAH_LOG_ERROR => log::LevelFilter::Error,
+        ASHERAH_LOG_OFF => log::LevelFilter::Off,
+        _ => log::LevelFilter::Trace,
+    }
+}
+
+fn install_log_hook_with_config(
+    cb: AsherahLogCallback,
+    user_data: *mut c_void,
+    queue_capacity: usize,
+    min_level: i32,
+) {
+    let _ = logging::ensure_logger();
+    *LOG_HOOK.lock() = Some(LogHookRegistration {
+        callback: cb as usize,
+        user_data: user_data as usize,
+    });
+    let inner = CallbackLogSink;
+    let async_sink = AsyncLogSink::new(
+        inner,
+        AsyncLogConfig {
+            queue_capacity: if queue_capacity == 0 {
+                DEFAULT_LOG_QUEUE_CAPACITY
+            } else {
+                queue_capacity
+            },
+            min_level: map_log_level(min_level),
+        },
+    );
+    logging::set_sink("asherah-ffi-log", Some(Arc::new(async_sink)));
+}
+
 /// Register a callback that receives every log event. Replaces any
 /// previously registered hook.
 ///
@@ -129,6 +204,20 @@ impl LogSink for CallbackLogSink {
 /// unchanged on every invocation; it may be NULL.
 ///
 /// Returns 0 on success, -1 if `callback` is NULL.
+///
+/// # Default level filter
+/// Only `Warn` and `Error` records are delivered by default. Verbose
+/// `Trace`/`Debug`/`Info` records are dropped at the producer thread —
+/// they never reach the queue and never invoke the callback. Use
+/// [`asherah_set_log_hook_with_config`] with `ASHERAH_LOG_TRACE` (or any
+/// other level constant) to widen the filter.
+///
+/// # Async dispatch
+/// The callback is **not** invoked on the encrypt/decrypt thread. Records
+/// are pushed to a bounded MPSC channel (default capacity 4096) and a
+/// dedicated worker thread invokes the callback. If the queue is full,
+/// records are dropped — see [`asherah_log_dropped_count`]. To override the
+/// queue size or filter by level, use [`asherah_set_log_hook_with_config`].
 ///
 /// # Safety
 /// `callback` must remain a valid function pointer until cleared or
@@ -143,14 +232,91 @@ pub unsafe extern "C" fn asherah_set_log_hook(
         Some(c) => c,
         None => return -1,
     };
-    // Ensure the multiplexer logger is installed so log events flow through.
+    install_log_hook_with_config(
+        cb,
+        user_data,
+        DEFAULT_LOG_QUEUE_CAPACITY,
+        DEFAULT_LOG_MIN_LEVEL,
+    );
+    0
+}
+
+/// Configurable variant of [`asherah_set_log_hook`].
+///
+/// - `queue_capacity`: max events buffered. `0` = use default (4096).
+///   When the queue is full, records are dropped and counted in
+///   [`asherah_log_dropped_count`].
+/// - `min_level`: only records at this severity or higher are delivered.
+///   Use `ASHERAH_LOG_TRACE` to deliver everything (default), or e.g.
+///   `ASHERAH_LOG_WARN` to skip trace/debug/info entirely. Values outside
+///   the documented range are treated as `ASHERAH_LOG_TRACE`.
+///
+/// # Safety
+/// Same lifetime requirements as [`asherah_set_log_hook`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn asherah_set_log_hook_with_config(
+    callback: Option<AsherahLogCallback>,
+    user_data: *mut c_void,
+    queue_capacity: usize,
+    min_level: i32,
+) -> c_int {
+    let cb = match callback {
+        Some(c) => c,
+        None => return -1,
+    };
+    install_log_hook_with_config(cb, user_data, queue_capacity, min_level);
+    0
+}
+
+/// Synchronous variant of [`asherah_set_log_hook`].
+///
+/// The callback is invoked **on the encrypt/decrypt thread, before the
+/// operation continues**. There is no queue, no worker thread, no drop
+/// counter. This is the right choice when:
+///
+/// - You're diagnosing a problem and want the callback to fire before any
+///   subsequent panic/crash so the message is observable.
+/// - You're correlating log records to in-progress operations and need
+///   thread-local context (trace IDs, request scopes) to be intact.
+/// - Your handler is verifiably non-blocking and you'd rather not pay the
+///   try_send cost.
+///
+/// Trade-off: a slow callback **directly extends encrypt/decrypt latency**.
+/// Use `asherah_set_log_hook` (or `_with_config`) for the async-by-default
+/// behaviour that protects the hot path from a misbehaving handler.
+///
+/// `min_level` filters the same way as in `_with_config`.
+///
+/// # Safety
+/// Same lifetime requirements as [`asherah_set_log_hook`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn asherah_set_log_hook_sync(
+    callback: Option<AsherahLogCallback>,
+    user_data: *mut c_void,
+    min_level: i32,
+) -> c_int {
+    let cb = match callback {
+        Some(c) => c,
+        None => return -1,
+    };
     let _ = logging::ensure_logger();
     *LOG_HOOK.lock() = Some(LogHookRegistration {
         callback: cb as usize,
         user_data: user_data as usize,
     });
-    logging::set_sink("asherah-ffi-log", Some(Arc::new(CallbackLogSink)));
+    let sink = SyncFilteredLogSink {
+        min_level: map_log_level(min_level),
+    };
+    logging::set_sink("asherah-ffi-log", Some(Arc::new(sink)));
     0
+}
+
+/// Cumulative count of log records dropped because the async dispatcher's
+/// queue was full, since the process started. Cumulative across all hook
+/// installations; never resets.
+#[unsafe(no_mangle)]
+pub extern "C" fn asherah_log_dropped_count() -> u64 {
+    logging::log_dropped_count()
 }
 
 /// Remove the registered log callback. Subsequent log events will not be
@@ -259,6 +425,32 @@ impl MetricsSink for CallbackMetricsSink {
     }
 }
 
+const DEFAULT_METRICS_QUEUE_CAPACITY: usize = 4096;
+
+fn install_metrics_hook_with_config(
+    cb: AsherahMetricsCallback,
+    user_data: *mut c_void,
+    queue_capacity: usize,
+) {
+    *METRICS_HOOK.lock() = Some(MetricsHookRegistration {
+        callback: cb as usize,
+        user_data: user_data as usize,
+    });
+    METRICS_HOOK_INSTALLED.store(1, Ordering::Release);
+    let async_sink = AsyncMetricsSink::new(
+        CallbackMetricsSink,
+        AsyncMetricsConfig {
+            queue_capacity: if queue_capacity == 0 {
+                DEFAULT_METRICS_QUEUE_CAPACITY
+            } else {
+                queue_capacity
+            },
+        },
+    );
+    metrics::set_sink(async_sink);
+    metrics::set_enabled(true);
+}
+
 /// Register a callback that receives every metric event. Replaces any
 /// previously registered hook. Also enables metrics collection (which is
 /// off by default for performance).
@@ -266,10 +458,59 @@ impl MetricsSink for CallbackMetricsSink {
 /// Pass a non-null `callback`. `user_data` is opaque and passed back
 /// unchanged. Returns 0 on success, -1 if `callback` is NULL.
 ///
+/// # Async dispatch
+/// The callback is **not** invoked on the encrypt/decrypt thread. Events
+/// are pushed to a bounded MPSC channel (default capacity 4096) drained by
+/// a dedicated worker thread. Overflow events are dropped — see
+/// [`asherah_metrics_dropped_count`]. Override the queue size with
+/// [`asherah_set_metrics_hook_with_config`].
+///
 /// # Safety
 /// Same lifetime requirements as `asherah_set_log_hook`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn asherah_set_metrics_hook(
+    callback: Option<AsherahMetricsCallback>,
+    user_data: *mut c_void,
+) -> c_int {
+    let cb = match callback {
+        Some(c) => c,
+        None => return -1,
+    };
+    install_metrics_hook_with_config(cb, user_data, DEFAULT_METRICS_QUEUE_CAPACITY);
+    0
+}
+
+/// Configurable variant of [`asherah_set_metrics_hook`].
+///
+/// - `queue_capacity`: max events buffered. `0` = use default (4096).
+///
+/// # Safety
+/// Same lifetime requirements as [`asherah_set_metrics_hook`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn asherah_set_metrics_hook_with_config(
+    callback: Option<AsherahMetricsCallback>,
+    user_data: *mut c_void,
+    queue_capacity: usize,
+) -> c_int {
+    let cb = match callback {
+        Some(c) => c,
+        None => return -1,
+    };
+    install_metrics_hook_with_config(cb, user_data, queue_capacity);
+    0
+}
+
+/// Synchronous variant of [`asherah_set_metrics_hook`].
+///
+/// The callback fires **on the encrypt/decrypt thread**, before the
+/// operation returns. No queue, no worker thread, no drop counter.
+/// See [`asherah_set_log_hook_sync`] for the trade-off discussion — same
+/// idea on the metrics side.
+///
+/// # Safety
+/// Same lifetime requirements as [`asherah_set_metrics_hook`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn asherah_set_metrics_hook_sync(
     callback: Option<AsherahMetricsCallback>,
     user_data: *mut c_void,
 ) -> c_int {
@@ -285,6 +526,13 @@ pub unsafe extern "C" fn asherah_set_metrics_hook(
     metrics::set_sink(CallbackMetricsSink);
     metrics::set_enabled(true);
     0
+}
+
+/// Cumulative count of metrics events dropped due to async-dispatch
+/// queue back-pressure since the process started. Never resets.
+#[unsafe(no_mangle)]
+pub extern "C" fn asherah_metrics_dropped_count() -> u64 {
+    metrics::metrics_dropped_count()
 }
 
 /// Remove the registered metrics callback and disable metrics collection.

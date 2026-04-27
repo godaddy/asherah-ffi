@@ -510,9 +510,16 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         }
     }
 
+    /// Opt the factory's sessions in to metrics observation. The actual
+    /// timing work (`Instant::now()` in the encrypt/decrypt hot path) only
+    /// runs when both this per-factory flag AND the global metrics gate are
+    /// enabled. The global gate is owned by the hook-installation API
+    /// (`asherah_set_metrics_hook` and the per-binding equivalents) and
+    /// flips on/off as hooks come and go — that way a factory that simply
+    /// declares "I want to be observable if anyone is listening" doesn't
+    /// pay any overhead when nothing is hooked.
     pub fn with_metrics(mut self, enabled: bool) -> Self {
         self.metrics_enabled = enabled;
-        metrics::set_enabled(enabled);
         self
     }
     pub fn get_session(&self, id: &str) -> PublicSession<A, K, M> {
@@ -770,7 +777,12 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
 
     pub fn encrypt(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
         self.ensure_valid_partition()?;
-        let start = if self.metrics_enabled {
+        // Per-session AND global gate: only call Instant::now() when both
+        // are true. Per-session is set at factory construction; the global
+        // gate flips on/off when a metrics hook is installed/cleared.
+        // Without the global check, every encrypt on a `with_metrics(true)`
+        // factory pays Instant::now() (~50ns) even when nothing is hooked.
+        let start = if self.metrics_enabled && metrics::is_enabled() {
             Some(std::time::Instant::now())
         } else {
             None
@@ -829,7 +841,12 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
 
     pub fn decrypt(&self, drr: crate::types::DataRowRecord) -> anyhow::Result<Vec<u8>> {
         self.ensure_valid_partition()?;
-        let start = if self.metrics_enabled {
+        // Per-session AND global gate: only call Instant::now() when both
+        // are true. Per-session is set at factory construction; the global
+        // gate flips on/off when a metrics hook is installed/cleared.
+        // Without the global check, every encrypt on a `with_metrics(true)`
+        // factory pays Instant::now() (~50ns) even when nothing is hooked.
+        let start = if self.metrics_enabled && metrics::is_enabled() {
             Some(std::time::Instant::now())
         } else {
             None
@@ -1131,7 +1148,12 @@ impl<
     /// Async encrypt — uses async metastore methods, no spawn_blocking needed.
     pub async fn encrypt_async(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
         self.ensure_valid_partition()?;
-        let start = if self.metrics_enabled {
+        // Per-session AND global gate: only call Instant::now() when both
+        // are true. Per-session is set at factory construction; the global
+        // gate flips on/off when a metrics hook is installed/cleared.
+        // Without the global check, every encrypt on a `with_metrics(true)`
+        // factory pays Instant::now() (~50ns) even when nothing is hooked.
+        let start = if self.metrics_enabled && metrics::is_enabled() {
             Some(std::time::Instant::now())
         } else {
             None
@@ -1206,7 +1228,12 @@ impl<
     /// Async decrypt — uses async metastore methods, no spawn_blocking needed.
     pub async fn decrypt_async(&self, drr: crate::types::DataRowRecord) -> anyhow::Result<Vec<u8>> {
         self.ensure_valid_partition()?;
-        let start = if self.metrics_enabled {
+        // Per-session AND global gate: only call Instant::now() when both
+        // are true. Per-session is set at factory construction; the global
+        // gate flips on/off when a metrics hook is installed/cleared.
+        // Without the global check, every encrypt on a `with_metrics(true)`
+        // factory pays Instant::now() (~50ns) even when nothing is hooked.
+        let start = if self.metrics_enabled && metrics::is_enabled() {
             Some(std::time::Instant::now())
         } else {
             None

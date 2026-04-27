@@ -94,29 +94,83 @@ handlers.
 
 ### Log hook
 
-Receive every log event from the Rust core (encrypt/decrypt path,
-metastore drivers, KMS clients). Pass `null` to deregister.
+Asherah uses the standard `Microsoft.Extensions.Logging` types. The
+fastest path is to hand the binding your host's `ILogger` (or
+`ILoggerFactory`) and let it forward records as structured events:
 
 ```csharp
 using GoDaddy.Asherah;
+using Microsoft.Extensions.Logging;
 
+// In ASP.NET Core / Worker Service / generic host:
+public class Startup(ILoggerFactory loggers)
+{
+    public void Configure()
+    {
+        // One ILogger is created per Asherah target (e.g. "asherah::session"),
+        // so host-side filter rules can match by category.
+        Asherah.SetLogHook(loggers);
+    }
+}
+
+// Or with a single ILogger:
+Asherah.SetLogHook(myLogger);
+
+// later:
+Asherah.ClearLogHook();
+```
+
+The raw callback API is still available for cases that don't fit the
+`ILogger` model (e.g. piping to a custom backend, low-level filtering):
+
+```csharp
 Asherah.SetLogHook(evt =>
 {
-    // evt = LogEvent(Level, Target, Message)
-    if (evt.Level == LogLevel.Warn || evt.Level == LogLevel.Error)
+    // evt = LogEvent(Level, Target, Message); Level is
+    // Microsoft.Extensions.Logging.LogLevel — Trace, Debug, Information,
+    // Warning, or Error.
+    if (evt.Level >= LogLevel.Warning)
     {
         Console.Error.WriteLine($"[asherah {evt.Level}] {evt.Message}");
     }
 });
 
 // later:
-Asherah.SetLogHook(null);   // or Asherah.ClearLogHook();
+Asherah.SetLogHook((Action<LogEvent>?)null);   // or Asherah.ClearLogHook();
 ```
 
 Callbacks may fire from any thread (Rust tokio worker threads, DB
 driver threads). The trampoline catches every exception thrown by your
 callback so a faulty hook cannot crash the process — log it via your
 own observability tooling.
+
+**Async delivery + bounded queue.** Log and metrics events are buffered
+in a process-wide MPSC channel (default capacity 4096) and delivered to
+your callback by a dedicated worker thread. The encrypt/decrypt hot path
+performs only a level check + non-blocking channel send, so a slow
+callback never extends an encrypt's latency. When the queue is full,
+events are dropped — `Asherah.LogDroppedCount()` and
+`Asherah.MetricsDroppedCount()` expose the cumulative drop count.
+
+**Default log level is `LogLevel.Warning`.** Verbose
+`Trace`/`Debug`/`Information` records from the encrypt/decrypt hot path
+are filtered out at the producer thread before any allocation, so
+installing a hook never floods you with noise. Pass `LogLevel.Trace`
+(or any other level from `Microsoft.Extensions.Logging.LogLevel`)
+explicitly via the `SetLogHook(callback, queueCapacity, minLevel)`
+overload (or the `SetLogHookSync` overload) when you want the verbose
+records. `LogLevel.Critical` and `LogLevel.None` are valid filter
+values and translate to "deliver nothing" — Asherah's Rust source
+never produces records at those severities.
+
+**Synchronous delivery (opt-in).** For diagnostics, single-threaded apps,
+or when you need thread-local context (trace IDs, request scopes) intact
+in the callback, use `Asherah.SetLogHookSync(callback, minLevel)` /
+`Asherah.SetMetricsHookSync(callback)`. The callback fires **on the
+encrypt/decrypt thread before the operation returns** — no queue, no
+worker. Trade-off: a slow callback directly extends operation latency,
+so make sure your handler is verifiably non-blocking before picking sync
+mode in production.
 
 ### Metrics hook
 
