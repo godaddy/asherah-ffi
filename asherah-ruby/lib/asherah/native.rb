@@ -87,6 +87,35 @@ module Asherah
     attach_function :asherah_decrypt_from_json_async,
                     [:pointer, :buffer_in, :size_t, :asherah_completion_fn, :pointer], :int
 
+    # Log + metrics hooks. The C ABI does not own the callback closure — Ruby
+    # must keep a reference to the FFI::Function it passes here for as long as
+    # the hook is registered, otherwise the GC will collect it and the next
+    # invocation segfaults. The Asherah module pins the active hooks in module
+    # state.
+    callback :asherah_log_callback, [:pointer, :int, :string, :string], :void
+    callback :asherah_metrics_callback, [:pointer, :int, :uint64, :string], :void
+
+    attach_function :asherah_set_log_hook, [:asherah_log_callback, :pointer], :int
+    attach_function :asherah_clear_log_hook, [], :int
+    attach_function :asherah_set_metrics_hook, [:asherah_metrics_callback, :pointer], :int
+    attach_function :asherah_clear_metrics_hook, [], :int
+
+    # Log severity constants (mirrors hooks.rs).
+    LOG_TRACE = 0
+    LOG_DEBUG = 1
+    LOG_INFO  = 2
+    LOG_WARN  = 3
+    LOG_ERROR = 4
+
+    # Metrics event type constants (mirrors hooks.rs).
+    METRIC_ENCRYPT     = 0
+    METRIC_DECRYPT     = 1
+    METRIC_STORE       = 2
+    METRIC_LOAD        = 3
+    METRIC_CACHE_HIT   = 4
+    METRIC_CACHE_MISS  = 5
+    METRIC_CACHE_STALE = 6
+
     def self.last_error
       ptr = asherah_last_error_message
       ptr.null? ? "unknown error" : ptr.read_string

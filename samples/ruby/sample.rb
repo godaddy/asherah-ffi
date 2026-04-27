@@ -64,7 +64,36 @@ ensure
   factory.close
 end
 
-# -- 4. Production config (commented out) --
+# -- 4. Log + metrics hooks: forward observability events to your stack --
+log_events = 0
+metric_events = 0
+Asherah.set_log_hook do |event|
+  log_events += 1
+  # In real code, dispatch to Logger / log4r based on event[:level]
+  unless %i[trace debug].include?(event[:level])
+    puts "[asherah-log #{event[:level]}] #{event[:target]}: #{event[:message]}"
+  end
+end
+Asherah.set_metrics_hook do |event|
+  metric_events += 1
+  # In real code, dispatch to your metrics library (statsd, prometheus, etc.).
+  # Timing events have non-zero duration_ns and nil name.
+  # Cache events have non-nil name and duration_ns == 0.
+end
+Asherah.setup(CONFIG)
+begin
+  5.times do |i|
+    ct = Asherah.encrypt_string("hooks-partition", "hook-payload-#{i}")
+    Asherah.decrypt_string("hooks-partition", ct)
+  end
+ensure
+  Asherah.shutdown
+  Asherah.clear_log_hook
+  Asherah.clear_metrics_hook
+end
+puts "Hooks observed #{log_events} log events and #{metric_events} metric events"
+
+# -- 5. Production config (commented out) --
 # Asherah.setup(
 #   "ServiceName" => "my-service",
 #   "ProductID" => "my-product",

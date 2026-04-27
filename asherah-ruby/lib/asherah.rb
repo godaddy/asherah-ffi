@@ -8,6 +8,7 @@ require_relative "asherah/config"
 require_relative "asherah/native"
 require_relative "asherah/session_factory"
 require_relative "asherah/session"
+require_relative "asherah/hooks"
 
 module Asherah
   @mutex = Mutex.new
@@ -171,6 +172,40 @@ module Asherah
         block&.call(result)
         result
       end
+    end
+
+    # Install a log hook. Yields a +Hash+ +{level:, target:, message:}+ for
+    # every log record emitted by the underlying Rust crates. The block may
+    # fire from any thread; implementations must be thread-safe and
+    # non-blocking. Pass +nil+ to clear (equivalent to {clear_log_hook}).
+    #
+    # Replaces any previously installed log hook. Exceptions raised from the
+    # callback are caught and silently swallowed.
+    def set_log_hook(callback = nil, &block)
+      Hooks.set_log_hook(callback, &block)
+    end
+
+    # Remove the active log hook, if any. Idempotent.
+    def clear_log_hook
+      Hooks.clear_log_hook
+    end
+
+    # Install a metrics hook. Yields a +Hash+ +{type:, duration_ns:, name:}+
+    # for every metrics event. Timing events ({:encrypt, :decrypt, :store,
+    # :load}) carry a positive +duration_ns+ and a +nil+ +name+; cache events
+    # ({:cache_hit, :cache_miss, :cache_stale}) carry +duration_ns+ == 0 and
+    # the cache identifier in +name+.
+    #
+    # Installing a hook implicitly enables the global metrics gate; clearing
+    # it disables the gate. Replaces any previously installed metrics hook.
+    # Pass +nil+ to clear (equivalent to {clear_metrics_hook}).
+    def set_metrics_hook(callback = nil, &block)
+      Hooks.set_metrics_hook(callback, &block)
+    end
+
+    # Remove the active metrics hook and disable metrics. Idempotent.
+    def clear_metrics_hook
+      Hooks.clear_metrics_hook
     end
 
     private
