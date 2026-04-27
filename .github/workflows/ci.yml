@@ -16,8 +16,19 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    env:
+      # Same memory-pressure profile as rust-tests: clippy --workspace
+      # --all-targets compiles every test binary, each statically linking
+      # the AWS SDK + OpenSSL + Postgres/MySQL/SQLite + aws-lc-rs. Cap
+      # link concurrency at 2 and disable incremental compilation so the
+      # 16 GB ubuntu-latest runner does not OOM rust-lld (observed as
+      # "hosted runner lost communication with the server" after ~50 min).
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Free disk space
+        run: bash scripts/ci-free-disk-space.sh
       - name: Cache cargo registry
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -55,6 +66,8 @@ jobs:
       CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Free disk space
+        run: bash scripts/ci-free-disk-space.sh
       - name: Restore workspace caches
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -77,8 +90,15 @@ jobs:
 
   integration-tests:
     runs-on: ubuntu-latest
+    env:
+      # Same memory-pressure profile as rust-tests; integration tests
+      # link the same fat test binaries.
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Free disk space
+        run: bash scripts/ci-free-disk-space.sh
       - name: Cache cargo registry
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -665,8 +685,13 @@ jobs:
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
+      # Match rust-tests: cap link concurrency on the 16 GB runner.
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Free disk space
+        run: bash scripts/ci-free-disk-space.sh
       - name: Restore workspace caches
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:

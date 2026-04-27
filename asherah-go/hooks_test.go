@@ -13,6 +13,18 @@ import (
 	"time"
 )
 
+// hookWaitDeadline bounds how long count-based hook tests will wait for
+// the async tokio worker to drain into Go callbacks. Set generously: a
+// loaded CI runner can take many seconds to schedule the worker even
+// after the producing op returns, and a false negative here looks like
+// a real bug. Local runs return well before this fires.
+const hookWaitDeadline = 30 * time.Second
+
+// hookSteadySettle is the no-change interval that waitForSteady treats
+// as "the queue has drained". Long enough to absorb scheduler jitter on
+// a slow runner; short enough that local tests don't drag.
+const hookSteadySettle = 500 * time.Millisecond
+
 // waitFor polls the predicate until it returns true or the deadline passes.
 // Hook delivery is asynchronous (see asherah-ffi/src/hooks.rs), so tests
 // that assert on event counts must give the worker thread time to drain.
@@ -25,6 +37,32 @@ func waitFor(d time.Duration, predicate func() bool) bool {
 		time.Sleep(10 * time.Millisecond)
 	}
 	return predicate()
+}
+
+// waitForSteady polls getCount until either (a) the value stops changing
+// for `settle` consecutive milliseconds — meaning the async worker has
+// drained the queue — or (b) the absolute deadline `d` elapses. Returns
+// the final observed count. Use this instead of waitFor for stress
+// tests where you care about the *total* delivered, not just "at least
+// one." waitFor with a count threshold races the producer/worker on
+// loaded runners.
+func waitForSteady(d, settle time.Duration, getCount func() int32) int32 {
+	deadline := time.Now().Add(d)
+	last := getCount()
+	stableSince := time.Now()
+	for time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+		cur := getCount()
+		if cur != last {
+			last = cur
+			stableSince = time.Now()
+			continue
+		}
+		if time.Since(stableSince) >= settle {
+			return cur
+		}
+	}
+	return getCount()
 }
 
 func hooksConfig() Config {
@@ -149,7 +187,7 @@ func TestLogHookFiresWithWellFormedEvents(t *testing.T) {
 		}
 	}
 
-	waitFor(2*time.Second, func() bool {
+	waitFor(hookWaitDeadline, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return len(received) > 0
@@ -314,7 +352,7 @@ func TestMetricsHookFiresEncryptAndDecrypt(t *testing.T) {
 		}
 	}
 
-	waitFor(2*time.Second, func() bool {
+	waitFor(hookWaitDeadline, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return seenTypes[MetricEncrypt] > 0 && seenTypes[MetricDecrypt] > 0
@@ -354,7 +392,7 @@ func TestMetricsTimingEventsCarryPositiveDuration(t *testing.T) {
 		_, _ = DecryptString("timing", ct)
 	}
 
-	waitFor(2*time.Second, func() bool {
+	waitFor(hookWaitDeadline, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return len(timings) > 0
@@ -399,7 +437,7 @@ func TestMetricsHookPanicDoesNotCrash(t *testing.T) {
 	if pt != "survive" {
 		t.Errorf("plaintext mismatch: %q", pt)
 	}
-	waitFor(2*time.Second, func() bool { return atomic.LoadInt32(&fired) > 0 })
+	waitFor(hookWaitDeadline, func() bool { return atomic.LoadInt32(&fired) > 0 })
 	if atomic.LoadInt32(&fired) == 0 {
 		t.Errorf("metrics hook never fired")
 	}
@@ -420,8 +458,11 @@ func TestMetricsHookSurvivesManyOperations(t *testing.T) {
 		_, _ = DecryptString("vol", ct)
 	}
 
-	waitFor(2*time.Second, func() bool { return atomic.LoadInt32(&fired) >= 200 })
-	if got := atomic.LoadInt32(&fired); got < 200 {
+	// Wait until the count has been stable for hookSteadySettle — that
+	// indicates the async worker has drained the queue. Then assert.
+	// A bare waitFor(>=200) races the worker on a loaded CI runner.
+	got := waitForSteady(hookWaitDeadline, hookSteadySettle, func() int32 { return atomic.LoadInt32(&fired) })
+	if got < 200 {
 		t.Errorf("expected ≥200 metrics events for 100 enc/dec ops, got %d", got)
 	}
 }
@@ -444,7 +485,7 @@ func TestMetricsAndLogHooksCoexist(t *testing.T) {
 		_, _ = DecryptString("coexist", ct)
 	}
 
-	waitFor(2*time.Second, func() bool { return atomic.LoadInt32(&metricHits) > 0 })
+	waitFor(hookWaitDeadline, func() bool { return atomic.LoadInt32(&metricHits) > 0 })
 	if atomic.LoadInt32(&metricHits) == 0 {
 		t.Errorf("metrics hook should have fired")
 	}
@@ -508,7 +549,7 @@ func TestHookSurvivesSetupShutdownCycles(t *testing.T) {
 		_, _ = DecryptString("cycle", ct)
 		Shutdown()
 	}
-	waitFor(2*time.Second, func() bool { return atomic.LoadInt32(&hits) > 0 })
+	waitFor(hookWaitDeadline, func() bool { return atomic.LoadInt32(&hits) > 0 })
 	if atomic.LoadInt32(&hits) == 0 {
 		t.Errorf("metrics hook should fire across factory cycles")
 	}
