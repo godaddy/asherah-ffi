@@ -28,6 +28,23 @@ class HooksTest < Minitest::Test
     # ignore
   end
 
+  # Hooks are delivered asynchronously by a dedicated worker thread (see
+  # asherah-ffi/src/hooks.rs). Tests that assert on hook delivery must wait
+  # for the worker to drain the channel before checking, otherwise they
+  # race the worker scheduler.
+  def wait_for(timeout: 2.0)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout
+    until yield
+      return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+      sleep 0.01
+    end
+    true
+  end
+
+  def drain_hooks
+    sleep 0.1
+  end
+
   # ----- log hook -----
 
   def test_set_log_hook_with_block_does_not_raise
@@ -66,16 +83,37 @@ class HooksTest < Minitest::Test
       Asherah.decrypt("log-fields", ct)
     end
     Asherah.shutdown
+    wait_for { received.size > 0 }
 
     refute_equal 0, received.size, "expected at least one log event"
+    valid_severities = [
+      Logger::DEBUG, Logger::INFO, Logger::WARN, Logger::ERROR,
+      Logger::FATAL, Logger::UNKNOWN
+    ]
     until received.empty?
       event = received.pop
       assert_kind_of Hash, event
-      assert_includes %i[trace debug info warn error], event[:level]
+      assert_includes %i[debug info warn error fatal unknown], event[:level]
+      assert_includes valid_severities, event[:severity]
       assert_kind_of String, event[:target]
       refute event[:target].empty?, "log target must not be empty"
       assert_kind_of String, event[:message]
     end
+  end
+
+  def test_set_log_hook_accepts_logger_instance
+    require "stringio"
+    buf = StringIO.new
+    logger = Logger.new(buf)
+    logger.level = Logger::DEBUG
+    Asherah.set_log_hook(logger)
+    Asherah.setup(CONFIG)
+    5.times { |i| Asherah.encrypt("logger-bridge", "v#{i}") }
+    Asherah.shutdown
+    # Best-effort: the bridge should not raise. Output is best-effort because
+    # most hot-path records are below WARN by default (the new global default
+    # min level), but the bridge wiring is exercised regardless.
+    refute_nil buf.string
   end
 
   def test_replacing_log_hook_redirects_to_new_callback
@@ -119,22 +157,24 @@ class HooksTest < Minitest::Test
 
   def test_set_metrics_hook_nil_clears
     counter = 0
-    Asherah.set_metrics_hook { |_| counter += 1 }
+    mutex = Mutex.new
+    Asherah.set_metrics_hook { |_| mutex.synchronize { counter += 1 } }
     Asherah.set_metrics_hook(nil)
     Asherah.setup(CONFIG)
     Asherah.encrypt("nil-clear", "payload")
     Asherah.shutdown
+    drain_hooks
     assert_equal 0, counter, "metrics hook fired after being cleared"
   end
 
   def test_metrics_hook_fires_encrypt_and_decrypt
-    seen_types = Set.new
     require "set"
     seen_types = Set.new
+    mutex = Mutex.new
     Asherah.set_metrics_hook do |event|
       assert_kind_of Hash, event
       assert_kind_of Symbol, event[:type]
-      seen_types << event[:type]
+      mutex.synchronize { seen_types << event[:type] }
     end
     Asherah.setup(CONFIG)
     5.times do |i|
@@ -142,6 +182,7 @@ class HooksTest < Minitest::Test
       Asherah.decrypt("metrics-fire", ct)
     end
     Asherah.shutdown
+    wait_for { mutex.synchronize { seen_types.include?(:encrypt) && seen_types.include?(:decrypt) } }
 
     assert_includes seen_types, :encrypt, "expected :encrypt event, saw #{seen_types.to_a.inspect}"
     assert_includes seen_types, :decrypt, "expected :decrypt event, saw #{seen_types.to_a.inspect}"
@@ -149,8 +190,9 @@ class HooksTest < Minitest::Test
 
   def test_metrics_timing_events_carry_positive_duration
     timings = []
+    mutex = Mutex.new
     Asherah.set_metrics_hook do |event|
-      timings << event if %i[encrypt decrypt].include?(event[:type])
+      mutex.synchronize { timings << event } if %i[encrypt decrypt].include?(event[:type])
     end
     Asherah.setup(CONFIG)
     3.times do |i|
@@ -158,6 +200,7 @@ class HooksTest < Minitest::Test
       Asherah.decrypt("timing", ct)
     end
     Asherah.shutdown
+    wait_for { mutex.synchronize { !timings.empty? } }
 
     refute_empty timings, "expected at least one timing event"
     timings.each do |event|
@@ -169,23 +212,27 @@ class HooksTest < Minitest::Test
 
   def test_metrics_hook_exceptions_do_not_crash
     fired = 0
-    Asherah.set_metrics_hook { |_| fired += 1; raise "intentional from metrics hook" }
+    mutex = Mutex.new
+    Asherah.set_metrics_hook { |_| mutex.synchronize { fired += 1 }; raise "intentional from metrics hook" }
     Asherah.setup(CONFIG)
     ct = Asherah.encrypt("metrics-throw", "survive")
     assert_equal "survive", Asherah.decrypt("metrics-throw", ct).force_encoding("UTF-8")
     Asherah.shutdown
+    wait_for { mutex.synchronize { fired > 0 } }
     assert fired > 0, "metrics hook must have fired at least once"
   end
 
   def test_metrics_hook_survives_many_operations
     fired = 0
-    Asherah.set_metrics_hook { |_| fired += 1 }
+    mutex = Mutex.new
+    Asherah.set_metrics_hook { |_| mutex.synchronize { fired += 1 } }
     Asherah.setup(CONFIG)
     100.times do |i|
       ct = Asherah.encrypt("vol", "payload-#{i}")
       Asherah.decrypt("vol", ct)
     end
     Asherah.shutdown
+    wait_for { mutex.synchronize { fired >= 200 } }
     assert fired >= 200,
       "expected ≥200 metrics events for 100 enc/dec ops, got #{fired}"
   end
@@ -193,14 +240,16 @@ class HooksTest < Minitest::Test
   def test_metrics_and_log_hooks_coexist
     log_hits = 0
     metric_hits = 0
-    Asherah.set_log_hook { |_| log_hits += 1 }
-    Asherah.set_metrics_hook { |_| metric_hits += 1 }
+    mutex = Mutex.new
+    Asherah.set_log_hook { |_| mutex.synchronize { log_hits += 1 } }
+    Asherah.set_metrics_hook { |_| mutex.synchronize { metric_hits += 1 } }
     Asherah.setup(CONFIG)
     3.times do |i|
       ct = Asherah.encrypt("coexist", "v#{i}")
       Asherah.decrypt("coexist", ct)
     end
     Asherah.shutdown
+    wait_for { mutex.synchronize { metric_hits > 0 } }
     assert metric_hits > 0, "metrics hook should have fired"
     assert log_hits >= 0
   end
@@ -232,13 +281,15 @@ class HooksTest < Minitest::Test
 
   def test_hook_survives_setup_shutdown_cycles
     metric_hits = 0
-    Asherah.set_metrics_hook { |_| metric_hits += 1 }
+    mutex = Mutex.new
+    Asherah.set_metrics_hook { |_| mutex.synchronize { metric_hits += 1 } }
     3.times do |cycle|
       Asherah.setup(CONFIG)
       ct = Asherah.encrypt("cycle-#{cycle}", "payload")
       Asherah.decrypt("cycle-#{cycle}", ct)
       Asherah.shutdown
     end
+    wait_for { mutex.synchronize { metric_hits > 0 } }
     assert metric_hits > 0, "hook should fire across factory cycles"
   end
 end

@@ -41,4 +41,8 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
 
   spec.add_dependency "ffi", "~> 1.15"
+  # +logger+ shipped with the stdlib through Ruby 3.4 but became a regular
+  # gem in Ruby 4.0. Declaring the dependency keeps Asherah.set_log_hook
+  # working uniformly across versions.
+  spec.add_dependency "logger", "~> 1.6"
 end

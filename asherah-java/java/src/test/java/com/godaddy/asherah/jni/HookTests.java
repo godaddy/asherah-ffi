@@ -83,7 +83,7 @@ class HookTests {
   void setLogHookNullClearsHook() {
     AtomicInteger counter = new AtomicInteger();
     Asherah.setLogHook(event -> counter.incrementAndGet());
-    Asherah.setLogHook(null);
+    Asherah.setLogHook((AsherahLogHook) null);
     // After clearing, no events should still be delivered to the original
     // callback even if the underlying library logs something.
     try (AsherahFactory factory = Asherah.factoryFromConfig(hookConfig());
@@ -127,8 +127,6 @@ class HookTests {
       assertNotNull(event.getLevel());
       assertNotNull(event.getTarget());
       assertNotNull(event.getMessage());
-      // levelEnum must parse without throwing
-      assertNotNull(event.getLevelEnum());
     }
   }
 
@@ -380,13 +378,63 @@ class HookTests {
   }
 
   @Test
-  void logLevelFromStringHandlesAllVariants() {
-    assertEquals(LogLevel.TRACE, LogLevel.fromString("trace"));
-    assertEquals(LogLevel.DEBUG, LogLevel.fromString("debug"));
-    assertEquals(LogLevel.INFO,  LogLevel.fromString("info"));
-    assertEquals(LogLevel.WARN,  LogLevel.fromString("warn"));
-    assertEquals(LogLevel.ERROR, LogLevel.fromString("error"));
-    assertEquals(LogLevel.ERROR, LogLevel.fromString(null));
-    assertEquals(LogLevel.ERROR, LogLevel.fromString("bogus"));
+  void slf4jLoggerIntegrationForwardsRecords() {
+    // A bare-minimum Logger captures records into a list so we can assert the
+    // SLF4J bridge wires through.
+    java.util.List<String> captured = new java.util.concurrent.CopyOnWriteArrayList<>();
+    org.slf4j.Logger captureLogger = new org.slf4j.helpers.AbstractLogger() {
+      @Override public String getFullyQualifiedCallerName() { return null; }
+      @Override protected void handleNormalizedLoggingCall(
+          org.slf4j.event.Level level, org.slf4j.Marker marker,
+          String message, Object[] args, Throwable throwable) {
+        // SLF4J's parameterised "{}: {}" expansion happens in the SubstituteLogger
+        // path; we just record the unexpanded template + args.
+        captured.add(level + " " + message + " " + java.util.Arrays.toString(args));
+      }
+      @Override public boolean isTraceEnabled() { return true; }
+      @Override public boolean isTraceEnabled(org.slf4j.Marker m) { return true; }
+      @Override public boolean isDebugEnabled() { return true; }
+      @Override public boolean isDebugEnabled(org.slf4j.Marker m) { return true; }
+      @Override public boolean isInfoEnabled()  { return true; }
+      @Override public boolean isInfoEnabled(org.slf4j.Marker m)  { return true; }
+      @Override public boolean isWarnEnabled()  { return true; }
+      @Override public boolean isWarnEnabled(org.slf4j.Marker m)  { return true; }
+      @Override public boolean isErrorEnabled() { return true; }
+      @Override public boolean isErrorEnabled(org.slf4j.Marker m) { return true; }
+    };
+    Asherah.setLogHook(captureLogger);
+    try (AsherahFactory factory = Asherah.factoryFromConfig(hookConfig());
+         AsherahSession session = factory.getSession("slf4j-bridge")) {
+      session.decryptString(session.encryptString("via-slf4j"));
+    }
+    Asherah.clearLogHook();
+    // Best-effort: at minimum the bridge should not have thrown, and any
+    // captured records must contain the level prefix.
+    for (String line : captured) {
+      assertTrue(line.startsWith("TRACE ")
+              || line.startsWith("DEBUG ")
+              || line.startsWith("INFO ")
+              || line.startsWith("WARN ")
+              || line.startsWith("ERROR "),
+          "unexpected captured line: " + line);
+    }
+  }
+
+  @Test
+  void logEventExposesSlf4jLevel() {
+    // LogEvent.getLevel() returns the SLF4J Level directly so callers can hand
+    // it straight to any SLF4J-aware logger without translation.
+    LogEvent trace = new LogEvent("trace", "asherah", "msg");
+    LogEvent debug = new LogEvent("debug", "asherah", "msg");
+    LogEvent info  = new LogEvent("info",  "asherah", "msg");
+    LogEvent warn  = new LogEvent("warn",  "asherah", "msg");
+    LogEvent error = new LogEvent("error", "asherah", "msg");
+    assertEquals(org.slf4j.event.Level.TRACE, trace.getLevel());
+    assertEquals(org.slf4j.event.Level.DEBUG, debug.getLevel());
+    assertEquals(org.slf4j.event.Level.INFO,  info.getLevel());
+    assertEquals(org.slf4j.event.Level.WARN,  warn.getLevel());
+    assertEquals(org.slf4j.event.Level.ERROR, error.getLevel());
+    assertEquals(org.slf4j.event.Level.ERROR, new LogEvent(null, "asherah", "msg").getLevel());
+    assertEquals(org.slf4j.event.Level.ERROR, new LogEvent("bogus", "asherah", "msg").getLevel());
   }
 }

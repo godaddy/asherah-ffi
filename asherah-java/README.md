@@ -279,50 +279,84 @@ AsherahFactory factory = Asherah.factoryFromEnv();
 
 ### Log hook
 
-Forward all log records emitted by the underlying Rust crates to your own
-logging framework via `Asherah.setLogHook(...)`. Pass `null` (or call
-`clearLogHook()`) to detach.
+Asherah ships first-class SLF4J integration. The simplest way to wire up
+logging is to hand it an SLF4J `Logger` directly — the bridge dispatches each
+record at its native severity, so any backend the host has bound SLF4J to
+(Logback, Log4j 2, `java.util.logging`) receives it without translation.
 
 ```java
 import com.godaddy.asherah.jni.Asherah;
-import com.godaddy.asherah.jni.LogEvent;
-import com.godaddy.asherah.jni.LogLevel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-Logger log = LoggerFactory.getLogger("asherah");
-
-Asherah.setLogHook(event -> {
-    LogLevel level = event.getLevelEnum();
-    String msg = "[" + event.getTarget() + "] " + event.getMessage();
-    switch (level) {
-        case TRACE: log.trace(msg); break;
-        case DEBUG: log.debug(msg); break;
-        case INFO:  log.info(msg);  break;
-        case WARN:  log.warn(msg);  break;
-        case ERROR: log.error(msg); break;
-    }
-});
+Logger asherahLog = LoggerFactory.getLogger("asherah");
+Asherah.setLogHook(asherahLog);
 // ... later
 Asherah.clearLogHook();
 ```
 
-`AsherahLogHook` is a `@FunctionalInterface` so a lambda is sufficient. The
-hook may fire from any thread (tokio worker threads, DB driver threads), so
-implementations must be thread-safe and should not block. Exceptions thrown
-from the hook are caught and silently swallowed by the JNI bridge.
+For per-target dispatch — each Rust source target (`asherah::session`,
+`asherah::builders`, etc.) routed to its own `Logger` so host-side filter
+rules can match by category — pass an `ILoggerFactory` through the
+`AsherahSlf4j` helper:
 
-### Metrics hook
+```java
+import com.godaddy.asherah.jni.AsherahSlf4j;
+import org.slf4j.LoggerFactory;
 
-Receive timing observations (`encrypt`, `decrypt`, `store`, `load`) and cache
-events (`cache_hit`, `cache_miss`, `cache_stale`) via
-`Asherah.setMetricsHook(...)`. Installing a hook implicitly enables the
-global metrics gate; clearing it disables the gate.
+Asherah.setLogHook(AsherahSlf4j.logHook(LoggerFactory.getILoggerFactory()));
+```
+
+The raw `AsherahLogHook` callback is also available if you don't use SLF4J:
 
 ```java
 import com.godaddy.asherah.jni.Asherah;
-import com.godaddy.asherah.jni.MetricsEvent;
-import com.godaddy.asherah.jni.MetricsEventType;
+import com.godaddy.asherah.jni.AsherahLogHook;
+import org.slf4j.event.Level;
+
+Asherah.setLogHook(event -> {
+    // event.getLevel() returns org.slf4j.event.Level directly
+    if (event.getLevel().toInt() >= Level.WARN.toInt()) {
+        System.err.println("[asherah " + event.getLevel() + "] "
+                + event.getTarget() + ": " + event.getMessage());
+    }
+});
+```
+
+The hook may fire from any thread (tokio worker threads, DB driver threads),
+so implementations must be thread-safe and should not block. Exceptions
+thrown from the hook are caught and silently swallowed by the JNI bridge.
+
+### Metrics hook
+
+Asherah produces timing observations (`encrypt`, `decrypt`, `store`, `load`)
+and cache events (`cache_hit`, `cache_miss`, `cache_stale`). Installing a
+hook implicitly enables the global metrics gate; clearing it disables it.
+
+If your stack already uses Micrometer (Spring Boot, Micronaut, Quarkus, or any
+OpenTelemetry / Prometheus / Datadog / CloudWatch registry), point the
+metrics hook at your `MeterRegistry`:
+
+```java
+import com.godaddy.asherah.jni.Asherah;
+import com.godaddy.asherah.jni.AsherahMicrometer;
+import io.micrometer.core.instrument.MeterRegistry;
+
+MeterRegistry registry = ...; // injected by your framework
+Asherah.setMetricsHook(AsherahMicrometer.metricsHook(registry));
+```
+
+The bridge registers standard instruments on the supplied registry —
+`asherah.encrypt.duration` (Timer), `asherah.cache.hits` (Counter, tag
+`cache=name`), and so on — and forwards each event to the appropriate one.
+The `micrometer-core` dependency is `optional` in the POM: callers that
+don't reference `AsherahMicrometer` are not forced to pull it.
+
+For other metrics libraries (StatsD, dropwizard-metrics, etc.) install a raw
+callback:
+
+```java
+import com.godaddy.asherah.jni.Asherah;
 
 Asherah.setMetricsHook(event -> {
     switch (event.getTypeEnum()) {
@@ -330,13 +364,11 @@ Asherah.setMetricsHook(event -> {
         case DECRYPT:
         case STORE:
         case LOAD:
-            // event.getDurationNs() carries elapsed nanoseconds
             myMetrics.timing("asherah." + event.getType(), event.getDurationNs());
             break;
         case CACHE_HIT:
         case CACHE_MISS:
         case CACHE_STALE:
-            // event.getName() carries the cache identifier
             myMetrics.counter("asherah." + event.getType(), event.getName());
             break;
     }

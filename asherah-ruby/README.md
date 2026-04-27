@@ -289,33 +289,42 @@ Uses snake_case attribute accessors:
 
 ### Log hook
 
-Forward every log record emitted by the underlying Rust crates to your own
-logging framework via `Asherah.set_log_hook`. The block receives a `Hash`
-with `:level` (Symbol), `:target` (String), and `:message` (String).
+Asherah ships first-class stdlib `Logger` integration. The simplest way to
+wire up logging is to hand it any Logger-compatible instance — stdlib
+`Logger`, `ActiveSupport::Logger`, `SemanticLogger`, `Ougai`, etc. — and the
+bridge dispatches each record via `Logger#add(severity, message, target)`
+so the logger's own filter rules and formatters apply.
 
 ```ruby
 require "logger"
 log = Logger.new($stdout)
-
-Asherah.set_log_hook do |event|
-  case event[:level]
-  when :trace, :debug then log.debug("[#{event[:target]}] #{event[:message]}")
-  when :info  then log.info("[#{event[:target]}] #{event[:message]}")
-  when :warn  then log.warn("[#{event[:target]}] #{event[:message]}")
-  when :error then log.error("[#{event[:target]}] #{event[:message]}")
-  end
-end
+log.level = Logger::WARN
+Asherah.set_log_hook(log)
 
 # ...later
 Asherah.clear_log_hook
 ```
 
-`:level` is one of `:trace`, `:debug`, `:info`, `:warn`, `:error` (matching
-the Rust `log` crate). The block may fire from any thread (Rust tokio worker
-threads, DB driver threads), so implementations must be thread-safe and
-should not block. Exceptions raised from the callback are caught and
-silently swallowed — propagating an exception across the FFI boundary is
-undefined behavior.
+For raw access pass a block; the event is a `Hash` with both a
+`Logger::Severity` integer and a matching lowercase symbol:
+
+```ruby
+Asherah.set_log_hook do |event|
+  # event[:severity] => Logger::DEBUG | INFO | WARN | ERROR
+  # event[:level]    => :debug | :info | :warn | :error  (symbol, for case dispatch)
+  # event[:target]   => "asherah::session"
+  # event[:message]  => "..."
+  next if event[:severity] < Logger::WARN
+  warn "[asherah #{event[:level]}] #{event[:target]}: #{event[:message]}"
+end
+```
+
+The Rust `log` crate has a TRACE level that stdlib `Logger` does not; Asherah
+maps `trace` records to `Logger::DEBUG` so the value is still meaningful.
+The block may fire from any thread (Rust tokio worker threads, DB driver
+threads), so implementations must be thread-safe and should not block.
+Exceptions raised from the callback are caught and silently swallowed —
+propagating an exception across the FFI boundary is undefined behavior.
 
 ### Metrics hook
 

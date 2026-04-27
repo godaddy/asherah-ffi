@@ -100,14 +100,16 @@ module Asherah
     attach_function :asherah_set_metrics_hook, [:asherah_metrics_callback, :pointer], :int
     attach_function :asherah_clear_metrics_hook, [], :int
 
-    # Log severity constants (mirrors hooks.rs).
+    # Internal: integer constants that mirror the C ABI severity/event
+    # codes in hooks.rs. The public Ruby API exposes them as
+    # +Logger::Severity+ values and +Symbol+ types respectively, so
+    # callers should never need to reference these directly.
     LOG_TRACE = 0
     LOG_DEBUG = 1
     LOG_INFO  = 2
     LOG_WARN  = 3
     LOG_ERROR = 4
 
-    # Metrics event type constants (mirrors hooks.rs).
     METRIC_ENCRYPT     = 0
     METRIC_DECRYPT     = 1
     METRIC_STORE       = 2
