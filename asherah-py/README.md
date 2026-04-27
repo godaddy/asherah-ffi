@@ -1,8 +1,10 @@
 # asherah
 
-Python bindings for the [Asherah](https://github.com/godaddy/asherah-ffi) envelope encryption and automatic key rotation library.
+Python bindings for the Asherah envelope encryption and key rotation library.
 
-Prebuilt wheels for Python 3.8+ (stable ABI): Linux x64/ARM64 (manylinux + musl), macOS universal2, Windows x64/ARM64.
+Native Rust implementation via PyO3/maturin. Prebuilt wheels are published to
+PyPI for Linux (x86_64 and aarch64, both glibc and musl), macOS (x86_64 and
+arm64), and Windows (x86_64 and arm64).
 
 ## Installation
 
@@ -10,94 +12,138 @@ Prebuilt wheels for Python 3.8+ (stable ABI): Linux x64/ARM64 (manylinux + musl)
 pip install asherah
 ```
 
-## Quick Start (Static API)
+Requires Python ≥ 3.8.
 
-The static API manages a global session factory internally. Call `setup()` once, then encrypt/decrypt with partition-scoped functions.
+## Choosing an API style
+
+Two API styles are exposed; both are fully supported and produce the same
+wire format. New code should prefer the **Factory / Session API**.
+
+| Style | When to use |
+|---|---|
+| **Static / module-level** (`asherah.setup`, `asherah.encrypt_bytes`, …) | Drop-in compatibility with the canonical `godaddy/asherah-python` package. Simplest call surface. Singleton lifecycle (`setup()` once, `shutdown()` once). |
+| **Factory / Session** (`asherah.SessionFactory`, `factory.get_session(...)`) | Recommended for new code. Explicit lifecycle, no hidden singleton, multi-tenant isolation is obvious in code. Context-manager friendly. |
+
+A complete runnable example exercising both styles plus async, log hook, and
+metrics hook is in [`samples/python/sample.py`](../samples/python/sample.py).
+
+## Quick start (static API)
 
 ```python
 import os
-os.environ["STATIC_MASTER_KEY_HEX"] = "22" * 32  # testing only
-
 import asherah
+
+os.environ["STATIC_MASTER_KEY_HEX"] = "22" * 32  # testing only
 
 asherah.setup({
     "ServiceName": "my-service",
-    "ProductID": "my-product",
-    "Metastore": "memory",    # testing only — use "rdbms" or "dynamodb" in production
-    "KMS": "static",          # testing only — use "aws" in production
-    "EnableSessionCaching": True,
+    "ProductID":   "my-product",
+    "Metastore":   "memory",   # testing only — use "rdbms" or "dynamodb" in production
+    "KMS":         "static",   # testing only — use "aws" in production
 })
 
-ciphertext = asherah.encrypt_string("partition-1", "sensitive data")
-plaintext = asherah.decrypt_string("partition-1", ciphertext)
-print(plaintext)  # "sensitive data"
+ct = asherah.encrypt_string("user-42", "secret")
+pt = asherah.decrypt_string("user-42", ct)
+assert pt == "secret"
 
 asherah.shutdown()
 ```
 
-## Session-Based API
-
-The `SessionFactory` class reads configuration from environment variables (set them before construction). Each `Session` is scoped to a partition. Both support context managers.
+## Quick start (factory / session API)
 
 ```python
-import os
-os.environ["SERVICE_NAME"] = "my-service"
-os.environ["PRODUCT_ID"] = "my-product"
-os.environ["Metastore"] = "memory"  # testing only
-os.environ["KMS"] = "static"       # testing only
-os.environ["STATIC_MASTER_KEY_HEX"] = "22" * 32
-os.environ["SESSION_CACHE"] = "1"
-
 import asherah
 
 with asherah.SessionFactory() as factory:
-    with factory.get_session("partition-1") as session:
-        ciphertext = session.encrypt_bytes(b"secret")
-        plaintext = session.decrypt_bytes(ciphertext)
-        print(plaintext)  # b"secret"
-
-        # Text variants
-        ct = session.encrypt_text("hello")
+    with factory.get_session("user-42") as session:
+        ct = session.encrypt_text("secret")
         pt = session.decrypt_text(ct)
-        print(pt)  # "hello"
+        assert pt == "secret"
 ```
+
+`SessionFactory` reads its config from environment variables. Set them with
+`asherah.setenv({...})` or via `os.environ` before constructing the factory.
 
 ## Async API
 
-Async wrappers dispatch to the default thread pool executor via `asyncio.run_in_executor`. The GIL is released during the native call.
+There are two flavors of async to choose from depending on your call pattern:
+
+- **Module-level async** (`encrypt_string_async`, `decrypt_string_async`,
+  `setup_async`, `shutdown_async`) — wraps the sync calls with
+  `loop.run_in_executor`. Lowest setup, but the sync work runs on the
+  default thread pool executor.
+
+- **Session-level async** (`session.encrypt_bytes_async`,
+  `session.decrypt_bytes_async`) — true async PyO3 coroutines that run
+  on the Rust tokio runtime. The asyncio event loop is not blocked, and
+  there is no thread pool overhead.
 
 ```python
 import asyncio
-import os
-os.environ["STATIC_MASTER_KEY_HEX"] = "22" * 32
-
 import asherah
 
 async def main():
-    await asherah.setup_async({
-        "ServiceName": "my-service",
-        "ProductID": "my-product",
-        "Metastore": "memory",
-        "KMS": "static",
-    })
-
-    ciphertext = await asherah.encrypt_string_async("partition-1", "data")
-    plaintext = await asherah.decrypt_string_async("partition-1", ciphertext)
-    print(plaintext)  # "data"
-
+    # Module-level
+    await asherah.setup_async({...})
+    ct = await asherah.encrypt_string_async("user-42", "secret")
+    pt = await asherah.decrypt_string_async("user-42", ct)
     await asherah.shutdown_async()
+
+    # Session-level (true async)
+    with asherah.SessionFactory() as factory:
+        session = factory.get_session("user-42")
+        ct = await session.encrypt_bytes_async(b"secret")
+        pt = await session.decrypt_bytes_async(ct)
 
 asyncio.run(main())
 ```
 
-### Async Behavior
+## Observability hooks
 
-- The event loop is **not** blocked -- work runs on a thread pool thread.
-- The GIL is released during the native Rust call.
-- Overhead: ~37 us vs ~1 us sync (hot cache, 64B payload).
-- Best for: I/O-bound asyncio applications that need non-blocking encryption.
+### Log hook
 
-For CPU-bound batch encryption, use the sync API directly.
+Receive every log event from the Rust core (encrypt/decrypt path,
+metastore drivers, KMS clients).
+
+```python
+def on_log(event):
+    # event = {"level": "trace"|"debug"|"info"|"warn"|"error",
+    #          "message": str, "target": str}
+    if event["level"] in ("warn", "error"):
+        print(f"[asherah {event['level']}] {event['message']}")
+
+asherah.set_log_hook(on_log)
+
+# later, to deregister:
+asherah.set_log_hook(None)
+```
+
+The callback may fire from any thread (Rust tokio worker threads, DB
+driver threads). PyO3 acquires the GIL before invoking the callback, so
+the callback runs single-threaded from Python's perspective.
+
+### Metrics hook
+
+Receive timing events for encrypt/decrypt/store/load and counter events
+for cache hit/miss/stale.
+
+```python
+def on_metric(event):
+    if event["type"] in ("encrypt", "decrypt", "store", "load"):
+        # event = {"type": ..., "duration_ns": int}
+        my_histogram.observe(event["type"], event["duration_ns"] / 1e6)
+    else:
+        # event = {"type": "cache_hit"|"cache_miss"|"cache_stale", "name": str}
+        my_counter.inc(result=event["type"], cache=event["name"])
+
+asherah.set_metrics_hook(on_metric)
+
+# later:
+asherah.set_metrics_hook(None)
+```
+
+Metrics collection is enabled automatically when a hook is installed and
+disabled when cleared.
 
 ## Input contract
 
@@ -107,12 +153,11 @@ cannot be empty"). No row is ever written to the metastore under a
 degenerate partition ID.
 
 **Plaintext** to encrypt:
-- `None` → `TypeError` from PyO3 type conversion before any native
-  call.
-- Empty `str` (`""`) and empty `bytes` (`b""`) are **valid**
-  plaintexts. `encrypt_string` / `encrypt_bytes` produce a real
-  `DataRowRecord` envelope; `decrypt_string` / `decrypt_bytes` return
-  exactly `""` or `b""`.
+- `None` → `TypeError` from PyO3 type conversion before any native call.
+- Empty `str` (`""`) and empty `bytes` (`b""`) are **valid** plaintexts.
+  `encrypt_string` / `encrypt_bytes` produce a real `DataRowRecord`
+  envelope; `decrypt_string` / `decrypt_bytes` return exactly `""` or
+  `b""`.
 
 **Ciphertext** to decrypt:
 - `None` → `TypeError`.
@@ -127,149 +172,171 @@ rationale.
 
 ## Configuration
 
-The `setup()` function accepts a dict (or any JSON-serializable object) with PascalCase keys matching the Go canonical API:
+`setup()` accepts a dict (or any JSON-serializable object) using
+PascalCase keys to match the canonical Go/Java/.NET API:
 
 | Key | Type | Required | Description |
 |-----|------|----------|-------------|
-| `ServiceName` | str | Yes | Service identifier for key hierarchy |
-| `ProductID` | str | Yes | Product identifier for key hierarchy |
-| `Metastore` | str | Yes | `"rdbms"`, `"dynamodb"`, `"memory"` (testing) |
-| `KMS` | str | No | `"static"` (default) or `"aws"` |
-| `ConnectionString` | str | Conditional | Required for `sqlite` and `rdbms` metastores |
-| `RegionMap` | dict | Conditional | Required for `aws` KMS. Maps preferred region to ARN. |
-| `PreferredRegion` | str | No | Preferred AWS region for KMS |
-| `EnableRegionSuffix` | bool | No | Append region suffix to system key IDs |
-| `EnableSessionCaching` | bool | No | Enable session caching (default: true) |
-| `SessionCacheMaxSize` | int | No | Max cached sessions |
-| `SessionCacheDuration` | int | No | Cache TTL in seconds |
-| `ExpireAfter` | int | No | Key expiration in seconds |
-| `CheckInterval` | int | No | Revocation check interval in seconds |
-| `DynamoDBEndpoint` | str | No | Custom DynamoDB endpoint URL |
-| `DynamoDBRegion` | str | No | DynamoDB region |
-| `DynamoDBSigningRegion` | str | No | Signing region (overrides `DynamoDBRegion`) |
-| `DynamoDBTableName` | str | No | DynamoDB table name |
-| `ReplicaReadConsistency` | str | No | DynamoDB read consistency |
-| `SQLMetastoreDBType` | str | No | `"mysql"` or `"postgres"` hint for rdbms |
-| `Verbose` | bool | No | Enable verbose logging |
-| `EnableCanaries` | bool | No | Enable canary buffer overflow detection |
-| `NullDataCheck` | bool | No | Enable null data validation |
-| `DisableZeroCopy` | bool | No | Disable zero-copy optimization |
-| `PoolMaxOpen` | int | No | Max open DB connections (default: 0 = unlimited) |
-| `PoolMaxIdle` | int | No | Max idle connections to retain (default: 2) |
-| `PoolMaxLifetime` | int | No | Max connection lifetime in seconds (default: 0 = unlimited) |
-| `PoolMaxIdleTime` | int | No | Max idle time per connection in seconds (default: 0 = unlimited) |
+| `ServiceName` | str | yes | Service identifier for the key hierarchy. |
+| `ProductID` | str | yes | Product identifier for the key hierarchy. |
+| `Metastore` | str | yes | `"memory"`, `"rdbms"`, or `"dynamodb"`. `"memory"` is testing-only. |
+| `KMS` | str | | `"static"` (default; testing) or `"aws"`. |
+| `ConnectionString` | str | | SQL connection string for `rdbms`. |
+| `SQLMetastoreDBType` | str | | `"mysql"` or `"postgres"` (paired with `Metastore: "rdbms"`). |
+| `EnableSessionCaching` | bool | | Cache `Session` objects by partition ID. Default `True`. |
+| `SessionCacheMaxSize` | int | | Max cached sessions. Default 1000. |
+| `SessionCacheDuration` | int | | Session cache TTL in seconds. |
+| `RegionMap` | dict[str,str] | | AWS KMS multi-region key-ARN map. |
+| `PreferredRegion` | str | | Preferred region from `RegionMap`. |
+| `EnableRegionSuffix` | bool | | Append AWS region suffix to key IDs. |
+| `ExpireAfter` | int | | Intermediate-key expiration in seconds. Default 90 days. |
+| `CheckInterval` | int | | Revoke-check interval in seconds. Default 60 minutes. |
+| `DynamoDBEndpoint` | str | | DynamoDB endpoint URL (for local DynamoDB). |
+| `DynamoDBRegion` | str | | AWS region for DynamoDB. |
+| `DynamoDBTableName` | str | | DynamoDB table name. Default `EncryptionKey`. |
+| `ReplicaReadConsistency` | str | | DynamoDB consistency. |
+| `Verbose` | bool | | Emit verbose log events (use a log hook to consume). |
+| `EnableCanaries` | bool | | Enable in-memory canary buffers around plaintexts. |
 
-### AWS KMS Example
+Both PascalCase and snake_case keys are accepted; PascalCase is
+canonical.
+
+### Environment variables
+
+| Variable | Effect |
+|---|---|
+| `STATIC_MASTER_KEY_HEX` | 64 hex chars (32 bytes) for static KMS. **Testing only.** |
+| `SERVICE_NAME` / `PRODUCT_ID` / `Metastore` / `KMS` | Read by `SessionFactory()` (no-config constructor). |
+
+### AWS KMS example
 
 ```python
 asherah.setup({
-    "ServiceName": "my-service",
-    "ProductID": "my-product",
-    "Metastore": "dynamodb",
+    "ServiceName": "payments-api",
+    "ProductID": "acme-corp",
+    "Metastore": "rdbms",
+    "ConnectionString": "mysql://user:pass@host:3306/asherah",
+    "SQLMetastoreDBType": "mysql",
     "KMS": "aws",
-    "RegionMap": {
-        "us-west-2": "arn:aws:kms:us-west-2:123456789012:key/mrk-abc123"
-    },
+    "RegionMap": {"us-west-2": "arn:aws:kms:us-west-2:000:key/abc"},
     "PreferredRegion": "us-west-2",
-    "DynamoDBTableName": "EncryptionKey",
     "EnableSessionCaching": True,
+    "SessionCacheMaxSize": 1000,
 })
 ```
 
 ## Performance
 
-Approximate latency on Apple M4 Max (hot cache, 64-byte payload):
+Native Rust implementation. Typical latencies on Apple M4 Max (in-memory
+metastore, session caching enabled, 64-byte payload):
 
-| Operation | Latency |
-|-----------|---------|
-| Encrypt | ~1,049 ns |
-| Decrypt | ~791 ns |
+| Operation | Sync | Async (session-level, true async) |
+|-----------|------|------------------------------------|
+| Encrypt   | ~1 µs | ~37 µs |
+| Decrypt   | ~1.2 µs | ~37 µs |
 
-This Rust-backed implementation replaces the Go Cobhan-based canonical `asherah` PyPI package. Run `scripts/benchmark.sh` for head-to-head comparisons.
+Async overhead is from the asyncio event loop dispatch + GIL handoff.
+Use sync for CPU-bound batches; use async when you need non-blocking
+behavior in an asyncio application.
 
 ## API Reference
 
-### Static Functions
+> Full docstrings live in `asherah/_asherah.pyi` and `asherah/__init__.py`
+> and surface in your IDE on hover. The tables below summarize each API;
+> the type stubs are the source of truth.
+
+### Static / module-level API (legacy compatibility)
+
+#### Lifecycle
 
 | Function | Description |
-|----------|-------------|
-| `setup(config)` | Initialize the global session factory from a config dict |
-| `shutdown()` | Shut down the global session factory and release resources |
-| `get_setup_status()` | Returns `True` if `setup()` has been called |
-| `encrypt_bytes(partition_id, data)` | Encrypt `bytes`, returns JSON `str` (DataRowRecord) |
-| `encrypt_string(partition_id, text)` | Encrypt `str`, returns JSON `str` (DataRowRecord) |
-| `decrypt_bytes(partition_id, drr)` | Decrypt JSON DataRowRecord, returns `bytes` |
-| `decrypt_string(partition_id, drr)` | Decrypt JSON DataRowRecord, returns `str` |
-| `setenv(env_dict)` | Set environment variables from a dict (both `os.environ` and Rust) |
-| `set_metrics_hook(callback)` | Register a callback for metrics events, or `None` to clear |
-| `set_log_hook(callback)` | Register a callback for log events, or `None` to clear |
-| `version()` | Returns the native library version string |
+|---|---|
+| `setup(config: dict)` | Initialize the global instance. Raises if already configured. |
+| `setup_async(config: dict)` | Async wrapper. Returns a coroutine. |
+| `shutdown()` | Tear down the global instance. Idempotent. |
+| `shutdown_async()` | Async wrapper. |
+| `get_setup_status() -> bool` | True iff `setup()` has been called and `shutdown()` has not. |
+| `setenv(env: dict)` | Apply env vars before `setup()`. Values may be `None` to delete. |
+| `version() -> str` | Package version string. |
 
-### Async Functions
+#### Encrypt / decrypt
+
+| Function | Param 1 | Param 2 | Returns |
+|---|---|---|---|
+| `encrypt_bytes(partition_id, data)` | `str` (non-empty) | `bytes` (empty OK) | `str` (DRR JSON) |
+| `encrypt_string(partition_id, text)` | `str` | `str` (empty OK) | `str` (DRR JSON) |
+| `decrypt_bytes(partition_id, drr)` | `str` | `str` | `bytes` |
+| `decrypt_string(partition_id, drr)` | `str` | `str` | `str` |
+| `encrypt_bytes_async(partition_id, data)` | `str` | `bytes` | `Awaitable[str]` |
+| `decrypt_bytes_async(partition_id, drr)` | `str` | `str` or `bytes` | `Awaitable[bytes]` |
+| `encrypt_string_async(partition_id, text)` | `str` | `str` | `Awaitable[str]` |
+| `decrypt_string_async(partition_id, drr)` | `str` | `str` | `Awaitable[str]` |
+
+#### Hooks
 
 | Function | Description |
-|----------|-------------|
-| `setup_async(config)` | Async version of `setup()` |
-| `shutdown_async()` | Async version of `shutdown()` |
-| `encrypt_bytes_async(partition_id, data)` | Async version of `encrypt_bytes()` |
-| `encrypt_string_async(partition_id, text)` | Async version of `encrypt_string()` |
-| `decrypt_bytes_async(partition_id, drr)` | Async version of `decrypt_bytes()` |
-| `decrypt_string_async(partition_id, drr)` | Async version of `decrypt_string()` |
+|---|---|
+| `set_log_hook(callback)` | Register a `(event_dict) -> None` log callback. Pass `None` to deregister. |
+| `set_metrics_hook(callback)` | Register a `(event_dict) -> None` metrics callback. Pass `None` to deregister. |
 
-### Classes
+### Factory / Session API (recommended)
 
-#### `SessionFactory`
+#### `class SessionFactory`
 
-Constructed from environment variables (not a config dict). Supports context manager protocol.
+| Member | Description |
+|---|---|
+| `SessionFactory()` | Construct from environment variables. |
+| `SessionFactory.from_env()` | Same as `SessionFactory()` — provided for SDK parity. |
+| `factory.get_session(partition_id)` | Get a per-partition `Session`. Raises on null/empty partition. |
+| `factory.close()` | Release native resources. |
+| `with SessionFactory() as factory:` | Context manager — `close()` runs on exit. |
 
-| Method | Description |
-|--------|-------------|
-| `SessionFactory()` | Create from env vars |
-| `SessionFactory.from_env()` | Same as constructor |
-| `get_session(partition_id)` | Create a `Session` for the given partition |
-| `close()` | Release resources |
+#### `class Session`
 
-#### `Session`
+| Member | Description |
+|---|---|
+| `session.encrypt_bytes(data)` | `bytes` → DRR JSON `str`. Empty `bytes` is valid. |
+| `session.encrypt_text(text)` | `str` → DRR JSON `str`. Empty string is valid. |
+| `session.decrypt_bytes(drr)` | DRR JSON `str` → `bytes`. |
+| `session.decrypt_text(drr)` | DRR JSON `str` → `str`. |
+| `session.encrypt_bytes_async(data)` | `Awaitable[str]` — true async on tokio. |
+| `session.decrypt_bytes_async(drr)` | `Awaitable[bytes]` — true async on tokio. |
+| `session.close()` | Release native resources. |
+| `with session as ...:` | Context manager — `close()` runs on exit. |
 
-Scoped to a single partition. Supports context manager protocol.
-
-| Method | Description |
-|--------|-------------|
-| `encrypt_bytes(data)` | Encrypt `bytes`, returns JSON `str` |
-| `encrypt_text(text)` | Encrypt `str`, returns JSON `str` |
-| `decrypt_bytes(drr)` | Decrypt JSON DataRowRecord, returns `bytes` |
-| `decrypt_text(drr)` | Decrypt JSON DataRowRecord, returns `str` |
-| `close()` | Release resources |
-
-### Hooks
-
-#### Metrics Hook
+### Event dict shapes
 
 ```python
-def on_metric(event):
-    # event is a dict with "type" and additional fields
-    # type: "encrypt", "decrypt", "store", "load" -> has "duration_ns"
-    # type: "cache_hit", "cache_miss" -> has "name"
-    print(event)
+LogEvent = {
+    "level": "trace" | "debug" | "info" | "warn" | "error",
+    "message": str,
+    "target": str,
+}
 
-asherah.set_metrics_hook(on_metric)
-asherah.set_metrics_hook(None)  # clear
+# Metrics event for timing measurements:
+TimingEvent = {
+    "type": "encrypt" | "decrypt" | "store" | "load",
+    "duration_ns": int,
+}
+
+# Metrics event for cache lifecycle:
+CacheEvent = {
+    "type": "cache_hit" | "cache_miss" | "cache_stale",
+    "name": str,  # cache name, e.g. "session", "intermediate-key"
+}
 ```
 
-#### Log Hook
+## Cross-language compatibility
 
-```python
-def on_log(record):
-    # record is a dict with "level", "message", "target"
-    print(f"[{record['level']}] {record['target']}: {record['message']}")
+Wire-format compatible with all other Asherah implementations:
 
-asherah.set_log_hook(on_log)
-asherah.set_log_hook(None)  # clear
-```
+- canonical `godaddy/asherah` (Go core via cobhan)
+- canonical `godaddy/asherah-csharp`
+- canonical `godaddy/asherah-java`
+- this repo's other bindings: Node, .NET, Java, Ruby, Go
 
-## Cross-Language Compatibility
-
-Ciphertext produced by any Asherah implementation (Go, Node.js, Java, .NET, Ruby) can be decrypted by any other, as long as they share the same metastore and KMS configuration. The DataRowRecord JSON format is the interchange format.
+A `DataRowRecord` written by any of these can be decrypted by any other,
+provided they share the same metastore and KMS configuration.
 
 ## License
 
