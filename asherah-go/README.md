@@ -331,6 +331,80 @@ The loader searches for the native library in this order:
 | `(*CompatSession).Store(ctx, data, store)` | Encrypt and store |
 | `(*CompatSession).Close()` | Release the session |
 
+## Observability hooks
+
+### Log hook
+
+Forward every log record emitted by the underlying Rust crates to your own
+logging framework via `asherah.SetLogHook`.
+
+```go
+package main
+
+import (
+    "log/slog"
+
+    asherah "github.com/godaddy/asherah-ffi/asherah-go"
+)
+
+func main() {
+    asherah.SetLogHook(func(e asherah.LogEvent) {
+        switch e.Level {
+        case asherah.LogTrace, asherah.LogDebug:
+            slog.Debug(e.Message, "target", e.Target)
+        case asherah.LogInfo:
+            slog.Info(e.Message, "target", e.Target)
+        case asherah.LogWarn:
+            slog.Warn(e.Message, "target", e.Target)
+        case asherah.LogError:
+            slog.Error(e.Message, "target", e.Target)
+        }
+    })
+    defer asherah.ClearLogHook()
+}
+```
+
+`asherah.LogHook` is a `func(LogEvent)`. The hook may fire from any goroutine
+(including ones spawned by the underlying Rust runtime). Implementations must
+be thread-safe and should not block. Panics raised inside the hook are
+recovered and silently dropped — propagating a panic across the FFI boundary
+is undefined behavior and would abort the process.
+
+### Metrics hook
+
+Receive timing observations (`MetricEncrypt`, `MetricDecrypt`, `MetricStore`,
+`MetricLoad`) and cache events (`MetricCacheHit`, `MetricCacheMiss`,
+`MetricCacheStale`) via `asherah.SetMetricsHook`. Installing a hook implicitly
+enables the global metrics gate; clearing it disables the gate.
+
+```go
+asherah.SetMetricsHook(func(e asherah.MetricsEvent) {
+    switch e.Type {
+    case asherah.MetricEncrypt, asherah.MetricDecrypt,
+         asherah.MetricStore, asherah.MetricLoad:
+        // Timing event: e.DurationNs is elapsed nanoseconds, e.Name is empty.
+        statsd.Timing("asherah."+e.Type.String(), float64(e.DurationNs)/1e6)
+    case asherah.MetricCacheHit, asherah.MetricCacheMiss, asherah.MetricCacheStale:
+        // Cache event: e.Name is the cache identifier, e.DurationNs is 0.
+        statsd.Increment("asherah." + e.Type.String() + "." + e.Name)
+    }
+})
+defer asherah.ClearMetricsHook()
+```
+
+| Event type | `DurationNs` | `Name` |
+|---|---|---|
+| `MetricEncrypt` | elapsed ns | `""` |
+| `MetricDecrypt` | elapsed ns | `""` |
+| `MetricStore` | elapsed ns | `""` |
+| `MetricLoad` | elapsed ns | `""` |
+| `MetricCacheHit` | `0` | cache identifier |
+| `MetricCacheMiss` | `0` | cache identifier |
+| `MetricCacheStale` | `0` | cache identifier |
+
+The same goroutine-safety caveats apply as for the log hook — implementations
+must be thread-safe and non-blocking, and panics are recovered.
+
 ## License
 
 Licensed under the Apache License, Version 2.0.
