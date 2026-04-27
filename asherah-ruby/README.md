@@ -285,6 +285,74 @@ Uses snake_case attribute accessors:
 | `close` | Release the session |
 | `closed?` | Returns `true` if closed |
 
+## Observability hooks
+
+### Log hook
+
+Forward every log record emitted by the underlying Rust crates to your own
+logging framework via `Asherah.set_log_hook`. The block receives a `Hash`
+with `:level` (Symbol), `:target` (String), and `:message` (String).
+
+```ruby
+require "logger"
+log = Logger.new($stdout)
+
+Asherah.set_log_hook do |event|
+  case event[:level]
+  when :trace, :debug then log.debug("[#{event[:target]}] #{event[:message]}")
+  when :info  then log.info("[#{event[:target]}] #{event[:message]}")
+  when :warn  then log.warn("[#{event[:target]}] #{event[:message]}")
+  when :error then log.error("[#{event[:target]}] #{event[:message]}")
+  end
+end
+
+# ...later
+Asherah.clear_log_hook
+```
+
+`:level` is one of `:trace`, `:debug`, `:info`, `:warn`, `:error` (matching
+the Rust `log` crate). The block may fire from any thread (Rust tokio worker
+threads, DB driver threads), so implementations must be thread-safe and
+should not block. Exceptions raised from the callback are caught and
+silently swallowed — propagating an exception across the FFI boundary is
+undefined behavior.
+
+### Metrics hook
+
+Receive timing observations (`:encrypt`, `:decrypt`, `:store`, `:load`) and
+cache events (`:cache_hit`, `:cache_miss`, `:cache_stale`) via
+`Asherah.set_metrics_hook`. Installing a hook implicitly enables the global
+metrics gate; clearing it disables the gate.
+
+```ruby
+Asherah.set_metrics_hook do |event|
+  case event[:type]
+  when :encrypt, :decrypt, :store, :load
+    # event[:duration_ns] is the elapsed time in nanoseconds, event[:name] is nil
+    Statsd.timing("asherah.#{event[:type]}", event[:duration_ns] / 1_000_000.0)
+  when :cache_hit, :cache_miss, :cache_stale
+    # event[:name] is the cache identifier, event[:duration_ns] is 0
+    Statsd.increment("asherah.#{event[:type]}.#{event[:name]}")
+  end
+end
+
+# ...later
+Asherah.clear_metrics_hook
+```
+
+| Event type | `:duration_ns` | `:name` |
+|---|---|---|
+| `:encrypt` | elapsed ns | `nil` |
+| `:decrypt` | elapsed ns | `nil` |
+| `:store` | elapsed ns | `nil` |
+| `:load` | elapsed ns | `nil` |
+| `:cache_hit` | `0` | cache identifier |
+| `:cache_miss` | `0` | cache identifier |
+| `:cache_stale` | `0` | cache identifier |
+
+The same threading caveats apply as for the log hook — implementations must
+be thread-safe and non-blocking, and exceptions are caught.
+
 ## License
 
 Licensed under the Apache License, Version 2.0.
