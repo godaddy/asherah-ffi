@@ -11,6 +11,9 @@
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <RepositoryUrl>https://github.com/godaddy/asherah-ffi</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
+
+    <!-- NuGet lock files: commit packages.lock.json per project; CI should pass locked-mode to restore. -->
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 
 </Project>

@@ -1,6 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Match every runtimes/<rid>/native/ folder below so NuGet locked restore (and any
+         /p:RuntimeIdentifiers usage) stays consistent with nupkg layout. -->
+    <RuntimeIdentifiers>linux-x64;linux-arm64;osx-x64;osx-arm64;win-x64;win-arm64</RuntimeIdentifiers>
 
     <!-- NuGet package metadata -->
     <PackageId>GoDaddy.Asherah.AppEncryption</PackageId>

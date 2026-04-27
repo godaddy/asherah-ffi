@@ -41,12 +41,10 @@ OUT_DIR="${BINDING_OUTPUT_DIR:-$ROOT_OUT_DIR_DEFAULT}"
 
 case "$ARCH" in
   x86_64|amd64)
-    DOTNET_RID="linux-x64"
     CARGO_TRIPLE="x86_64-unknown-linux-gnu"
     NAPI_PLATFORM="linux-x64-gnu"
     ;;
   aarch64|arm64)
-    DOTNET_RID="linux-arm64"
     CARGO_TRIPLE="aarch64-unknown-linux-gnu"
     NAPI_PLATFORM="linux-arm64-gnu"
     ;;
@@ -295,14 +293,16 @@ if should_build dotnet || should_build all; then
   _csproj="$ROOT_DIR/asherah-dotnet/src/GoDaddy.Asherah.AppEncryption/GoDaddy.Asherah.AppEncryption.csproj"
   # Use 'dotnet msbuild' instead of 'dotnet pack' to work around .NET 10 SDK
   # injecting the csproj twice via a response file (MSB1008).
+  # Runtime identifiers come from the csproj (linux-x64;linux-arm64) so they match packages.lock.json;
+  # do not pass /p:RuntimeIdentifiers here or locked restore fails (NU1004) when it differs from the lock.
   dotnet msbuild "$_csproj" /t:Restore \
     /p:Configuration=Release \
-    /p:RuntimeIdentifiers="$DOTNET_RID"
+    /p:RestoreLockedMode=true
   dotnet msbuild "$_csproj" /t:Pack \
     /p:Configuration=Release \
     /p:ContinuousIntegrationBuild=true \
-    /p:RuntimeIdentifiers="$DOTNET_RID" \
     /p:PackageOutputPath="$OUT_DIR/dotnet" \
+    /p:RestoreLockedMode=true \
     /p:_IsPacking=true
 fi
 

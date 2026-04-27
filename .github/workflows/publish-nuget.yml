@@ -102,11 +102,13 @@ jobs:
           # Pack core (contains native libs)
           dotnet pack src/GoDaddy.Asherah.AppEncryption/GoDaddy.Asherah.AppEncryption.csproj -c Release \
             /p:Version="${NUGET_VERSION}" \
-            /p:PackageOutputPath="$GITHUB_WORKSPACE/dist"
+            /p:PackageOutputPath="$GITHUB_WORKSPACE/dist" \
+            /p:RestoreLockedMode=true
           # Pack compat (references core, no native libs)
           dotnet pack src/GoDaddy.Asherah.AppEncryption.Compat/GoDaddy.Asherah.AppEncryption.Compat.csproj -c Release \
             /p:Version="${NUGET_VERSION}" \
-            /p:PackageOutputPath="$GITHUB_WORKSPACE/dist"
+            /p:PackageOutputPath="$GITHUB_WORKSPACE/dist" \
+            /p:RestoreLockedMode=true
 
       - name: Verify native libraries in core package
         run: |
