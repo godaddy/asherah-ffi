@@ -72,23 +72,29 @@ jobs:
 
           mkdir -p "$NATIVE_DIR/linux-x64/native"
           mkdir -p "$NATIVE_DIR/linux-arm64/native"
+          mkdir -p "$NATIVE_DIR/linux-musl-x64/native"
+          mkdir -p "$NATIVE_DIR/linux-musl-arm64/native"
           mkdir -p "$NATIVE_DIR/osx-x64/native"
           mkdir -p "$NATIVE_DIR/osx-arm64/native"
           mkdir -p "$NATIVE_DIR/win-x64/native"
           mkdir -p "$NATIVE_DIR/win-arm64/native"
 
           # Download cobhan-named assets from release, rename to _ffi naming for .NET
-          gh release download "$TAG" -p 'libasherah-x64.so'     -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-arm64.so'    -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-x64.dylib'   -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-arm64.dylib' -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-x64.dll'     -D /tmp/native-dl || true
-          gh release download "$TAG" -p 'libasherah-arm64.dll'   -D /tmp/native-dl || true
+          gh release download "$TAG" -p 'libasherah-x64.so'           -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-arm64.so'         -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-x64-musl.so'      -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-arm64-musl.so'    -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-x64.dylib'        -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-arm64.dylib'      -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-x64.dll'          -D /tmp/native-dl || true
+          gh release download "$TAG" -p 'libasherah-arm64.dll'        -D /tmp/native-dl || true
 
-          cp /tmp/native-dl/libasherah-x64.so      "$NATIVE_DIR/linux-x64/native/libasherah_ffi.so"
-          cp /tmp/native-dl/libasherah-arm64.so     "$NATIVE_DIR/linux-arm64/native/libasherah_ffi.so"
-          cp /tmp/native-dl/libasherah-x64.dylib    "$NATIVE_DIR/osx-x64/native/libasherah_ffi.dylib"
-          cp /tmp/native-dl/libasherah-arm64.dylib  "$NATIVE_DIR/osx-arm64/native/libasherah_ffi.dylib"
+          cp /tmp/native-dl/libasherah-x64.so          "$NATIVE_DIR/linux-x64/native/libasherah_ffi.so"
+          cp /tmp/native-dl/libasherah-arm64.so        "$NATIVE_DIR/linux-arm64/native/libasherah_ffi.so"
+          cp /tmp/native-dl/libasherah-x64-musl.so     "$NATIVE_DIR/linux-musl-x64/native/libasherah_ffi.so"
+          cp /tmp/native-dl/libasherah-arm64-musl.so   "$NATIVE_DIR/linux-musl-arm64/native/libasherah_ffi.so"
+          cp /tmp/native-dl/libasherah-x64.dylib       "$NATIVE_DIR/osx-x64/native/libasherah_ffi.dylib"
+          cp /tmp/native-dl/libasherah-arm64.dylib     "$NATIVE_DIR/osx-arm64/native/libasherah_ffi.dylib"
           # Windows binaries may not exist yet — skip if missing
           [ -f /tmp/native-dl/libasherah-x64.dll ]  && cp /tmp/native-dl/libasherah-x64.dll   "$NATIVE_DIR/win-x64/native/asherah_ffi.dll"
           [ -f /tmp/native-dl/libasherah-arm64.dll ] && cp /tmp/native-dl/libasherah-arm64.dll "$NATIVE_DIR/win-arm64/native/asherah_ffi.dll"
@@ -120,14 +126,14 @@ jobs:
               continue
             fi
             unzip -l "$pkg" | grep -E 'native|runtimes' | sort
-            for required in linux-x64 linux-arm64 osx-x64 osx-arm64; do
+            for required in linux-x64 linux-arm64 linux-musl-x64 linux-musl-arm64 osx-x64 osx-arm64; do
               if ! unzip -l "$pkg" | grep -q "runtimes/${required}/native/"; then
                 echo "ERROR: Missing required native library for ${required}"
                 exit 1
               fi
             done
             COUNT=$(unzip -l "$pkg" | grep -c "runtimes/.*/native/.*\.\(so\|dylib\|dll\)$" || true)
-            echo "$COUNT native libraries bundled (4 required, Windows optional)"
+            echo "$COUNT native libraries bundled (6 required, Windows optional)"
           done
 
       - name: Publish to GitHub Packages

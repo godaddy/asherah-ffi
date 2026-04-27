@@ -50,17 +50,21 @@ jobs:
           echo "Downloading native libs from release ${TAG}"
 
           mkdir -p /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-x64.so'     -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-arm64.so'    -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-x64.dylib'   -D /tmp/native-dl
-          gh release download "$TAG" -p 'libasherah-arm64.dylib' -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-x64.so'           -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-arm64.so'         -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-x64-musl.so'      -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-arm64-musl.so'    -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-x64.dylib'        -D /tmp/native-dl
+          gh release download "$TAG" -p 'libasherah-arm64.dylib'      -D /tmp/native-dl
 
           # Stage for gem packaging (rename to libasherah_ffi.*)
-          mkdir -p /tmp/staged/{x86_64-linux,aarch64-linux,x86_64-darwin,arm64-darwin}
-          cp /tmp/native-dl/libasherah-x64.so     /tmp/staged/x86_64-linux/libasherah_ffi.so
-          cp /tmp/native-dl/libasherah-arm64.so    /tmp/staged/aarch64-linux/libasherah_ffi.so
-          cp /tmp/native-dl/libasherah-x64.dylib   /tmp/staged/x86_64-darwin/libasherah_ffi.dylib
-          cp /tmp/native-dl/libasherah-arm64.dylib /tmp/staged/arm64-darwin/libasherah_ffi.dylib
+          mkdir -p /tmp/staged/{x86_64-linux,aarch64-linux,x86_64-linux-musl,aarch64-linux-musl,x86_64-darwin,arm64-darwin}
+          cp /tmp/native-dl/libasherah-x64.so          /tmp/staged/x86_64-linux/libasherah_ffi.so
+          cp /tmp/native-dl/libasherah-arm64.so        /tmp/staged/aarch64-linux/libasherah_ffi.so
+          cp /tmp/native-dl/libasherah-x64-musl.so     /tmp/staged/x86_64-linux-musl/libasherah_ffi.so
+          cp /tmp/native-dl/libasherah-arm64-musl.so   /tmp/staged/aarch64-linux-musl/libasherah_ffi.so
+          cp /tmp/native-dl/libasherah-x64.dylib       /tmp/staged/x86_64-darwin/libasherah_ffi.dylib
+          cp /tmp/native-dl/libasherah-arm64.dylib     /tmp/staged/arm64-darwin/libasherah_ffi.dylib
 
       - name: Set version
         working-directory: asherah-ruby
@@ -97,7 +101,7 @@ jobs:
         run: |
           mkdir -p pkg
 
-          for platform in x86_64-linux aarch64-linux x86_64-darwin arm64-darwin; do
+          for platform in x86_64-linux aarch64-linux x86_64-linux-musl aarch64-linux-musl x86_64-darwin arm64-darwin; do
             lib=$(find "/tmp/staged/$platform" -name 'libasherah_ffi.*' | head -1)
             if [ -z "$lib" ]; then
               echo "WARNING: No library for $platform"

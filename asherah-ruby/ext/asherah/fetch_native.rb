@@ -18,12 +18,14 @@ module AsherahFetchNative
   # Map Ruby platform identifiers to our release asset names.
   # Keys: [os, cpu] from RbConfig. Values: [asset_name, local_name].
   PLATFORM_MAP = {
-    ["linux", "x86_64"]   => ["libasherah-x64.so",       "libasherah_ffi.so"],
-    ["linux", "aarch64"]  => ["libasherah-arm64.so",      "libasherah_ffi.so"],
-    ["darwin", "x86_64"]  => ["libasherah-x64.dylib",     "libasherah_ffi.dylib"],
-    ["darwin", "arm64"]   => ["libasherah-arm64.dylib",   "libasherah_ffi.dylib"],
-    ["mingw", "x86_64"]   => ["libasherah-x64.dll",       "asherah_ffi.dll"],
-    ["mingw", "aarch64"]  => ["libasherah-arm64.dll",      "asherah_ffi.dll"],
+    ["linux", "x86_64"]        => ["libasherah-x64.so",         "libasherah_ffi.so"],
+    ["linux", "aarch64"]       => ["libasherah-arm64.so",       "libasherah_ffi.so"],
+    ["linux-musl", "x86_64"]   => ["libasherah-x64-musl.so",    "libasherah_ffi.so"],
+    ["linux-musl", "aarch64"]  => ["libasherah-arm64-musl.so",  "libasherah_ffi.so"],
+    ["darwin", "x86_64"]       => ["libasherah-x64.dylib",      "libasherah_ffi.dylib"],
+    ["darwin", "arm64"]        => ["libasherah-arm64.dylib",    "libasherah_ffi.dylib"],
+    ["mingw", "x86_64"]        => ["libasherah-x64.dll",        "asherah_ffi.dll"],
+    ["mingw", "aarch64"]       => ["libasherah-arm64.dll",      "asherah_ffi.dll"],
   }.freeze
 
   class << self
@@ -61,7 +63,8 @@ module AsherahFetchNative
       host_cpu = RbConfig::CONFIG["host_cpu"]
 
       os = case host_os
-           when /linux/          then "linux"
+           when /linux.*musl/    then "linux-musl"
+           when /linux/          then musl_libc? ? "linux-musl" : "linux"
            when /darwin/         then "darwin"
            when /mswin|mingw/    then "mingw"
            else                       host_os
@@ -77,6 +80,16 @@ module AsherahFetchNative
       result = PLATFORM_MAP[key]
       abort "ERROR: Unsupported platform #{os}-#{cpu} (#{RUBY_PLATFORM})" unless result
       result
+    end
+
+    # True when running on musl libc (e.g. Alpine Linux). Modern Ruby on
+    # Alpine reports host_os=linux-musl directly, but older builds may
+    # report just "linux" — fall back to inspecting RUBY_PLATFORM and
+    # the dynamic loader.
+    def musl_libc?
+      return true if RUBY_PLATFORM.include?("musl")
+      return true if File.exist?("/lib/ld-musl-x86_64.so.1") || File.exist?("/lib/ld-musl-aarch64.so.1")
+      false
     end
 
     def resolve_version

@@ -39,7 +39,7 @@ dependencies {
 }
 ```
 
-The package includes prebuilt native JNI libraries for Linux x64/ARM64, macOS x64/ARM64, and Windows x64/ARM64.
+The package includes prebuilt native JNI libraries for Linux x64/ARM64 (glibc and musl/Alpine), macOS x64/ARM64, and Windows x64/ARM64.
 
 ## Quick Start
 
