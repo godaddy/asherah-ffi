@@ -124,10 +124,15 @@ your callback by a dedicated worker thread. The encrypt/decrypt hot path
 performs only a level check + non-blocking channel send, so a slow
 callback never extends an encrypt's latency. When the queue is full,
 events are dropped — `Asherah.LogDroppedCount()` and
-`Asherah.MetricsDroppedCount()` expose the cumulative drop count. To tune
-the queue size or filter to a minimum log level (e.g. only deliver
-`Warn`+ to skip the verbose debug records), use the
-`SetLogHook(callback, queueCapacity, minLevel)` overload.
+`Asherah.MetricsDroppedCount()` expose the cumulative drop count.
+
+**Default log level is `Warn`.** Verbose `Trace`/`Debug`/`Info` records
+from the encrypt/decrypt hot path are filtered out at the producer
+thread before any allocation, so installing a hook never floods you
+with noise. Pass `LogLevel.Trace` (or any other level) explicitly via
+the `SetLogHook(callback, queueCapacity, minLevel)` overload (or the
+`SetLogHookSync` overload) when you want the verbose records, e.g. for
+debugging.
 
 **Synchronous delivery (opt-in).** For diagnostics, single-threaded apps,
 or when you need thread-local context (trace IDs, request scopes) intact

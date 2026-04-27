@@ -47,8 +47,10 @@ fn async_log_sink_delivers_events_off_thread() {
     let sink = AsyncLogSink::new(SharedLogSink(Arc::clone(&inner)), AsyncLogConfig::default());
     logging::set_sink("async-test", Some(Arc::new(sink)));
 
+    // `warn!` (not `info!`) because the default `AsyncLogConfig` filters
+    // anything below Warn at the producer thread.
     for _ in 0..200 {
-        log::info!(target: TEST_TARGET, "hello");
+        log::warn!(target: TEST_TARGET, "hello");
     }
 
     // Worker drains asynchronously — wait briefly for delivery.

@@ -121,7 +121,8 @@ pub struct AsyncLogConfig {
     /// Filter applied on the producer thread before materializing the
     /// record. Records whose level is more verbose than this filter are
     /// discarded before any allocation or queue push. Default:
-    /// [`log::LevelFilter::Trace`] (deliver everything).
+    /// [`log::LevelFilter::Warn`] — Trace/Debug/Info are dropped. Pass
+    /// [`log::LevelFilter::Trace`] to deliver everything.
     pub min_level: log::LevelFilter,
 }
 
@@ -129,7 +130,10 @@ impl Default for AsyncLogConfig {
     fn default() -> Self {
         Self {
             queue_capacity: 4096,
-            min_level: log::LevelFilter::Trace,
+            // Warn-and-above by default. Trace/Debug/Info are dropped at the
+            // producer thread before any allocation. Callers who want the
+            // verbose records pass an explicit `min_level` (typically Trace).
+            min_level: log::LevelFilter::Warn,
         }
     }
 }

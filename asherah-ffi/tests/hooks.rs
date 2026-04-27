@@ -110,7 +110,8 @@ fn log_hook_register_and_invoke() {
 fn log_hook_clear_stops_callbacks() {
     let _t = HookTest::new();
     unsafe { asherah_set_log_hook(Some(log_cb), std::ptr::null_mut()) };
-    log::info!("first");
+    // `warn!` (not `info!`) because the default min level is Warn.
+    log::warn!("first");
     wait_for(|| LOG_COUNT.load(AtomOrd::Relaxed) >= 1);
     let after_first = LOG_COUNT.load(AtomOrd::Relaxed);
     assert!(after_first >= 1);
@@ -118,7 +119,7 @@ fn log_hook_clear_stops_callbacks() {
     // Async dispatch worker is gone now; emitting more records cannot reach
     // the old callback. Give a moment for any in-flight events to drain
     // (there should be none at this point).
-    log::info!("second — should not fire callback");
+    log::warn!("second — should not fire callback");
     std::thread::sleep(Duration::from_millis(20));
     let after_clear = LOG_COUNT.load(AtomOrd::Relaxed);
     assert_eq!(after_first, after_clear, "callback fired after clear");

@@ -126,9 +126,11 @@ impl LogSink for CallbackLogSink {
 // thousand encrypts worth of records on a hot path before the queue starts
 // dropping. Override per-hook via `asherah_set_log_hook_with_config`.
 const DEFAULT_LOG_QUEUE_CAPACITY: usize = 4096;
-// Default min level — deliver everything. Tighten via `_with_config` if
-// callers want to skip the verbose debug/trace records.
-const DEFAULT_LOG_MIN_LEVEL: i32 = ASHERAH_LOG_TRACE;
+// Default min level — Warn and above. Trace/Debug/Info are dropped at the
+// producer thread so they never reach the queue. Callers who want the
+// verbose records pass `ASHERAH_LOG_TRACE` (or any other level constant)
+// to `_with_config` / `_sync` explicitly.
+const DEFAULT_LOG_MIN_LEVEL: i32 = ASHERAH_LOG_WARN;
 
 // Synchronous variant of `CallbackLogSink` that applies a per-hook level
 // filter. Async mode does the filter inside `AsyncLogSink::log` to avoid
@@ -193,6 +195,13 @@ fn install_log_hook_with_config(
 /// unchanged on every invocation; it may be NULL.
 ///
 /// Returns 0 on success, -1 if `callback` is NULL.
+///
+/// # Default level filter
+/// Only `Warn` and `Error` records are delivered by default. Verbose
+/// `Trace`/`Debug`/`Info` records are dropped at the producer thread —
+/// they never reach the queue and never invoke the callback. Use
+/// [`asherah_set_log_hook_with_config`] with `ASHERAH_LOG_TRACE` (or any
+/// other level constant) to widen the filter.
 ///
 /// # Async dispatch
 /// The callback is **not** invoked on the encrypt/decrypt thread. Records

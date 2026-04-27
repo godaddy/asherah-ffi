@@ -333,8 +333,9 @@ public static class Asherah
     /// <param name="callback">The hook to register. <c>null</c> deregisters.</param>
     /// <param name="minLevel">
     /// Records more verbose than this level are filtered out before the
-    /// callback is invoked. Default <see cref="LogLevel.Trace"/> delivers
-    /// everything.
+    /// callback is invoked. Defaults to <see cref="LogLevel.Warn"/> so
+    /// only <c>Warn</c>/<c>Error</c> records are delivered. Pass
+    /// <see cref="LogLevel.Trace"/> to deliver everything.
     /// </param>
     /// <remarks>
     /// Use this when you're diagnosing a problem and need the callback to
@@ -349,7 +350,7 @@ public static class Asherah
     /// </para>
     /// </remarks>
     public static unsafe void SetLogHookSync(
-        Action<LogEvent>? callback, LogLevel minLevel = LogLevel.Trace)
+        Action<LogEvent>? callback, LogLevel minLevel = LogLevel.Warn)
     {
         lock (HookLock)
         {
