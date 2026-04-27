@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	asherah "github.com/godaddy/asherah-ffi/asherah-go"
 )
@@ -95,6 +96,43 @@ func main() {
 	wg.Wait()
 
 	asherah.Shutdown()
+
+	// -- 4. Log + metrics hooks: forward observability events to your stack --
+	var logEvents, metricEvents int32
+	if err := asherah.SetLogHook(func(e asherah.LogEvent) {
+		atomic.AddInt32(&logEvents, 1)
+		// In real code, dispatch to log/slog/zap based on e.Level.
+		if e.Level != asherah.LogTrace && e.Level != asherah.LogDebug {
+			fmt.Printf("[asherah-log %s] %s: %s\n", e.Level, e.Target, e.Message)
+		}
+	}); err != nil {
+		log.Fatal(err)
+	}
+	if err := asherah.SetMetricsHook(func(e asherah.MetricsEvent) {
+		atomic.AddInt32(&metricEvents, 1)
+		// In real code, dispatch to your metrics library (statsd, prometheus, etc.).
+		// Timing events have non-zero DurationNs and empty Name.
+		// Cache events have non-empty Name and DurationNs == 0.
+	}); err != nil {
+		log.Fatal(err)
+	}
+	if err := asherah.Setup(config); err != nil {
+		log.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		ct, err := asherah.EncryptString("hooks-partition", fmt.Sprintf("hook-payload-%d", i))
+		if err != nil {
+			log.Fatal(err)
+		}
+		if _, err := asherah.DecryptString("hooks-partition", ct); err != nil {
+			log.Fatal(err)
+		}
+	}
+	asherah.Shutdown()
+	_ = asherah.ClearLogHook()
+	_ = asherah.ClearMetricsHook()
+	fmt.Printf("Hooks observed %d log events and %d metric events\n",
+		atomic.LoadInt32(&logEvents), atomic.LoadInt32(&metricEvents))
 }
 
 // -- 4. Production config (commented out) --

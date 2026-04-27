@@ -26,6 +26,10 @@ func loadSymbols(lib uintptr) error {
 	reg(&fnDecryptFromJSON, "asherah_decrypt_from_json")
 	reg(&fnBufferFree, "asherah_buffer_free")
 	reg(&fnLastErrorMessage, "asherah_last_error_message")
+	reg(&fnSetLogHook, "asherah_set_log_hook")
+	reg(&fnClearLogHook, "asherah_clear_log_hook")
+	reg(&fnSetMetricsHook, "asherah_set_metrics_hook")
+	reg(&fnClearMetricsHook, "asherah_clear_metrics_hook")
 
 	return err
 }

@@ -104,18 +104,29 @@ func (s *Session) Encrypt(plaintext []byte) ([]byte, error) {
 		return nil, errors.New("asherah-go: session is closed")
 	}
 
-	var buf asherahBuffer
+	// Pin the output buffer so the Go runtime cannot move it during the C
+	// call. If a metrics or log hook is installed, it fires from inside this
+	// C call and may trigger Go GC that relocates heap objects. A relocated
+	// buf invalidates the bare uintptr we passed to C — when C subsequently
+	// writes `*out = buf`, it writes to the old (now-stale) address.
+	var pinner runtime.Pinner
+	buf := new(asherahBuffer)
+	pinner.Pin(buf)
+	defer pinner.Unpin()
+
 	var dataPtr uintptr
 	if len(plaintext) > 0 {
+		pinner.Pin(&plaintext[0])
 		dataPtr = uintptr(unsafe.Pointer(&plaintext[0]))
 	}
-	rc := fnEncryptToJSON(s.ptr, dataPtr, uintptr(len(plaintext)), uintptr(unsafe.Pointer(&buf)))
+	rc := fnEncryptToJSON(s.ptr, dataPtr, uintptr(len(plaintext)), uintptr(unsafe.Pointer(buf)))
 	runtime.KeepAlive(plaintext)
+	runtime.KeepAlive(buf)
 	if rc != 0 {
 		return nil, fmt.Errorf("asherah-go: encrypt failed: %s", lastErrorMessage())
 	}
-	defer freeBuffer(&buf)
-	return readBuffer(&buf), nil
+	defer freeBuffer(buf)
+	return readBuffer(buf), nil
 }
 
 // EncryptString encrypts a UTF-8 string and returns a JSON string.
@@ -135,18 +146,26 @@ func (s *Session) Decrypt(dataRowRecord []byte) ([]byte, error) {
 		return nil, errors.New("asherah-go: session is closed")
 	}
 
-	var buf asherahBuffer
+	// See Encrypt for why we pin the buffer (Go callbacks fired during this
+	// C call can trigger GC that relocates heap objects).
+	var pinner runtime.Pinner
+	buf := new(asherahBuffer)
+	pinner.Pin(buf)
+	defer pinner.Unpin()
+
 	var jsonPtr uintptr
 	if len(dataRowRecord) > 0 {
+		pinner.Pin(&dataRowRecord[0])
 		jsonPtr = uintptr(unsafe.Pointer(&dataRowRecord[0]))
 	}
-	rc := fnDecryptFromJSON(s.ptr, jsonPtr, uintptr(len(dataRowRecord)), uintptr(unsafe.Pointer(&buf)))
+	rc := fnDecryptFromJSON(s.ptr, jsonPtr, uintptr(len(dataRowRecord)), uintptr(unsafe.Pointer(buf)))
 	runtime.KeepAlive(dataRowRecord)
+	runtime.KeepAlive(buf)
 	if rc != 0 {
 		return nil, fmt.Errorf("asherah-go: decrypt failed: %s", lastErrorMessage())
 	}
-	defer freeBuffer(&buf)
-	return readBuffer(&buf), nil
+	defer freeBuffer(buf)
+	return readBuffer(buf), nil
 }
 
 // DecryptString decrypts the provided DataRowRecord JSON and returns a UTF-8 string.
