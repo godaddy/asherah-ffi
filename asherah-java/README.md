@@ -275,6 +275,89 @@ AsherahFactory factory = Asherah.factoryFromEnv();
 | `decryptStringAsync(String)` | True async decrypt, string variant |
 | `close()` | Release the session (implements `AutoCloseable`) |
 
+## Observability hooks
+
+### Log hook
+
+Forward all log records emitted by the underlying Rust crates to your own
+logging framework via `Asherah.setLogHook(...)`. Pass `null` (or call
+`clearLogHook()`) to detach.
+
+```java
+import com.godaddy.asherah.jni.Asherah;
+import com.godaddy.asherah.jni.LogEvent;
+import com.godaddy.asherah.jni.LogLevel;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+Logger log = LoggerFactory.getLogger("asherah");
+
+Asherah.setLogHook(event -> {
+    LogLevel level = event.getLevelEnum();
+    String msg = "[" + event.getTarget() + "] " + event.getMessage();
+    switch (level) {
+        case TRACE: log.trace(msg); break;
+        case DEBUG: log.debug(msg); break;
+        case INFO:  log.info(msg);  break;
+        case WARN:  log.warn(msg);  break;
+        case ERROR: log.error(msg); break;
+    }
+});
+// ... later
+Asherah.clearLogHook();
+```
+
+`AsherahLogHook` is a `@FunctionalInterface` so a lambda is sufficient. The
+hook may fire from any thread (tokio worker threads, DB driver threads), so
+implementations must be thread-safe and should not block. Exceptions thrown
+from the hook are caught and silently swallowed by the JNI bridge.
+
+### Metrics hook
+
+Receive timing observations (`encrypt`, `decrypt`, `store`, `load`) and cache
+events (`cache_hit`, `cache_miss`, `cache_stale`) via
+`Asherah.setMetricsHook(...)`. Installing a hook implicitly enables the
+global metrics gate; clearing it disables the gate.
+
+```java
+import com.godaddy.asherah.jni.Asherah;
+import com.godaddy.asherah.jni.MetricsEvent;
+import com.godaddy.asherah.jni.MetricsEventType;
+
+Asherah.setMetricsHook(event -> {
+    switch (event.getTypeEnum()) {
+        case ENCRYPT:
+        case DECRYPT:
+        case STORE:
+        case LOAD:
+            // event.getDurationNs() carries elapsed nanoseconds
+            myMetrics.timing("asherah." + event.getType(), event.getDurationNs());
+            break;
+        case CACHE_HIT:
+        case CACHE_MISS:
+        case CACHE_STALE:
+            // event.getName() carries the cache identifier
+            myMetrics.counter("asherah." + event.getType(), event.getName());
+            break;
+    }
+});
+// ... later
+Asherah.clearMetricsHook();
+```
+
+| Event type | Duration | Name |
+|---|---|---|
+| `ENCRYPT` | elapsed ns | `null` |
+| `DECRYPT` | elapsed ns | `null` |
+| `STORE` | elapsed ns | `null` |
+| `LOAD` | elapsed ns | `null` |
+| `CACHE_HIT` | `0` | cache identifier |
+| `CACHE_MISS` | `0` | cache identifier |
+| `CACHE_STALE` | `0` | cache identifier |
+
+The same threading caveats apply as for the log hook — implementations must
+be thread-safe and non-blocking, and exceptions are caught.
+
 ## License
 
 Licensed under the Apache License, Version 2.0.

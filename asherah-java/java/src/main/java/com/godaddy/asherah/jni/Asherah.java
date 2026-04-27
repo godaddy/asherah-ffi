@@ -204,4 +204,33 @@ public final class Asherah {
       throw new IllegalStateException("Asherah not configured; call setup() first");
     }
   }
+
+  /**
+   * Install a log hook. Replaces any previously installed hook. The callback
+   * may fire from any thread; implementations must be thread-safe. Pass
+   * {@code null} to clear (equivalent to {@link #clearLogHook()}).
+   */
+  public static void setLogHook(final AsherahLogHook callback) {
+    AsherahNative.setLogHook(callback);
+  }
+
+  /** Remove the currently installed log hook, if any. */
+  public static void clearLogHook() {
+    AsherahNative.clearLogHook();
+  }
+
+  /**
+   * Install a metrics hook. Replaces any previously installed hook. Installing
+   * a hook implicitly enables the global metrics gate; clearing it disables
+   * the gate. Pass {@code null} to clear (equivalent to
+   * {@link #clearMetricsHook()}).
+   */
+  public static void setMetricsHook(final AsherahMetricsHook callback) {
+    AsherahNative.setMetricsHook(callback);
+  }
+
+  /** Remove the currently installed metrics hook, if any. */
+  public static void clearMetricsHook() {
+    AsherahNative.clearMetricsHook();
+  }
 }

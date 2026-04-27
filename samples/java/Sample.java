@@ -5,6 +5,7 @@ import com.godaddy.asherah.jni.AsherahSession;
 
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class Sample {
     public static void main(String[] args) throws Exception {
@@ -55,6 +56,39 @@ public class Sample {
         } finally {
             Asherah.shutdown();
         }
+
+        // -- 4. Log + metrics hooks: forward observability events to your stack --
+        AtomicInteger logEvents = new AtomicInteger();
+        AtomicInteger metricEvents = new AtomicInteger();
+        Asherah.setLogHook(event -> {
+            logEvents.incrementAndGet();
+            // In real code, dispatch to slf4j / log4j / java.util.logging based on event.getLevelEnum().
+            if (event.getLevelEnum() != com.godaddy.asherah.jni.LogLevel.TRACE
+                    && event.getLevelEnum() != com.godaddy.asherah.jni.LogLevel.DEBUG) {
+                System.out.println("[asherah-log " + event.getLevel() + "] "
+                        + event.getTarget() + ": " + event.getMessage());
+            }
+        });
+        Asherah.setMetricsHook(event -> {
+            metricEvents.incrementAndGet();
+            // In real code, dispatch to your metrics library (statsd, prometheus, etc.).
+            // Timing events have non-zero durationNs and null name.
+            // Cache events have name set and durationNs == 0.
+        });
+        Asherah.setup(config);
+        try (AsherahFactory factory = Asherah.factoryFromConfig(config);
+             AsherahSession session = factory.getSession("hooks-partition")) {
+            for (int i = 0; i < 5; i++) {
+                String ct = session.encryptString("hook-payload-" + i);
+                session.decryptString(ct);
+            }
+        } finally {
+            Asherah.shutdown();
+            Asherah.clearLogHook();
+            Asherah.clearMetricsHook();
+        }
+        System.out.println("Hooks observed " + logEvents.get() + " log events and "
+                + metricEvents.get() + " metric events");
     }
 
     // -- 4. Production config (commented out) --
