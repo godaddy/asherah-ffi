@@ -46,6 +46,12 @@ fn setup(config_obj: &Bound<'_, PyAny>) -> PyResult<()> {
         .extract()?;
     let cfg = config::ConfigOptions::from_json(&json_config).map_err(anyhow_to_py)?;
     let (factory, applied) = config::factory_from_config(&cfg).map_err(anyhow_to_py)?;
+    // Always enable per-factory metrics so an installed metrics hook
+    // actually fires for encrypt/decrypt/store/load events. The cost is
+    // one Instant::now() per encrypt regardless of hook state; the
+    // global metrics gate (toggled by set_metrics_hook) decides whether
+    // the sink is actually invoked.
+    let factory = factory.with_metrics(true);
     let mut guard = MANAGER.lock();
     if guard.is_some() {
         return Err(PyRuntimeError::new_err(
@@ -263,6 +269,7 @@ impl PySessionFactory {
     #[new]
     pub fn new() -> PyResult<Self> {
         let inner = ael::builders::factory_from_env().map_err(anyhow_to_py)?;
+        let inner = inner.with_metrics(true);
         Ok(Self { inner })
     }
 
@@ -457,6 +464,16 @@ impl MetricsSink for PyMetricsSink {
             Ok(dict.into_any().unbind())
         });
     }
+
+    fn cache_stale(&self, name: &str) {
+        let name = name.to_string();
+        self.emit(|py| {
+            let dict = PyDict::new(py);
+            dict.set_item("type", "cache_stale")?;
+            dict.set_item("name", &name)?;
+            Ok(dict.into_any().unbind())
+        });
+    }
 }
 
 struct PyLogSink {
@@ -465,7 +482,16 @@ struct PyLogSink {
 
 impl LogSink for PyLogSink {
     fn log(&self, record: &log::Record<'_>) {
-        let level = record.level().to_string();
+        // Normalize to lowercase ("warn" not "WARN") to match the
+        // documented set of LogEvent.level values across all bindings.
+        let level = match record.level() {
+            log::Level::Error => "error",
+            log::Level::Warn => "warn",
+            log::Level::Info => "info",
+            log::Level::Debug => "debug",
+            log::Level::Trace => "trace",
+        }
+        .to_string();
         let message = record.args().to_string();
         let target = record.target().to_string();
         let cb = Arc::clone(&self.callback);
@@ -492,9 +518,13 @@ fn set_metrics_hook(callback: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
         metrics::set_sink(PyMetricsSink {
             callback: Arc::clone(&arc),
         });
+        // Metrics are gated for performance; enable them when a hook is
+        // installed, disable them when cleared.
+        metrics::set_enabled(true);
         *PY_METRICS_CALLBACK.lock() = Some(arc);
     } else {
         metrics::clear_sink();
+        metrics::set_enabled(false);
         *PY_METRICS_CALLBACK.lock() = None;
     }
     Ok(())
