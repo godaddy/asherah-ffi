@@ -178,7 +178,9 @@ dependencies = [
  "asherah",
  "asherah-cobhan",
  "asherah-config",
+ "log",
  "once_cell",
+ "parking_lot",
  "serde_json",
  "tokio",
 ]

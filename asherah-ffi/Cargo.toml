@@ -11,7 +11,7 @@ keywords = ["asherah", "ffi", "encryption", "kms"]
 categories = ["cryptography", "memory-management", "ffi"]
 
 [lib]
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 asherah = { path = "../asherah", features = ["sqlite", "mysql", "postgres", "dynamodb"] }
@@ -21,6 +21,8 @@ serde_json = "1.0"
 anyhow = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 once_cell = "1"
+parking_lot = "0.12"
+log = "0.4"
 
 [lints]
 workspace = true
