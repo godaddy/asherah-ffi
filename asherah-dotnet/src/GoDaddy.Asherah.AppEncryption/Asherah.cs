@@ -276,6 +276,56 @@ public static class Asherah
     public static void ClearLogHook() => SetLogHook(null);
 
     /// <summary>
+    /// Configurable variant of <see cref="SetLogHook(Action{LogEvent}?)"/>.
+    /// Tunes the bounded MPSC queue used to deliver records asynchronously
+    /// and the minimum severity actually delivered.
+    /// </summary>
+    /// <param name="callback">The hook to register. <c>null</c> deregisters.</param>
+    /// <param name="queueCapacity">
+    /// Maximum events buffered in the worker queue. <c>0</c> uses the
+    /// default (4096). When the queue is full, additional records are
+    /// dropped — see <see cref="LogDroppedCount"/>.
+    /// </param>
+    /// <param name="minLevel">
+    /// Records more verbose than this level are filtered out by the
+    /// producer thread before any allocation or queue push. Use this to
+    /// skip the verbose <c>Trace</c>/<c>Debug</c> records and only pay for
+    /// <c>Warn</c>/<c>Error</c>.
+    /// </param>
+    public static unsafe void SetLogHook(
+        Action<LogEvent>? callback, int queueCapacity, LogLevel minLevel)
+    {
+        lock (HookLock)
+        {
+            if (callback is null)
+            {
+                NativeMethods.asherah_clear_log_hook();
+                _logHook = null;
+                return;
+            }
+            _logHook = callback;
+            var rc = NativeMethods.asherah_set_log_hook_with_config(
+                &LogTrampoline,
+                IntPtr.Zero,
+                (UIntPtr)Math.Max(queueCapacity, 0),
+                (int)minLevel);
+            if (rc != 0)
+            {
+                _logHook = null;
+                throw new InvalidOperationException(
+                    $"asherah_set_log_hook_with_config failed: rc={rc}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cumulative count of log records dropped because the async
+    /// dispatcher's queue was full, since the process started. Cumulative
+    /// across all hook installations; never resets.
+    /// </summary>
+    public static ulong LogDroppedCount() => NativeMethods.asherah_log_dropped_count();
+
+    /// <summary>
     /// Register a callback that receives every metrics event from the
     /// Rust core: encrypt/decrypt timings, metastore store/load timings,
     /// and key cache hit/miss/stale counters. Pass <c>null</c> to
@@ -284,7 +334,7 @@ public static class Asherah
     /// <remarks>
     /// Metrics collection is enabled automatically when a hook is
     /// installed and disabled when cleared. Same threading and exception
-    /// semantics as <see cref="SetLogHook"/>.
+    /// semantics as <see cref="SetLogHook(Action{LogEvent}?)"/>.
     /// </remarks>
     public static unsafe void SetMetricsHook(Action<MetricsEvent>? callback)
     {
@@ -306,6 +356,39 @@ public static class Asherah
             }
         }
     }
+
+    /// <summary>
+    /// Configurable variant of <see cref="SetMetricsHook(Action{MetricsEvent}?)"/>.
+    /// </summary>
+    public static unsafe void SetMetricsHook(Action<MetricsEvent>? callback, int queueCapacity)
+    {
+        lock (HookLock)
+        {
+            if (callback is null)
+            {
+                NativeMethods.asherah_clear_metrics_hook();
+                _metricsHook = null;
+                return;
+            }
+            _metricsHook = callback;
+            var rc = NativeMethods.asherah_set_metrics_hook_with_config(
+                &MetricsTrampoline,
+                IntPtr.Zero,
+                (UIntPtr)Math.Max(queueCapacity, 0));
+            if (rc != 0)
+            {
+                _metricsHook = null;
+                throw new InvalidOperationException(
+                    $"asherah_set_metrics_hook_with_config failed: rc={rc}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cumulative count of metrics events dropped because the async
+    /// dispatcher's queue was full, since the process started.
+    /// </summary>
+    public static ulong MetricsDroppedCount() => NativeMethods.asherah_metrics_dropped_count();
 
     /// <summary>
     /// Convenience method equivalent to <c>SetMetricsHook(null)</c>.

@@ -14,11 +14,13 @@ extern crate asherah_cobhan;
 
 mod hooks;
 pub use hooks::{
-    asherah_clear_log_hook, asherah_clear_metrics_hook, asherah_set_log_hook,
-    asherah_set_metrics_hook, AsherahLogCallback, AsherahMetricsCallback, ASHERAH_LOG_DEBUG,
-    ASHERAH_LOG_ERROR, ASHERAH_LOG_INFO, ASHERAH_LOG_TRACE, ASHERAH_LOG_WARN,
-    ASHERAH_METRIC_CACHE_HIT, ASHERAH_METRIC_CACHE_MISS, ASHERAH_METRIC_CACHE_STALE,
-    ASHERAH_METRIC_DECRYPT, ASHERAH_METRIC_ENCRYPT, ASHERAH_METRIC_LOAD, ASHERAH_METRIC_STORE,
+    asherah_clear_log_hook, asherah_clear_metrics_hook, asherah_log_dropped_count,
+    asherah_metrics_dropped_count, asherah_set_log_hook, asherah_set_log_hook_with_config,
+    asherah_set_metrics_hook, asherah_set_metrics_hook_with_config, AsherahLogCallback,
+    AsherahMetricsCallback, ASHERAH_LOG_DEBUG, ASHERAH_LOG_ERROR, ASHERAH_LOG_INFO,
+    ASHERAH_LOG_TRACE, ASHERAH_LOG_WARN, ASHERAH_METRIC_CACHE_HIT, ASHERAH_METRIC_CACHE_MISS,
+    ASHERAH_METRIC_CACHE_STALE, ASHERAH_METRIC_DECRYPT, ASHERAH_METRIC_ENCRYPT,
+    ASHERAH_METRIC_LOAD, ASHERAH_METRIC_STORE,
 };
 
 use std::ffi::{CStr, CString};

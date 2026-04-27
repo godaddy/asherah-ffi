@@ -83,6 +83,27 @@ internal static class NativeMethods
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int asherah_clear_metrics_hook();
+
+    // Configurable variants — let the caller pick the async-dispatch
+    // queue size and (for log) the minimum delivered level.
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern unsafe int asherah_set_log_hook_with_config(
+        delegate* unmanaged[Cdecl]<IntPtr, int, IntPtr, IntPtr, void> callback,
+        IntPtr userData,
+        UIntPtr queueCapacity,
+        int minLevel);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern unsafe int asherah_set_metrics_hook_with_config(
+        delegate* unmanaged[Cdecl]<IntPtr, int, ulong, IntPtr, void> callback,
+        IntPtr userData,
+        UIntPtr queueCapacity);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern ulong asherah_log_dropped_count();
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern ulong asherah_metrics_dropped_count();
 }
 
 [StructLayout(LayoutKind.Sequential)]

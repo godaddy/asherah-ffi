@@ -118,6 +118,17 @@ driver threads). The trampoline catches every exception thrown by your
 callback so a faulty hook cannot crash the process — log it via your
 own observability tooling.
 
+**Async delivery + bounded queue.** Log and metrics events are buffered
+in a process-wide MPSC channel (default capacity 4096) and delivered to
+your callback by a dedicated worker thread. The encrypt/decrypt hot path
+performs only a level check + non-blocking channel send, so a slow
+callback never extends an encrypt's latency. When the queue is full,
+events are dropped — `Asherah.LogDroppedCount` and
+`Asherah.MetricsDroppedCount` expose the cumulative drop count. To tune
+the queue size or filter to a minimum log level (e.g. only deliver
+`Warn`+ to skip the verbose debug records), use the
+`SetLogHook(callback, queueCapacity, minLevel)` overload.
+
 ### Metrics hook
 
 Receive timing events for encrypt/decrypt/store/load and counter events

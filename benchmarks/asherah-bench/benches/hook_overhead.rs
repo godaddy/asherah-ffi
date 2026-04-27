@@ -16,6 +16,7 @@
 //! "global gate short-circuits" optimization works.
 
 use asherah::logging::LogSink;
+use asherah::metrics::{AsyncMetricsConfig, AsyncMetricsSink};
 use asherah::{builders, logging, metrics};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use std::sync::Arc;
@@ -53,6 +54,30 @@ fn install_counting_sink() {
         count: std::sync::atomic::AtomicU64::new(0),
     };
     metrics::set_sink(sink);
+    metrics::set_enabled(true);
+}
+
+/// Counting sink that simulates a SLOW user callback by sleeping. Used to
+/// demonstrate that the async dispatch wrapper insulates encrypt latency
+/// from the user's callback runtime.
+struct SlowCountingSink;
+impl metrics::MetricsSink for SlowCountingSink {
+    fn encrypt(&self, _dur: std::time::Duration) {
+        std::thread::sleep(std::time::Duration::from_micros(50));
+    }
+    fn decrypt(&self, _dur: std::time::Duration) {
+        std::thread::sleep(std::time::Duration::from_micros(50));
+    }
+}
+
+fn install_slow_sync_sink() {
+    metrics::set_sink(SlowCountingSink);
+    metrics::set_enabled(true);
+}
+
+fn install_slow_async_sink() {
+    let async_sink = AsyncMetricsSink::new(SlowCountingSink, AsyncMetricsConfig::default());
+    metrics::set_sink(async_sink);
     metrics::set_enabled(true);
 }
 
@@ -113,7 +138,7 @@ fn bench_encrypt(c: &mut Criterion) {
         factory.close().ok();
     }
 
-    // Scenario C: metrics_enabled = true, hook installed
+    // Scenario C: metrics_enabled = true, hook installed (fast sync sink)
     {
         install_counting_sink();
         let factory = builders::factory_from_env().expect("factory_c");
@@ -123,6 +148,45 @@ fn bench_encrypt(c: &mut Criterion) {
             let _ = session.encrypt(black_box(&payload)).expect("warmup");
         }
         group.bench_function(BenchmarkId::new("metrics_on_hooked", 64), |b| {
+            b.iter(|| black_box(session.encrypt(black_box(&payload)).expect("encrypt")))
+        });
+        session.close().ok();
+        factory.close().ok();
+        uninstall_sink();
+    }
+
+    // Scenario D: SLOW user callback delivered SYNCHRONOUSLY. Each event
+    // costs ~50µs of sleep so encrypt latency includes it. This is the
+    // scenario the async dispatch wrapper exists to fix.
+    {
+        install_slow_sync_sink();
+        let factory = builders::factory_from_env().expect("factory_d");
+        let factory = factory.with_metrics(true);
+        let session = factory.get_session("hook-bench-d");
+        for _ in 0..50 {
+            let _ = session.encrypt(black_box(&payload)).expect("warmup");
+        }
+        group.bench_function(BenchmarkId::new("metrics_slow_sync", 64), |b| {
+            b.iter(|| black_box(session.encrypt(black_box(&payload)).expect("encrypt")))
+        });
+        session.close().ok();
+        factory.close().ok();
+        uninstall_sink();
+    }
+
+    // Scenario E: SAME slow user callback, delivered ASYNCHRONOUSLY via the
+    // AsyncMetricsSink wrapper used by the C ABI's `asherah_set_metrics_hook`.
+    // Encrypt latency must NOT include the 50µs sleep — the worker thread
+    // absorbs it.
+    {
+        install_slow_async_sink();
+        let factory = builders::factory_from_env().expect("factory_e");
+        let factory = factory.with_metrics(true);
+        let session = factory.get_session("hook-bench-e");
+        for _ in 0..1000 {
+            let _ = session.encrypt(black_box(&payload)).expect("warmup");
+        }
+        group.bench_function(BenchmarkId::new("metrics_slow_async", 64), |b| {
             b.iter(|| black_box(session.encrypt(black_box(&payload)).expect("encrypt")))
         });
         session.close().ok();

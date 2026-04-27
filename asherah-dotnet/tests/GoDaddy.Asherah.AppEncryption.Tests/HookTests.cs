@@ -67,6 +67,21 @@ public class HookTests
         }
     }
 
+    /// <summary>
+    /// The C ABI delivers hook events asynchronously on a dedicated worker
+    /// thread to keep the encrypt/decrypt hot path independent of how slow
+    /// a user-supplied callback is. Tests that assert on collected events
+    /// need to give the worker a moment to drain.
+    /// </summary>
+    private static void WaitFor(Func<bool> cond, int timeoutMs = 2000)
+    {
+        var deadline = Environment.TickCount + timeoutMs;
+        while (!cond() && Environment.TickCount < deadline)
+        {
+            Thread.Sleep(2);
+        }
+    }
+
     [Fact]
     public void LogHook_Fires_OnEncryptDecrypt()
     {
@@ -95,10 +110,14 @@ public class HookTests
         Asherah.SetLogHook(e => events.Add(e));
         Asherah.Setup(CreateConfig(verbose: true));
         Asherah.EncryptString("p2", "first");
+        WaitFor(() => events.Count >= 1);
         var beforeClear = events.Count;
         Assert.True(beforeClear >= 1);
         Asherah.SetLogHook(null);
         Asherah.EncryptString("p2", "second");
+        // Async dispatcher is gone after SetLogHook(null); give a moment
+        // for any in-flight events to drain (there should be none).
+        Thread.Sleep(20);
         Asherah.Shutdown();
         Assert.Equal(beforeClear, events.Count);
     }
@@ -112,9 +131,11 @@ public class HookTests
         Asherah.SetLogHook(e => a.Add(e));
         Asherah.Setup(CreateConfig(verbose: true));
         Asherah.EncryptString("p3", "first");
+        WaitFor(() => !a.IsEmpty);
         Assert.NotEmpty(a);
         Asherah.SetLogHook(e => b.Add(e));
         Asherah.EncryptString("p3", "second");
+        WaitFor(() => !b.IsEmpty);
         Asherah.Shutdown();
         Assert.NotEmpty(a);
         Assert.NotEmpty(b);
@@ -181,10 +202,12 @@ public class HookTests
         Asherah.SetMetricsHook(e => events.Add(e));
         Asherah.Setup(CreateConfig());
         Asherah.EncryptString("p6", "pre-deregister");
+        WaitFor(() => events.Count > 0);
         var beforeClear = events.Count;
         Assert.True(beforeClear > 0);
         Asherah.SetMetricsHook(null);
         Asherah.EncryptString("p6", "post-deregister");
+        Thread.Sleep(20);
         Asherah.Shutdown();
         Assert.Equal(beforeClear, events.Count);
     }
@@ -198,9 +221,11 @@ public class HookTests
         Asherah.SetMetricsHook(e => a.Add(e));
         Asherah.Setup(CreateConfig());
         Asherah.EncryptString("p7", "first");
+        WaitFor(() => !a.IsEmpty);
         Assert.NotEmpty(a);
         Asherah.SetMetricsHook(e => b.Add(e));
         Asherah.EncryptString("p7", "second");
+        WaitFor(() => !b.IsEmpty);
         Asherah.Shutdown();
         Assert.NotEmpty(a);
         Assert.NotEmpty(b);
