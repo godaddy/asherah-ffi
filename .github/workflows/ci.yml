@@ -42,6 +42,17 @@ jobs:
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
+      # The workspace test binaries each statically embed the full AWS SDK,
+      # OpenSSL, Postgres/MySQL/SQLite drivers, and aws-lc-rs. In debug mode
+      # one link peaks at ~3-5 GB resident; cargo's default -j4 on a 16 GB
+      # Ubuntu runner has been observed to OOM the rust-lld parallel-link
+      # path with SIGBUS in llvm::parallelFor during link of memguard /
+      # async_metastore_trait / config_env_tests test binaries. Cap link
+      # concurrency at 2 and disable incremental compilation (matching the
+      # other Rust build jobs in this workflow) so we stay well under the
+      # cliff.
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Restore workspace caches
