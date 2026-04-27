@@ -15,6 +15,7 @@ anyhow = "1.0"
 asherah = { path = "../../asherah", features = ["mysql", "postgres"] }
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 libloading = "0.8"
+log = "0.4"
 mysql = { version = "27", optional = true, features = ["native-tls"] }
 once_cell = "1.19"
 rand = "0.9"
@@ -32,6 +33,10 @@ harness = false
 
 [[bench]]
 name = "native"
+harness = false
+
+[[bench]]
+name = "hook_overhead"
 harness = false
 
 [[bench]]
