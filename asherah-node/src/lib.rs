@@ -156,6 +156,12 @@ pub fn setup(config: AsherahConfig) -> Result<()> {
     let opts = to_config_options(&config);
     let (factory, applied) = asherah_config::factory_from_config(&opts)
         .map_err(|e| Error::from_reason(format!("setup error: {e:#}")))?;
+    // Always enable per-factory metrics so an installed metrics hook
+    // actually fires for encrypt/decrypt/store/load events. The
+    // additional cost is one Instant::now() per encrypt regardless of
+    // whether a hook is installed; the global metrics gate (toggled by
+    // set_metrics_hook) decides whether the sink is actually invoked.
+    let factory = factory.with_metrics(true);
 
     let dbg_env = std::env::var("ASHERAH_NODE_DEBUG")
         .ok()
@@ -191,6 +197,7 @@ pub async fn setup_async(config: AsherahConfig) -> Result<()> {
     let (factory, applied) = asherah_config::factory_from_config_async(&opts)
         .await
         .map_err(|e| Error::from_reason(format!("setup error: {e:#}")))?;
+    let factory = factory.with_metrics(true);
 
     let dbg_env = std::env::var("ASHERAH_NODE_DEBUG")
         .ok()
@@ -454,6 +461,8 @@ impl SessionFactory {
         let opts = to_config_options(&config);
         let (factory, _applied) = asherah_config::factory_from_config(&opts)
             .map_err(|e| Error::from_reason(format!("factory creation failed: {e}")))?;
+        // Always enable per-factory metrics — see comment in setup().
+        let factory = factory.with_metrics(true);
         Ok(Self {
             factory: Mutex::new(Some(factory)),
         })
@@ -464,6 +473,7 @@ impl SessionFactory {
         let opts = asherah_config::ConfigOptions::default();
         let (factory, _applied) = asherah_config::factory_from_config(&opts)
             .map_err(|e| Error::from_reason(format!("factory_from_env failed: {e}")))?;
+        let factory = factory.with_metrics(true);
         Ok(Self {
             factory: Mutex::new(Some(factory)),
         })
@@ -578,7 +588,7 @@ struct MetricsEvent {
 }
 
 type MetricsCallback =
-    ThreadsafeFunction<MetricsEvent, Unknown<'static>, JsArgList, Status, true, false, 0>;
+    ThreadsafeFunction<MetricsEvent, Unknown<'static>, JsArgList, Status, false, false, 0>;
 
 struct JsMetricsSink {
     tsfn: Arc<MetricsCallback>,
@@ -598,7 +608,7 @@ impl JsMetricsSink {
         };
         let status = self
             .tsfn
-            .call(Ok(event), ThreadsafeFunctionCallMode::NonBlocking);
+            .call(event, ThreadsafeFunctionCallMode::NonBlocking);
         if status != napi::Status::Ok {
             log::warn!("metrics hook: failed to enqueue event: {status:?}");
         }
@@ -629,6 +639,10 @@ impl MetricsSink for JsMetricsSink {
     fn cache_miss(&self, name: &str) {
         self.emit("cache_miss", None, Some(name.to_string()));
     }
+
+    fn cache_stale(&self, name: &str) {
+        self.emit("cache_stale", None, Some(name.to_string()));
+    }
 }
 
 static METRICS_HOOK: Lazy<Mutex<Option<MetricsHook>>> = Lazy::new(|| Mutex::new(None));
@@ -642,7 +656,7 @@ pub fn set_metrics_hook(env: Env, callback: Option<Function<'_>>) -> Result<()> 
         let tsfn = borrowed_static
             .build_threadsafe_function::<MetricsEvent>()
             .max_queue_size::<0>()
-            .callee_handled::<true>()
+            .callee_handled::<false>()
             .build_callback(|ctx: ThreadsafeCallContext<MetricsEvent>| {
                 let env = ctx.env;
                 let MetricsEvent {
@@ -667,12 +681,16 @@ pub fn set_metrics_hook(env: Env, callback: Option<Function<'_>>) -> Result<()> 
         metrics::set_sink(JsMetricsSink {
             tsfn: Arc::clone(&arc),
         });
+        // Metrics are gated for performance; enable them when a hook is
+        // installed and disable them when it is cleared.
+        metrics::set_enabled(true);
         *METRICS_HOOK.lock() = Some(MetricsHook {
             _tsfn: arc,
             _reference: reference,
         });
     } else {
         metrics::clear_sink();
+        metrics::set_enabled(false);
         *METRICS_HOOK.lock() = None;
     }
     Ok(())
@@ -686,7 +704,7 @@ struct LogEvent {
 }
 
 type LogCallback =
-    ThreadsafeFunction<LogEvent, Unknown<'static>, JsArgList, Status, true, false, 0>;
+    ThreadsafeFunction<LogEvent, Unknown<'static>, JsArgList, Status, false, false, 0>;
 
 struct JsLogSink {
     tsfn: Arc<LogCallback>,
@@ -706,7 +724,7 @@ impl LogSink for JsLogSink {
         };
         let status = self
             .tsfn
-            .call(Ok(event), ThreadsafeFunctionCallMode::NonBlocking);
+            .call(event, ThreadsafeFunctionCallMode::NonBlocking);
         if status != napi::Status::Ok {
             log::warn!("log hook: failed to enqueue event: {status:?}");
         }
@@ -735,7 +753,7 @@ pub fn set_log_hook(env: Env, callback: Option<Function<'_>>) -> Result<()> {
         let tsfn = borrowed_static
             .build_threadsafe_function::<LogEvent>()
             .max_queue_size::<0>()
-            .callee_handled::<true>()
+            .callee_handled::<false>()
             .build_callback(|ctx: ThreadsafeCallContext<LogEvent>| {
                 let env = ctx.env;
                 let LogEvent {
@@ -744,7 +762,16 @@ pub fn set_log_hook(env: Env, callback: Option<Function<'_>>) -> Result<()> {
                     target,
                 } = ctx.value;
                 let mut obj = Object::new(&env)?;
-                obj.set("level", env.create_string(level.as_str())?)?;
+                // Lowercase for the documented LogEvent.level union type
+                // ("trace" | "debug" | "info" | "warn" | "error").
+                let level_str = match level {
+                    log::Level::Error => "error",
+                    log::Level::Warn => "warn",
+                    log::Level::Info => "info",
+                    log::Level::Debug => "debug",
+                    log::Level::Trace => "trace",
+                };
+                obj.set("level", env.create_string(level_str)?)?;
                 obj.set("message", env.create_string(&message)?)?;
                 obj.set("target", env.create_string(&target)?)?;
                 let raw = obj.value().value;

@@ -14,117 +14,147 @@ npm install asherah
 
 Requires Node.js >= 18.
 
-## Quick Start (Static API)
+## Choosing an API style
 
-The static API uses a global singleton. Call `setup()` once, then `encrypt`/`decrypt` from anywhere.
+Two API styles are exposed; both are fully supported and produce the same
+wire format. New code should prefer the **Factory / Session API**.
+
+| Style | When to use |
+|---|---|
+| **Static / module-level** (`asherah.setup`, `asherah.encrypt`, …) | Drop-in compatibility with the canonical `godaddy/asherah-node` package. Simplest call surface. Singleton lifecycle (`setup()` once, `shutdown()` once). |
+| **Factory / Session** (`new SessionFactory(...)`, `factory.getSession(...)`) | Recommended for new code. Explicit lifecycle, no hidden singleton, multi-tenant isolation is obvious in code. |
+
+A complete runnable example exercising both styles plus async, log hook, and
+metrics hook is in [`samples/node/index.mjs`](../samples/node/index.mjs).
+
+## Quick start (static API)
 
 ```js
 const asherah = require('asherah');
 
-// Static master key for local development only.
-// In production, use kms: 'aws' with a region map.
-process.env.STATIC_MASTER_KEY_HEX = '22'.repeat(32);
+process.env.STATIC_MASTER_KEY_HEX = '22'.repeat(32); // testing only
 
 asherah.setup({
   serviceName: 'my-service',
   productId: 'my-product',
-  metastore: 'memory',   // testing only
-  kms: 'static',         // testing only
-  enableSessionCaching: true,
+  metastore: 'memory',   // testing only — use 'rdbms' or 'dynamodb' in production
+  kms: 'static',         // testing only — use 'aws' in production
 });
 
-// Encrypt raw bytes
-const ciphertext = asherah.encrypt('my-partition', Buffer.from('secret data'));
-const plaintext = asherah.decrypt('my-partition', ciphertext);
-console.log(plaintext.toString()); // 'secret data'
-
-// Or use the string convenience methods
-const ct = asherah.encryptString('my-partition', 'hello world');
-const pt = asherah.decryptString('my-partition', ct);
-console.log(pt); // 'hello world'
+const ct = asherah.encryptString('user-42', 'secret');
+const pt = asherah.decryptString('user-42', ct);
 
 asherah.shutdown();
 ```
 
-## Session-Based API
-
-The `SessionFactory` / `AsherahSession` pattern is preferred for production. It
-avoids the global singleton and gives you explicit control over session
-lifetimes.
+## Quick start (factory / session API)
 
 ```js
 const { SessionFactory } = require('asherah');
 
-process.env.STATIC_MASTER_KEY_HEX = '22'.repeat(32);
-
 const factory = new SessionFactory({
   serviceName: 'my-service',
   productId: 'my-product',
-  metastore: 'memory',   // testing only
-  kms: 'static',         // testing only
+  metastore: 'memory',
+  kms: 'static',
 });
-
-const session = factory.getSession('my-partition');
-
-const ct = session.encrypt(Buffer.from('secret'));
-const pt = session.decrypt(ct);
-console.log(pt.toString()); // 'secret'
-
-// String variants
-const ct2 = session.encryptString('hello');
-const pt2 = session.decryptString(ct2);
-console.log(pt2); // 'hello'
-
-session.close();
-factory.close();
-```
-
-You can also create a factory from environment variables:
-
-```js
-const factory = SessionFactory.fromEnv();
+const session = factory.getSession('user-42');
+try {
+  const ct = session.encryptString('secret');
+  const pt = session.decryptString(ct);
+} finally {
+  session.close();
+  factory.close();
+}
 ```
 
 ## Async API
 
-Every sync function has an async counterpart that returns a Promise and never
-blocks the Node.js event loop.
+Every sync function has a `*Async` counterpart that returns a `Promise` and
+runs on the Rust tokio runtime — the Node event loop is not blocked.
 
 ```js
-const asherah = require('asherah');
-
-process.env.STATIC_MASTER_KEY_HEX = '22'.repeat(32);
-
-await asherah.setupAsync({
-  serviceName: 'my-service',
-  productId: 'my-product',
-  metastore: 'memory',   // testing only
-  kms: 'static',         // testing only
-});
-
-const ct = await asherah.encryptStringAsync('my-partition', 'secret');
-const pt = await asherah.decryptStringAsync('my-partition', ct);
-console.log(pt); // 'secret'
-
+await asherah.setupAsync(config);
+const ct = await asherah.encryptStringAsync('user-42', 'secret');
+const pt = await asherah.decryptStringAsync('user-42', ct);
 await asherah.shutdownAsync();
 ```
 
-## Async Behavior
-
-Async operations run on a Rust tokio runtime, separate from the Node.js event
-loop. The exact execution strategy depends on the metastore:
-
-| Metastore | Async Encrypt/Decrypt | Blocks Event Loop? |
-|-----------|----------------------|-------------------|
-| In-Memory | Runs on tokio worker thread | No |
-| DynamoDB  | True async AWS SDK calls on tokio | No |
+| Metastore | Async path | Blocks event loop? |
+|-----------|------------|---------------------|
+| In-memory | tokio worker thread | No |
+| DynamoDB  | true async AWS SDK calls on tokio | No |
 | MySQL     | `spawn_blocking` (sync driver on tokio thread pool) | No |
 | Postgres  | `spawn_blocking` (sync driver on tokio thread pool) | No |
 
-**Async never blocks the Node.js event loop.** The tradeoff is ~12us overhead
-per async call vs ~1us for sync (hot cache, 64B payload). Use sync in tight
-loops where latency matters; use async when you need to keep the event loop
-responsive.
+Tradeoff: ~12µs async vs ~1µs sync per call (hot cache, 64 B payload). Use
+sync in tight loops where latency matters; async when you need to keep the
+event loop responsive.
+
+## Observability hooks
+
+### Log hook
+
+Receive every log event from the Rust core (encrypt/decrypt path, metastore
+drivers, KMS clients).
+
+```js
+asherah.setLogHook((event) => {
+  // event = { level, message, target }
+  // level ∈ 'trace' | 'debug' | 'info' | 'warn' | 'error'
+  if (event.level === 'warn' || event.level === 'error') {
+    console.error(`[asherah ${event.level}] ${event.message}`);
+  }
+});
+
+// later, to deregister:
+asherah.setLogHook(null);
+```
+
+The snake_case alias `set_log_hook` also accepts the canonical
+`(level: number, message: string)` signature for backward compatibility with
+the Go-based `asherah` npm package.
+
+```js
+asherah.set_log_hook((level, message) => {
+  // level is a number 0..4 (0=trace, 1=debug, 2=info, 3=warn, 4=error)
+  console.log(`[level ${level}] ${message}`);
+});
+```
+
+Log events are delivered via N-API ThreadsafeFunction — they run on the Node
+main thread, so synchronous code in the callback is safe.
+
+### Metrics hook
+
+Receive timing events for encrypt/decrypt/store/load and counter events for
+cache hit/miss/stale.
+
+```js
+asherah.setMetricsHook((event) => {
+  switch (event.type) {
+    case 'encrypt':
+    case 'decrypt':
+    case 'store':
+    case 'load':
+      // event = { type, durationNs }
+      myHistogram.observe(event.type, event.durationNs / 1e6);
+      break;
+    case 'cache_hit':
+    case 'cache_miss':
+    case 'cache_stale':
+      // event = { type, name }
+      myCounter.inc({ result: event.type, cache: event.name });
+      break;
+  }
+});
+
+// later:
+asherah.setMetricsHook(null);
+```
+
+Metrics collection is enabled automatically when a hook is installed, and
+disabled when cleared.
 
 ## Input contract
 
@@ -154,146 +184,178 @@ rationale.
 
 ## Configuration
 
-Pass a config object to `setup()`, `setupAsync()`, or the `SessionFactory`
-constructor. Both camelCase and PascalCase field names are accepted (PascalCase
-is auto-mapped for backward compatibility with the canonical Go-based package).
+All fields can be passed in `camelCase` (native) or `PascalCase` (canonical Go
+SDK) — both are auto-mapped. Pass to `setup()`, `setupAsync()`, or the
+`SessionFactory` constructor.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `serviceName` | `string` | **(required)** | Service identifier for key hierarchy |
-| `productId` | `string` | **(required)** | Product identifier for key hierarchy |
-| `metastore` | `string` | **(required)** | `"rdbms"`, `"dynamodb"`, `"memory"` (testing) |
-| `kms` | `string` | `"static"` | `"static"` or `"aws"` |
-| `connectionString` | `string` | | Connection string for sqlite or rdbms metastore |
-| `sqlMetastoreDBType` | `string` | | `"mysql"` or `"postgres"` (for rdbms metastore) |
-| `enableSessionCaching` | `boolean` | `true` | Cache sessions by partition ID |
-| `sessionCacheMaxSize` | `number` | `1000` | Max cached sessions |
-| `sessionCacheDuration` | `number` | | Session cache TTL in milliseconds |
-| `regionMap` | `object` | | `{ "us-west-2": "arn:aws:kms:..." }` for AWS KMS multi-region |
-| `preferredRegion` | `string` | | Preferred AWS region for KMS |
-| `enableRegionSuffix` | `boolean` | | Append region suffix to system key IDs |
-| `expireAfter` | `number` | | Key expiration in milliseconds |
-| `checkInterval` | `number` | | Key rotation check interval in milliseconds |
-| `dynamoDBEndpoint` | `string` | | Custom DynamoDB endpoint URL |
-| `dynamoDBRegion` | `string` | | DynamoDB region |
-| `dynamoDBTableName` | `string` | | DynamoDB table name |
-| `replicaReadConsistency` | `string` | | DynamoDB read consistency |
-| `verbose` | `boolean` | `false` | Enable debug logging |
-| `enableCanaries` | `boolean` | | Enable canary key verification |
-| `disableZeroCopy` | `boolean` | | Disable zero-copy optimizations |
-| `nullDataCheck` | `boolean` | | Verify data is not null before decrypt |
-| `poolMaxOpen` | `number` | `0` | Max open DB connections (0 = unlimited) |
-| `poolMaxIdle` | `number` | `2` | Max idle connections to retain |
-| `poolMaxLifetime` | `number` | `0` | Max connection lifetime in seconds (0 = unlimited) |
-| `poolMaxIdleTime` | `number` | `0` | Max idle time per connection in seconds (0 = unlimited) |
+| `serviceName` | `string` | **required** | Service identifier for the key hierarchy. |
+| `productId` | `string` | **required** | Product identifier for the key hierarchy. |
+| `metastore` | `'memory' \| 'rdbms' \| 'dynamodb'` | **required** | `'memory'` is testing-only and does not persist across processes. |
+| `kms` | `'static' \| 'aws'` | `'static'` | `'static'` is testing-only (uses a hard-coded master key). |
+| `connectionString` | `string` | | Connection string for `rdbms` metastore. |
+| `sqlMetastoreDbType` | `'mysql' \| 'postgres'` | | SQL driver. |
+| `enableSessionCaching` | `boolean` | `true` | Cache `Session` objects by partition ID. |
+| `sessionCacheMaxSize` | `number` | `1000` | Max cached sessions. |
+| `sessionCacheDuration` | `number` | | Session cache TTL in seconds. |
+| `regionMap` | `Record<string, string>` | | AWS KMS multi-region key ARN map. |
+| `preferredRegion` | `string` | | Preferred AWS region from `regionMap`. |
+| `enableRegionSuffix` | `boolean` | | Append AWS region suffix to key IDs. |
+| `expireAfter` | `number` | 90 days | Intermediate-key expiration in seconds. |
+| `checkInterval` | `number` | 60 minutes | Revoke-check interval in seconds. |
+| `dynamoDbEndpoint` | `string` | | DynamoDB endpoint URL (for local DynamoDB). |
+| `dynamoDbRegion` | `string` | | AWS region for DynamoDB. |
+| `dynamoDbTableName` | `string` | `'EncryptionKey'` | DynamoDB table name. |
+| `dynamoDbSigningRegion` | `string` | | Region used for SigV4 signing. |
+| `replicaReadConsistency` | `'eventual' \| 'global' \| 'session'` | | DynamoDB read consistency. |
+| `verbose` | `boolean` | `false` | Emit verbose log events (use a log hook to consume). |
+| `enableCanaries` | `boolean` | `false` | Enable in-memory canary buffers around plaintexts. |
+| `disableZeroCopy` | `boolean` | | Compatibility shim — accepted but no effect. |
+| `nullDataCheck` | `boolean` | | Compatibility shim — accepted but no effect. |
+| `poolMaxOpen` | `number` | `0` | Max open DB connections (0 = unlimited). |
+| `poolMaxIdle` | `number` | `2` | Max idle DB connections to retain. |
+| `poolMaxLifetime` | `number` | `0` | Max connection lifetime in seconds (0 = unlimited). |
+| `poolMaxIdleTime` | `number` | `0` | Max idle time in seconds per connection (0 = unlimited). |
 
-### Environment Variables
+### Environment variables
 
-- `STATIC_MASTER_KEY_HEX` -- 64 hex chars (32 bytes) for static KMS. **Testing only.**
-- `ASHERAH_NODE_DEBUG=1` -- Enable native debug logging.
-- `ASHERAH_POOL_MAX_OPEN` -- Max open DB connections (overrides config).
-- `ASHERAH_POOL_MAX_IDLE` -- Max idle connections (overrides config).
-- `ASHERAH_POOL_MAX_LIFETIME` -- Max connection lifetime in seconds (overrides config).
-- `ASHERAH_POOL_MAX_IDLE_TIME` -- Max idle time per connection in seconds (overrides config).
+| Variable | Effect |
+|---|---|
+| `STATIC_MASTER_KEY_HEX` | 64 hex chars (32 bytes) for static KMS. **Testing only.** |
+| `ASHERAH_NODE_DEBUG=1` | Enable native-side debug logging. |
+| `ASHERAH_POOL_MAX_OPEN` | Override `poolMaxOpen`. |
+| `ASHERAH_POOL_MAX_IDLE` | Override `poolMaxIdle`. |
+| `ASHERAH_POOL_MAX_LIFETIME` | Override `poolMaxLifetime`. |
+| `ASHERAH_POOL_MAX_IDLE_TIME` | Override `poolMaxIdleTime`. |
 
 ## Performance
 
-This is a native Rust implementation compiled via napi-rs. Typical latencies on
-Apple M4 Max (in-memory metastore, session caching enabled, 64-byte payload):
+Native Rust implementation compiled via napi-rs. Typical latencies on Apple
+M4 Max (in-memory metastore, session caching enabled, 64-byte payload):
 
 | Operation | Sync | Async |
 |-----------|------|-------|
-| Encrypt   | ~970 ns | ~12 us |
-| Decrypt   | ~1,200 ns | ~12 us |
+| Encrypt   | ~970 ns | ~12 µs |
+| Decrypt   | ~1.2 µs | ~12 µs |
 
 See `scripts/benchmark.sh` for head-to-head comparisons with the canonical
 Go-based implementation.
 
-## Migration from Canonical (v3.x)
+## Migration from the canonical Go-based `asherah` (v3.x)
 
-This package is a drop-in replacement for the Go-based `asherah` npm package
-(v3.x). The JavaScript wrapper provides full backward compatibility:
+Drop-in replacement. The npm wrapper provides full backward compatibility:
 
-- **PascalCase config** -- `ServiceName`, `ProductID`, `Metastore`, etc. are
-  auto-mapped to camelCase equivalents.
-- **snake_case function aliases** -- `set_log_hook`, `get_setup_status`,
-  `encrypt_string`, `decrypt_string_async`, etc. all work.
-- **Metastore/KMS aliases** -- `"test-debug-memory"`, `"test-debug-static"`,
-  etc. are normalized to their short forms.
-- **`set_log_hook` callback signature** -- Both the canonical
-  `(level: number, message: string)` and the native
-  `(event: { level, message, target })` signatures are supported.
+- **PascalCase config** — `ServiceName`, `ProductID`, `Metastore`, etc. are
+  auto-mapped to camelCase.
+- **snake_case function aliases** — `set_log_hook`, `set_metrics_hook`,
+  `get_setup_status`, `encrypt_string`, `decrypt_string_async`, etc.
+- **Metastore/KMS aliases** — `'test-debug-memory'`, `'test-debug-static'`
+  normalize to the short forms.
+- **`set_log_hook` signature variants** — both the canonical
+  `(level: number, message: string)` and the structured
+  `(event: { level, message, target })` are supported.
 
-To migrate, update your package version. No code changes required.
+To migrate: change your dependency from `asherah@^3` to this package. No code
+changes required.
 
-## Supported Platforms
+## Supported platforms
 
 | Platform | Architecture | Notes |
-|----------|-------------|-------|
-| Linux    | x64         | glibc (most distros) |
-| Linux    | x64         | musl (Alpine) |
-| Linux    | ARM64       | glibc |
-| Linux    | ARM64       | musl (Alpine) |
-| macOS    | x64         | Intel Macs |
-| macOS    | ARM64       | Apple Silicon |
-| Windows  | x64         | MSVC |
-| Windows  | ARM64       | MSVC |
+|----------|--------------|-------|
+| Linux    | x64          | glibc (most distros) |
+| Linux    | x64          | musl (Alpine) |
+| Linux    | ARM64        | glibc |
+| Linux    | ARM64        | musl (Alpine) |
+| macOS    | x64          | Intel |
+| macOS    | ARM64        | Apple Silicon |
+| Windows  | x64          | MSVC |
+| Windows  | ARM64        | MSVC |
 
 ## API Reference
 
-### Setup / Teardown
+> Full TSDoc lives in `index.d.ts` and surfaces in your IDE on hover. The
+> tables below summarize each API; the type file is the source of truth.
 
-- `setup(config)` -- Initialize the global Asherah instance.
-- `setupAsync(config)` -- Async variant of `setup`.
-- `shutdown()` -- Shut down and release all resources.
-- `shutdownAsync()` -- Async variant of `shutdown`.
-- `getSetupStatus()` -- Returns `true` if `setup` has been called.
+### Static / module-level API (legacy compatibility)
 
-### Encrypt / Decrypt (Static API)
+#### Lifecycle
 
-- `encrypt(partitionId, data: Buffer)` -- Returns JSON string (DataRowRecord).
-- `encryptAsync(partitionId, data: Buffer)` -- Async variant.
-- `encryptString(partitionId, data: string)` -- String-in, string-out convenience.
-- `encryptStringAsync(partitionId, data: string)` -- Async variant.
-- `decrypt(partitionId, dataRowRecord: string | Buffer)` -- Returns `Buffer`.
-- `decryptAsync(partitionId, dataRowRecord: string | Buffer)` -- Async variant.
-- `decryptString(partitionId, dataRowRecord: string)` -- Returns `string`.
-- `decryptStringAsync(partitionId, dataRowRecord: string)` -- Async variant.
+| Function | Description |
+|---|---|
+| `setup(config)` | Initialize the global instance. Throws if already configured. |
+| `setupAsync(config)` | Async variant. Returns `Promise<void>`. |
+| `shutdown()` | Tear down the global instance and clear cached sessions. Idempotent. |
+| `shutdownAsync()` | Async variant. Returns `Promise<void>`. |
+| `getSetupStatus()` | `boolean` — true if `setup()` has been called and `shutdown()` has not. |
+| `setenv(envJson)` | Apply env vars from a JSON string before `setup()`. Mirrors the canonical SDK. |
 
-### Session-Based API
+#### Encrypt / decrypt
 
-- `new SessionFactory(config)` -- Create a factory with explicit config.
-- `SessionFactory.fromEnv()` -- Create a factory from environment variables.
-- `factory.getSession(partitionId)` -- Get a session for a partition.
-- `factory.close()` -- Close the factory and release resources.
-- `session.encrypt(data: Buffer)` -- Returns JSON string.
-- `session.encryptString(data: string)` -- String convenience.
-- `session.decrypt(dataRowRecord: string)` -- Returns `Buffer`.
-- `session.decryptString(dataRowRecord: string)` -- Returns `string`.
-- `session.close()` -- Close the session.
+| Function | Param 1 | Param 2 | Returns |
+|---|---|---|---|
+| `encrypt(partitionId, data)` | `string` (non-empty) | `Buffer` (empty OK) | `string` (DRR JSON) |
+| `encryptAsync(partitionId, data)` | `string` | `Buffer` | `Promise<string>` |
+| `encryptString(partitionId, data)` | `string` | `string` (empty OK) | `string` (DRR JSON) |
+| `encryptStringAsync(partitionId, data)` | `string` | `string` | `Promise<string>` |
+| `decrypt(partitionId, drr)` | `string` | `string` (DRR JSON) | `Buffer` |
+| `decryptAsync(partitionId, drr)` | `string` | `string` | `Promise<Buffer>` |
+| `decryptString(partitionId, drr)` | `string` | `string` | `string` |
+| `decryptStringAsync(partitionId, drr)` | `string` | `string` | `Promise<string>` |
 
-### Hooks
+All accept the snake_case aliases `encrypt_async`, `encrypt_string`,
+`encrypt_string_async`, `decrypt_async`, `decrypt_string`,
+`decrypt_string_async`, `setup_async`, `shutdown_async`, `get_setup_status`.
 
-- `setLogHook(callback)` / `set_log_hook(callback)` -- Receive log events.
-  Pass `null` to disable.
-- `setMetricsHook(callback)` -- Receive metrics events
-  (`{ type, durationNs?, name? }`). Pass `null` to disable.
+#### Hooks
 
-### Utility
+| Function | Description |
+|---|---|
+| `setLogHook(cb)` / `set_log_hook(cb)` | Register a structured-event log callback. Pass `null` to deregister. The snake_case alias also accepts the canonical `(level, message)` signature. |
+| `setMetricsHook(cb)` / `set_metrics_hook(cb)` | Register a metrics callback. Pass `null` to deregister. |
 
-- `setenv(lines: string)` -- Set environment variables from `KEY=VALUE` lines.
-- `setMaxStackAllocItemSize(n)` -- No-op (compatibility stub).
-- `setSafetyPaddingOverhead(n)` -- No-op (compatibility stub).
+### Factory / Session API (recommended)
 
-## Features
+#### `class SessionFactory`
 
-- Synchronous and asynchronous encrypt/decrypt APIs
-- Session-based API with factory pattern
-- Compatible with Go, Python, Ruby, Java, and .NET Asherah implementations
-- SQLite, MySQL, PostgreSQL, and DynamoDB metastore support
-- AWS KMS and static key management
-- Log and metrics hooks
-- Automatic key rotation with configurable intervals
+| Member | Description |
+|---|---|
+| `new SessionFactory(config)` | Construct from inline config. |
+| `static SessionFactory.fromEnv()` | Construct from environment variables. |
+| `factory.getSession(partitionId)` | Get a per-partition session. Throws on null/empty partition. |
+| `factory.close()` | Release native resources. After close, `getSession()` throws. |
+
+#### `class AsherahSession`
+
+| Member | Description |
+|---|---|
+| `session.encrypt(data)` | `Buffer` → DRR JSON `string`. Empty `Buffer` is valid. |
+| `session.encryptString(data)` | `string` → DRR JSON `string`. Empty `string` is valid. |
+| `session.decrypt(drr)` | DRR JSON `string` → `Buffer`. |
+| `session.decryptString(drr)` | DRR JSON `string` → `string`. |
+| `session.close()` | Release native resources. |
+
+### Type aliases
+
+```ts
+type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
+
+type LogEvent = {
+  level: LogLevel;
+  message: string;
+  target: string;
+};
+
+type MetricsEvent =
+  | { type: 'encrypt' | 'decrypt' | 'store' | 'load'; durationNs: number }
+  | { type: 'cache_hit' | 'cache_miss' | 'cache_stale'; name: string };
+```
+
+### Compatibility shims
+
+`setMaxStackAllocItemSize(n)` and `setSafetyPaddingOverhead(n)` are accepted
+for parity with the canonical Go-based asherah-node package but have no
+effect in this Rust binding.
 
 ## License
 

@@ -284,4 +284,5 @@ module.exports.decrypt_string_async = native.decryptStringAsync;
 module.exports.set_max_stack_alloc_item_size = native.setMaxStackAllocItemSize;
 module.exports.set_safety_padding_overhead = native.setSafetyPaddingOverhead;
 module.exports.set_log_hook = set_log_hook;
+module.exports.set_metrics_hook = native.setMetricsHook;
 module.exports.get_setup_status = native.getSetupStatus;
