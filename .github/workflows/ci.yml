@@ -365,9 +365,19 @@ jobs:
       - name: Pack both NuGet packages
         working-directory: asherah-dotnet
         run: |
-          # Stage the FFI lib as linux-x64 native
-          mkdir -p src/GoDaddy.Asherah.AppEncryption/runtimes/linux-x64/native
-          cp ../target/release/libasherah_ffi.so src/GoDaddy.Asherah.AppEncryption/runtimes/linux-x64/native/
+          # Stage the FFI lib under every Linux + macOS RID the publish workflow
+          # ships. We only have one host binary in dry-run, so the *contents*
+          # are all the host x64 build — this verifies layout, not arch correctness.
+          # publish-nuget.yml ships the right architecture per RID.
+          NATIVE_DIR=src/GoDaddy.Asherah.AppEncryption/runtimes
+          for rid in linux-x64 linux-arm64 linux-musl-x64 linux-musl-arm64; do
+            mkdir -p "$NATIVE_DIR/$rid/native"
+            cp ../target/release/libasherah_ffi.so "$NATIVE_DIR/$rid/native/"
+          done
+          for rid in osx-x64 osx-arm64; do
+            mkdir -p "$NATIVE_DIR/$rid/native"
+            cp ../target/release/libasherah_ffi.so "$NATIVE_DIR/$rid/native/libasherah_ffi.dylib"
+          done
 
           dotnet pack src/GoDaddy.Asherah.AppEncryption/GoDaddy.Asherah.AppEncryption.csproj -c Release \
             /p:Version="0.0.0-dryrun" \
@@ -389,10 +399,12 @@ jobs:
               continue
             fi
             unzip -l "$pkg" | grep -E 'native|runtimes' | sort
-            if ! unzip -l "$pkg" | grep -q "runtimes/linux-x64/native/"; then
-              echo "ERROR: Core package missing linux-x64 native library"
-              exit 1
-            fi
+            for required in linux-x64 linux-arm64 linux-musl-x64 linux-musl-arm64 osx-x64 osx-arm64; do
+              if ! unzip -l "$pkg" | grep -q "runtimes/${required}/native/"; then
+                echo "ERROR: Core package missing required native library for ${required}"
+                exit 1
+              fi
+            done
           done
           echo "NuGet dry-run passed ($(ls dist/*.nupkg | wc -l) packages)"
 
@@ -1461,14 +1473,22 @@ jobs:
         with:
           name: bindings-linux-x86_64-part-ffi
           path: artifacts
-      - name: Build platform gem
+      - name: Build platform gems
         working-directory: asherah-ruby
         run: |
-          mkdir -p lib/asherah/native
-          find ../artifacts -name 'libasherah_ffi.*' -exec cp {} lib/asherah/native/ \;
-          ls lib/asherah/native/libasherah_ffi.* || { echo "ERROR: No native lib staged"; exit 1; }
-          ASHERAH_GEM_PLATFORM="x86_64-linux" gem build asherah.gemspec && mv *.gem /tmp/
-          ls /tmp/*.gem || { echo "ERROR: No gem produced"; exit 1; }
+          # Build both glibc + musl variants. Dry-run only has one host
+          # binary, so the *contents* match the host arch — this verifies
+          # the gemspec layout for both platforms; publish-rubygems.yml
+          # ships the right architecture per platform.
+          for platform in x86_64-linux x86_64-linux-musl; do
+            rm -rf lib/asherah/native
+            mkdir -p lib/asherah/native
+            find ../artifacts -name 'libasherah_ffi.*' -exec cp {} lib/asherah/native/ \;
+            ls lib/asherah/native/libasherah_ffi.* || { echo "ERROR: No native lib staged"; exit 1; }
+            ASHERAH_GEM_PLATFORM="$platform" gem build asherah.gemspec && mv *.gem /tmp/
+          done
+          ls /tmp/*.gem | grep -q 'x86_64-linux\.gem'      || { echo "ERROR: glibc gem missing"; exit 1; }
+          ls /tmp/*.gem | grep -q 'x86_64-linux-musl\.gem' || { echo "ERROR: musl gem missing";  exit 1; }
 
   publish-dry-run-java-jar:
     runs-on: ubuntu-latest
@@ -1489,9 +1509,15 @@ jobs:
       - name: Build JAR with pre-built native lib
         run: |
           NATIVE_DIR=asherah-java/java/src/main/resources/native
-          mkdir -p "$NATIVE_DIR/linux-x86_64"
-          find artifacts -name 'libasherah_java.*' -exec cp {} "$NATIVE_DIR/linux-x86_64/" \;
-          ls "$NATIVE_DIR/linux-x86_64/libasherah_java."* || { echo "ERROR: No JNI lib found in artifacts"; exit 1; }
+          # Stage under both glibc and musl resource paths. Dry-run only has
+          # the host x86_64 binary; this verifies pom.xml/JAR layout for both
+          # platforms. publish-maven.yml ships the right architecture per RID.
+          for rid in linux-x86_64 linux-musl-x86_64; do
+            mkdir -p "$NATIVE_DIR/$rid"
+            find artifacts -name 'libasherah_java.*' -exec cp {} "$NATIVE_DIR/$rid/" \;
+            ls "$NATIVE_DIR/$rid/libasherah_java."* || { echo "ERROR: No JNI lib found for $rid"; exit 1; }
+          done
           mvn -B -f asherah-java/java/pom.xml -Dnative.build.skip=true -DskipTests package
           JAR=$(find asherah-java/java/target -name 'appencryption-*.jar' -not -name '*sources*' -not -name '*javadoc*' | head -1)
           jar tf "$JAR" | grep "native/.*\\.so$" || { echo "ERROR: No native lib in JAR"; exit 1; }
+          jar tf "$JAR" | grep -q "native/linux-musl-x86_64/" || { echo "ERROR: musl JNI lib missing from JAR"; exit 1; }

@@ -3,7 +3,8 @@
 .NET bindings for the [Asherah](https://github.com/godaddy/asherah-ffi)
 envelope encryption and key rotation library. Native Rust implementation via
 P/Invoke; the native binary ships in NuGet for `linux-x64`, `linux-arm64`,
-`osx-x64`, `osx-arm64`, `win-x64`, `win-arm64`.
+`linux-musl-x64`, `linux-musl-arm64` (Alpine), `osx-x64`, `osx-arm64`,
+`win-x64`, `win-arm64`.
 
 ## Installation
 

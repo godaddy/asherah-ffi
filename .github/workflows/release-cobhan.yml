@@ -86,6 +86,22 @@ jobs:
             asset_name: libasherah-arm64.so
             arch: arm64
             cross: true
+          # Linux x86_64 musl (Alpine) — cargo-zigbuild + Alpine OpenSSL
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-musl
+            artifact_name: libasherah_ffi.so
+            asset_name: libasherah-x64-musl.so
+            arch: x64-musl
+            musl: true
+            musl_arch: x86_64
+          # Linux arm64 musl (Alpine) — cargo-zigbuild + Alpine OpenSSL
+          - os: ubuntu-22.04
+            target: aarch64-unknown-linux-musl
+            artifact_name: libasherah_ffi.so
+            asset_name: libasherah-arm64-musl.so
+            arch: arm64-musl
+            musl: true
+            musl_arch: aarch64
           # macOS x86_64 — cross-compile from ARM64 via rustup target
           - os: macos-latest
             target: x86_64-apple-darwin
@@ -142,10 +158,39 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
+      - name: Install aarch64 strip tool (musl arm64)
+        if: matrix.musl == true && matrix.musl_arch == 'aarch64'
+        run: |
+          echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/80-retries
+          sudo apt-get update
+          sudo apt-get install -y binutils-aarch64-linux-gnu
+
+      - name: Install Zig (musl builds)
+        if: matrix.musl == true
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+
+      - name: Install cargo-zigbuild (musl builds)
+        if: matrix.musl == true
+        uses: taiki-e/install-action@85b24a67ef0c632dfefad70b9d5ce8fddb040754 # v2
+        with:
+          tool: cargo-zigbuild
+
+      - name: Setup musl OpenSSL (musl builds)
+        if: matrix.musl == true
+        shell: bash
+        run: |
+          ARCH=${{ matrix.musl_arch }} source "$GITHUB_WORKSPACE/scripts/download-musl-openssl.sh"
+          {
+            echo "OPENSSL_DIR=$OPENSSL_DIR"
+            echo "OPENSSL_STATIC=$OPENSSL_STATIC"
+            echo "OPENSSL_NO_VENDOR=$OPENSSL_NO_VENDOR"
+          } >> "$GITHUB_ENV"
+
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
 
-      - name: Build asherah-ffi
+      - name: Build asherah-ffi (glibc / macOS / Windows)
+        if: matrix.musl != true
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: ${{ matrix.cross && 'aarch64-linux-gnu-gcc' || '' }}
           CC_aarch64_unknown_linux_gnu: ${{ matrix.cross && 'aarch64-linux-gnu-gcc' || '' }}
@@ -154,14 +199,22 @@ jobs:
         run: |
           cargo build --release -p asherah-ffi -p asherah-java --target ${{ matrix.target }}
 
+      - name: Build asherah-ffi (musl)
+        if: matrix.musl == true
+        run: |
+          cargo zigbuild --release -p asherah-ffi -p asherah-java --target ${{ matrix.target }}
+
       - name: Strip binary (Linux/macOS)
         if: matrix.os != 'windows-latest'
         run: |
-          if [ "${{ matrix.cross }}" = "true" ]; then
-            aarch64-linux-gnu-strip -x target/${{ matrix.target }}/release/${{ matrix.artifact_name }} || true
-          else
-            strip -x target/${{ matrix.target }}/release/${{ matrix.artifact_name }} || true
-          fi
+          case '${{ matrix.target }}' in
+            aarch64-*-linux-*)
+              aarch64-linux-gnu-strip -x target/${{ matrix.target }}/release/${{ matrix.artifact_name }} || true
+              ;;
+            *)
+              strip -x target/${{ matrix.target }}/release/${{ matrix.artifact_name }} || true
+              ;;
+          esac
 
       - name: Prepare artifact
         shell: bash
@@ -329,12 +382,16 @@ jobs:
           files: |
             artifacts/libasherah-x64.so
             artifacts/libasherah-arm64.so
+            artifacts/libasherah-x64-musl.so
+            artifacts/libasherah-arm64-musl.so
             artifacts/libasherah-x64.dylib
             artifacts/libasherah-arm64.dylib
             artifacts/libasherah-x64.dll
             artifacts/libasherah-arm64.dll
             artifacts/libasherah_java-x64.so
             artifacts/libasherah_java-arm64.so
+            artifacts/libasherah_java-x64-musl.so
+            artifacts/libasherah_java-arm64-musl.so
             artifacts/libasherah_java-x64.dylib
             artifacts/libasherah_java-arm64.dylib
             artifacts/libasherah_java-x64.dll
@@ -361,13 +418,19 @@ jobs:
           echo "libasherah Download URLs (Drop-in compatible)"
           echo "=============================================="
           echo ""
-          echo "Linux x86_64:"
+          echo "Linux x86_64 (glibc):"
           echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-x64.so"
           echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-x64.h"
           echo ""
-          echo "Linux arm64:"
+          echo "Linux arm64 (glibc):"
           echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-arm64.so"
           echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-arm64.h"
+          echo ""
+          echo "Linux x86_64 (musl / Alpine):"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-x64-musl.so"
+          echo ""
+          echo "Linux arm64 (musl / Alpine):"
+          echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-arm64-musl.so"
           echo ""
           echo "macOS x86_64:"
           echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-x64.dylib"
