@@ -78,7 +78,54 @@ static async Task RunAsyncExample()
     Console.WriteLine($"Async session:  {Encoding.UTF8.GetString(await session.DecryptBytesAsync(enc))}");
 }
 
-// --- 4. Production config (uncomment and fill in real values) ---
+// --- 4. Log hook (observability) ---
+// Receives every log event from the Rust core. Use with verbose: true to
+// see info/debug-level setup messages, or always-on for warn/error.
+
+var logEvents = new System.Collections.Concurrent.ConcurrentBag<LogEvent>();
+Asherah.SetLogHook(e =>
+{
+    if (e.Level == LogLevel.Warn || e.Level == LogLevel.Error)
+    {
+        Console.WriteLine($"[log] {e.Level}: {e.Message}");
+    }
+    logEvents.Add(e);
+});
+
+var verboseConfig = AsherahConfig.CreateBuilder()
+    .WithServiceName("sample-service")
+    .WithProductId("sample-product")
+    .WithMetastore("memory")
+    .WithKms("static")
+    .WithVerbose(true)
+    .Build();
+
+Asherah.Setup(verboseConfig);
+Asherah.EncryptString("partition-5", "with-log-hook");
+Asherah.Shutdown();
+Console.WriteLine($"[log] received {logEvents.Count} log events total");
+Asherah.SetLogHook(null);
+
+// --- 5. Metrics hook (observability) ---
+// Receives encrypt/decrypt/store/load timings plus key cache hit/miss/stale.
+
+var metricCounts = new System.Collections.Concurrent.ConcurrentDictionary<MetricsEventType, int>();
+Asherah.SetMetricsHook(e =>
+{
+    metricCounts.AddOrUpdate(e.Type, 1, (_, c) => c + 1);
+});
+
+Asherah.Setup(config);
+for (int i = 0; i < 5; i++)
+{
+    var ct = Asherah.EncryptString("metrics-test", $"payload-{i}");
+    Asherah.DecryptString("metrics-test", ct);
+}
+Asherah.Shutdown();
+Console.WriteLine($"[metrics] {string.Join(", ", metricCounts.Select(kv => $"{kv.Key}={kv.Value}"))}");
+Asherah.SetMetricsHook(null);
+
+// --- 6. Production config (uncomment and fill in real values) ---
 //
 // var prodConfig = AsherahConfig.CreateBuilder()
 //     .WithServiceName("my-service")

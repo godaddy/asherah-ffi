@@ -63,6 +63,26 @@ internal static class NativeMethods
         IntPtr session, byte* json, UIntPtr length,
         delegate* unmanaged[Cdecl]<IntPtr, IntPtr, UIntPtr, IntPtr, void> callback,
         IntPtr userData);
+
+    // Log / metrics hooks (C ABI exposed by asherah-ffi/src/hooks.rs).
+    // Callback signatures:
+    //   log:     (user_data, level: i32, target: *const c_char, message: *const c_char)
+    //   metrics: (user_data, event_type: i32, duration_ns: u64, name: *const c_char)
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern unsafe int asherah_set_log_hook(
+        delegate* unmanaged[Cdecl]<IntPtr, int, IntPtr, IntPtr, void> callback,
+        IntPtr userData);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int asherah_clear_log_hook();
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern unsafe int asherah_set_metrics_hook(
+        delegate* unmanaged[Cdecl]<IntPtr, int, ulong, IntPtr, void> callback,
+        IntPtr userData);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int asherah_clear_metrics_hook();
 }
 
 [StructLayout(LayoutKind.Sequential)]

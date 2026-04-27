@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -217,6 +219,149 @@ public static class Asherah
         if (_sharedFactory is null)
         {
             throw new InvalidOperationException("Asherah not configured; call Setup() first");
+        }
+    }
+
+    // ====================================================================
+    // Observability hooks (log + metrics)
+    //
+    // These wrap the C ABI exported by asherah-ffi/src/hooks.rs. The
+    // user-supplied delegate is held alive via a static field (not a
+    // GCHandle) since we only allow one hook at a time. The unmanaged
+    // trampoline catches all exceptions before returning across the FFI
+    // boundary — throwing through `extern "C"` aborts the Rust process
+    // since 1.81.
+    // ====================================================================
+
+    private static readonly object HookLock = new();
+    private static Action<LogEvent>? _logHook;
+    private static Action<MetricsEvent>? _metricsHook;
+
+    /// <summary>
+    /// Register a callback that receives every log event from the Rust
+    /// core (encrypt/decrypt path, metastore drivers, KMS clients).
+    /// Pass <c>null</c> to deregister.
+    /// </summary>
+    /// <remarks>
+    /// Callbacks may fire from any thread (Rust tokio worker threads, DB
+    /// driver threads). The trampoline catches every exception thrown by
+    /// the user callback so a faulty hook cannot tear down the process —
+    /// log it via your own observability tooling instead of relying on
+    /// Asherah to surface it.
+    /// </remarks>
+    public static unsafe void SetLogHook(Action<LogEvent>? callback)
+    {
+        lock (HookLock)
+        {
+            if (callback is null)
+            {
+                NativeMethods.asherah_clear_log_hook();
+                _logHook = null;
+                return;
+            }
+            _logHook = callback;
+            var rc = NativeMethods.asherah_set_log_hook(&LogTrampoline, IntPtr.Zero);
+            if (rc != 0)
+            {
+                _logHook = null;
+                throw new InvalidOperationException(
+                    $"asherah_set_log_hook failed: rc={rc}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Convenience method equivalent to <c>SetLogHook(null)</c>.
+    /// </summary>
+    public static void ClearLogHook() => SetLogHook(null);
+
+    /// <summary>
+    /// Register a callback that receives every metrics event from the
+    /// Rust core: encrypt/decrypt timings, metastore store/load timings,
+    /// and key cache hit/miss/stale counters. Pass <c>null</c> to
+    /// deregister.
+    /// </summary>
+    /// <remarks>
+    /// Metrics collection is enabled automatically when a hook is
+    /// installed and disabled when cleared. Same threading and exception
+    /// semantics as <see cref="SetLogHook"/>.
+    /// </remarks>
+    public static unsafe void SetMetricsHook(Action<MetricsEvent>? callback)
+    {
+        lock (HookLock)
+        {
+            if (callback is null)
+            {
+                NativeMethods.asherah_clear_metrics_hook();
+                _metricsHook = null;
+                return;
+            }
+            _metricsHook = callback;
+            var rc = NativeMethods.asherah_set_metrics_hook(&MetricsTrampoline, IntPtr.Zero);
+            if (rc != 0)
+            {
+                _metricsHook = null;
+                throw new InvalidOperationException(
+                    $"asherah_set_metrics_hook failed: rc={rc}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Convenience method equivalent to <c>SetMetricsHook(null)</c>.
+    /// </summary>
+    public static void ClearMetricsHook() => SetMetricsHook(null);
+
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static void LogTrampoline(IntPtr userData, int level, IntPtr targetPtr, IntPtr messagePtr)
+    {
+        // Snapshot the delegate locally so a concurrent SetLogHook(null)
+        // doesn't race with us.
+        var hook = _logHook;
+        if (hook is null) return;
+        try
+        {
+            var target = Marshal.PtrToStringUTF8(targetPtr) ?? string.Empty;
+            var message = Marshal.PtrToStringUTF8(messagePtr) ?? string.Empty;
+            var lvl = level switch
+            {
+                0 => LogLevel.Trace,
+                1 => LogLevel.Debug,
+                2 => LogLevel.Info,
+                3 => LogLevel.Warn,
+                _ => LogLevel.Error,
+            };
+            hook(new LogEvent(lvl, target, message));
+        }
+        catch
+        {
+            // Swallow — we cannot let exceptions cross the FFI boundary.
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
+    private static void MetricsTrampoline(IntPtr userData, int eventType, ulong durationNs, IntPtr namePtr)
+    {
+        var hook = _metricsHook;
+        if (hook is null) return;
+        try
+        {
+            var type = eventType switch
+            {
+                0 => MetricsEventType.Encrypt,
+                1 => MetricsEventType.Decrypt,
+                2 => MetricsEventType.Store,
+                3 => MetricsEventType.Load,
+                4 => MetricsEventType.CacheHit,
+                5 => MetricsEventType.CacheMiss,
+                _ => MetricsEventType.CacheStale,
+            };
+            string? name = namePtr == IntPtr.Zero ? null : Marshal.PtrToStringUTF8(namePtr);
+            hook(new MetricsEvent(type, durationNs, name));
+        }
+        catch
+        {
+            // Swallow.
         }
     }
 }
