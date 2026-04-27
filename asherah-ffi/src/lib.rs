@@ -114,7 +114,14 @@ pub extern "C" fn asherah_last_error_message() -> *const c_char {
 #[unsafe(no_mangle)]
 pub extern "C" fn asherah_factory_new_from_env() -> *mut AsherahFactory {
     match std::panic::catch_unwind(|| match ael::builders::factory_from_env() {
-        Ok(f) => Box::into_raw(Box::new(AsherahFactory { inner: f })),
+        // Always enable per-factory metrics so an installed metrics hook
+        // (asherah_set_metrics_hook) actually fires for encrypt/decrypt/
+        // store/load events. The cost is one Instant::now() per encrypt
+        // regardless of hook state; the global metrics gate (toggled by
+        // asherah_set_metrics_hook) decides whether the sink is invoked.
+        Ok(f) => Box::into_raw(Box::new(AsherahFactory {
+            inner: f.with_metrics(true),
+        })),
         Err(e) => {
             set_error(format!("{e:#}"));
             null_mut()
@@ -165,7 +172,11 @@ pub unsafe extern "C" fn asherah_factory_new_with_config(
 ) -> *mut AsherahFactory {
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
         || match factory_from_config_json(config_json) {
-            Ok((factory, _applied)) => Box::into_raw(Box::new(AsherahFactory { inner: factory })),
+            // Always enable per-factory metrics — see comment in
+            // asherah_factory_new_from_env.
+            Ok((factory, _applied)) => Box::into_raw(Box::new(AsherahFactory {
+                inner: factory.with_metrics(true),
+            })),
             Err(e) => {
                 set_error(format!("{e:#}"));
                 null_mut()

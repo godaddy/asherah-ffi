@@ -36,4 +36,9 @@ public sealed class AsherahClient : IAsherah
 
     public Task<string> DecryptStringAsync(string partitionId, string dataRowRecordJson) =>
         Asherah.DecryptStringAsync(partitionId, dataRowRecordJson);
+
+    public void SetLogHook(System.Action<LogEvent>? callback) =>
+        Asherah.SetLogHook(callback);
+    public void SetMetricsHook(System.Action<MetricsEvent>? callback) =>
+        Asherah.SetMetricsHook(callback);
 }
