@@ -123,11 +123,20 @@ in a process-wide MPSC channel (default capacity 4096) and delivered to
 your callback by a dedicated worker thread. The encrypt/decrypt hot path
 performs only a level check + non-blocking channel send, so a slow
 callback never extends an encrypt's latency. When the queue is full,
-events are dropped — `Asherah.LogDroppedCount` and
-`Asherah.MetricsDroppedCount` expose the cumulative drop count. To tune
+events are dropped — `Asherah.LogDroppedCount()` and
+`Asherah.MetricsDroppedCount()` expose the cumulative drop count. To tune
 the queue size or filter to a minimum log level (e.g. only deliver
 `Warn`+ to skip the verbose debug records), use the
 `SetLogHook(callback, queueCapacity, minLevel)` overload.
+
+**Synchronous delivery (opt-in).** For diagnostics, single-threaded apps,
+or when you need thread-local context (trace IDs, request scopes) intact
+in the callback, use `Asherah.SetLogHookSync(callback, minLevel)` /
+`Asherah.SetMetricsHookSync(callback)`. The callback fires **on the
+encrypt/decrypt thread before the operation returns** — no queue, no
+worker. Trade-off: a slow callback directly extends operation latency,
+so make sure your handler is verifiably non-blocking before picking sync
+mode in production.
 
 ### Metrics hook
 

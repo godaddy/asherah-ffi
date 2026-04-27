@@ -14,7 +14,8 @@ use std::time::Duration;
 use asherah::metrics;
 use asherah_ffi::{
     asherah_clear_log_hook, asherah_clear_metrics_hook, asherah_set_log_hook,
-    asherah_set_metrics_hook, ASHERAH_LOG_WARN, ASHERAH_METRIC_ENCRYPT,
+    asherah_set_log_hook_sync, asherah_set_metrics_hook, asherah_set_metrics_hook_sync,
+    ASHERAH_LOG_TRACE, ASHERAH_LOG_WARN, ASHERAH_METRIC_ENCRYPT,
 };
 
 // All tests in this binary touch the same global hook registration. A
@@ -280,4 +281,104 @@ fn metrics_hook_cache_event_carries_name() {
         "session-cache",
         "cache event name not propagated"
     );
+}
+
+// ─── Sync-mode hooks ────────────────────────────────────────────────────
+//
+// These verify the `_sync` entry points fire on the *calling* thread (no
+// queue, no worker). The async-mode tests above already cover correctness
+// of the events themselves; here we just need to prove the threading
+// difference.
+
+#[test]
+fn log_hook_sync_fires_on_calling_thread() {
+    let _t = HookTest::new();
+    static OBSERVED_TID: AtomicU64 = AtomicU64::new(0);
+    OBSERVED_TID.store(0, AtomOrd::Relaxed);
+    unsafe extern "C" fn cb(
+        _user_data: *mut c_void,
+        _level: i32,
+        _target: *const c_char,
+        _message: *const c_char,
+    ) {
+        // std::thread::ThreadId is opaque, but its `as_u64` is unstable.
+        // Use a process-unique stack address as a "current thread" proxy.
+        let sentinel = 0_u8;
+        OBSERVED_TID.store(
+            std::ptr::addr_of!(sentinel) as usize as u64,
+            AtomOrd::Relaxed,
+        );
+    }
+    let my_sentinel = 0_u8;
+    let my_thread_addr = std::ptr::addr_of!(my_sentinel) as usize as u64;
+    // Sentinels from different stack frames in the same thread aren't
+    // identical, but they ARE within a small range of each other; from a
+    // worker thread the addresses would differ by megabytes.
+    let rc =
+        unsafe { asherah_set_log_hook_sync(Some(cb), std::ptr::null_mut(), ASHERAH_LOG_TRACE) };
+    assert_eq!(rc, 0);
+    log::warn!("trigger sync");
+    let observed = OBSERVED_TID.load(AtomOrd::Relaxed);
+    assert!(
+        observed != 0,
+        "sync log hook never fired — must have been called on this thread synchronously"
+    );
+    let diff = (observed as i64 - my_thread_addr as i64).unsigned_abs();
+    assert!(
+        diff < 64 * 1024,
+        "sync log hook fired on a different thread (test stack ≈ {my_thread_addr:x}, callback observed ≈ {observed:x}, diff = {diff})"
+    );
+    asherah_clear_log_hook();
+}
+
+#[test]
+fn log_hook_sync_min_level_filter() {
+    let _t = HookTest::new();
+    let rc =
+        unsafe { asherah_set_log_hook_sync(Some(log_cb), std::ptr::null_mut(), ASHERAH_LOG_WARN) };
+    assert_eq!(rc, 0);
+    log::trace!("filtered");
+    log::debug!("filtered");
+    log::info!("filtered");
+    log::warn!("kept");
+    log::error!("kept");
+    // Sync — no need to wait for a worker.
+    assert_eq!(
+        LOG_COUNT.load(AtomOrd::Relaxed),
+        2,
+        "expected exactly 2 records (warn + error) past the level filter, got {}",
+        LOG_COUNT.load(AtomOrd::Relaxed)
+    );
+}
+
+#[test]
+fn metrics_hook_sync_fires_on_calling_thread() {
+    let _t = HookTest::new();
+    static OBSERVED_TID: AtomicU64 = AtomicU64::new(0);
+    OBSERVED_TID.store(0, AtomOrd::Relaxed);
+    unsafe extern "C" fn cb(
+        _user_data: *mut c_void,
+        _event_type: i32,
+        _duration_ns: u64,
+        _name: *const c_char,
+    ) {
+        let sentinel = 0_u8;
+        OBSERVED_TID.store(
+            std::ptr::addr_of!(sentinel) as usize as u64,
+            AtomOrd::Relaxed,
+        );
+    }
+    let my_sentinel = 0_u8;
+    let my_thread_addr = std::ptr::addr_of!(my_sentinel) as usize as u64;
+    let rc = unsafe { asherah_set_metrics_hook_sync(Some(cb), std::ptr::null_mut()) };
+    assert_eq!(rc, 0);
+    metrics::record_encrypt(std::time::Instant::now());
+    let observed = OBSERVED_TID.load(AtomOrd::Relaxed);
+    assert!(observed != 0, "sync metrics hook never fired");
+    let diff = (observed as i64 - my_thread_addr as i64).unsigned_abs();
+    assert!(
+        diff < 64 * 1024,
+        "sync metrics hook fired on a different thread (test stack ≈ {my_thread_addr:x}, callback observed ≈ {observed:x})"
+    );
+    asherah_clear_metrics_hook();
 }

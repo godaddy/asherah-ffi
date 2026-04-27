@@ -104,6 +104,20 @@ internal static class NativeMethods
 
     [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
     internal static extern ulong asherah_metrics_dropped_count();
+
+    // Synchronous variants — callback fires on the encrypt/decrypt thread,
+    // before the operation returns. No queue, no worker. Trade-off: a slow
+    // callback directly extends operation latency.
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern unsafe int asherah_set_log_hook_sync(
+        delegate* unmanaged[Cdecl]<IntPtr, int, IntPtr, IntPtr, void> callback,
+        IntPtr userData,
+        int minLevel);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern unsafe int asherah_set_metrics_hook_sync(
+        delegate* unmanaged[Cdecl]<IntPtr, int, ulong, IntPtr, void> callback,
+        IntPtr userData);
 }
 
 [StructLayout(LayoutKind.Sequential)]

@@ -326,6 +326,52 @@ public static class Asherah
     public static ulong LogDroppedCount() => NativeMethods.asherah_log_dropped_count();
 
     /// <summary>
+    /// Synchronous variant of <see cref="SetLogHook(Action{LogEvent}?)"/>.
+    /// The callback fires <b>on the encrypt/decrypt thread, before the
+    /// operation returns</b>. No queue, no worker thread, no drop counter.
+    /// </summary>
+    /// <param name="callback">The hook to register. <c>null</c> deregisters.</param>
+    /// <param name="minLevel">
+    /// Records more verbose than this level are filtered out before the
+    /// callback is invoked. Default <see cref="LogLevel.Trace"/> delivers
+    /// everything.
+    /// </param>
+    /// <remarks>
+    /// Use this when you're diagnosing a problem and need the callback to
+    /// fire before any subsequent panic/crash, when you need thread-local
+    /// context (trace IDs) intact in the callback, or when you've verified
+    /// your handler is non-blocking and prefer not to pay the queue cost.
+    /// <para>
+    /// Trade-off: a slow callback directly extends encrypt/decrypt
+    /// latency. Prefer <see cref="SetLogHook(Action{LogEvent}?)"/> for the
+    /// async-by-default behaviour that protects the hot path from a
+    /// misbehaving handler.
+    /// </para>
+    /// </remarks>
+    public static unsafe void SetLogHookSync(
+        Action<LogEvent>? callback, LogLevel minLevel = LogLevel.Trace)
+    {
+        lock (HookLock)
+        {
+            if (callback is null)
+            {
+                NativeMethods.asherah_clear_log_hook();
+                _logHook = null;
+                return;
+            }
+            _logHook = callback;
+            var rc = NativeMethods.asherah_set_log_hook_sync(
+                &LogTrampoline, IntPtr.Zero, (int)minLevel);
+            if (rc != 0)
+            {
+                _logHook = null;
+                throw new InvalidOperationException(
+                    $"asherah_set_log_hook_sync failed: rc={rc}");
+            }
+        }
+    }
+
+    /// <summary>
     /// Register a callback that receives every metrics event from the
     /// Rust core: encrypt/decrypt timings, metastore store/load timings,
     /// and key cache hit/miss/stale counters. Pass <c>null</c> to
@@ -389,6 +435,34 @@ public static class Asherah
     /// dispatcher's queue was full, since the process started.
     /// </summary>
     public static ulong MetricsDroppedCount() => NativeMethods.asherah_metrics_dropped_count();
+
+    /// <summary>
+    /// Synchronous variant of <see cref="SetMetricsHook(Action{MetricsEvent}?)"/>.
+    /// The callback fires on the encrypt/decrypt thread before the
+    /// operation returns. See <see cref="SetLogHookSync"/> for when to use
+    /// this and the trade-off.
+    /// </summary>
+    public static unsafe void SetMetricsHookSync(Action<MetricsEvent>? callback)
+    {
+        lock (HookLock)
+        {
+            if (callback is null)
+            {
+                NativeMethods.asherah_clear_metrics_hook();
+                _metricsHook = null;
+                return;
+            }
+            _metricsHook = callback;
+            var rc = NativeMethods.asherah_set_metrics_hook_sync(
+                &MetricsTrampoline, IntPtr.Zero);
+            if (rc != 0)
+            {
+                _metricsHook = null;
+                throw new InvalidOperationException(
+                    $"asherah_set_metrics_hook_sync failed: rc={rc}");
+            }
+        }
+    }
 
     /// <summary>
     /// Convenience method equivalent to <c>SetMetricsHook(null)</c>.

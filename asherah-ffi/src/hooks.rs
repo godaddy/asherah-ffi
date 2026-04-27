@@ -130,6 +130,23 @@ const DEFAULT_LOG_QUEUE_CAPACITY: usize = 4096;
 // callers want to skip the verbose debug/trace records.
 const DEFAULT_LOG_MIN_LEVEL: i32 = ASHERAH_LOG_TRACE;
 
+// Synchronous variant of `CallbackLogSink` that applies a per-hook level
+// filter. Async mode does the filter inside `AsyncLogSink::log` to avoid
+// even materialising the record; sync mode does it here so the user's
+// callback only sees records at or above their configured threshold.
+struct SyncFilteredLogSink {
+    min_level: log::LevelFilter,
+}
+
+impl LogSink for SyncFilteredLogSink {
+    fn log(&self, record: &log::Record<'_>) {
+        if record.level() > self.min_level {
+            return;
+        }
+        CallbackLogSink.log(record);
+    }
+}
+
 fn map_log_level(value: i32) -> log::LevelFilter {
     // Anything outside the documented range is treated as "deliver everything"
     // (the caller likely passed 0 / -1 / a sentinel value, and over-delivering
@@ -230,6 +247,49 @@ pub unsafe extern "C" fn asherah_set_log_hook_with_config(
         None => return -1,
     };
     install_log_hook_with_config(cb, user_data, queue_capacity, min_level);
+    0
+}
+
+/// Synchronous variant of [`asherah_set_log_hook`].
+///
+/// The callback is invoked **on the encrypt/decrypt thread, before the
+/// operation continues**. There is no queue, no worker thread, no drop
+/// counter. This is the right choice when:
+///
+/// - You're diagnosing a problem and want the callback to fire before any
+///   subsequent panic/crash so the message is observable.
+/// - You're correlating log records to in-progress operations and need
+///   thread-local context (trace IDs, request scopes) to be intact.
+/// - Your handler is verifiably non-blocking and you'd rather not pay the
+///   try_send cost.
+///
+/// Trade-off: a slow callback **directly extends encrypt/decrypt latency**.
+/// Use `asherah_set_log_hook` (or `_with_config`) for the async-by-default
+/// behaviour that protects the hot path from a misbehaving handler.
+///
+/// `min_level` filters the same way as in `_with_config`.
+///
+/// # Safety
+/// Same lifetime requirements as [`asherah_set_log_hook`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn asherah_set_log_hook_sync(
+    callback: Option<AsherahLogCallback>,
+    user_data: *mut c_void,
+    min_level: i32,
+) -> c_int {
+    let cb = match callback {
+        Some(c) => c,
+        None => return -1,
+    };
+    let _ = logging::ensure_logger();
+    *LOG_HOOK.lock() = Some(LogHookRegistration {
+        callback: cb as usize,
+        user_data: user_data as usize,
+    });
+    let sink = SyncFilteredLogSink {
+        min_level: map_log_level(min_level),
+    };
+    logging::set_sink("asherah-ffi-log", Some(Arc::new(sink)));
     0
 }
 
@@ -419,6 +479,34 @@ pub unsafe extern "C" fn asherah_set_metrics_hook_with_config(
         None => return -1,
     };
     install_metrics_hook_with_config(cb, user_data, queue_capacity);
+    0
+}
+
+/// Synchronous variant of [`asherah_set_metrics_hook`].
+///
+/// The callback fires **on the encrypt/decrypt thread**, before the
+/// operation returns. No queue, no worker thread, no drop counter.
+/// See [`asherah_set_log_hook_sync`] for the trade-off discussion — same
+/// idea on the metrics side.
+///
+/// # Safety
+/// Same lifetime requirements as [`asherah_set_metrics_hook`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn asherah_set_metrics_hook_sync(
+    callback: Option<AsherahMetricsCallback>,
+    user_data: *mut c_void,
+) -> c_int {
+    let cb = match callback {
+        Some(c) => c,
+        None => return -1,
+    };
+    *METRICS_HOOK.lock() = Some(MetricsHookRegistration {
+        callback: cb as usize,
+        user_data: user_data as usize,
+    });
+    METRICS_HOOK_INSTALLED.store(1, Ordering::Release);
+    metrics::set_sink(CallbackMetricsSink);
+    metrics::set_enabled(true);
     0
 }
 

@@ -300,6 +300,57 @@ public class HookTests
         Assert.NotEmpty(events);
     }
 
+    // ── Sync-mode hooks ────────────────────────────────────────────
+    //
+    // The async-mode tests above cover correctness of the events; these
+    // tests prove the threading difference (callback runs on the
+    // encrypt thread, not on a worker).
+
+    [Fact]
+    public void LogHookSync_FiresOnCallingThread()
+    {
+        using var _ = new HookScope();
+        var callerThreadId = Environment.CurrentManagedThreadId;
+        int? observedThreadId = null;
+        Asherah.SetLogHookSync(_ => observedThreadId = Environment.CurrentManagedThreadId);
+        Asherah.Setup(CreateConfig(verbose: true));
+        Asherah.EncryptString("sync-p1", "sync-payload");
+        // No WaitFor — sync delivery means the callback has already run by
+        // the time EncryptString returns.
+        Asherah.Shutdown();
+        Assert.NotNull(observedThreadId);
+        Assert.Equal(callerThreadId, observedThreadId);
+    }
+
+    [Fact]
+    public void LogHookSync_MinLevelFilter()
+    {
+        using var _ = new HookScope();
+        var events = new ConcurrentBag<LogEvent>();
+        Asherah.SetLogHookSync(e => events.Add(e), LogLevel.Warn);
+        Asherah.Setup(CreateConfig(verbose: true));
+        Asherah.EncryptString("sync-p2", "filter-payload");
+        Asherah.Shutdown();
+        Assert.All(events, e =>
+            Assert.True(
+                e.Level == LogLevel.Warn || e.Level == LogLevel.Error,
+                $"unexpected {e.Level} record passed Warn filter: {e.Message}"));
+    }
+
+    [Fact]
+    public void MetricsHookSync_FiresOnCallingThread()
+    {
+        using var _ = new HookScope();
+        var callerThreadId = Environment.CurrentManagedThreadId;
+        var observedThreadIds = new ConcurrentBag<int>();
+        Asherah.SetMetricsHookSync(_ => observedThreadIds.Add(Environment.CurrentManagedThreadId));
+        Asherah.Setup(CreateConfig());
+        Asherah.EncryptString("sync-p3", "sync-payload");
+        Asherah.Shutdown();
+        Assert.NotEmpty(observedThreadIds);
+        Assert.All(observedThreadIds, tid => Assert.Equal(callerThreadId, tid));
+    }
+
     private static string LocateRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
