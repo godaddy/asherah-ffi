@@ -133,12 +133,15 @@ public class HookTests
         using var _ = new HookScope();
         var a = new ConcurrentBag<LogEvent>();
         var b = new ConcurrentBag<LogEvent>();
-        Asherah.SetLogHook(e => a.Add(e));
+        // Trace filter: encrypt() emits Debug records every call. The
+        // default Warn filter only delivers the one-shot static-master-key
+        // warning at Setup, so the second-hook bag would never fill.
+        Asherah.SetLogHook(e => a.Add(e), queueCapacity: 0, minLevel: LogLevel.Trace);
         Asherah.Setup(CreateConfig(verbose: true));
         Asherah.EncryptString("p3", "first");
         WaitFor(() => !a.IsEmpty);
         Assert.NotEmpty(a);
-        Asherah.SetLogHook(e => b.Add(e));
+        Asherah.SetLogHook(e => b.Add(e), queueCapacity: 0, minLevel: LogLevel.Trace);
         Asherah.EncryptString("p3", "second");
         WaitFor(() => !b.IsEmpty);
         Asherah.Shutdown();
