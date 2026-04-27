@@ -195,6 +195,7 @@ dependencies = [
  "jni",
  "log",
  "once_cell",
+ "parking_lot",
  "serde_json",
  "serial_test",
  "tokio",

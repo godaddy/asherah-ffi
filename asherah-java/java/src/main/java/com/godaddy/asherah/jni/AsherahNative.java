@@ -32,4 +32,12 @@ final class AsherahNative {
 
   static native void decryptAsync(long sessionHandle, byte[] ciphertextJson,
       java.util.concurrent.CompletableFuture<byte[]> future);
+
+  static native void setLogHook(AsherahLogHook callback);
+
+  static native void clearLogHook();
+
+  static native void setMetricsHook(AsherahMetricsHook callback);
+
+  static native void clearMetricsHook();
 }
