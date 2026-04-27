@@ -7,12 +7,11 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-// `using Microsoft.Extensions.Logging` brings in both the ILogger interface
-// and the LoggerExtensions structured-logging extension methods (`.Log`,
+// `LogEvent.Level` is `Microsoft.Extensions.Logging.LogLevel` — bringing in
+// the namespace gives us the enum, the ILogger interface, and the
+// LoggerExtensions structured-logging extension methods (`.Log`,
 // `.LogWarning`, etc.) we need below.
 using Microsoft.Extensions.Logging;
-// Disambiguate: Microsoft.Extensions.Logging.LogLevel vs our LogLevel.
-using MsLogLevel = Microsoft.Extensions.Logging.LogLevel;
 
 namespace GoDaddy.Asherah;
 
@@ -315,7 +314,7 @@ public static class Asherah
                 &LogTrampoline,
                 IntPtr.Zero,
                 (UIntPtr)Math.Max(queueCapacity, 0),
-                (int)minLevel);
+                LogLevelToCAbi(minLevel));
             if (rc != 0)
             {
                 _logHook = null;
@@ -340,7 +339,7 @@ public static class Asherah
     /// <param name="callback">The hook to register. <c>null</c> deregisters.</param>
     /// <param name="minLevel">
     /// Records more verbose than this level are filtered out before the
-    /// callback is invoked. Defaults to <see cref="LogLevel.Warn"/> so
+    /// callback is invoked. Defaults to <see cref="LogLevel.Warning"/> so
     /// only <c>Warn</c>/<c>Error</c> records are delivered. Pass
     /// <see cref="LogLevel.Trace"/> to deliver everything.
     /// </param>
@@ -357,7 +356,7 @@ public static class Asherah
     /// </para>
     /// </remarks>
     public static unsafe void SetLogHookSync(
-        Action<LogEvent>? callback, LogLevel minLevel = LogLevel.Warn)
+        Action<LogEvent>? callback, LogLevel minLevel = LogLevel.Warning)
     {
         lock (HookLock)
         {
@@ -369,7 +368,7 @@ public static class Asherah
             }
             _logHook = callback;
             var rc = NativeMethods.asherah_set_log_hook_sync(
-                &LogTrampoline, IntPtr.Zero, (int)minLevel);
+                &LogTrampoline, IntPtr.Zero, LogLevelToCAbi(minLevel));
             if (rc != 0)
             {
                 _logHook = null;
@@ -488,12 +487,15 @@ public static class Asherah
         {
             var target = Marshal.PtrToStringUTF8(targetPtr) ?? string.Empty;
             var message = Marshal.PtrToStringUTF8(messagePtr) ?? string.Empty;
+            // C ABI integers happen to match Microsoft.Extensions.Logging.LogLevel
+            // 1:1 for our five produced levels (Trace=0, Debug=1, Information=2,
+            // Warning=3, Error=4). Any unexpected value is clamped to Error.
             var lvl = level switch
             {
                 0 => LogLevel.Trace,
                 1 => LogLevel.Debug,
-                2 => LogLevel.Info,
-                3 => LogLevel.Warn,
+                2 => LogLevel.Information,
+                3 => LogLevel.Warning,
                 _ => LogLevel.Error,
             };
             hook(new LogEvent(lvl, target, message));
@@ -536,24 +538,17 @@ public static class Asherah
     // the host (ASP.NET Core, Generic Host, Worker Service). These overloads
     // bridge our LogEvent stream into a caller-supplied ILogger so users
     // don't have to write the boilerplate themselves.
-
-    private static MsLogLevel MapToMsLogLevel(LogLevel level) => level switch
-    {
-        LogLevel.Trace => MsLogLevel.Trace,
-        LogLevel.Debug => MsLogLevel.Debug,
-        LogLevel.Info => MsLogLevel.Information,
-        LogLevel.Warn => MsLogLevel.Warning,
-        _ => MsLogLevel.Error,
-    };
+    //
+    // `LogEvent.Level` is already `Microsoft.Extensions.Logging.LogLevel` —
+    // no level mapping needed.
 
     private static Action<LogEvent> AdaptLogger(ILogger logger) => evt =>
     {
-        var ms = MapToMsLogLevel(evt.Level);
-        if (!logger.IsEnabled(ms)) return;
+        if (!logger.IsEnabled(evt.Level)) return;
         // Structured form: `{Target}` and `{Message}` become first-class
         // properties for any ILogger provider that consumes them
         // (Serilog, OpenTelemetry, Application Insights, etc.).
-        logger.Log(ms, "{Target}: {Message}", evt.Target, evt.Message);
+        logger.Log(evt.Level, "{Target}: {Message}", evt.Target, evt.Message);
     };
 
     private static Action<LogEvent> AdaptLoggerFactory(ILoggerFactory factory)
@@ -565,16 +560,32 @@ public static class Asherah
         return evt =>
         {
             var logger = cache.GetOrAdd(evt.Target, factory.CreateLogger);
-            var ms = MapToMsLogLevel(evt.Level);
-            if (!logger.IsEnabled(ms)) return;
-            logger.Log(ms, "{Message}", evt.Message);
+            if (!logger.IsEnabled(evt.Level)) return;
+            logger.Log(evt.Level, "{Message}", evt.Message);
         };
     }
 
     /// <summary>
+    /// Translate a Microsoft.Extensions.Logging.LogLevel into the C-ABI
+    /// integer the Rust side expects. Critical and None map to the C ABI's
+    /// "drop everything" sentinel.
+    /// </summary>
+    private static int LogLevelToCAbi(LogLevel level) => level switch
+    {
+        LogLevel.Trace => 0,
+        LogLevel.Debug => 1,
+        LogLevel.Information => 2,
+        LogLevel.Warning => 3,
+        LogLevel.Error => 4,
+        // Critical, None — neither is produced by the Rust source. Treat as
+        // "filter everything" (ASHERAH_LOG_OFF = 5 in asherah-ffi/hooks.rs).
+        _ => 5,
+    };
+
+    /// <summary>
     /// Register a Microsoft.Extensions.Logging <see cref="ILogger"/> as the
     /// destination for Asherah log records. Async delivery on a worker
-    /// thread; producer-side filter set to <see cref="LogLevel.Warn"/>+ by
+    /// thread; producer-side filter set to <see cref="LogLevel.Warning"/>+ by
     /// default.
     /// </summary>
     public static void SetLogHook(ILogger logger)
@@ -621,7 +632,7 @@ public static class Asherah
     /// thread-local context (trace IDs / scopes) intact when the host's
     /// logger writes the record.
     /// </summary>
-    public static void SetLogHookSync(ILogger logger, LogLevel minLevel = LogLevel.Warn)
+    public static void SetLogHookSync(ILogger logger, LogLevel minLevel = LogLevel.Warning)
     {
         ArgumentNullException.ThrowIfNull(logger);
         SetLogHookSync(AdaptLogger(logger), minLevel);
@@ -630,7 +641,7 @@ public static class Asherah
     /// <summary>
     /// Synchronous variant accepting an <see cref="ILoggerFactory"/>.
     /// </summary>
-    public static void SetLogHookSync(ILoggerFactory loggerFactory, LogLevel minLevel = LogLevel.Warn)
+    public static void SetLogHookSync(ILoggerFactory loggerFactory, LogLevel minLevel = LogLevel.Warning)
     {
         ArgumentNullException.ThrowIfNull(loggerFactory);
         SetLogHookSync(AdaptLoggerFactory(loggerFactory), minLevel);

@@ -51,6 +51,13 @@ pub const ASHERAH_LOG_DEBUG: i32 = 1;
 pub const ASHERAH_LOG_INFO: i32 = 2;
 pub const ASHERAH_LOG_WARN: i32 = 3;
 pub const ASHERAH_LOG_ERROR: i32 = 4;
+/// Filter sentinel: drop every record. Useful when a binding's standard
+/// log-level enum has values higher than Error (e.g. Microsoft.Extensions.
+/// Logging.LogLevel.Critical/None) and the caller wants those to translate
+/// to "deliver nothing" rather than "deliver everything (the unknown-value
+/// fallback)". Only meaningful as a `min_level` argument to `_with_config`/
+/// `_sync`; never appears in a delivered LogEvent.
+pub const ASHERAH_LOG_OFF: i32 = 5;
 
 /// Log callback signature. Strings are NUL-terminated UTF-8 valid for the
 /// callback's lifetime only.
@@ -152,12 +159,14 @@ impl LogSink for SyncFilteredLogSink {
 fn map_log_level(value: i32) -> log::LevelFilter {
     // Anything outside the documented range is treated as "deliver everything"
     // (the caller likely passed 0 / -1 / a sentinel value, and over-delivering
-    // is preferable to silently dropping).
+    // is preferable to silently dropping). `ASHERAH_LOG_OFF` is the explicit
+    // "deliver nothing" sentinel.
     match value {
         ASHERAH_LOG_DEBUG => log::LevelFilter::Debug,
         ASHERAH_LOG_INFO => log::LevelFilter::Info,
         ASHERAH_LOG_WARN => log::LevelFilter::Warn,
         ASHERAH_LOG_ERROR => log::LevelFilter::Error,
+        ASHERAH_LOG_OFF => log::LevelFilter::Off,
         _ => log::LevelFilter::Trace,
     }
 }

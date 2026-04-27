@@ -10,8 +10,6 @@ using GoDaddy.Asherah;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
-// Disambiguate our LogLevel from Microsoft.Extensions.Logging.LogLevel.
-using AsherahLogLevel = GoDaddy.Asherah.LogLevel;
 
 namespace GoDaddy.Asherah.AppEncryption.Tests;
 
@@ -348,14 +346,14 @@ public class HookTests
     {
         using var _ = new HookScope();
         var events = new ConcurrentBag<LogEvent>();
-        Asherah.SetLogHookSync(e => events.Add(e), LogLevel.Warn);
+        Asherah.SetLogHookSync(e => events.Add(e), LogLevel.Warning);
         Asherah.Setup(CreateConfig(verbose: true));
         Asherah.EncryptString("sync-p2", "filter-payload");
         Asherah.Shutdown();
         Assert.All(events, e =>
             Assert.True(
-                e.Level == LogLevel.Warn || e.Level == LogLevel.Error,
-                $"unexpected {e.Level} record passed Warn filter: {e.Message}"));
+                e.Level == LogLevel.Warning || e.Level == LogLevel.Error,
+                $"unexpected {e.Level} record passed Warning filter: {e.Message}"));
     }
 
     [Fact]
@@ -436,7 +434,7 @@ public class HookTests
         var captured = new ConcurrentBag<CapturedLogEntry>();
         var logger = new CapturingLogger("test", captured);
         // Wide filter so the test exercises the level mapping.
-        Asherah.SetLogHook(logger, queueCapacity: 0, minLevel: AsherahLogLevel.Trace);
+        Asherah.SetLogHook(logger, queueCapacity: 0, minLevel: LogLevel.Trace);
         Asherah.Setup(CreateConfig(verbose: true));
         Asherah.EncryptString("ilogger-p", "via-ilogger");
         WaitFor(() => !captured.IsEmpty);
@@ -457,7 +455,7 @@ public class HookTests
     {
         using var _ = new HookScope();
         using var factory = new CapturingLoggerFactory();
-        Asherah.SetLogHook(factory, queueCapacity: 0, minLevel: AsherahLogLevel.Trace);
+        Asherah.SetLogHook(factory, queueCapacity: 0, minLevel: LogLevel.Trace);
         Asherah.Setup(CreateConfig(verbose: true));
         Asherah.EncryptString("ilf-p", "via-iloggerfactory");
         WaitFor(() => !factory.Provider.Captured.IsEmpty);
@@ -476,7 +474,7 @@ public class HookTests
         using var _ = new HookScope();
         var captured = new ConcurrentBag<CapturedLogEntry>();
         var logger = new CapturingLogger("sync", captured);
-        Asherah.SetLogHookSync(logger, AsherahLogLevel.Trace);
+        Asherah.SetLogHookSync(logger, LogLevel.Trace);
         Asherah.Setup(CreateConfig(verbose: true));
         Asherah.EncryptString("ilogger-sync-p", "sync-via-ilogger");
         // Sync delivery — no WaitFor needed.
