@@ -7,6 +7,7 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import org.slf4j.Logger;
 
 public final class Asherah {
   private static final ReentrantReadWriteLock LOCK = new ReentrantReadWriteLock();
@@ -214,6 +215,24 @@ public final class Asherah {
     AsherahNative.setLogHook(callback);
   }
 
+  /**
+   * Install an SLF4J {@link Logger} as the destination for Asherah log
+   * records. Records are forwarded with their native severity (Asherah's
+   * Rust source emits TRACE/DEBUG/INFO/WARN/ERROR; SLF4J takes those
+   * directly). The logger's own enablement check ({@code logger.isXxxEnabled()})
+   * is honoured before the message is materialised on the consumer side.
+   *
+   * <p>Typical use in a Spring/Micronaut/Quarkus app:
+   * <pre>
+   *   Logger asherahLogger = LoggerFactory.getLogger("asherah");
+   *   Asherah.setLogHook(asherahLogger);
+   * </pre>
+   */
+  public static void setLogHook(final Logger logger) {
+    Objects.requireNonNull(logger, "logger");
+    AsherahNative.setLogHook(adaptLogger(logger));
+  }
+
   /** Remove the currently installed log hook, if any. */
   public static void clearLogHook() {
     AsherahNative.clearLogHook();
@@ -224,6 +243,12 @@ public final class Asherah {
    * a hook implicitly enables the global metrics gate; clearing it disables
    * the gate. Pass {@code null} to clear (equivalent to
    * {@link #clearMetricsHook()}).
+   *
+   * <p>To forward to a Micrometer {@code MeterRegistry} (Spring Boot,
+   * Micronaut, Quarkus, OpenTelemetry, Prometheus, Datadog, CloudWatch), use
+   * {@code AsherahMicrometer.metricsHook(registry)} as the callback. That
+   * helper class lives in a separate compilation unit so users without
+   * micrometer-core on their classpath are not affected.
    */
   public static void setMetricsHook(final AsherahMetricsHook callback) {
     AsherahNative.setMetricsHook(callback);
@@ -232,5 +257,40 @@ public final class Asherah {
   /** Remove the currently installed metrics hook, if any. */
   public static void clearMetricsHook() {
     AsherahNative.clearMetricsHook();
+  }
+
+  // ── SLF4J bridge ─────────────────────────────────────────────────────
+
+  static AsherahLogHook adaptLogger(final Logger logger) {
+    return event -> {
+      switch (event.getLevel()) {
+        case TRACE:
+          if (logger.isTraceEnabled()) {
+            logger.trace("{}: {}", event.getTarget(), event.getMessage());
+          }
+          break;
+        case DEBUG:
+          if (logger.isDebugEnabled()) {
+            logger.debug("{}: {}", event.getTarget(), event.getMessage());
+          }
+          break;
+        case INFO:
+          if (logger.isInfoEnabled()) {
+            logger.info("{}: {}", event.getTarget(), event.getMessage());
+          }
+          break;
+        case WARN:
+          if (logger.isWarnEnabled()) {
+            logger.warn("{}: {}", event.getTarget(), event.getMessage());
+          }
+          break;
+        case ERROR:
+        default:
+          if (logger.isErrorEnabled()) {
+            logger.error("{}: {}", event.getTarget(), event.getMessage());
+          }
+          break;
+      }
+    };
   }
 }

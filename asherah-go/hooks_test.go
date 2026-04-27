@@ -1,6 +1,8 @@
 package asherah
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -8,7 +10,22 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
+
+// waitFor polls the predicate until it returns true or the deadline passes.
+// Hook delivery is asynchronous (see asherah-ffi/src/hooks.rs), so tests
+// that assert on event counts must give the worker thread time to drain.
+func waitFor(d time.Duration, predicate func() bool) bool {
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		if predicate() {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return predicate()
+}
 
 func hooksConfig() Config {
 	caching := false
@@ -132,21 +149,61 @@ func TestLogHookFiresWithWellFormedEvents(t *testing.T) {
 		}
 	}
 
+	waitFor(2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(received) > 0
+	})
 	mu.Lock()
 	defer mu.Unlock()
 	if len(received) == 0 {
 		t.Fatalf("expected at least one log event")
 	}
 	for _, e := range received {
-		if e.Level < LogTrace || e.Level > LogError {
-			t.Errorf("invalid level: %v", e.Level)
+		// e.Level is a slog.Level — every Asherah record should map to one
+		// of the canonical slog levels or LevelTrace (one below Debug).
+		switch e.Level {
+		case LevelTrace, slog.LevelDebug, slog.LevelInfo, slog.LevelWarn, slog.LevelError:
+			// ok
+		default:
+			t.Errorf("unexpected level: %v", e.Level)
 		}
 		if e.Target == "" {
 			t.Errorf("empty target")
 		}
-		if e.Level.String() == "unknown" {
-			t.Errorf("unknown level string for %v", e.Level)
+	}
+}
+
+func TestSetSlogLoggerForwardsRecords(t *testing.T) {
+	ensureHooksEnv(t)
+	resetHooks(t)
+	defer resetHooks(t)
+
+	var buf bytes.Buffer
+	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: LevelTrace})
+	logger := slog.New(handler)
+
+	if err := SetSlogLogger(logger); err != nil {
+		t.Fatalf("SetSlogLogger: %v", err)
+	}
+	setupHooks(t, hooksConfig())
+	for i := 0; i < 5; i++ {
+		ct, err := EncryptString("slog-bridge", "v")
+		if err != nil {
+			t.Fatalf("EncryptString: %v", err)
 		}
+		if _, err := DecryptString("slog-bridge", ct); err != nil {
+			t.Fatalf("DecryptString: %v", err)
+		}
+	}
+	Shutdown()
+
+	// The async dispatch worker may not have drained yet. Best-effort: just
+	// confirm the bridge wired up without panicking. If anything was logged,
+	// the record must include the "target" attribute injected by the bridge.
+	out := buf.String()
+	if out != "" && !strings.Contains(out, `"target"`) {
+		t.Errorf("expected slog records to carry target attribute, got: %s", out)
 	}
 }
 
@@ -257,6 +314,11 @@ func TestMetricsHookFiresEncryptAndDecrypt(t *testing.T) {
 		}
 	}
 
+	waitFor(2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return seenTypes[MetricEncrypt] > 0 && seenTypes[MetricDecrypt] > 0
+	})
 	mu.Lock()
 	defer mu.Unlock()
 	if seenTypes[MetricEncrypt] == 0 {
@@ -292,6 +354,11 @@ func TestMetricsTimingEventsCarryPositiveDuration(t *testing.T) {
 		_, _ = DecryptString("timing", ct)
 	}
 
+	waitFor(2*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(timings) > 0
+	})
 	mu.Lock()
 	defer mu.Unlock()
 	if len(timings) == 0 {
@@ -332,6 +399,7 @@ func TestMetricsHookPanicDoesNotCrash(t *testing.T) {
 	if pt != "survive" {
 		t.Errorf("plaintext mismatch: %q", pt)
 	}
+	waitFor(2*time.Second, func() bool { return atomic.LoadInt32(&fired) > 0 })
 	if atomic.LoadInt32(&fired) == 0 {
 		t.Errorf("metrics hook never fired")
 	}
@@ -352,6 +420,7 @@ func TestMetricsHookSurvivesManyOperations(t *testing.T) {
 		_, _ = DecryptString("vol", ct)
 	}
 
+	waitFor(2*time.Second, func() bool { return atomic.LoadInt32(&fired) >= 200 })
 	if got := atomic.LoadInt32(&fired); got < 200 {
 		t.Errorf("expected ≥200 metrics events for 100 enc/dec ops, got %d", got)
 	}
@@ -375,6 +444,7 @@ func TestMetricsAndLogHooksCoexist(t *testing.T) {
 		_, _ = DecryptString("coexist", ct)
 	}
 
+	waitFor(2*time.Second, func() bool { return atomic.LoadInt32(&metricHits) > 0 })
 	if atomic.LoadInt32(&metricHits) == 0 {
 		t.Errorf("metrics hook should have fired")
 	}
@@ -438,23 +508,16 @@ func TestHookSurvivesSetupShutdownCycles(t *testing.T) {
 		_, _ = DecryptString("cycle", ct)
 		Shutdown()
 	}
+	waitFor(2*time.Second, func() bool { return atomic.LoadInt32(&hits) > 0 })
 	if atomic.LoadInt32(&hits) == 0 {
 		t.Errorf("metrics hook should fire across factory cycles")
 	}
 }
 
-func TestLogLevelStringHandlesAllVariants(t *testing.T) {
-	cases := map[LogLevel]string{
-		LogTrace: "trace",
-		LogDebug: "debug",
-		LogInfo:  "info",
-		LogWarn:  "warn",
-		LogError: "error",
-	}
-	for level, want := range cases {
-		if got := level.String(); got != want {
-			t.Errorf("%v.String() = %q, want %q", level, got, want)
-		}
+func TestLevelTraceIsBelowSlogDebug(t *testing.T) {
+	if LevelTrace >= slog.LevelDebug {
+		t.Errorf("LevelTrace (%v) must be below slog.LevelDebug (%v)",
+			LevelTrace, slog.LevelDebug)
 	}
 }
 

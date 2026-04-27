@@ -62,9 +62,12 @@ public class Sample {
         AtomicInteger metricEvents = new AtomicInteger();
         Asherah.setLogHook(event -> {
             logEvents.incrementAndGet();
-            // In real code, dispatch to slf4j / log4j / java.util.logging based on event.getLevelEnum().
-            if (event.getLevelEnum() != com.godaddy.asherah.jni.LogLevel.TRACE
-                    && event.getLevelEnum() != com.godaddy.asherah.jni.LogLevel.DEBUG) {
+            // event.getLevel() returns org.slf4j.event.Level directly — pass it
+            // to any SLF4J-aware logger without translation. In a Spring/
+            // Micronaut/Quarkus app, prefer Asherah.setLogHook(slf4jLogger)
+            // and let the framework's filter rules handle dispatch.
+            if (event.getLevel() != org.slf4j.event.Level.TRACE
+                    && event.getLevel() != org.slf4j.event.Level.DEBUG) {
                 System.out.println("[asherah-log " + event.getLevel() + "] "
                         + event.getTarget() + ": " + event.getMessage());
             }

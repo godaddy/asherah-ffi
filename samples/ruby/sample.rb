@@ -65,12 +65,23 @@ ensure
 end
 
 # -- 4. Log + metrics hooks: forward observability events to your stack --
+require "logger"
 log_events = 0
 metric_events = 0
+# The simplest way: hand Asherah a Ruby Logger and let it dispatch via
+# Logger#add(severity, message, target). Any Logger-compatible object works
+# (ActiveSupport::Logger, SemanticLogger, Ougai, etc.).
+#
+#   stdout_logger = Logger.new($stdout)
+#   stdout_logger.level = Logger::WARN
+#   Asherah.set_log_hook(stdout_logger)
+#
+# Or pass a block to read each record's structured fields directly:
 Asherah.set_log_hook do |event|
   log_events += 1
-  # In real code, dispatch to Logger / log4r based on event[:level]
-  unless %i[trace debug].include?(event[:level])
+  # event[:severity] is a Logger::Severity integer (Logger::DEBUG ... ERROR);
+  # event[:level] is the matching lowercase symbol.
+  if event[:severity] >= Logger::INFO
     puts "[asherah-log #{event[:level]}] #{event[:target]}: #{event[:message]}"
   end
 end

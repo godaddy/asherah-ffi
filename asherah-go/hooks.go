@@ -1,47 +1,27 @@
 package asherah
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
 )
 
-// LogLevel mirrors the Rust log crate's level enum and the C ABI
-// ASHERAH_LOG_* constants delivered by the underlying library.
-type LogLevel int
-
-const (
-	LogTrace LogLevel = 0
-	LogDebug LogLevel = 1
-	LogInfo  LogLevel = 2
-	LogWarn  LogLevel = 3
-	LogError LogLevel = 4
-)
-
-// String returns the lowercase level name (matches the Rust log crate).
-func (l LogLevel) String() string {
-	switch l {
-	case LogTrace:
-		return "trace"
-	case LogDebug:
-		return "debug"
-	case LogInfo:
-		return "info"
-	case LogWarn:
-		return "warn"
-	case LogError:
-		return "error"
-	default:
-		return "unknown"
-	}
-}
+// LevelTrace is one step below [slog.LevelDebug]. The Rust log crate has a
+// TRACE level that stdlib slog does not; Asherah surfaces those records as
+// [LevelTrace] so callers can filter on it via slog's standard
+// [slog.Leveler] machinery.
+const LevelTrace = slog.Level(-8)
 
 // LogEvent is delivered to a registered LogHook for every log record emitted
-// by the underlying Rust crates.
+// by the underlying Rust crates. Level uses [slog.Level] directly so the
+// value plugs into any [slog.Handler] without translation.
 type LogEvent struct {
-	Level   LogLevel
+	Level   slog.Level
 	Target  string
 	Message string
 }
@@ -144,9 +124,32 @@ func cstr(ptr uintptr) string {
 	return string(buf)
 }
 
+// cLevelToSlog maps the C ABI integer level (mirrors Rust log crate) to a
+// [slog.Level]. The Rust TRACE has no slog equivalent, so it falls below
+// [slog.LevelDebug] as [LevelTrace].
+func cLevelToSlog(level int32) slog.Level {
+	switch level {
+	case 0: // ASHERAH_LOG_TRACE
+		return LevelTrace
+	case 1: // ASHERAH_LOG_DEBUG
+		return slog.LevelDebug
+	case 2: // ASHERAH_LOG_INFO
+		return slog.LevelInfo
+	case 3: // ASHERAH_LOG_WARN
+		return slog.LevelWarn
+	case 4: // ASHERAH_LOG_ERROR
+		return slog.LevelError
+	default:
+		return slog.LevelError
+	}
+}
+
 // SetLogHook installs callback to receive every log record emitted by the
 // underlying Asherah crates. Replaces any previously installed hook. Pass nil
 // to clear (equivalent to ClearLogHook).
+//
+// To forward records to a [*slog.Logger] use [SetSlogLogger]; to forward
+// to a [slog.Handler] directly use [SetSlogHandler].
 func SetLogHook(callback LogHook) error {
 	if err := ensureLoaded(); err != nil {
 		return err
@@ -166,6 +169,42 @@ func SetLogHook(callback LogHook) error {
 		return fmt.Errorf("asherah-go: SetLogHook failed (rc=%d): %s", rc, lastErrorMessage())
 	}
 	return nil
+}
+
+// SetSlogLogger forwards every Asherah log record to the supplied
+// [*slog.Logger]. The logger's own enablement check is honoured before each
+// record is emitted, so out-of-band records below the logger's threshold
+// are dropped without allocation. Replaces any previously installed hook.
+//
+// The Rust source target (e.g. "asherah::session") is attached as a
+// "target" attribute on every record so handlers can route by category.
+func SetSlogLogger(logger *slog.Logger) error {
+	if logger == nil {
+		return ClearLogHook()
+	}
+	return SetSlogHandler(logger.Handler())
+}
+
+// SetSlogHandler forwards every Asherah log record to the supplied
+// [slog.Handler]. Use this when you need to wire Asherah into a logging
+// pipeline that exposes a Handler rather than a Logger (for example,
+// composing handlers with [slog.NewJSONHandler] under a custom dispatcher).
+func SetSlogHandler(handler slog.Handler) error {
+	if handler == nil {
+		return ClearLogHook()
+	}
+	return SetLogHook(func(event LogEvent) {
+		ctx := context.Background()
+		if !handler.Enabled(ctx, event.Level) {
+			return
+		}
+		// Use time.Now() rather than the zero time so the record carries a
+		// timestamp at the moment the FFI layer dispatched it (the Rust side
+		// does not propagate a wall-clock time across the boundary).
+		record := slog.NewRecord(time.Now(), event.Level, event.Message, 0)
+		record.AddAttrs(slog.String("target", event.Target))
+		_ = handler.Handle(ctx, record)
+	})
 }
 
 // ClearLogHook removes the active log hook, if any. Idempotent.
@@ -231,7 +270,7 @@ func logTrampoline(userData uintptr, level int32, target uintptr, message uintpt
 		return 0
 	}
 	cb(LogEvent{
-		Level:   LogLevel(level),
+		Level:   cLevelToSlog(level),
 		Target:  cstr(target),
 		Message: cstr(message),
 	})

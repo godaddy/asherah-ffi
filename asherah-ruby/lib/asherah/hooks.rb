@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "logger"
+
 require_relative "native"
 
 module Asherah
@@ -16,15 +18,30 @@ module Asherah
   # not block; expensive forwarding (e.g. to a logging framework) should be
   # done by enqueueing work onto a background thread you own.
   module Hooks
-    # Map from C ABI integer log level to a lowercase symbol matching the
-    # Rust +log+ crate's level names.
-    LOG_LEVEL_NAMES = {
-      Native::LOG_TRACE => :trace,
-      Native::LOG_DEBUG => :debug,
-      Native::LOG_INFO  => :info,
-      Native::LOG_WARN  => :warn,
-      Native::LOG_ERROR => :error
+    # Map C ABI integer log level → +Logger::Severity+ constant. The Rust
+    # +log+ crate has a TRACE level that stdlib +Logger+ does not; it is
+    # surfaced as +Logger::DEBUG+ so the value is still meaningful when the
+    # caller dispatches via +Logger#add+.
+    LOG_LEVEL_TO_SEVERITY = {
+      Native::LOG_TRACE => Logger::DEBUG,
+      Native::LOG_DEBUG => Logger::DEBUG,
+      Native::LOG_INFO  => Logger::INFO,
+      Native::LOG_WARN  => Logger::WARN,
+      Native::LOG_ERROR => Logger::ERROR
     }.freeze
+    private_constant :LOG_LEVEL_TO_SEVERITY
+
+    # Map +Logger::Severity+ → lowercase symbol for ergonomic dispatch on
+    # the raw block API.
+    SEVERITY_TO_SYMBOL = {
+      Logger::DEBUG => :debug,
+      Logger::INFO  => :info,
+      Logger::WARN  => :warn,
+      Logger::ERROR => :error,
+      Logger::FATAL => :fatal,
+      Logger::UNKNOWN => :unknown
+    }.freeze
+    private_constant :SEVERITY_TO_SYMBOL
 
     METRIC_TYPE_NAMES = {
       Native::METRIC_ENCRYPT     => :encrypt,
@@ -35,6 +52,7 @@ module Asherah
       Native::METRIC_CACHE_MISS  => :cache_miss,
       Native::METRIC_CACHE_STALE => :cache_stale
     }.freeze
+    private_constant :METRIC_TYPE_NAMES
 
     # Module state: pinning the active FFI::Function trampolines is required
     # so the GC does not free them while the C ABI still holds the pointer.
@@ -51,21 +69,40 @@ module Asherah
     @metrics_in_callback = {}
 
     class << self
-      # Install a log hook. +block+ receives a Hash:
+      # Install a log hook. Three forms are supported:
       #
-      #   { level: Symbol, target: String, message: String }
+      # 1. A stdlib +Logger+ instance (or any Logger-compatible object that
+      #    responds to +#add+, +#debug+, +#info+, +#warn+, +#error+):
       #
-      # +level+ is one of +:trace+, +:debug+, +:info+, +:warn+, +:error+.
+      #      Asherah.set_log_hook(Logger.new($stdout))
       #
-      # Replaces any previously installed log hook. Pass +nil+ to clear.
+      #    Each Asherah record is forwarded via
+      #    +Logger#add(severity, message, target)+ so the logger's own filter
+      #    rules and formatters apply. The +target+ argument is passed as
+      #    +progname+ for routing.
+      #
+      # 2. A +Proc+ or block, yielded a Hash:
+      #
+      #      Asherah.set_log_hook do |event|
+      #        # event[:level]    => :debug | :info | :warn | :error  (symbol)
+      #        # event[:severity] => Logger::DEBUG ...  (Logger::Severity int)
+      #        # event[:target]   => "asherah::session"
+      #        # event[:message]  => "..."
+      #      end
+      #
+      # 3. +nil+ to clear (equivalent to {clear_log_hook}).
+      #
+      # Replaces any previously installed log hook. Exceptions raised from
+      # the callback are caught and silently swallowed.
       def set_log_hook(callback = nil, &block)
         callback ||= block
         if callback.nil?
           clear_log_hook
           return
         end
+        callback = logger_to_callback(callback) if logger_like?(callback)
         unless callback.respond_to?(:call)
-          raise ArgumentError, "log hook must be callable (Proc or block)"
+          raise ArgumentError, "log hook must be a Logger, Proc, or block"
         end
 
         @mutex.synchronize do
@@ -140,6 +177,24 @@ module Asherah
 
       private
 
+      # Duck-typed Logger detection: anything that is NOT a +Proc+/+Method+
+      # and responds to the core stdlib +Logger+ API is treated as a Logger
+      # instance. This catches stdlib +Logger+, +ActiveSupport::Logger+,
+      # +SemanticLogger+, +Ougai+, etc.
+      def logger_like?(obj)
+        return false if obj.is_a?(Proc) || obj.is_a?(Method)
+        %i[debug info warn error add].all? { |m| obj.respond_to?(m) }
+      end
+
+      def logger_to_callback(logger)
+        lambda do |event|
+          severity = event[:severity] || Logger::ERROR
+          # Logger#add(severity, msg, progname) — progname carries target so
+          # custom formatters can route on it.
+          logger.add(severity, event[:message], event[:target])
+        end
+      end
+
       def dispatch_log(level, target, message)
         tid = Thread.current.object_id
         return if @log_in_callback[tid]
@@ -147,8 +202,10 @@ module Asherah
         cb = @log_callback
         return if cb.nil?
         begin
+          severity = LOG_LEVEL_TO_SEVERITY[level] || Logger::ERROR
           cb.call(
-            level: LOG_LEVEL_NAMES[level] || :error,
+            level: SEVERITY_TO_SYMBOL[severity] || :error,
+            severity: severity,
             target: target.to_s,
             message: message.to_s
           )

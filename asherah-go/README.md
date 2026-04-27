@@ -335,40 +335,59 @@ The loader searches for the native library in this order:
 
 ### Log hook
 
-Forward every log record emitted by the underlying Rust crates to your own
-logging framework via `asherah.SetLogHook`.
+Asherah ships first-class `log/slog` integration. The simplest way to forward
+records is to hand it a `*slog.Logger` — the bridge attaches the Rust source
+target as a `target` attribute on every record, so any handler routing on
+attributes works out of the box:
 
 ```go
 package main
 
 import (
     "log/slog"
+    "os"
 
     asherah "github.com/godaddy/asherah-ffi/asherah-go"
 )
 
 func main() {
-    asherah.SetLogHook(func(e asherah.LogEvent) {
-        switch e.Level {
-        case asherah.LogTrace, asherah.LogDebug:
-            slog.Debug(e.Message, "target", e.Target)
-        case asherah.LogInfo:
-            slog.Info(e.Message, "target", e.Target)
-        case asherah.LogWarn:
-            slog.Warn(e.Message, "target", e.Target)
-        case asherah.LogError:
-            slog.Error(e.Message, "target", e.Target)
-        }
-    })
+    logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+        Level: slog.LevelInfo,
+    }))
+    if err := asherah.SetSlogLogger(logger); err != nil {
+        panic(err)
+    }
     defer asherah.ClearLogHook()
 }
 ```
 
-`asherah.LogHook` is a `func(LogEvent)`. The hook may fire from any goroutine
-(including ones spawned by the underlying Rust runtime). Implementations must
-be thread-safe and should not block. Panics raised inside the hook are
-recovered and silently dropped — propagating a panic across the FFI boundary
-is undefined behavior and would abort the process.
+`SetSlogLogger` honours the underlying handler's `Enabled` check before
+materialising each record, so out-of-band records below the configured level
+are dropped without allocation. To forward to a `slog.Handler` directly (for
+custom dispatchers), use `asherah.SetSlogHandler`.
+
+The Rust `log` crate has a TRACE level that stdlib `slog` does not; Asherah
+exports it as `asherah.LevelTrace` (one step below `slog.LevelDebug`) so you
+can filter on it with the standard `slog.Leveler` interface.
+
+For raw access pass a `LogHook` callback. `LogEvent.Level` is a `slog.Level`,
+so direct comparison and dispatch works:
+
+```go
+asherah.SetLogHook(func(e asherah.LogEvent) {
+    if e.Level >= slog.LevelWarn {
+        slog.Default().LogAttrs(nil, e.Level, e.Message,
+            slog.String("target", e.Target))
+    }
+})
+defer asherah.ClearLogHook()
+```
+
+The hook may fire from any goroutine (including ones spawned by the
+underlying Rust runtime). Implementations must be thread-safe and should not
+block. Panics raised inside the hook are recovered and silently dropped —
+propagating a panic across the FFI boundary is undefined behavior and would
+abort the process.
 
 ### Metrics hook
 

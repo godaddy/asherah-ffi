@@ -64,10 +64,35 @@
       <artifactId>json</artifactId>
       <version>20240303</version>
     </dependency>
+    <!-- Industry-standard logging facade. Lets callers register an
+         org.slf4j.Logger / ILoggerFactory directly via Asherah.setLogHook(...);
+         the binding bridges the LogEvent stream to whichever backend (Logback,
+         Log4j2, java.util.logging) the host has wired SLF4J to. -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>2.0.16</version>
+    </dependency>
+    <!-- Industry-standard JVM metrics facade (Spring Boot, Micronaut, Quarkus
+         all consume from a Micrometer MeterRegistry). Optional dep — only the
+         AsherahMicrometer helper class references it, so callers without
+         Micrometer on classpath load the rest of the API normally. -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-core</artifactId>
+      <version>1.13.6</version>
+      <optional>true</optional>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
       <version>${junit.jupiter.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-simple</artifactId>
+      <version>2.0.16</version>
       <scope>test</scope>
     </dependency>
   </dependencies>

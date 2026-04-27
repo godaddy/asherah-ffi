@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
@@ -99,10 +100,17 @@ func main() {
 
 	// -- 4. Log + metrics hooks: forward observability events to your stack --
 	var logEvents, metricEvents int32
+	// The simplest way: hand Asherah a *slog.Logger and let slog handle
+	// dispatch, filtering, and formatting:
+	//
+	//   _ = asherah.SetSlogLogger(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	//
+	// Or pass a callback to read each record's structured fields directly:
 	if err := asherah.SetLogHook(func(e asherah.LogEvent) {
 		atomic.AddInt32(&logEvents, 1)
-		// In real code, dispatch to log/slog/zap based on e.Level.
-		if e.Level != asherah.LogTrace && e.Level != asherah.LogDebug {
+		// e.Level is a slog.Level — pass it straight to any slog.Handler,
+		// or filter on slog.LevelInfo etc. with normal comparison.
+		if e.Level >= slog.LevelInfo {
 			fmt.Printf("[asherah-log %s] %s: %s\n", e.Level, e.Target, e.Message)
 		}
 	}); err != nil {
