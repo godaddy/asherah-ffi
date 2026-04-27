@@ -39,7 +39,14 @@ dependencies {
 }
 ```
 
-The package includes prebuilt native JNI libraries for Linux x64/ARM64 (glibc and musl/Alpine), macOS x64/ARM64, and Windows x64/ARM64.
+The package includes prebuilt native JNI libraries for Linux x64/ARM64 (glibc and musl/Alpine), macOS x64/ARM64, and Windows x64/ARM64. The matching binary is auto-extracted from the JAR to your temp directory on first use — no `java.library.path` configuration is required.
+
+### Native library resolution order
+
+1. `-Dasherah.java.nativeLibraryPath=<file-or-dir>` system property — if set, this exact path (or directory) is used and the JAR-bundled binaries are ignored.
+2. `ASHERAH_JAVA_NATIVE=<file-or-dir>` environment variable — same as above, lower precedence than the system property.
+3. Bundled JAR resource for the detected platform RID (`linux-{x86_64,aarch64}`, `linux-musl-{x86_64,aarch64}`, `darwin-{x86_64,aarch64}`, `windows-{x86_64,aarch64}`) extracted to a content-addressed directory under `${java.io.tmpdir}/asherah-jni-<sha256>/`. Concurrent JVMs share the cache; version upgrades land in a fresh directory.
+4. `System.loadLibrary("asherah_java")` — falls back to the JVM's `java.library.path`.
 
 ## Quick Start
 
