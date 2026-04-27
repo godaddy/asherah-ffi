@@ -150,7 +150,23 @@ setup_ci_artifacts() {
 do_lint() {
     log "=== Lint ==="
     run_test "cargo fmt" cargo fmt --all -- --check
-    run_test "cargo clippy" cargo clippy --workspace --all-targets --all-features -- -D warnings
+    # Splitting clippy by package group keeps peak link memory under
+    # the 16 GB ubuntu-latest cliff (a single --workspace --all-targets
+    # invocation has been observed to OOM the runner agent after ~50
+    # min, surfacing as "hosted runner lost communication"). Each
+    # invocation reuses target/ from the previous, so wall time on a
+    # warm cache is similar to the single-shot version. The five groups
+    # together cover every workspace member.
+    run_test "cargo clippy (foundations)" \
+        cargo clippy -p asherah-config -p asherah-cobhan --all-targets --all-features -- -D warnings
+    run_test "cargo clippy (core)" \
+        cargo clippy -p asherah --all-targets --all-features -- -D warnings
+    run_test "cargo clippy (ffi+server)" \
+        cargo clippy -p asherah-ffi -p asherah-server --all-targets --all-features -- -D warnings
+    run_test "cargo clippy (bindings)" \
+        cargo clippy -p asherah-node -p asherah-py -p asherah-java --all-targets --all-features -- -D warnings
+    run_test "cargo clippy (bench)" \
+        cargo clippy -p asherah-bench --all-targets --all-features -- -D warnings
 }
 
 do_unit() {
