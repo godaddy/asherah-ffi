@@ -37,7 +37,13 @@ fn round_to_page_size(len: usize) -> usize {
 }
 
 pub fn scramble_bytes(buf: &mut [u8]) {
-    OsRng.try_fill_bytes(buf).expect("OsRng");
+    // Random overwrite is preferred over zero-fill for forensic reasons.
+    // If OsRng fails, fall back to zero-fill rather than panicking: a panic
+    // here prevents wipe/destroy from running at all, leaving key material
+    // in memory without any overwrite.
+    if OsRng.try_fill_bytes(buf).is_err() {
+        wipe_bytes(buf);
+    }
 }
 pub fn wipe_bytes(buf: &mut [u8]) {
     for b in buf {
