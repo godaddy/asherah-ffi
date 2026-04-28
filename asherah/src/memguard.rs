@@ -40,13 +40,11 @@ pub fn scramble_bytes(buf: &mut [u8]) {
     OsRng.try_fill_bytes(buf).expect("OsRng");
 }
 pub fn wipe_bytes(buf: &mut [u8]) {
-    // write_volatile prevents the compiler from eliminating this as a dead
-    // store when buf is about to be freed. A simple assignment loop is subject
-    // to dead-store elimination when the optimizer determines the memory is
-    // unreachable after the write.
-    for b in buf.iter_mut() {
-        unsafe { std::ptr::write_volatile(std::ptr::addr_of_mut!(*b), 0_u8) };
-    }
+    // zeroize uses volatile writes plus a SeqCst compiler fence to prevent
+    // the optimizer from eliminating the wipe as a dead store when the
+    // buffer is about to be freed.
+    use zeroize::Zeroize;
+    buf.zeroize();
 }
 pub fn hash(bytes: &[u8]) -> [u8; 32] {
     let mut h = [0_u8; 32];

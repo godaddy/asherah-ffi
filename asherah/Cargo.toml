@@ -33,6 +33,7 @@ windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_
 ring = "0.17"
 scc = "2"
 percent-encoding = "2"
+zeroize = "1.8"
 
 [[bin]]
 name = "asherah-interop"
