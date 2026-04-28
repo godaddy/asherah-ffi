@@ -21,27 +21,31 @@ record.
 
 ## Language Bindings
 
-| Language | Package | Docs |
-|----------|---------|------|
-| Node.js | [`asherah`](https://www.npmjs.com/package/asherah) on npm | [README](asherah-node/) |
-| Python | [`asherah`](https://pypi.org/project/asherah) on PyPI | [README](asherah-py/) |
-| .NET | `GoDaddy.Asherah.Encryption` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages) | [README](asherah-dotnet/) |
-| Java | `com.godaddy.asherah:appencryption` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages) | [README](asherah-java/) |
-| Ruby | `asherah` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages) | [README](asherah-ruby/) |
-| Go | [`github.com/godaddy/asherah-ffi/asherah-go`](https://pkg.go.dev/github.com/godaddy/asherah-ffi/asherah-go) | [README](asherah-go/) |
+
+| Language | Package                                                                                                     | Docs                      |
+| -------- | ----------------------------------------------------------------------------------------------------------- | ------------------------- |
+| Node.js  | `[asherah](https://www.npmjs.com/package/asherah)` on npm                                                   | [README](asherah-node/)   |
+| Python   | `[asherah](https://pypi.org/project/asherah)` on PyPI                                                       | [README](asherah-py/)     |
+| .NET     | `GoDaddy.Asherah.Encryption` on [NuGet](https://www.nuget.org/packages/GoDaddy.Asherah.Encryption)          | [README](asherah-dotnet/) |
+| Java     | `com.godaddy.asherah:appencryption` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages)   | [README](asherah-java/)   |
+| Ruby     | `asherah` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages)                             | [README](asherah-ruby/)   |
+| Go       | `[github.com/godaddy/asherah-ffi/asherah-go](https://pkg.go.dev/github.com/godaddy/asherah-ffi/asherah-go)` | [README](asherah-go/)     |
+
 
 ## Platform Support
 
-| Platform | Architecture | Status |
-|----------|-------------|--------|
-| Linux | x86_64 (glibc) | Supported |
-| Linux | x86_64 (musl) | Supported |
-| Linux | ARM64 (glibc) | Supported |
-| Linux | ARM64 (musl) | Supported |
-| macOS | x86_64 | Supported |
-| macOS | ARM64 (Apple Silicon) | Supported |
-| Windows | x64 | Supported |
-| Windows | ARM64 | Supported |
+
+| Platform | Architecture          | Status    |
+| -------- | --------------------- | --------- |
+| Linux    | x86_64 (glibc)        | Supported |
+| Linux    | x86_64 (musl)         | Supported |
+| Linux    | ARM64 (glibc)         | Supported |
+| Linux    | ARM64 (musl)          | Supported |
+| macOS    | x86_64                | Supported |
+| macOS    | ARM64 (Apple Silicon) | Supported |
+| Windows  | x64                   | Supported |
+| Windows  | ARM64                 | Supported |
+
 
 ## Quick Start
 
@@ -69,21 +73,21 @@ session-based usage, and production configuration.
 There are two argument categories with different rules:
 
 - **Partition ID** (the tenancy/isolation identifier): `null`, `nil`,
-  `undefined`, and the empty string `""` are **always programming errors**.
-  Bindings reject them at the API boundary with the language-native
-  exception type — no row is ever written to the metastore under a
-  degenerate ID. (Stricter than canonical asherah-csharp / asherah-java,
-  which silently accept null and persist `_IK__service_product` rows.)
+`undefined`, and the empty string `""` are **always programming errors**.
+Bindings reject them at the API boundary with the language-native
+exception type — no row is ever written to the metastore under a
+degenerate ID. (Stricter than canonical asherah-csharp / asherah-java,
+which silently accept null and persist `_IK__service_product` rows.)
 - **Plaintext** (input to encrypt): `null`/`nil`/`undefined` is rejected
-  as a programming error. Empty `String` and empty byte array are
-  **valid** plaintexts that produce a real `DataRowRecord` envelope and
-  round-trip back to empty on decrypt. **Do not short-circuit empty
-  plaintext encryption in caller code** — empty data is real data,
-  encrypting it is a real cryptographic operation, and skipping it leaks
-  the fact that the value was empty as a side channel.
+as a programming error. Empty `String` and empty byte array are
+**valid** plaintexts that produce a real `DataRowRecord` envelope and
+round-trip back to empty on decrypt. **Do not short-circuit empty
+plaintext encryption in caller code** — empty data is real data,
+encrypting it is a real cryptographic operation, and skipping it leaks
+the fact that the value was empty as a side channel.
 - **Ciphertext** (input to decrypt): `null`/`nil`/`undefined` and empty
-  string/bytes are all rejected — empty input cannot be a valid
-  `DataRowRecord` JSON envelope.
+string/bytes are all rejected — empty input cannot be a valid
+`DataRowRecord` JSON envelope.
 
 See [docs/input-contract.md](docs/input-contract.md) for the full
 per-binding behavior matrix, exception types, and rationale.
@@ -95,7 +99,7 @@ stay under 2μs for sync operations. The table includes both sync and async
 variants, plus head-to-head comparison with the canonical Go/C#/Java
 implementations:
 
-![Benchmark results — hot cache, Apple M4 Max](docs/images/benchmark-hot-cache.png)
+Benchmark results — hot cache, Apple M4 Max
 
 See each binding's README for detailed async behavior and per-metastore
 performance characteristics.
@@ -225,22 +229,22 @@ refresh loads the latest version from the metastore.
 ## Testing
 
 - **127 Rust unit tests** covering core encryption engine, key management,
-  metastore adapters, and memory protection
+metastore adapters, and memory protection
 - **64 .NET tests** (34 core + 30 compatibility layer) across net8.0 and net10.0
 - **49 Node.js tests** including async context, unicode, binary edge cases, and
-  Factory/Session API
+Factory/Session API
 - **21 Go tests** covering Factory/Session API and compatibility layer
 - **21 Python tests** including session-based and async APIs
 - **16 Java tests** including JNI lifecycle and async CompletableFuture
 - **74 Ruby tests** including thread safety, session lifecycle, and async
-  callbacks
+callbacks
 - **5 cross-language interop tests** verifying Python, Node.js, Rust, and Ruby
-  encrypt/decrypt compatibility
+encrypt/decrypt compatibility
 - **6 fuzz targets** for Cargo-fuzz continuous fuzzing
 - **Memory safety**: Miri (undefined behavior detection), AddressSanitizer, and
-  Valgrind on every PR
+Valgrind on every PR
 - **12 publish dry-run jobs** that replicate every unique compilation path in the
-  release pipeline
+release pipeline
 - **56+ CI jobs** on every pull request across x86_64 and ARM64
 
 ```bash
@@ -259,37 +263,39 @@ scripts/test.sh --fuzz           # requires nightly
 
 ## Project Structure
 
-| Directory | Description |
-|-----------|-------------|
-| `asherah/` | Rust core library |
-| `asherah-node/` | Node.js bindings |
-| `asherah-py/` | Python bindings |
-| `asherah-dotnet/` | .NET bindings |
-| `asherah-java/` | Java bindings (JNI) |
-| `asherah-ruby/` | Ruby bindings |
-| `asherah-go/` | Go bindings (purego, no CGO) |
-| `asherah-ffi/` | C ABI for language bindings |
-| `asherah-server/` | gRPC sidecar server |
-| `samples/` | Usage examples for each language |
-| `benchmarks/` | Cross-language benchmark suite |
+
+| Directory         | Description                      |
+| ----------------- | -------------------------------- |
+| `asherah/`        | Rust core library                |
+| `asherah-node/`   | Node.js bindings                 |
+| `asherah-py/`     | Python bindings                  |
+| `asherah-dotnet/` | .NET bindings                    |
+| `asherah-java/`   | Java bindings (JNI)              |
+| `asherah-ruby/`   | Ruby bindings                    |
+| `asherah-go/`     | Go bindings (purego, no CGO)     |
+| `asherah-ffi/`    | C ABI for language bindings      |
+| `asherah-server/` | gRPC sidecar server              |
+| `samples/`        | Usage examples for each language |
+| `benchmarks/`     | Cross-language benchmark suite   |
+
 
 ## Security
 
 - **mlock'd memory**: All key material lives in pages pinned to RAM
-  (`mlock`), preventing the OS from swapping secrets to disk
+(`mlock`), preventing the OS from swapping secrets to disk
 - **Guard pages**: Buffer overflows and underflows are caught by
-  hardware-enforced guard pages around protected memory regions
+hardware-enforced guard pages around protected memory regions
 - **Canary bytes**: Optional buffer overflow detection via randomized
-  canary values at buffer boundaries
+canary values at buffer boundaries
 - **Wipe-on-free**: All key material is cryptographically scrubbed
-  before memory is released — no residual secrets in freed pages
+before memory is released — no residual secrets in freed pages
 - **Core dump protection**: Disabled at process initialization to
-  prevent secrets from appearing in crash dumps
+prevent secrets from appearing in crash dumps
 - **Coffer key splitting**: The Enclave master key is split across two
-  mlock'd slots using XOR + hash derivation — neither slot alone reveals
-  the key
+mlock'd slots using XOR + hash derivation — neither slot alone reveals
+the key
 - **AES-256-GCM Enclaves**: Keys at rest in regular memory are encrypted
-  with authenticated encryption; only the mlock'd Coffer can decrypt them
+with authenticated encryption; only the mlock'd Coffer can decrypt them
 
 ## License
 

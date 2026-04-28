@@ -1,4 +1,4 @@
-name: Publish to GitHub Packages (NuGet)
+name: Publish to NuGet.org
 
 concurrency:
   group: publish-nuget
@@ -25,7 +25,6 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
-      packages: write
       contents: read
 
     steps:
@@ -143,12 +142,14 @@ jobs:
             echo "$COUNT native libraries bundled (6 required, Windows optional)"
           done
 
-      - name: Publish to GitHub Packages
+      - name: Publish to NuGet.org
         if: ${{ github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }}
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_TOKEN }}
         run: |
           dotnet nuget push dist/*.nupkg \
-            --source "https://nuget.pkg.github.com/godaddy/index.json" \
-            --api-key "${{ secrets.GITHUB_TOKEN }}"
+            --source "https://api.nuget.org/v3/index.json" \
+            --api-key "$NUGET_API_KEY"
 
       - name: Dry run
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
