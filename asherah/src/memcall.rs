@@ -135,8 +135,12 @@ impl Drop for MemBuf {
     }
 }
 fn wipe(buf: &mut [u8]) {
-    for b in buf {
-        *b = 0;
+    // write_volatile prevents the compiler from eliminating this as a dead
+    // store when buf is about to be freed. This is the final wipe path called
+    // from MemBuf::drop; without volatile semantics the optimizer could prove
+    // the memory is unreachable after the loop and elide the wipe.
+    for b in buf.iter_mut() {
+        unsafe { std::ptr::write_volatile(std::ptr::addr_of_mut!(*b), 0_u8) };
     }
 }
 pub fn disable_core_dumps() -> Result<(), MemError> {

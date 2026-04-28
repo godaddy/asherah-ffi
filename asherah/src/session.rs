@@ -803,9 +803,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         struct DrkGuard([u8; 32]);
         impl Drop for DrkGuard {
             fn drop(&mut self) {
-                for b in self.0.iter_mut() {
-                    unsafe { std::ptr::write_volatile(std::ptr::addr_of_mut!(*b), 0_u8) };
-                }
+                crate::memguard::wipe_bytes(&mut self.0);
             }
         }
         let mut drk = DrkGuard([0_u8; 32]);
@@ -1192,9 +1190,7 @@ impl<
         struct DrkGuard([u8; 32]);
         impl Drop for DrkGuard {
             fn drop(&mut self) {
-                for b in self.0.iter_mut() {
-                    unsafe { std::ptr::write_volatile(std::ptr::addr_of_mut!(*b), 0_u8) };
-                }
+                crate::memguard::wipe_bytes(&mut self.0);
             }
         }
         let mut drk = DrkGuard([0_u8; 32]);
