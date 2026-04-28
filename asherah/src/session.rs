@@ -385,9 +385,12 @@ impl<
             .crypto
             .decrypt(&drr.data, &drk)
             .context("decrypt: failed to decrypt data with DRK")?;
-        // wipe DRK bytes after use; wipe_bytes uses write_volatile to prevent
-        // dead-store elimination when drk is about to be dropped.
+        // wipe DRK bytes after use; wipe_bytes uses zeroize for volatile
+        // writes plus a SeqCst compiler fence to prevent DSE.
         crate::memguard::wipe_bytes(&mut drk);
+        // pt is the decrypted plaintext; the FFI layers (asherah_buffer_free,
+        // asherah-cobhan Decrypt/DecryptFromJson) are responsible for zeroing
+        // it before deallocation.
         Ok(pt)
     }
 
