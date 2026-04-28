@@ -1,4 +1,4 @@
-# GoDaddy.Asherah.AppEncryption
+# GoDaddy.Asherah.Encryption
 
 .NET bindings for the [Asherah](https://github.com/godaddy/asherah-ffi)
 envelope encryption and key rotation library. Native Rust implementation via
@@ -9,7 +9,7 @@ P/Invoke; the native binary ships in NuGet for `linux-x64`, `linux-arm64`,
 ## Installation
 
 ```bash
-dotnet add package GoDaddy.Asherah.AppEncryption
+dotnet add package GoDaddy.Asherah.Encryption
 ```
 
 Targets `net8.0` and `net10.0`.
@@ -237,7 +237,7 @@ rationale.
 
 Drop-in replacement for the canonical Java-style SDK. Key differences:
 
-| | Canonical (`GoDaddy.Asherah.AppEncryption@0.x`) | This binding |
+| | Canonical (`GoDaddy.Asherah.AppEncryption@0.x`) | This repo (`GoDaddy.Asherah.Encryption`) |
 |---|---|---|
 | Implementation | Pure C# / Bouncy Castle | Native Rust via P/Invoke |
 | Performance | ~50 µs encrypt | ~0.7 µs encrypt |
@@ -409,10 +409,23 @@ implements it by forwarding to the `Asherah` static class. Includes
 
 ## Building from Source
 
+From the repository root:
+
+**Debug FFI (simplest)** — test projects locate the workspace root and, when `ASHERAH_DOTNET_NATIVE` is unset, point it at `target/debug` automatically:
+
+```bash
+cargo build -p asherah-ffi
+dotnet test asherah-dotnet/GoDaddy.Asherah.Encryption.slnx --nologo -p:RestoreLockedMode=true
+```
+
+**Release FFI** — use a **shell-expanded absolute path** for `ASHERAH_DOTNET_NATIVE`. A value like `target/release` alone is wrong: the binding resolves relative paths against the test process working directory, not the repo root.
+
 ```bash
 cargo build --release -p asherah-ffi
-ASHERAH_DOTNET_NATIVE=target/release dotnet test asherah-dotnet/
+ASHERAH_DOTNET_NATIVE="$(pwd)/target/release" dotnet test asherah-dotnet/GoDaddy.Asherah.Encryption.slnx --nologo -p:RestoreLockedMode=true
 ```
+
+`ASHERAH_DOTNET_NATIVE` must refer to the directory containing `libasherah_ffi.dylib` / `libasherah_ffi.so` / `asherah_ffi.dll`. Without a correct path, the loader can bind a different `asherah_ffi` on `PATH` and tests may fail with missing entry points.
 
 ## License
 

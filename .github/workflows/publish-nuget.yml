@@ -68,7 +68,7 @@ jobs:
           fi
           echo "Downloading native libs from release ${TAG}"
 
-          NATIVE_DIR="asherah-dotnet/src/GoDaddy.Asherah.AppEncryption/runtimes"
+          NATIVE_DIR="asherah-dotnet/src/GoDaddy.Asherah.Encryption/runtimes"
 
           mkdir -p "$NATIVE_DIR/linux-x64/native"
           mkdir -p "$NATIVE_DIR/linux-arm64/native"
@@ -106,12 +106,12 @@ jobs:
         working-directory: asherah-dotnet
         run: |
           # Pack core (contains native libs)
-          dotnet pack src/GoDaddy.Asherah.AppEncryption/GoDaddy.Asherah.AppEncryption.csproj -c Release \
+          dotnet pack src/GoDaddy.Asherah.Encryption/GoDaddy.Asherah.Encryption.csproj -c Release \
             /p:Version="${NUGET_VERSION}" \
             /p:PackageOutputPath="$GITHUB_WORKSPACE/dist" \
             /p:RestoreLockedMode=true
           # Pack compat (references core, no native libs)
-          dotnet pack src/GoDaddy.Asherah.AppEncryption.Compat/GoDaddy.Asherah.AppEncryption.Compat.csproj -c Release \
+          dotnet pack src/GoDaddy.Asherah.Encryption.Compat/GoDaddy.Asherah.Encryption.Compat.csproj -c Release \
             /p:Version="${NUGET_VERSION}" \
             /p:PackageOutputPath="$GITHUB_WORKSPACE/dist" \
             /p:RestoreLockedMode=true
@@ -154,6 +154,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
+          # Only auto-bump stable X.Y.Z — skip prerelease (e.g. 1.2.3-beta) and build metadata (+…)
+          if ! printf '%s\n' "$NUGET_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Skipping NUGET_VERSION bump (not exact MAJOR.MINOR.PATCH): ${NUGET_VERSION}"
+            exit 0
+          fi
           MAJOR=$(echo "$NUGET_VERSION" | cut -d. -f1)
           MINOR=$(echo "$NUGET_VERSION" | cut -d. -f2)
           PATCH=$(echo "$NUGET_VERSION" | cut -d. -f3)

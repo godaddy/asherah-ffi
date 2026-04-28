@@ -169,16 +169,16 @@
           "xunit.v3.runner.common": "[3.2.2]"
         }
       },
-      "godaddy.asherah.appencryption": {
+      "godaddy.asherah.encryption": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "[9.0.0, )"
         }
       },
-      "godaddy.asherah.appencryption.compat": {
+      "godaddy.asherah.encryption.compat": {
         "type": "Project",
         "dependencies": {
-          "GoDaddy.Asherah.AppEncryption": "[0.50.0, )",
+          "GoDaddy.Asherah.Encryption": "[0.50.0, )",
           "Newtonsoft.Json": "[13.0.4, )"
         }
       },
@@ -371,16 +371,16 @@
           "xunit.v3.runner.common": "[3.2.2]"
         }
       },
-      "godaddy.asherah.appencryption": {
+      "godaddy.asherah.encryption": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "[9.0.0, )"
         }
       },
-      "godaddy.asherah.appencryption.compat": {
+      "godaddy.asherah.encryption.compat": {
         "type": "Project",
         "dependencies": {
-          "GoDaddy.Asherah.AppEncryption": "[0.50.0, )",
+          "GoDaddy.Asherah.Encryption": "[0.50.0, )",
           "Newtonsoft.Json": "[13.0.4, )"
         }
       },

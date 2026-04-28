@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\GoDaddy.Asherah.Encryption\GoDaddy.Asherah.Encryption.csproj" />
+    <ProjectReference Include="..\..\src\GoDaddy.Asherah.Encryption.Compat\GoDaddy.Asherah.Encryption.Compat.csproj" />
+  </ItemGroup>
+</Project>

@@ -11,7 +11,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
-namespace GoDaddy.Asherah.AppEncryption.Tests;
+namespace GoDaddy.Asherah.Encryption.Tests;
 
 // Comprehensive log/metrics hook coverage for the .NET binding.
 //

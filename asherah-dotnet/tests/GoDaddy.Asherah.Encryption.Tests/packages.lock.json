@@ -169,7 +169,7 @@
           "xunit.v3.runner.common": "[3.2.2]"
         }
       },
-      "godaddy.asherah.appencryption": {
+      "godaddy.asherah.encryption": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "[9.0.0, )"
@@ -364,7 +364,7 @@
           "xunit.v3.runner.common": "[3.2.2]"
         }
       },
-      "godaddy.asherah.appencryption": {
+      "godaddy.asherah.encryption": {
         "type": "Project",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "[9.0.0, )"

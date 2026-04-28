@@ -389,7 +389,7 @@ jobs:
           # ships. We only have one host binary in dry-run, so the *contents*
           # are all the host x64 build — this verifies layout, not arch correctness.
           # publish-nuget.yml ships the right architecture per RID.
-          NATIVE_DIR=src/GoDaddy.Asherah.AppEncryption/runtimes
+          NATIVE_DIR=src/GoDaddy.Asherah.Encryption/runtimes
           for rid in linux-x64 linux-arm64 linux-musl-x64 linux-musl-arm64; do
             mkdir -p "$NATIVE_DIR/$rid/native"
             cp ../target/release/libasherah_ffi.so "$NATIVE_DIR/$rid/native/"
@@ -399,11 +399,11 @@ jobs:
             cp ../target/release/libasherah_ffi.so "$NATIVE_DIR/$rid/native/libasherah_ffi.dylib"
           done
 
-          dotnet pack src/GoDaddy.Asherah.AppEncryption/GoDaddy.Asherah.AppEncryption.csproj -c Release \
+          dotnet pack src/GoDaddy.Asherah.Encryption/GoDaddy.Asherah.Encryption.csproj -c Release \
             /p:Version="0.0.0-dryrun" \
             /p:PackageOutputPath="$GITHUB_WORKSPACE/dist" \
             /p:RestoreLockedMode=true
-          dotnet pack src/GoDaddy.Asherah.AppEncryption.Compat/GoDaddy.Asherah.AppEncryption.Compat.csproj -c Release \
+          dotnet pack src/GoDaddy.Asherah.Encryption.Compat/GoDaddy.Asherah.Encryption.Compat.csproj -c Release \
             /p:Version="0.0.0-dryrun" \
             /p:PackageOutputPath="$GITHUB_WORKSPACE/dist" \
             /p:RestoreLockedMode=true

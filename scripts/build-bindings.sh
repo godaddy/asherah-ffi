@@ -290,7 +290,7 @@ fi
 
 if should_build dotnet || should_build all; then
   echo "[build-bindings] Packing .NET library"
-  _csproj="$ROOT_DIR/asherah-dotnet/src/GoDaddy.Asherah.AppEncryption/GoDaddy.Asherah.AppEncryption.csproj"
+  _csproj="$ROOT_DIR/asherah-dotnet/src/GoDaddy.Asherah.Encryption/GoDaddy.Asherah.Encryption.csproj"
   # Use 'dotnet msbuild' instead of 'dotnet pack' to work around .NET 10 SDK
   # injecting the csproj twice via a response file (MSB1008).
   # Runtime identifiers come from the csproj (linux-x64;linux-arm64) so they match packages.lock.json;

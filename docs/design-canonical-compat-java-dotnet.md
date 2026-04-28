@@ -232,8 +232,8 @@ Recommendation: **Option A** — single JAR. The compat classes are small (pure 
 - `Newtonsoft.Json` added as a dependency
 
 **Option B: Separate compat NuGet**
-- `GoDaddy.Asherah` (new API, existing)
-- `GoDaddy.Asherah.AppEncryption` (compat, depends on GoDaddy.Asherah)
+- `GoDaddy.Asherah.Encryption` (new API FFI binding)
+- `GoDaddy.Asherah.Encryption.Compat` (canonical-style API surface, depends on `GoDaddy.Asherah.Encryption`; exposes `GoDaddy.Asherah.AppEncryption` namespaces)
 
 Recommendation: **Option A** — same rationale as Java.
 

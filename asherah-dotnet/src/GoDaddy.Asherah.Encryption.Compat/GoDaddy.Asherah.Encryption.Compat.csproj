@@ -1,13 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
 
-    <!-- NuGet package metadata -->
-    <PackageId>GoDaddy.Asherah.AppEncryption.Compat</PackageId>
+    <!-- NuGet package + assembly identity; public API namespaces remain GoDaddy.Asherah.AppEncryption.* -->
+    <AssemblyName>GoDaddy.Asherah.Encryption.Compat</AssemblyName>
+    <PackageId>GoDaddy.Asherah.Encryption.Compat</PackageId>
     <Description>Drop-in compatibility layer for migrating from the canonical godaddy/asherah C# SDK to the Rust-backed implementation. Provides SessionFactory builder, Session&lt;TP,TD&gt; generics, Persistence&lt;T&gt;, LanguageExt.Option&lt;T&gt; shim, and Newtonsoft.Json JObject support.</Description>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\GoDaddy.Asherah.AppEncryption\GoDaddy.Asherah.AppEncryption.csproj" />
+    <ProjectReference Include="..\GoDaddy.Asherah.Encryption\GoDaddy.Asherah.Encryption.csproj" />
   </ItemGroup>
 
   <ItemGroup>

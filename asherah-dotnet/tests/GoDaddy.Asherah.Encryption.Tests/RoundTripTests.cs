@@ -6,7 +6,7 @@ using System.Threading.Tasks;
 using GoDaddy.Asherah;
 using Xunit;
 
-namespace GoDaddy.Asherah.AppEncryption.Tests;
+namespace GoDaddy.Asherah.Encryption.Tests;
 
 public class RoundTripTests
 {

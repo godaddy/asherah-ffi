@@ -25,7 +25,7 @@ record.
 |----------|---------|------|
 | Node.js | [`asherah`](https://www.npmjs.com/package/asherah) on npm | [README](asherah-node/) |
 | Python | [`asherah`](https://pypi.org/project/asherah) on PyPI | [README](asherah-py/) |
-| .NET | `GoDaddy.Asherah.AppEncryption` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages) | [README](asherah-dotnet/) |
+| .NET | `GoDaddy.Asherah.Encryption` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages) | [README](asherah-dotnet/) |
 | Java | `com.godaddy.asherah:appencryption` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages) | [README](asherah-java/) |
 | Ruby | `asherah` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages) | [README](asherah-ruby/) |
 | Go | [`github.com/godaddy/asherah-ffi/asherah-go`](https://pkg.go.dev/github.com/godaddy/asherah-ffi/asherah-go) | [README](asherah-go/) |
