@@ -51,8 +51,15 @@ jobs:
             echo "::error::Neither input version nor NUGET_VERSION repo variable is set"
             exit 1
           fi
-          echo "Publishing version: ${VERSION}"
+          if ! printf '%s\n' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Version must be semver X.Y.Z with no label (got: ${VERSION}). Prerelease -alpha is appended automatically for NuGet pack."
+            exit 1
+          fi
+          PACK_VERSION="${VERSION}-alpha"
+          echo "NuGet base (repo variable / bump): ${VERSION}"
+          echo "NuGet package version (pack/push): ${PACK_VERSION}"
           echo "NUGET_VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "NUGET_PACKAGE_VERSION=${PACK_VERSION}" >> "$GITHUB_ENV"
 
       - name: Download native libraries from release
         env:
@@ -107,12 +114,12 @@ jobs:
         run: |
           # Pack core (contains native libs)
           dotnet pack src/GoDaddy.Asherah.Encryption/GoDaddy.Asherah.Encryption.csproj -c Release \
-            /p:Version="${NUGET_VERSION}" \
+            /p:Version="${NUGET_PACKAGE_VERSION}" \
             /p:PackageOutputPath="$GITHUB_WORKSPACE/dist" \
             /p:RestoreLockedMode=true
           # Pack compat (references core, no native libs)
           dotnet pack src/GoDaddy.Asherah.Encryption.Compat/GoDaddy.Asherah.Encryption.Compat.csproj -c Release \
-            /p:Version="${NUGET_VERSION}" \
+            /p:Version="${NUGET_PACKAGE_VERSION}" \
             /p:PackageOutputPath="$GITHUB_WORKSPACE/dist" \
             /p:RestoreLockedMode=true
 
@@ -154,11 +161,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
-          # Only auto-bump stable X.Y.Z — skip prerelease (e.g. 1.2.3-beta) and build metadata (+…)
-          if ! printf '%s\n' "$NUGET_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "Skipping NUGET_VERSION bump (not exact MAJOR.MINOR.PATCH): ${NUGET_VERSION}"
-            exit 0
-          fi
           MAJOR=$(echo "$NUGET_VERSION" | cut -d. -f1)
           MINOR=$(echo "$NUGET_VERSION" | cut -d. -f2)
           PATCH=$(echo "$NUGET_VERSION" | cut -d. -f3)
