@@ -71,7 +71,7 @@
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-api</artifactId>
-      <version>2.0.16</version>
+      <version>2.0.17</version>
     </dependency>
     <!-- Industry-standard JVM metrics facade (Spring Boot, Micronaut, Quarkus
          all consume from a Micrometer MeterRegistry). Optional dep — only the
