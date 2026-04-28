@@ -408,6 +408,100 @@ mod tests {
         assert!(json.contains("\"Key\":\""), "key not base64: {json}");
     }
 
-    // Tests for to_json_fast / from_json_fast were removed along with those functions.
-    // Serde serialization is now the only path and is covered by the test above.
+    #[test]
+    fn envelope_key_record_to_json_fast_matches_serde() {
+        // Verify that to_json_fast produces JSON that serde_json can parse
+        // to the same value. Any divergence would silently break round-trips
+        // between the encrypt (fast path) and decrypt (serde path) code.
+        let record = EnvelopeKeyRecord {
+            revoked: Some(false),
+            id: "test-ik-id".into(),
+            created: 1_700_000_000,
+            encrypted_key: vec![0x01, 0x02, 0x03, 0xfe, 0xff],
+            parent_key_meta: Some(KeyMeta {
+                id: "sk-id".into(),
+                created: 1_699_999_000,
+            }),
+        };
+        let fast_json = record.to_json_fast();
+        let from_fast: EnvelopeKeyRecord =
+            serde_json::from_str(&fast_json).expect("fast JSON must parse with serde");
+        assert_eq!(from_fast.created, record.created);
+        assert_eq!(from_fast.encrypted_key, record.encrypted_key);
+        assert_eq!(from_fast.revoked, record.revoked);
+        assert_eq!(
+            from_fast.parent_key_meta.as_ref().map(|m| m.id.as_str()),
+            record.parent_key_meta.as_ref().map(|m| m.id.as_str())
+        );
+    }
+
+    #[test]
+    fn envelope_key_record_from_json_fast_matches_serde() {
+        // Verify that from_json_fast parses serde-generated JSON to the same
+        // value as serde. Mismatches here would silently corrupt key records
+        // on load from the metastore.
+        let record = EnvelopeKeyRecord {
+            revoked: None,
+            id: "ik-42".into(),
+            created: 42,
+            encrypted_key: vec![0xab, 0xcd, 0xef],
+            parent_key_meta: Some(KeyMeta {
+                id: "sk-root".into(),
+                created: 1,
+            }),
+        };
+        let serde_json = serde_json::to_string(&record).expect("serde must serialize");
+        let from_fast = EnvelopeKeyRecord::from_json_fast(&serde_json)
+            .expect("fast parser must parse serde JSON");
+        assert_eq!(from_fast.created, record.created);
+        assert_eq!(from_fast.encrypted_key, record.encrypted_key);
+        assert_eq!(from_fast.revoked, record.revoked);
+    }
+
+    #[test]
+    fn envelope_key_record_fast_roundtrip() {
+        // Full round-trip: to_json_fast → from_json_fast
+        let record = EnvelopeKeyRecord {
+            revoked: Some(true),
+            id: "rt-key".into(),
+            created: 9_999,
+            encrypted_key: (0_u8..32).collect(),
+            parent_key_meta: None,
+        };
+        let json = record.to_json_fast();
+        let parsed = EnvelopeKeyRecord::from_json_fast(&json).expect("round-trip must succeed");
+        assert_eq!(parsed.created, record.created);
+        assert_eq!(parsed.encrypted_key, record.encrypted_key);
+        assert_eq!(parsed.revoked, record.revoked);
+    }
+
+    #[test]
+    fn data_row_record_to_json_fast_matches_serde() {
+        // asherah_encrypt_to_json uses DataRowRecord::to_json_fast to serialize;
+        // asherah_decrypt_from_json uses serde_json to deserialize. Both must
+        // produce and consume compatible JSON.
+        let drr = DataRowRecord {
+            key: Some(EnvelopeKeyRecord {
+                revoked: None,
+                id: String::new(),
+                created: 100,
+                encrypted_key: vec![0xca, 0xfe, 0xba, 0xbe],
+                parent_key_meta: Some(KeyMeta {
+                    id: "ik-1".into(),
+                    created: 50,
+                }),
+            }),
+            data: vec![0xde, 0xad, 0xbe, 0xef],
+        };
+        let fast_json = drr.to_json_fast();
+        // Decrypt path uses serde_json::from_slice; verify it can parse the
+        // JSON produced by the encrypt path's to_json_fast.
+        let parsed: DataRowRecord =
+            serde_json::from_str(&fast_json).expect("serde must parse fast JSON");
+        assert_eq!(parsed.data, drr.data);
+        assert_eq!(
+            parsed.key.as_ref().map(|k| k.encrypted_key.as_slice()),
+            drr.key.as_ref().map(|k| k.encrypted_key.as_slice())
+        );
+    }
 }
