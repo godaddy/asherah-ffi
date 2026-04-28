@@ -755,11 +755,11 @@ pub unsafe extern "C" fn Decrypt(
         };
 
         // Write output, then zero the Rust-side plaintext copy before it drops.
+        // zeroize uses volatile writes plus a SeqCst compiler fence to prevent
+        // dead-store elimination.
         let result = cobhan_bytes_to_buffer(&plaintext, output_decrypted_data_ptr);
-        // write_volatile prevents dead-store elimination of the wipe.
-        for b in plaintext.iter_mut() {
-            unsafe { std::ptr::write_volatile(std::ptr::addr_of_mut!(*b), 0_u8) };
-        }
+        use zeroize::Zeroize;
+        plaintext.zeroize();
         result
     })) {
         Ok(result) => result,
@@ -902,9 +902,8 @@ pub unsafe extern "C" fn DecryptFromJson(
 
         // Write output, then zero the Rust-side plaintext copy before it drops.
         let result = cobhan_bytes_to_buffer(&plaintext, data_ptr);
-        for b in plaintext.iter_mut() {
-            unsafe { std::ptr::write_volatile(std::ptr::addr_of_mut!(*b), 0_u8) };
-        }
+        use zeroize::Zeroize;
+        plaintext.zeroize();
         result
     })) {
         Ok(result) => result,

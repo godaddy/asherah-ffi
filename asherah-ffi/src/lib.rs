@@ -297,10 +297,10 @@ pub unsafe extern "C" fn asherah_buffer_free(buf: *mut AsherahBuffer) {
             let b = &mut *buf;
             if !b.data.is_null() && b.capacity > 0 {
                 // Zero before drop: this buffer may contain decrypted plaintext.
-                // write_volatile prevents dead-store elimination.
-                for i in 0..b.len {
-                    std::ptr::write_volatile(b.data.add(i), 0_u8);
-                }
+                // zeroize uses volatile writes plus a SeqCst compiler fence to
+                // prevent dead-store elimination.
+                use zeroize::Zeroize;
+                std::slice::from_raw_parts_mut(b.data, b.len).zeroize();
                 drop(Vec::from_raw_parts(b.data, b.len, b.capacity));
             }
             b.data = null_mut();
