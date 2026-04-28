@@ -135,9 +135,12 @@ impl Drop for MemBuf {
     }
 }
 fn wipe(buf: &mut [u8]) {
-    for b in buf {
-        *b = 0;
-    }
+    // zeroize uses volatile writes plus a SeqCst compiler fence to prevent
+    // dead-store elimination. This is the final wipe path called from
+    // MemBuf::drop, where the optimizer can prove the memory is unreachable
+    // after the call.
+    use zeroize::Zeroize;
+    buf.zeroize();
 }
 pub fn disable_core_dumps() -> Result<(), MemError> {
     os::os_disable_core_dumps()
