@@ -673,6 +673,10 @@ jobs:
         if: matrix.binding == 'go'
         with:
           go-version: '1.23'
+      - uses: ruby/setup-ruby@c4e5b1316158f92e3d49443a9d58b31d25ac0f8f # v1
+        if: matrix.binding == 'ruby'
+        with:
+          ruby-version: '3.3'
       - name: Run ${{ matrix.binding }} binding tests (x86_64)
         env:
           BINDING_ARTIFACTS_DIR: ${{ github.workspace }}/ci-artifacts
