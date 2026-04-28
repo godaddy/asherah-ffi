@@ -183,9 +183,13 @@ fn async_metrics_sink_delivers_events_off_thread() {
         async_sink.decrypt(Duration::from_nanos(200));
     }
 
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while inner.encrypts.load(Ordering::Relaxed) < 500
-        && inner.decrypts.load(Ordering::Relaxed) < 300
+    // Wait until BOTH counters have drained — `&&` here used to exit the
+    // loop the moment either counter hit its target, leaving the other
+    // mid-drain and causing a flaky assert when the worker happened to
+    // process encrypts before decrypts (which is the common ordering).
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while (inner.encrypts.load(Ordering::Relaxed) < 500
+        || inner.decrypts.load(Ordering::Relaxed) < 300)
         && Instant::now() < deadline
     {
         std::thread::sleep(Duration::from_millis(5));
