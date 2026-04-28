@@ -134,6 +134,12 @@ The session-level async methods (`encrypt_bytes_async`, `decrypt_bytes_async`) a
 
 However, the implementation uses `Queue#pop` to synchronize the callback result back to the calling Ruby thread. This means `queue.pop` blocks the calling Ruby thread until the result arrives. True concurrency requires multiple Ruby threads or Ractors dispatching async calls in parallel.
 
+If the FFI callback never fires (e.g. the worker pool deadlocks), the
+async call raises `Asherah::Error::Timeout` after 30 seconds rather
+than blocking indefinitely. Override the bound by setting the
+`ASHERAH_RUBY_ASYNC_TIMEOUT` environment variable (in seconds) before
+the gem is loaded.
+
 The static-level async methods (`Asherah.encrypt_async`, `Asherah.decrypt_async`) simply run the sync operation in a new `Thread`.
 
 ## Input contract

@@ -11,5 +11,6 @@ module Asherah
     EncryptFailed = Class.new(self)
     DecryptFailed = Class.new(self)
     BadConfig = Class.new(self)
+    Timeout = Class.new(self)
   end
 end
