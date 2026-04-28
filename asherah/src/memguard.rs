@@ -72,6 +72,11 @@ pub enum Error {
     InvalidKeyLength,
     BufferTooSmall,
     DecryptionFailed,
+    /// Input was not the required fixed size for this operation.
+    InvalidSize {
+        expected: usize,
+        got: usize,
+    },
 }
 impl From<memcall::MemError> for Error {
     fn from(e: memcall::MemError) -> Self {
@@ -311,11 +316,12 @@ impl Enclave {
     /// Buffer. The plaintext is encrypted and inserted into the SLAB hot cache.
     /// This avoids 6 syscalls (mmap/mlock/mprotect/munlock/munmap) per key.
     pub fn seal_bytes(plaintext: &[u8]) -> Result<Self, Error> {
-        assert_eq!(
-            plaintext.len(),
-            SLOT_SIZE,
-            "seal_bytes requires exactly {SLOT_SIZE} bytes"
-        );
+        if plaintext.len() != SLOT_SIZE {
+            return Err(Error::InvalidSize {
+                expected: SLOT_SIZE,
+                got: plaintext.len(),
+            });
+        }
         let mut key = coffer_view()?;
         let id = ENCLAVE_ID.fetch_add(1, Ordering::Relaxed);
         cache_insert(id, plaintext);
