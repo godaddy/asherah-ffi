@@ -11,6 +11,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="../../asherah-dotnet/src/GoDaddy.Asherah.AppEncryption/GoDaddy.Asherah.AppEncryption.csproj" />
+    <ProjectReference Include="../../asherah-dotnet/src/GoDaddy.Asherah.Encryption/GoDaddy.Asherah.Encryption.csproj" />
   </ItemGroup>
 </Project>

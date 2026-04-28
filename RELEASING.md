@@ -40,7 +40,7 @@ publish:
 
 | Workflow | Publishes to |
 |----------|-------------|
-| `publish-nuget` | [GitHub Packages (NuGet)](https://github.com/godaddy/asherah-ffi/packages) |
+| `publish-nuget` | [nuget.org](https://www.nuget.org/packages/GoDaddy.Asherah.Encryption) (`NUGET_TOKEN` secret) |
 | `publish-maven` | [GitHub Packages (Maven)](https://github.com/godaddy/asherah-ffi/packages) |
 | `publish-rubygems` | [GitHub Packages (RubyGems)](https://github.com/godaddy/asherah-ffi/packages) |
 

@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="src/GoDaddy.Asherah.Encryption/GoDaddy.Asherah.Encryption.csproj" />
+  <Project Path="src/GoDaddy.Asherah.Encryption.Compat/GoDaddy.Asherah.Encryption.Compat.csproj" />
+  <Project Path="tests/GoDaddy.Asherah.Encryption.Tests/GoDaddy.Asherah.Encryption.Tests.csproj" />
+  <Project Path="tests/GoDaddy.Asherah.Encryption.Compat.Tests/GoDaddy.Asherah.Encryption.Compat.Tests.csproj" />
+</Solution>

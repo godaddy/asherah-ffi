@@ -5,8 +5,7 @@
          /p:RuntimeIdentifiers usage) stays consistent with nupkg layout. -->
     <RuntimeIdentifiers>linux-x64;linux-arm64;linux-musl-x64;linux-musl-arm64;osx-x64;osx-arm64;win-x64;win-arm64</RuntimeIdentifiers>
 
-    <!-- NuGet package metadata -->
-    <PackageId>GoDaddy.Asherah.AppEncryption</PackageId>
+    <!-- PackageId / assembly name default to the .csproj filename (GoDaddy.Asherah.Encryption). -->
     <Description>Asherah application-layer encryption for .NET with automatic key rotation, powered by the native Rust implementation.</Description>
   </PropertyGroup>
 

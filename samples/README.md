@@ -45,8 +45,10 @@ async API via asyncio.
 
 ```sh
 cargo build --release -p asherah-ffi
-ASHERAH_DOTNET_NATIVE=target/release dotnet run --project samples/dotnet
+ASHERAH_DOTNET_NATIVE="$(pwd)/target/release" dotnet run --project samples/dotnet
 ```
+
+Use `"$(pwd)/target/release"` (or another absolute path) so the binding finds the freshly built library; a relative `target/release` depends on the process working directory.
 
 Covers: Static API, Factory/Session API with `using` disposal, async API
 (true async via Rust tokio — does not block .NET thread pool).

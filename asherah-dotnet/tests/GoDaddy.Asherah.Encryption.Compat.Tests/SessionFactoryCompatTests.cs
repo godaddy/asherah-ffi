@@ -12,7 +12,7 @@ using Newtonsoft.Json.Linq;
 using Xunit;
 using static LanguageExt.Prelude;
 
-namespace GoDaddy.Asherah.AppEncryption.Compat.Tests;
+namespace GoDaddy.Asherah.Encryption.Compat.Tests;
 
 public class SessionFactoryCompatTests : IDisposable
 {

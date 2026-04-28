@@ -68,10 +68,12 @@ Individual binding tests:
 |---------|---------|
 | Node.js | `cd asherah-node && npm test` |
 | Python | `maturin develop --manifest-path asherah-py/Cargo.toml && pytest asherah-py/tests/` |
-| .NET | `dotnet test asherah-dotnet/GoDaddy.Asherah.AppEncryption.slnx` |
+| .NET | `dotnet test asherah-dotnet/GoDaddy.Asherah.Encryption.slnx --nologo -p:RestoreLockedMode=true` |
 | Java | `cd asherah-java/java && mvn test` |
 | Ruby | `ruby -Iasherah-ruby/lib -Iasherah-ruby/test asherah-ruby/test/round_trip_test.rb` |
 | Go | `cd asherah-go && go test ./...` |
+
+`.NET` tests need a locally built `asherah-ffi` native library. From the repo root: run `cargo build -p asherah-ffi`, then the `dotnet test` command above (tests default to `{repo}/target/debug` when `ASHERAH_DOTNET_NATIVE` is unset). For a **release** build, see [`asherah-dotnet/README.md`](asherah-dotnet/README.md) — use `ASHERAH_DOTNET_NATIVE="$(pwd)/target/release"`, not a bare `target/release` path.
 
 ## Formatting & Linting
 
