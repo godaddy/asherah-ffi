@@ -385,8 +385,9 @@ impl<
             .crypto
             .decrypt(&drr.data, &drk)
             .context("decrypt: failed to decrypt data with DRK")?;
-        // wipe DRK bytes after use (practical parity with Go's MemClr)
-        drk.fill(0);
+        // wipe DRK bytes after use; wipe_bytes uses write_volatile to prevent
+        // dead-store elimination when drk is about to be dropped.
+        crate::memguard::wipe_bytes(&mut drk);
         Ok(pt)
     }
 
@@ -802,7 +803,9 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         struct DrkGuard([u8; 32]);
         impl Drop for DrkGuard {
             fn drop(&mut self) {
-                self.0.fill(0);
+                for b in self.0.iter_mut() {
+                    unsafe { std::ptr::write_volatile(std::ptr::addr_of_mut!(*b), 0_u8) };
+                }
             }
         }
         let mut drk = DrkGuard([0_u8; 32]);
@@ -895,7 +898,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         let drk_lsk = crate::aead::make_lsk(&drk).context("decrypt: failed to create DRK key")?;
         let pt = crate::aead::decrypt_with_lsk(&drr.data, &drk_lsk)
             .context("decrypt: failed to decrypt data with DRK")?;
-        drk.fill(0);
+        crate::memguard::wipe_bytes(&mut drk);
         if let Some(start) = start {
             metrics::record_decrypt(start);
         }
@@ -1189,7 +1192,9 @@ impl<
         struct DrkGuard([u8; 32]);
         impl Drop for DrkGuard {
             fn drop(&mut self) {
-                self.0.fill(0);
+                for b in self.0.iter_mut() {
+                    unsafe { std::ptr::write_volatile(std::ptr::addr_of_mut!(*b), 0_u8) };
+                }
             }
         }
         let mut drk = DrkGuard([0_u8; 32]);
@@ -1288,7 +1293,7 @@ impl<
             crate::aead::make_lsk(&drk).context("decrypt_async: failed to create DRK key")?;
         let pt = crate::aead::decrypt_with_lsk(&drr.data, &drk_lsk)
             .context("decrypt_async: failed to decrypt data with DRK")?;
-        drk.fill(0);
+        crate::memguard::wipe_bytes(&mut drk);
         if let Some(start) = start {
             metrics::record_decrypt(start);
         }
