@@ -24,12 +24,12 @@ record.
 
 | Language | Package                                                                                                     | Docs                      |
 | -------- | ----------------------------------------------------------------------------------------------------------- | ------------------------- |
-| Node.js  | `[asherah](https://www.npmjs.com/package/asherah)` on npm                                                   | [README](asherah-node/)   |
-| Python   | `[asherah](https://pypi.org/project/asherah)` on PyPI                                                       | [README](asherah-py/)     |
+| Node.js  | [`asherah`](https://www.npmjs.com/package/asherah) on npm                                                   | [README](asherah-node/)   |
+| Python   | [`asherah`](https://pypi.org/project/asherah) on PyPI                                                       | [README](asherah-py/)     |
 | .NET     | `GoDaddy.Asherah.Encryption` on [NuGet](https://www.nuget.org/packages/GoDaddy.Asherah.Encryption)          | [README](asherah-dotnet/) |
 | Java     | `com.godaddy.asherah:appencryption` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages)   | [README](asherah-java/)   |
 | Ruby     | `asherah` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages)                             | [README](asherah-ruby/)   |
-| Go       | `[github.com/godaddy/asherah-ffi/asherah-go](https://pkg.go.dev/github.com/godaddy/asherah-ffi/asherah-go)` | [README](asherah-go/)     |
+| Go       | [`github.com/godaddy/asherah-ffi/asherah-go`](https://pkg.go.dev/github.com/godaddy/asherah-ffi/asherah-go) | [README](asherah-go/)     |
 
 
 ## Platform Support
