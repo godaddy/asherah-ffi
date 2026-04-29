@@ -6,7 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using GoDaddy.Asherah;
+using GoDaddy.Asherah.Encryption;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -59,15 +59,15 @@ public class HookTests
     {
         public HookScope()
         {
-            Asherah.SetLogHook((Action<LogEvent>?)null);
-            Asherah.SetMetricsHook((Action<MetricsEvent>?)null);
-            if (Asherah.GetSetupStatus()) Asherah.Shutdown();
+            AsherahHooks.SetLogHook((Action<LogEvent>?)null);
+            AsherahHooks.SetMetricsHook((Action<MetricsEvent>?)null);
+            if (AsherahApi.GetSetupStatus()) AsherahApi.Shutdown();
         }
         public void Dispose()
         {
-            Asherah.SetLogHook((Action<LogEvent>?)null);
-            Asherah.SetMetricsHook((Action<MetricsEvent>?)null);
-            if (Asherah.GetSetupStatus()) Asherah.Shutdown();
+            AsherahHooks.SetLogHook((Action<LogEvent>?)null);
+            AsherahHooks.SetMetricsHook((Action<MetricsEvent>?)null);
+            if (AsherahApi.GetSetupStatus()) AsherahApi.Shutdown();
         }
     }
 
@@ -91,12 +91,12 @@ public class HookTests
     {
         using var _ = new HookScope();
         var events = new ConcurrentBag<LogEvent>();
-        Asherah.SetLogHook(e => events.Add(e));
-        Asherah.Setup(CreateConfig(verbose: true));
-        var ct = Asherah.EncryptString("p1", "log-test");
-        Asherah.DecryptString("p1", ct);
+        AsherahHooks.SetLogHook(e => events.Add(e));
+        AsherahApi.Setup(CreateConfig(verbose: true));
+        var ct = AsherahApi.EncryptString("p1", "log-test");
+        AsherahApi.DecryptString("p1", ct);
         WaitFor(() => !events.IsEmpty);
-        Asherah.Shutdown();
+        AsherahApi.Shutdown();
         Assert.NotEmpty(events);
         // Every event must have the documented shape.
         foreach (var e in events)
@@ -112,18 +112,18 @@ public class HookTests
     {
         using var _ = new HookScope();
         var events = new ConcurrentBag<LogEvent>();
-        Asherah.SetLogHook(e => events.Add(e));
-        Asherah.Setup(CreateConfig(verbose: true));
-        Asherah.EncryptString("p2", "first");
+        AsherahHooks.SetLogHook(e => events.Add(e));
+        AsherahApi.Setup(CreateConfig(verbose: true));
+        AsherahApi.EncryptString("p2", "first");
         // Drain the queue before snapshotting (worker may still be
         // delivering events from the encrypt above).
         Thread.Sleep(50);
         var beforeClear = events.Count;
         Assert.True(beforeClear >= 1);
-        Asherah.SetLogHook((Action<LogEvent>?)null);
-        Asherah.EncryptString("p2", "second");
+        AsherahHooks.SetLogHook((Action<LogEvent>?)null);
+        AsherahApi.EncryptString("p2", "second");
         Thread.Sleep(50);
-        Asherah.Shutdown();
+        AsherahApi.Shutdown();
         Assert.Equal(beforeClear, events.Count);
     }
 
@@ -136,15 +136,15 @@ public class HookTests
         // Trace filter: encrypt() emits Debug records every call. The
         // default Warn filter only delivers the one-shot static-master-key
         // warning at Setup, so the second-hook bag would never fill.
-        Asherah.SetLogHook(e => a.Add(e), queueCapacity: 0, minLevel: LogLevel.Trace);
-        Asherah.Setup(CreateConfig(verbose: true));
-        Asherah.EncryptString("p3", "first");
+        AsherahHooks.SetLogHook(e => a.Add(e), queueCapacity: 0, minLevel: LogLevel.Trace);
+        AsherahApi.Setup(CreateConfig(verbose: true));
+        AsherahApi.EncryptString("p3", "first");
         WaitFor(() => !a.IsEmpty);
         Assert.NotEmpty(a);
-        Asherah.SetLogHook(e => b.Add(e), queueCapacity: 0, minLevel: LogLevel.Trace);
-        Asherah.EncryptString("p3", "second");
+        AsherahHooks.SetLogHook(e => b.Add(e), queueCapacity: 0, minLevel: LogLevel.Trace);
+        AsherahApi.EncryptString("p3", "second");
         WaitFor(() => !b.IsEmpty);
-        Asherah.Shutdown();
+        AsherahApi.Shutdown();
         Assert.NotEmpty(a);
         Assert.NotEmpty(b);
     }
@@ -153,11 +153,11 @@ public class HookTests
     public void LogHook_CallbackException_DoesNotCrash()
     {
         using var _ = new HookScope();
-        Asherah.SetLogHook(_ => throw new InvalidOperationException("intentional"));
-        Asherah.Setup(CreateConfig(verbose: true));
+        AsherahHooks.SetLogHook(_ => throw new InvalidOperationException("intentional"));
+        AsherahApi.Setup(CreateConfig(verbose: true));
         // Must not crash the process even though the callback throws.
-        Asherah.EncryptString("p4", "exception-safe");
-        Asherah.Shutdown();
+        AsherahApi.EncryptString("p4", "exception-safe");
+        AsherahApi.Shutdown();
     }
 
     [Fact]
@@ -165,17 +165,17 @@ public class HookTests
     {
         using var _ = new HookScope();
         var events = new ConcurrentBag<MetricsEvent>();
-        Asherah.SetMetricsHook(e => events.Add(e));
-        Asherah.Setup(CreateConfig());
+        AsherahHooks.SetMetricsHook(e => events.Add(e));
+        AsherahApi.Setup(CreateConfig());
         for (int i = 0; i < 5; i++)
         {
-            var ct = Asherah.EncryptString("p5", $"payload-{i}");
-            Asherah.DecryptString("p5", ct);
+            var ct = AsherahApi.EncryptString("p5", $"payload-{i}");
+            AsherahApi.DecryptString("p5", ct);
         }
         WaitFor(() =>
             events.Count(e => e.Type == MetricsEventType.Encrypt) >= 5 &&
             events.Count(e => e.Type == MetricsEventType.Decrypt) >= 5);
-        Asherah.Shutdown();
+        AsherahApi.Shutdown();
         var encrypts = events.Where(e => e.Type == MetricsEventType.Encrypt).ToList();
         var decrypts = events.Where(e => e.Type == MetricsEventType.Decrypt).ToList();
         Assert.True(encrypts.Count >= 5, $"expected ≥5 encrypt events, got {encrypts.Count}");
@@ -189,14 +189,14 @@ public class HookTests
     {
         using var _ = new HookScope();
         var events = new ConcurrentBag<MetricsEvent>();
-        Asherah.SetMetricsHook(e => events.Add(e));
-        Asherah.Setup(CreateConfig());
+        AsherahHooks.SetMetricsHook(e => events.Add(e));
+        AsherahApi.Setup(CreateConfig());
         for (int i = 0; i < 3; i++)
         {
-            Asherah.EncryptString("cache-p", $"item-{i}");
+            AsherahApi.EncryptString("cache-p", $"item-{i}");
         }
         WaitFor(() => !events.IsEmpty);
-        Asherah.Shutdown();
+        AsherahApi.Shutdown();
         // Cache events may or may not surface depending on session
         // caching state; assert structure of any that do fire.
         var cacheEvents = events.Where(e =>
@@ -211,19 +211,19 @@ public class HookTests
     {
         using var _ = new HookScope();
         var events = new ConcurrentBag<MetricsEvent>();
-        Asherah.SetMetricsHook(e => events.Add(e));
-        Asherah.Setup(CreateConfig());
-        Asherah.EncryptString("p6", "pre-deregister");
+        AsherahHooks.SetMetricsHook(e => events.Add(e));
+        AsherahApi.Setup(CreateConfig());
+        AsherahApi.EncryptString("p6", "pre-deregister");
         // Wait for the async dispatcher to fully drain its queue before
         // snapshotting `beforeClear` — otherwise the worker is still
         // delivering events from the encrypt above when we read the count.
         Thread.Sleep(50);
         var beforeClear = events.Count;
         Assert.True(beforeClear > 0);
-        Asherah.SetMetricsHook((Action<MetricsEvent>?)null);
-        Asherah.EncryptString("p6", "post-deregister");
+        AsherahHooks.SetMetricsHook((Action<MetricsEvent>?)null);
+        AsherahApi.EncryptString("p6", "post-deregister");
         Thread.Sleep(50);
-        Asherah.Shutdown();
+        AsherahApi.Shutdown();
         Assert.Equal(beforeClear, events.Count);
     }
 
@@ -233,15 +233,15 @@ public class HookTests
         using var _ = new HookScope();
         var a = new ConcurrentBag<MetricsEvent>();
         var b = new ConcurrentBag<MetricsEvent>();
-        Asherah.SetMetricsHook(e => a.Add(e));
-        Asherah.Setup(CreateConfig());
-        Asherah.EncryptString("p7", "first");
+        AsherahHooks.SetMetricsHook(e => a.Add(e));
+        AsherahApi.Setup(CreateConfig());
+        AsherahApi.EncryptString("p7", "first");
         WaitFor(() => !a.IsEmpty);
         Assert.NotEmpty(a);
-        Asherah.SetMetricsHook(e => b.Add(e));
-        Asherah.EncryptString("p7", "second");
+        AsherahHooks.SetMetricsHook(e => b.Add(e));
+        AsherahApi.EncryptString("p7", "second");
         WaitFor(() => !b.IsEmpty);
-        Asherah.Shutdown();
+        AsherahApi.Shutdown();
         Assert.NotEmpty(a);
         Assert.NotEmpty(b);
     }
@@ -250,10 +250,10 @@ public class HookTests
     public void MetricsHook_CallbackException_DoesNotCrash()
     {
         using var _ = new HookScope();
-        Asherah.SetMetricsHook(_ => throw new InvalidOperationException("intentional"));
-        Asherah.Setup(CreateConfig());
-        Asherah.EncryptString("p8", "exception-safe");
-        Asherah.Shutdown();
+        AsherahHooks.SetMetricsHook(_ => throw new InvalidOperationException("intentional"));
+        AsherahApi.Setup(CreateConfig());
+        AsherahApi.EncryptString("p8", "exception-safe");
+        AsherahApi.Shutdown();
     }
 
     [Fact]
@@ -262,9 +262,9 @@ public class HookTests
         using var _ = new HookScope();
         var logs = new ConcurrentBag<LogEvent>();
         var metrics = new ConcurrentBag<MetricsEvent>();
-        Asherah.SetLogHook(e => logs.Add(e));
-        Asherah.SetMetricsHook(e => metrics.Add(e));
-        using (var factory = Asherah.FactoryFromConfig(CreateConfig()))
+        AsherahHooks.SetLogHook(e => logs.Add(e));
+        AsherahHooks.SetMetricsHook(e => metrics.Add(e));
+        using (var factory = AsherahFactory.FromConfig(CreateConfig()))
         using (var session = factory.GetSession("factory-p"))
         {
             var ct = session.EncryptString("factory-payload");
@@ -279,11 +279,11 @@ public class HookTests
     {
         using var _ = new HookScope();
         var events = new ConcurrentBag<MetricsEvent>();
-        Asherah.SetMetricsHook(e => events.Add(e));
-        Asherah.Setup(CreateConfig());
-        Asherah.EncryptString("p9", "before-setup");
+        AsherahHooks.SetMetricsHook(e => events.Add(e));
+        AsherahApi.Setup(CreateConfig());
+        AsherahApi.EncryptString("p9", "before-setup");
         WaitFor(() => !events.IsEmpty);
-        Asherah.Shutdown();
+        AsherahApi.Shutdown();
         Assert.NotEmpty(events);
     }
 
@@ -294,24 +294,24 @@ public class HookTests
         for (int cycle = 0; cycle < 3; cycle++)
         {
             var events = new ConcurrentBag<MetricsEvent>();
-            Asherah.SetMetricsHook(e => events.Add(e));
-            Asherah.Setup(CreateConfig());
-            Asherah.EncryptString("p10", $"cycle-{cycle}");
+            AsherahHooks.SetMetricsHook(e => events.Add(e));
+            AsherahApi.Setup(CreateConfig());
+            AsherahApi.EncryptString("p10", $"cycle-{cycle}");
             // Drain async dispatcher's queue before tearing down the hook —
             // otherwise the worker could still be holding events when we
             // null out the callback.
             WaitFor(() => events.Count > 0);
-            Asherah.Shutdown();
-            Asherah.SetMetricsHook((Action<MetricsEvent>?)null);
+            AsherahApi.Shutdown();
+            AsherahHooks.SetMetricsHook((Action<MetricsEvent>?)null);
             Assert.True(events.Count > 0, $"cycle {cycle} produced no events");
         }
     }
 
     [Fact]
-    public void IAsherah_ExposesHookApi()
+    public void IAsherahApi_ExposesHookApi()
     {
         using var _ = new HookScope();
-        IAsherah client = new AsherahClient();
+        IAsherahApi client = new AsherahApiClient();
         var events = new ConcurrentBag<MetricsEvent>();
         client.SetMetricsHook(e => events.Add(e));
         client.Setup(CreateConfig());
@@ -334,12 +334,12 @@ public class HookTests
         using var _ = new HookScope();
         var callerThreadId = Environment.CurrentManagedThreadId;
         int? observedThreadId = null;
-        Asherah.SetLogHookSync(_ => observedThreadId = Environment.CurrentManagedThreadId);
-        Asherah.Setup(CreateConfig(verbose: true));
-        Asherah.EncryptString("sync-p1", "sync-payload");
+        AsherahHooks.SetLogHookSync(_ => observedThreadId = Environment.CurrentManagedThreadId);
+        AsherahApi.Setup(CreateConfig(verbose: true));
+        AsherahApi.EncryptString("sync-p1", "sync-payload");
         // No WaitFor — sync delivery means the callback has already run by
         // the time EncryptString returns.
-        Asherah.Shutdown();
+        AsherahApi.Shutdown();
         Assert.NotNull(observedThreadId);
         Assert.Equal(callerThreadId, observedThreadId);
     }
@@ -349,10 +349,10 @@ public class HookTests
     {
         using var _ = new HookScope();
         var events = new ConcurrentBag<LogEvent>();
-        Asherah.SetLogHookSync(e => events.Add(e), LogLevel.Warning);
-        Asherah.Setup(CreateConfig(verbose: true));
-        Asherah.EncryptString("sync-p2", "filter-payload");
-        Asherah.Shutdown();
+        AsherahHooks.SetLogHookSync(e => events.Add(e), LogLevel.Warning);
+        AsherahApi.Setup(CreateConfig(verbose: true));
+        AsherahApi.EncryptString("sync-p2", "filter-payload");
+        AsherahApi.Shutdown();
         Assert.All(events, e =>
             Assert.True(
                 e.Level == LogLevel.Warning || e.Level == LogLevel.Error,
@@ -365,10 +365,10 @@ public class HookTests
         using var _ = new HookScope();
         var callerThreadId = Environment.CurrentManagedThreadId;
         var observedThreadIds = new ConcurrentBag<int>();
-        Asherah.SetMetricsHookSync(_ => observedThreadIds.Add(Environment.CurrentManagedThreadId));
-        Asherah.Setup(CreateConfig());
-        Asherah.EncryptString("sync-p3", "sync-payload");
-        Asherah.Shutdown();
+        AsherahHooks.SetMetricsHookSync(_ => observedThreadIds.Add(Environment.CurrentManagedThreadId));
+        AsherahApi.Setup(CreateConfig());
+        AsherahApi.EncryptString("sync-p3", "sync-payload");
+        AsherahApi.Shutdown();
         Assert.NotEmpty(observedThreadIds);
         Assert.All(observedThreadIds, tid => Assert.Equal(callerThreadId, tid));
     }
@@ -437,11 +437,11 @@ public class HookTests
         var captured = new ConcurrentBag<CapturedLogEntry>();
         var logger = new CapturingLogger("test", captured);
         // Wide filter so the test exercises the level mapping.
-        Asherah.SetLogHook(logger, queueCapacity: 0, minLevel: LogLevel.Trace);
-        Asherah.Setup(CreateConfig(verbose: true));
-        Asherah.EncryptString("ilogger-p", "via-ilogger");
+        AsherahHooks.SetLogHook(logger, queueCapacity: 0, minLevel: LogLevel.Trace);
+        AsherahApi.Setup(CreateConfig(verbose: true));
+        AsherahApi.EncryptString("ilogger-p", "via-ilogger");
         WaitFor(() => !captured.IsEmpty);
-        Asherah.Shutdown();
+        AsherahApi.Shutdown();
         Assert.NotEmpty(captured);
         // Every captured entry must have a known M.E.L.LogLevel.
         foreach (var e in captured)
@@ -458,11 +458,11 @@ public class HookTests
     {
         using var _ = new HookScope();
         using var factory = new CapturingLoggerFactory();
-        Asherah.SetLogHook(factory, queueCapacity: 0, minLevel: LogLevel.Trace);
-        Asherah.Setup(CreateConfig(verbose: true));
-        Asherah.EncryptString("ilf-p", "via-iloggerfactory");
+        AsherahHooks.SetLogHook(factory, queueCapacity: 0, minLevel: LogLevel.Trace);
+        AsherahApi.Setup(CreateConfig(verbose: true));
+        AsherahApi.EncryptString("ilf-p", "via-iloggerfactory");
         WaitFor(() => !factory.Provider.Captured.IsEmpty);
-        Asherah.Shutdown();
+        AsherahApi.Shutdown();
         Assert.NotEmpty(factory.Provider.Captured);
         // Categories should come from our log targets (e.g. "asherah::session"),
         // not a single hard-coded category.
@@ -477,11 +477,11 @@ public class HookTests
         using var _ = new HookScope();
         var captured = new ConcurrentBag<CapturedLogEntry>();
         var logger = new CapturingLogger("sync", captured);
-        Asherah.SetLogHookSync(logger, LogLevel.Trace);
-        Asherah.Setup(CreateConfig(verbose: true));
-        Asherah.EncryptString("ilogger-sync-p", "sync-via-ilogger");
+        AsherahHooks.SetLogHookSync(logger, LogLevel.Trace);
+        AsherahApi.Setup(CreateConfig(verbose: true));
+        AsherahApi.EncryptString("ilogger-sync-p", "sync-via-ilogger");
         // Sync delivery — no WaitFor needed.
-        Asherah.Shutdown();
+        AsherahApi.Shutdown();
         Assert.NotEmpty(captured);
     }
 
@@ -512,17 +512,17 @@ public class HookTests
             observed.Add(instrument.Name));
         listener.Start();
 
-        Asherah.SetMetricsHook(meter);
-        Asherah.Setup(CreateConfig());
+        AsherahHooks.SetMetricsHook(meter);
+        AsherahApi.Setup(CreateConfig());
         for (int i = 0; i < 3; i++)
         {
-            var ct = Asherah.EncryptString("meter-p", $"payload-{i}");
-            Asherah.DecryptString("meter-p", ct);
+            var ct = AsherahApi.EncryptString("meter-p", $"payload-{i}");
+            AsherahApi.DecryptString("meter-p", ct);
         }
         WaitFor(() =>
             observed.Contains("asherah.encrypt.duration") &&
             observed.Contains("asherah.decrypt.duration"));
-        Asherah.Shutdown();
+        AsherahApi.Shutdown();
         listener.Dispose();
 
         // The bridge must have produced measurements on the documented
@@ -547,11 +547,11 @@ public class HookTests
             observed.Add(instrument.Name));
         listener.Start();
 
-        Asherah.SetMetricsHookSync(meter);
-        Asherah.Setup(CreateConfig());
-        var ct = Asherah.EncryptString("meter-sync-p", "sync-via-meter");
-        Asherah.DecryptString("meter-sync-p", ct);
-        Asherah.Shutdown();
+        AsherahHooks.SetMetricsHookSync(meter);
+        AsherahApi.Setup(CreateConfig());
+        var ct = AsherahApi.EncryptString("meter-sync-p", "sync-via-meter");
+        AsherahApi.DecryptString("meter-sync-p", ct);
+        AsherahApi.Shutdown();
         listener.Dispose();
 
         // Sync delivery — no WaitFor.

@@ -108,6 +108,11 @@ jobs:
 
   build-wheels:
     needs: resolve-version
+    # `resolve-version` uses `if: always()` to survive verify-ci being
+    # skipped under workflow_dispatch; without an explicit always() here
+    # the implicit `success()` check walks back to the skipped verify-ci
+    # and skips this job too.
+    if: ${{ always() && needs.resolve-version.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -172,7 +177,7 @@ jobs:
           else
             VCPKG_TRIPLET="x64-windows-static-md"
           fi
-          vcpkg install "openssl:${VCPKG_TRIPLET}"
+          bash "$GITHUB_WORKSPACE/scripts/vcpkg-install-with-retry.sh" "openssl:${VCPKG_TRIPLET}"
           echo "OPENSSL_DIR=C:/vcpkg/installed/${VCPKG_TRIPLET}" >> "$GITHUB_ENV"
           echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
           echo "OPENSSL_NO_VENDOR=1" >> "$GITHUB_ENV"
@@ -211,6 +216,7 @@ jobs:
 
   build-sdist:
     needs: resolve-version
+    if: ${{ always() && needs.resolve-version.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -240,6 +246,7 @@ jobs:
 
   publish:
     needs: [resolve-version, build-wheels, build-sdist]
+    if: ${{ always() && needs.resolve-version.result == 'success' && needs.build-wheels.result == 'success' && needs.build-sdist.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       actions: write

@@ -535,7 +535,7 @@ jobs:
       - name: Install OpenSSL via vcpkg
         shell: bash
         run: |
-          vcpkg install openssl:x64-windows-static-md
+          bash "$GITHUB_WORKSPACE/scripts/vcpkg-install-with-retry.sh" openssl:x64-windows-static-md
           echo "OPENSSL_DIR=C:/vcpkg/installed/x64-windows-static-md" >> "$GITHUB_ENV"
           echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
           echo "OPENSSL_NO_VENDOR=1" >> "$GITHUB_ENV"
@@ -1284,7 +1284,7 @@ jobs:
       - name: Install OpenSSL via vcpkg
         shell: bash
         run: |
-          vcpkg install openssl:x64-windows-static-md
+          bash "$GITHUB_WORKSPACE/scripts/vcpkg-install-with-retry.sh" openssl:x64-windows-static-md
           echo "OPENSSL_DIR=C:/vcpkg/installed/x64-windows-static-md" >> "$GITHUB_ENV"
           echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
           echo "OPENSSL_NO_VENDOR=1" >> "$GITHUB_ENV"
@@ -1469,7 +1469,7 @@ jobs:
       - name: Install OpenSSL via vcpkg (arm64)
         shell: bash
         run: |
-          vcpkg install openssl:arm64-windows-static-md
+          bash "$GITHUB_WORKSPACE/scripts/vcpkg-install-with-retry.sh" openssl:arm64-windows-static-md
           echo "OPENSSL_DIR=C:/vcpkg/installed/arm64-windows-static-md" >> "$GITHUB_ENV"
           echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
           echo "OPENSSL_NO_VENDOR=1" >> "$GITHUB_ENV"
@@ -1486,6 +1486,93 @@ jobs:
           pip install maturin==1.9.4
           maturin build --release --manifest-path asherah-py/Cargo.toml --target aarch64-pc-windows-msvc --out dist/
           ls dist/*.whl || { echo "ERROR: No wheel produced"; exit 1; }
+
+  # Mirrors the musl build path in release-cobhan.yml's `build` matrix.
+  # Without this dry-run, a regression in the cobhan musl build (which
+  # produces the libasherah-*-musl.so binaries shipped to GitHub Releases
+  # and consumed by NuGet, Maven, RubyGems, and Go) would only surface
+  # at release time. The release workflow already runs `cargo zigbuild
+  # --release -p asherah-ffi -p asherah-java`; we replicate that exactly
+  # and then assert that the cdylib outputs actually exist on disk —
+  # the warning "dropping unsupported crate type cdylib" silently
+  # produces a successful exit code with no .so file.
+  publish-dry-run-cobhan-musl-x64:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+      - uses: taiki-e/install-action@481c34c1cf3a84c68b5e46f4eccfc82af798415a # v2
+        with:
+          tool: cargo-zigbuild
+      - name: Setup musl OpenSSL
+        shell: bash
+        run: |
+          ARCH=x86_64 source "$GITHUB_WORKSPACE/scripts/download-musl-openssl.sh"
+          {
+            echo "OPENSSL_DIR=$OPENSSL_DIR"
+            echo "OPENSSL_STATIC=$OPENSSL_STATIC"
+            echo "OPENSSL_NO_VENDOR=$OPENSSL_NO_VENDOR"
+          } >> "$GITHUB_ENV"
+      - name: Build asherah-ffi (musl x86_64)
+        env:
+          RUSTFLAGS: "-C target-feature=-crt-static"
+        run: |
+          cargo zigbuild --release -p asherah-ffi -p asherah-java --target x86_64-unknown-linux-musl
+      - name: Verify cdylib outputs exist
+        run: |
+          set -e
+          for lib in libasherah_ffi.so libasherah_java.so; do
+            path="target/x86_64-unknown-linux-musl/release/$lib"
+            if [ ! -f "$path" ]; then
+              echo "::error::Missing cdylib $path — Rust likely dropped the cdylib crate type for musl. Ensure RUSTFLAGS includes '-C target-feature=-crt-static'."
+              exit 1
+            fi
+            echo "OK: $path ($(stat -c%s "$path") bytes)"
+          done
+
+  publish-dry-run-cobhan-musl-arm64:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        with:
+          targets: aarch64-unknown-linux-musl
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+      - uses: taiki-e/install-action@481c34c1cf3a84c68b5e46f4eccfc82af798415a # v2
+        with:
+          tool: cargo-zigbuild
+      - name: Setup musl OpenSSL
+        shell: bash
+        run: |
+          ARCH=aarch64 source "$GITHUB_WORKSPACE/scripts/download-musl-openssl.sh"
+          {
+            echo "OPENSSL_DIR=$OPENSSL_DIR"
+            echo "OPENSSL_STATIC=$OPENSSL_STATIC"
+            echo "OPENSSL_NO_VENDOR=$OPENSSL_NO_VENDOR"
+          } >> "$GITHUB_ENV"
+      - name: Build asherah-ffi (musl aarch64)
+        env:
+          RUSTFLAGS: "-C target-feature=-crt-static"
+        run: |
+          cargo zigbuild --release -p asherah-ffi -p asherah-java --target aarch64-unknown-linux-musl
+      - name: Verify cdylib outputs exist
+        run: |
+          set -e
+          for lib in libasherah_ffi.so libasherah_java.so; do
+            path="target/aarch64-unknown-linux-musl/release/$lib"
+            if [ ! -f "$path" ]; then
+              echo "::error::Missing cdylib $path — Rust likely dropped the cdylib crate type for musl. Ensure RUSTFLAGS includes '-C target-feature=-crt-static'."
+              exit 1
+            fi
+            echo "OK: $path ($(stat -c%s "$path") bytes)"
+          done
 
   publish-dry-run-rubygem:
     runs-on: ubuntu-latest

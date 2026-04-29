@@ -22,7 +22,11 @@ on:
 
 jobs:
   publish:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # See note in publish-nuget.yml: only auto-fire when the upstream
+    # release-cobhan run was triggered by a release event. Reruns via
+    # workflow_dispatch would otherwise re-publish "latest release"
+    # under a fresh Maven coordinate.
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release') }}
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -42,9 +46,13 @@ jobs:
       - name: Download native libraries from release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RUN_EVENT: ${{ github.event.workflow_run.event }}
           WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          if [ -n "$WORKFLOW_RUN_BRANCH" ]; then
+          # Use the upstream tag only when the triggering workflow_run was
+          # a release event. For workflow_dispatch upstreams, head_branch
+          # is the dispatched ref (e.g. "main") — fall back to latest.
+          if [ "$WORKFLOW_RUN_EVENT" = "release" ] && [ -n "$WORKFLOW_RUN_BRANCH" ]; then
             TAG="$WORKFLOW_RUN_BRANCH"
           else
             TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"

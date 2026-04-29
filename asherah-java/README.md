@@ -48,6 +48,18 @@ The package includes prebuilt native JNI libraries for Linux x64/ARM64 (glibc an
 3. Bundled JAR resource for the detected platform RID (`linux-{x86_64,aarch64}`, `linux-musl-{x86_64,aarch64}`, `darwin-{x86_64,aarch64}`, `windows-{x86_64,aarch64}`) extracted to a content-addressed directory under `${java.io.tmpdir}/asherah-jni-<sha256>/`. Concurrent JVMs share the cache; version upgrades land in a fresh directory.
 4. `System.loadLibrary("asherah_java")` — falls back to the JVM's `java.library.path`.
 
+## Documentation
+
+Task-oriented walkthroughs under [`docs/`](./docs/):
+
+| Guide | When to read |
+|---|---|
+| [Getting started](./docs/getting-started.md) | Maven/Gradle through round-trip encrypt/decrypt. |
+| [Framework integration](./docs/framework-integration.md) | Spring Boot, Micronaut, Quarkus, Helidon, Vert.x, servlets. |
+| [AWS production setup](./docs/aws-production-setup.md) | KMS keys, DynamoDB, IAM policy, region routing. |
+| [Testing](./docs/testing.md) | JUnit 5 fixtures, Spring Boot tests, Mockito patterns, Testcontainers. |
+| [Troubleshooting](./docs/troubleshooting.md) | Common errors with what to check first. |
+
 ## Quick Start
 
 The simplest way to use Asherah is the static API on the `Asherah` class. Call `setup()` once at startup and `shutdown()` on exit:

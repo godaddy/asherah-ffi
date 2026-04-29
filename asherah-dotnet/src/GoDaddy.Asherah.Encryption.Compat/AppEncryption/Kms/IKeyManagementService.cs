@@ -1,3 +1,5 @@
+using GoDaddy.Asherah.Encryption;
+
 namespace GoDaddy.Asherah.AppEncryption.Kms;
 
 /// <summary>KMS interface. In the FFI binding, KMS is handled by the native Rust layer.</summary>
@@ -39,8 +41,10 @@ public class AwsKeyManagementServiceImpl : IKeyManagementService
 
     public void ApplyConfig(AsherahConfig.Builder builder)
     {
+        // Cast disambiguates between the IDictionary and IReadOnlyDictionary
+        // WithRegionMap overloads — Dictionary<,> implements both.
         builder.WithKms("aws")
-               .WithRegionMap(_regionToArnMap)
+               .WithRegionMap((IDictionary<string, string>)_regionToArnMap)
                .WithPreferredRegion(_preferredRegion);
     }
 

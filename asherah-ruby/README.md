@@ -23,6 +23,18 @@ end
 
 The gem uses FFI to load the native Asherah library. Platform-specific gems ship the prebuilt library; the source gem builds it during installation.
 
+## Documentation
+
+Task-oriented walkthroughs under [`docs/`](./docs/):
+
+| Guide | When to read |
+|---|---|
+| [Getting started](./docs/getting-started.md) | `gem install` through round-trip encrypt/decrypt. |
+| [Framework integration](./docs/framework-integration.md) | Rails, Sidekiq, Sinatra, Rack middleware, AWS Lambda. |
+| [AWS production setup](./docs/aws-production-setup.md) | KMS keys, DynamoDB, IAM policy, region routing. |
+| [Testing](./docs/testing.md) | RSpec/Minitest fixtures, Testcontainers, mocking patterns. |
+| [Troubleshooting](./docs/troubleshooting.md) | Common errors with what to check first. |
+
 ## Quick Start
 
 The simplest way to use Asherah is the static module API. Call `setup` once at startup and `shutdown` on exit:

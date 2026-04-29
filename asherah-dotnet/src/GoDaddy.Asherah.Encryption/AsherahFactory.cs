@@ -1,7 +1,7 @@
 using System;
 using System.Text;
 
-namespace GoDaddy.Asherah;
+namespace GoDaddy.Asherah.Encryption;
 
 public sealed class AsherahFactory : IAsherahFactory
 {
@@ -11,6 +11,51 @@ public sealed class AsherahFactory : IAsherahFactory
     internal AsherahFactory(SafeFactoryHandle handle)
     {
         _handle = handle;
+    }
+
+    /// <summary>
+    /// Create a factory from environment-variable configuration. The Rust
+    /// core reads <c>SERVICE_NAME</c>, <c>PRODUCT_ID</c>, <c>METASTORE</c>
+    /// (etc.) from the process environment.
+    /// </summary>
+    /// <exception cref="AsherahException">
+    /// Thrown if the native call fails (missing required env vars,
+    /// metastore connection failure, etc.).
+    /// </exception>
+    public static AsherahFactory FromEnv()
+    {
+        var ptr = NativeMethods.asherah_factory_new_from_env();
+        if (ptr == IntPtr.Zero)
+        {
+            throw NativeError.Create("factory_from_env");
+        }
+
+        return new AsherahFactory(new SafeFactoryHandle(ptr));
+    }
+
+    /// <summary>
+    /// Create a factory from an explicit <see cref="AsherahConfig"/>.
+    /// Preferred over <see cref="FromEnv"/> when configuration comes from
+    /// app config / DI / a builder rather than environment variables.
+    /// </summary>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="config"/> is <c>null</c>.
+    /// </exception>
+    /// <exception cref="AsherahException">
+    /// Thrown if the native call fails (invalid config, metastore
+    /// connection failure, etc.).
+    /// </exception>
+    public static AsherahFactory FromConfig(AsherahConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        using var json = new Utf8String(config.ToJson());
+        var ptr = NativeMethods.asherah_factory_new_with_config(json.Pointer);
+        if (ptr == IntPtr.Zero)
+        {
+            throw NativeError.Create("factory_from_config");
+        }
+
+        return new AsherahFactory(new SafeFactoryHandle(ptr));
     }
 
     public unsafe AsherahSession GetSession(string partitionId)
