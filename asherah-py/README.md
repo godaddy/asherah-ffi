@@ -14,6 +14,18 @@ pip install asherah
 
 Requires Python ≥ 3.8.
 
+## Documentation
+
+Task-oriented walkthroughs under [`docs/`](./docs/):
+
+| Guide | When to read |
+|---|---|
+| [Getting started](./docs/getting-started.md) | First-time install through round-trip encrypt/decrypt. |
+| [Framework integration](./docs/framework-integration.md) | FastAPI, Flask, Django, AWS Lambda, Celery. |
+| [AWS production setup](./docs/aws-production-setup.md) | KMS keys, DynamoDB, IAM policy, region routing. |
+| [Testing](./docs/testing.md) | pytest fixtures, Testcontainers, mocking patterns, asyncio test patterns. |
+| [Troubleshooting](./docs/troubleshooting.md) | Common errors with what to check first. |
+
 ## Choosing an API style
 
 Two API styles are exposed; both are fully supported and produce the same
