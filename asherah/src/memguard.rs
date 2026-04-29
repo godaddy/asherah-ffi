@@ -313,6 +313,17 @@ pub struct Enclave {
     ciphertext: Vec<u8>,
     data_len: usize,
 }
+
+impl Drop for Enclave {
+    fn drop(&mut self) {
+        // Evict this enclave's entry from the hot-cache slab so that the
+        // plaintext key bytes are wiped immediately when the owning CryptoKey
+        // is dropped (e.g. on cache eviction), rather than waiting for LRU
+        // pressure to evict them.
+        cache_evict(self.id);
+    }
+}
+
 impl Enclave {
     /// Seal a SLOT_SIZE byte slice directly without allocating a page-locked
     /// Buffer. The plaintext is encrypted and inserted into the SLAB hot cache.
@@ -572,6 +583,17 @@ impl SecureSlab {
         self.cache_lru.push_back(slot_idx);
     }
 
+    /// Remove one entry from the hot cache by enclave_id, wiping its slot.
+    fn cache_remove(&mut self, enclave_id: u64) {
+        if let Some(&slot_idx) = self.cache_map.get(&enclave_id) {
+            wipe_bytes(self.slot_slice_mut(slot_idx));
+            self.cache_slot_to_id[slot_idx] = 0;
+            self.cache_lru.retain(|&i| i != slot_idx);
+            self.free.push(slot_idx);
+            self.cache_map.remove(&enclave_id);
+        }
+    }
+
     /// Clear all hot cache entries, returning slots to the free list.
     fn clear_cache(&mut self) {
         let indices: Vec<usize> = self.cache_map.values().copied().collect();
@@ -693,6 +715,13 @@ fn cache_insert(enclave_id: u64, plaintext: &[u8]) {
     if plaintext.len() == SLOT_SIZE {
         SLAB.lock().cache_insert(enclave_id, plaintext);
     }
+}
+
+/// Remove an entry from the hot cache by enclave_id, wiping the slab slot.
+/// Called from Enclave::drop so that key bytes in the slab are wiped as soon
+/// as the CryptoKey that holds the Enclave is dropped (e.g. on cache eviction).
+fn cache_evict(enclave_id: u64) {
+    SLAB.lock().cache_remove(enclave_id);
 }
 
 use std::sync::{Arc, Weak};
