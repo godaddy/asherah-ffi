@@ -1,6 +1,6 @@
 using System;
 
-namespace GoDaddy.Asherah;
+namespace GoDaddy.Asherah.Encryption;
 
 public sealed class AsherahException : Exception
 {

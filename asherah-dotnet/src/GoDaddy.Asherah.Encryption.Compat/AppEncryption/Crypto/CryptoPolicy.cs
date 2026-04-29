@@ -1,3 +1,5 @@
+using GoDaddy.Asherah.Encryption;
+
 namespace GoDaddy.Asherah.AppEncryption.Crypto;
 
 public enum KeyRotationStrategy { Inline, Queued }

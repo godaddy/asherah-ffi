@@ -54,8 +54,8 @@ programming bug, not data.
 | string of only whitespace | accepted as a valid (if unusual) partition — whitespace is preserved verbatim, not collapsed |
 
 This applies to every entry point that takes a partition ID:
-`factory.GetSession(...)`, `Asherah.Encrypt(...)`,
-`Asherah.Decrypt(...)`, the equivalent string variants, and the async
+`factory.GetSession(...)`, `AsherahApi.Encrypt(...)`,
+`AsherahApi.Decrypt(...)`, the equivalent string variants, and the async
 counterparts.
 
 ### Divergence from canonical

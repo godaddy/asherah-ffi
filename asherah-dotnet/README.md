@@ -12,30 +12,59 @@ P/Invoke; the native binary ships in NuGet for `linux-x64`, `linux-arm64`,
 dotnet add package GoDaddy.Asherah.Encryption
 ```
 
-Targets `net8.0` and `net10.0`.
+Targets `net8.0` and `net10.0`. Namespace: `GoDaddy.Asherah.Encryption`.
+
+For drop-in compatibility with the canonical pure-C# `GoDaddy.Asherah.AppEncryption`
+SDK (the `SessionFactory.NewBuilder()` style), install the companion compat
+package which preserves the original namespace and API surface:
+
+```bash
+dotnet add package GoDaddy.Asherah.Encryption.Compat
+```
+
+The compat package is documented separately and brings `Newtonsoft.Json` /
+`LanguageExt.Option` along with it for source-level parity. Use it only when
+migrating existing code; new code should target `GoDaddy.Asherah.Encryption`
+directly.
 
 ## Choosing an API style
 
-Two API styles are exposed; both are fully supported and produce the same
-wire format. New code should prefer the **Factory / Session API**.
+Two coexisting API styles are exposed in `GoDaddy.Asherah.Encryption`. Both
+produce the same wire format and operate on the same native core; pick by
+operational style, not by feature.
 
-| Style | When to use |
-|---|---|
-| **Static** (`Asherah.Setup`, `Asherah.Encrypt`, …) | Drop-in compatibility with the canonical `GoDaddy.Asherah.AppEncryption` v0.x. Simplest call surface. Singleton lifecycle (`Setup()` once, `Shutdown()` once). |
-| **Factory / Session** (`Asherah.FactoryFromConfig(...)`, `factory.GetSession(...)`) | Recommended for new code. Explicit lifecycle, no hidden singleton, `IDisposable` resource management, multi-tenant isolation is obvious in code. |
+| Style | Entry point | When to use |
+|---|---|---|
+| **Single-shot** | `AsherahApi.Setup` / `AsherahApi.Encrypt` / `AsherahApi.Decrypt` | Configure once, call encrypt/decrypt with a partition id. No factory or session lifecycle to manage. Simplest call surface. |
+| **Factory / Session** | `AsherahFactory.FromConfig(...)` / `factory.GetSession(...)` | Explicit lifecycle, no hidden process-global singleton, `IDisposable` resource management, multi-tenant isolation is obvious in code, multiple factories with different configs in one process. |
 
-Also exposed via the `IAsherah` / `IAsherahFactory` / `IAsherahSession`
-interfaces for DI. The `AsherahClient` class implements `IAsherah` over
-the static API for callers who want to inject the static surface.
+Either style accepts the same `AsherahConfig` builder. Observability hooks
+(`AsherahHooks.SetLogHook` / `SetMetricsHook`) are configured separately and
+apply globally regardless of which style created the factory or session.
+
+For DI scenarios:
+
+- `IAsherahApi` + `AsherahApiClient` — instance-shaped wrapper for the
+  single-shot API.
+- `IAsherahFactory` / `IAsherahSession` — interfaces on the factory/session
+  types.
 
 A complete runnable example exercising both styles plus async, log hook,
 and metrics hook is in
 [`samples/dotnet/Program.cs`](../samples/dotnet/Program.cs).
 
-## Quick start (static API)
+> **Sync vs async:** prefer sync for Asherah's hot encrypt/decrypt paths.
+> The native operation is sub-microsecond — the async state-machine
+> overhead (~9 µs) is larger than the work itself for in-memory and warm
+> cache scenarios. Use `*Async` overloads for ASP.NET Core request
+> handlers and any caller already on an async context that touches a
+> network metastore (DynamoDB, MySQL, Postgres) where the I/O actually
+> warrants yielding.
+
+## Quick start (single-shot API)
 
 ```csharp
-using GoDaddy.Asherah;
+using GoDaddy.Asherah.Encryption;
 
 Environment.SetEnvironmentVariable("STATIC_MASTER_KEY_HEX", new string('2', 64));
 
@@ -46,26 +75,31 @@ var config = AsherahConfig.CreateBuilder()
     .WithKms("static")        // testing only — use "aws" in production
     .Build();
 
-Asherah.Setup(config);
+AsherahApi.Setup(config);
 try
 {
-    var ct = Asherah.EncryptString("user-42", "secret");
-    var pt = Asherah.DecryptString("user-42", ct);
+    var ct = AsherahApi.EncryptString("user-42", "secret");
+    var pt = AsherahApi.DecryptString("user-42", ct);
 }
 finally
 {
-    Asherah.Shutdown();
+    AsherahApi.Shutdown();
 }
 ```
 
 ## Quick start (factory / session API)
 
 ```csharp
-using var factory = Asherah.FactoryFromConfig(config);
+using GoDaddy.Asherah.Encryption;
+
+using var factory = AsherahFactory.FromConfig(config);
 using var session = factory.GetSession("user-42");
 var ct = session.EncryptString("secret");
 var pt = session.DecryptString(ct);
 ```
+
+`AsherahFactory.FromEnv()` is also available when configuration comes
+exclusively from environment variables.
 
 ## Async API
 
@@ -74,10 +108,10 @@ tokio runtime and completes the `Task` via `[UnmanagedCallersOnly]`
 callback — the .NET ThreadPool is not blocked.
 
 ```csharp
-await Asherah.SetupAsync(config);
-var ct = await Asherah.EncryptStringAsync("user-42", "secret");
-var pt = await Asherah.DecryptStringAsync("user-42", ct);
-await Asherah.ShutdownAsync();
+await AsherahApi.SetupAsync(config);
+var ct = await AsherahApi.EncryptStringAsync("user-42", "secret");
+var pt = await AsherahApi.DecryptStringAsync("user-42", ct);
+await AsherahApi.ShutdownAsync();
 ```
 
 | Metastore | Async pattern | Blocks ThreadPool? |
@@ -93,6 +127,10 @@ handlers.
 
 ## Observability hooks
 
+All hook registration lives on `AsherahHooks`. Hooks are process-global
+and apply to every factory/session in the process regardless of which
+API style (`AsherahApi` or explicit factory) created them.
+
 ### Log hook
 
 Asherah uses the standard `Microsoft.Extensions.Logging` types. The
@@ -100,7 +138,7 @@ fastest path is to hand the binding your host's `ILogger` (or
 `ILoggerFactory`) and let it forward records as structured events:
 
 ```csharp
-using GoDaddy.Asherah;
+using GoDaddy.Asherah.Encryption;
 using Microsoft.Extensions.Logging;
 
 // In ASP.NET Core / Worker Service / generic host:
@@ -110,22 +148,22 @@ public class Startup(ILoggerFactory loggers)
     {
         // One ILogger is created per Asherah target (e.g. "asherah::session"),
         // so host-side filter rules can match by category.
-        Asherah.SetLogHook(loggers);
+        AsherahHooks.SetLogHook(loggers);
     }
 }
 
 // Or with a single ILogger:
-Asherah.SetLogHook(myLogger);
+AsherahHooks.SetLogHook(myLogger);
 
 // later:
-Asherah.ClearLogHook();
+AsherahHooks.ClearLogHook();
 ```
 
 The raw callback API is still available for cases that don't fit the
 `ILogger` model (e.g. piping to a custom backend, low-level filtering):
 
 ```csharp
-Asherah.SetLogHook(evt =>
+AsherahHooks.SetLogHook(evt =>
 {
     // evt = LogEvent(Level, Target, Message); Level is
     // Microsoft.Extensions.Logging.LogLevel — Trace, Debug, Information,
@@ -137,7 +175,7 @@ Asherah.SetLogHook(evt =>
 });
 
 // later:
-Asherah.SetLogHook((Action<LogEvent>?)null);   // or Asherah.ClearLogHook();
+AsherahHooks.SetLogHook((Action<LogEvent>?)null);   // or AsherahHooks.ClearLogHook();
 ```
 
 Callbacks may fire from any thread (Rust tokio worker threads, DB
@@ -150,8 +188,8 @@ in a process-wide MPSC channel (default capacity 4096) and delivered to
 your callback by a dedicated worker thread. The encrypt/decrypt hot path
 performs only a level check + non-blocking channel send, so a slow
 callback never extends an encrypt's latency. When the queue is full,
-events are dropped — `Asherah.LogDroppedCount()` and
-`Asherah.MetricsDroppedCount()` expose the cumulative drop count.
+events are dropped — `AsherahHooks.LogDroppedCount()` and
+`AsherahHooks.MetricsDroppedCount()` expose the cumulative drop count.
 
 **Default log level is `LogLevel.Warning`.** Verbose
 `Trace`/`Debug`/`Information` records from the encrypt/decrypt hot path
@@ -166,8 +204,8 @@ never produces records at those severities.
 
 **Synchronous delivery (opt-in).** For diagnostics, single-threaded apps,
 or when you need thread-local context (trace IDs, request scopes) intact
-in the callback, use `Asherah.SetLogHookSync(callback, minLevel)` /
-`Asherah.SetMetricsHookSync(callback)`. The callback fires **on the
+in the callback, use `AsherahHooks.SetLogHookSync(callback, minLevel)` /
+`AsherahHooks.SetMetricsHookSync(callback)`. The callback fires **on the
 encrypt/decrypt thread before the operation returns** — no queue, no
 worker. Trade-off: a slow callback directly extends operation latency,
 so make sure your handler is verifiably non-blocking before picking sync
@@ -179,7 +217,7 @@ Receive timing events for encrypt/decrypt/store/load and counter events
 for cache hit/miss/stale.
 
 ```csharp
-Asherah.SetMetricsHook(evt =>
+AsherahHooks.SetMetricsHook(evt =>
 {
     switch (evt.Type)
     {
@@ -200,11 +238,16 @@ Asherah.SetMetricsHook(evt =>
 });
 
 // later:
-Asherah.SetMetricsHook(null);   // or Asherah.ClearMetricsHook();
+AsherahHooks.SetMetricsHook(null);   // or AsherahHooks.ClearMetricsHook();
 ```
 
 Metrics collection is enabled automatically when a hook is installed
 and disabled when cleared.
+
+`AsherahHooks.SetMetricsHook(Meter)` is also available — it creates
+standard `System.Diagnostics.Metrics` instruments
+(`asherah.encrypt.duration` etc.) on the supplied `Meter` for use with
+OpenTelemetry / Prometheus / Application Insights exporters.
 
 ## Input contract
 
@@ -237,20 +280,19 @@ skipping encryption leaks the fact that the value was empty. See
 [docs/input-contract.md](../docs/input-contract.md) for the full
 rationale.
 
-## Migration from canonical (`GoDaddy.Asherah.AppEncryption` v0.x)
+## Migration
 
-Drop-in replacement for the canonical Java-style SDK. Key differences:
+### From canonical `GoDaddy.Asherah.AppEncryption` v0.x
 
-| | Canonical (`GoDaddy.Asherah.AppEncryption@0.x`) | This repo (`GoDaddy.Asherah.Encryption`) |
-|---|---|---|
-| Implementation | Pure C# / Bouncy Castle | Native Rust via P/Invoke |
-| Performance | ~50 µs encrypt | ~0.7 µs encrypt |
-| Async | Sync only | Native async via tokio callbacks |
-| Hooks | Not exposed | `SetLogHook`, `SetMetricsHook` |
-| Null partition | Silently accepted, persists `_IK__service_product` | `ArgumentNullException` (intentional hardening) |
+The companion `GoDaddy.Asherah.Encryption.Compat` package preserves the
+canonical namespace `GoDaddy.Asherah.AppEncryption` and the
+`SessionFactory.NewBuilder()` builder API. Reference that package for
+zero-code-change migration:
 
 ```csharp
-// Before (canonical SDK)
+// Existing canonical code — unchanged after switching the package reference:
+using GoDaddy.Asherah.AppEncryption;
+
 using var sessionFactory = SessionFactory.NewBuilder("product", "service")
     .WithInMemoryMetastore()
     .WithCryptoPolicy(policy)
@@ -259,25 +301,54 @@ using var sessionFactory = SessionFactory.NewBuilder("product", "service")
 using var session = sessionFactory.GetSessionBytes("partition-id");
 var ct = session.Encrypt(payload);
 var pt = session.Decrypt(ct);
-
-// After (this binding — equivalent semantics)
-using var factory = Asherah.FactoryFromConfig(
-    AsherahConfig.CreateBuilder()
-        .WithServiceName("service")
-        .WithProductId("product")
-        .WithMetastore("memory")
-        .WithKms("static")
-        .Build());
-using var session = factory.GetSession("partition-id");
-var ct = session.EncryptBytes(payload);
-var pt = session.DecryptBytes(ct);
 ```
+
+For new code, target `GoDaddy.Asherah.Encryption` directly using either
+the single-shot `AsherahApi` or the factory/session pattern above.
+
+| | Canonical (`GoDaddy.Asherah.AppEncryption@0.x`) | This repo (`GoDaddy.Asherah.Encryption`) |
+|---|---|---|
+| Implementation | Pure C# / Bouncy Castle | Native Rust via P/Invoke |
+| Performance | ~50 µs encrypt | ~0.7 µs encrypt |
+| Async | Sync only | Native async via tokio callbacks |
+| Hooks | Not exposed | `AsherahHooks.SetLogHook`, `SetMetricsHook` |
+| Null partition | Silently accepted, persists `_IK__service_product` | `ArgumentNullException` (intentional hardening) |
+| Newtonsoft.Json / LanguageExt | Required | Not required (only the `Compat` package transitively pulls them) |
+
+### Earlier preview namespace `GoDaddy.Asherah`
+
+Earlier preview builds of this package exposed types under namespace
+`GoDaddy.Asherah` and a static class also named `Asherah`. Both moved:
+
+```diff
+-using GoDaddy.Asherah;
+-Asherah.Setup(config);
+-var ct = Asherah.EncryptString("user-42", "secret");
+-Asherah.SetLogHook(myLogger);
+-using var factory = Asherah.FactoryFromConfig(config);
++using GoDaddy.Asherah.Encryption;
++AsherahApi.Setup(config);
++var ct = AsherahApi.EncryptString("user-42", "secret");
++AsherahHooks.SetLogHook(myLogger);
++using var factory = AsherahFactory.FromConfig(config);
+```
+
+Map of preview names → current names:
+
+| Preview | Current |
+|---|---|
+| `GoDaddy.Asherah` (namespace) | `GoDaddy.Asherah.Encryption` |
+| `Asherah.Setup` / `Shutdown` / `Encrypt` / `Decrypt` / `SetEnv` etc. | `AsherahApi.Setup` / `Shutdown` / `Encrypt` / … |
+| `Asherah.FactoryFromConfig(config)` | `AsherahFactory.FromConfig(config)` |
+| `Asherah.FactoryFromEnv()` | `AsherahFactory.FromEnv()` |
+| `Asherah.SetLogHook` / `SetMetricsHook` / `ClearLogHook` / … | `AsherahHooks.SetLogHook` / `SetMetricsHook` / `ClearLogHook` / … |
+| `IAsherah` / `AsherahClient` | `IAsherahApi` / `AsherahApiClient` |
 
 ## Configuration
 
 Build a config with the fluent `AsherahConfig.CreateBuilder()`. Pass it
-to `Asherah.Setup()`, `Asherah.SetupAsync()`, or
-`Asherah.FactoryFromConfig()`.
+to `AsherahApi.Setup()`, `AsherahApi.SetupAsync()`, or
+`AsherahFactory.FromConfig()`.
 
 | Builder method | Description |
 |---|---|
@@ -299,8 +370,8 @@ to `Asherah.Setup()`, `Asherah.SetupAsync()`, or
 | `WithDynamoDbRegion(string?)` | AWS region for DynamoDB. |
 | `WithDynamoDbSigningRegion(string?)` | Region used for SigV4 signing. |
 | `WithDynamoDbTableName(string?)` | DynamoDB table name. |
-| `WithReplicaReadConsistency(string?)` | DynamoDB consistency. |
-| `WithVerbose(bool?)` | Emit verbose log events (use a log hook to consume). |
+| `WithReplicaReadConsistency(string?)` | Aurora MySQL replica consistency: `"eventual"`, `"global"`, or `"session"`. |
+| `WithVerbose(bool?)` | Emit verbose log events from the Rust core (use a log hook to consume). |
 | `WithPoolMaxOpen(int?)` | Max open DB connections (0 = unlimited). |
 | `WithPoolMaxIdle(int?)` | Max idle DB connections to retain. |
 | `WithPoolMaxLifetime(long?)` | Max connection lifetime in seconds (0 = unlimited). |
@@ -312,6 +383,15 @@ to `Asherah.Setup()`, `Asherah.SetupAsync()`, or
 |---|---|
 | `STATIC_MASTER_KEY_HEX` | 64 hex chars (32 bytes) for static KMS. **Testing only.** |
 | `ASHERAH_DOTNET_NATIVE` | Override the native binary search path (used by tests). |
+
+### AWS credentials
+
+The C# layer does not resolve AWS credentials. The Rust core uses the
+[AWS SDK for Rust](https://docs.aws.amazon.com/sdk-for-rust/latest/dg/credentials.html)
+default credential chain: environment variables, shared config / credentials
+files, AWS SSO, IAM roles for ECS tasks, EC2 instance metadata. SSO profiles
+configured via `aws sso login` are picked up automatically — no additional
+.NET-side configuration is required.
 
 ## Performance
 
@@ -333,15 +413,15 @@ canonical pure-C# implementation.
 > The tables below summarize each API; the source XML docs are the
 > source of truth.
 
-### `Asherah` (static class — legacy compatibility)
+### `AsherahApi` (static class — single-shot convenience)
 
 #### Lifecycle
 
 | Method | Description |
 |---|---|
-| `Setup(AsherahConfig)` | Initialize the global instance. Throws if already configured. |
+| `Setup(AsherahConfig)` | Initialize the process-global instance. Throws if already configured. |
 | `SetupAsync(AsherahConfig)` | Async variant. Returns `Task`. |
-| `Shutdown()` | Tear down the global instance. Idempotent. |
+| `Shutdown()` | Tear down the process-global instance. Idempotent. |
 | `ShutdownAsync()` | Async variant. Returns `Task`. |
 | `GetSetupStatus()` | `bool` — true after `Setup()` and before `Shutdown()`. |
 | `SetEnv(IDictionary<string, string?>)` | Apply env vars before `Setup()`. |
@@ -360,23 +440,14 @@ canonical pure-C# implementation.
 | `DecryptAsync(partitionId, drr)` | `string` | `byte[]` | `Task<byte[]>` |
 | `DecryptStringAsync(partitionId, drr)` | `string` | `string` | `Task<string>` |
 
-#### Hooks
-
-| Method | Description |
-|---|---|
-| `SetLogHook(Action<LogEvent>?)` | Register a structured-event log callback. Pass `null` to deregister. |
-| `ClearLogHook()` | Convenience for `SetLogHook(null)`. |
-| `SetMetricsHook(Action<MetricsEvent>?)` | Register a metrics callback. Pass `null` to deregister. |
-| `ClearMetricsHook()` | Convenience for `SetMetricsHook(null)`. |
-
-### Factory / Session API (recommended)
+### Factory / Session API
 
 #### `AsherahFactory : IAsherahFactory, IDisposable`
 
 | Member | Description |
 |---|---|
-| `Asherah.FactoryFromConfig(AsherahConfig)` | Construct a factory. |
-| `Asherah.FactoryFromEnv()` | Construct from environment variables. |
+| `static AsherahFactory.FromConfig(AsherahConfig)` | Construct a factory from an explicit config. |
+| `static AsherahFactory.FromEnv()` | Construct a factory from environment variables. |
 | `factory.GetSession(string partitionId)` | Get a per-partition session. Throws on null/empty partition. |
 | `factory.Dispose()` | Release native resources. After dispose, `GetSession()` throws. |
 
@@ -391,10 +462,28 @@ canonical pure-C# implementation.
 | `DecryptBytesAsync(...)` / `DecryptStringAsync(...)` | Async variants. |
 | `Dispose()` | Release native resources. |
 
+### `AsherahHooks` (static class — observability)
+
+| Method | Description |
+|---|---|
+| `SetLogHook(Action<LogEvent>?)` | Register a structured-event log callback. Pass `null` to deregister. |
+| `SetLogHook(Action<LogEvent>?, int queueCapacity, LogLevel minLevel)` | Configurable variant: queue size + producer-side level filter. |
+| `SetLogHook(ILogger)` / `SetLogHook(ILoggerFactory)` | Bridge to `Microsoft.Extensions.Logging`. |
+| `SetLogHookSync(Action<LogEvent>?, LogLevel minLevel = Warning)` | Synchronous variant; fires on the encrypt/decrypt thread. |
+| `SetLogHookSync(ILogger, LogLevel)` / `SetLogHookSync(ILoggerFactory, LogLevel)` | Sync `ILogger` bridges. |
+| `ClearLogHook()` | Convenience for `SetLogHook(null)`. |
+| `LogDroppedCount()` | Cumulative count of log records dropped due to a full queue. |
+| `SetMetricsHook(Action<MetricsEvent>?)` | Register a metrics callback. Pass `null` to deregister. |
+| `SetMetricsHook(Action<MetricsEvent>?, int queueCapacity)` | Configurable variant. |
+| `SetMetricsHook(Meter)` | Bridge to `System.Diagnostics.Metrics` — creates standard instruments. |
+| `SetMetricsHookSync(Action<MetricsEvent>?)` / `SetMetricsHookSync(Meter)` | Synchronous variants. |
+| `ClearMetricsHook()` | Convenience for `SetMetricsHook(null)`. |
+| `MetricsDroppedCount()` | Cumulative count of metrics events dropped due to a full queue. |
+
 ### Observability types
 
 ```csharp
-public enum LogLevel { Trace, Debug, Info, Warn, Error }
+// Microsoft.Extensions.Logging.LogLevel is reused directly.
 public sealed record LogEvent(LogLevel Level, string Target, string Message);
 
 public enum MetricsEventType
@@ -405,11 +494,12 @@ public enum MetricsEventType
 public sealed record MetricsEvent(MetricsEventType Type, ulong DurationNs, string? Name);
 ```
 
-### `IAsherah` / `AsherahClient`
+### `IAsherahApi` / `AsherahApiClient`
 
-`IAsherah` exposes the static-API surface for DI; `AsherahClient`
-implements it by forwarding to the `Asherah` static class. Includes
-`SetLogHook` / `SetMetricsHook` for parity.
+`IAsherahApi` exposes the single-shot API surface as an instance
+interface for DI; `AsherahApiClient` implements it by forwarding to the
+`AsherahApi` static class. Includes `SetLogHook` / `SetMetricsHook` for
+parity (those forward to `AsherahHooks` internally).
 
 ## Building from Source
 

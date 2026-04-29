@@ -1,4 +1,4 @@
-namespace GoDaddy.Asherah;
+namespace GoDaddy.Asherah.Encryption;
 
 /// <summary>
 /// Type of metrics event delivered to a callback registered with
