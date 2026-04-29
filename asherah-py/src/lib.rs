@@ -13,8 +13,9 @@ use pyo3::types::PyBytes;
 use pyo3::types::PyDict;
 use pyo3::PyRef;
 
+use lru::LruCache;
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 type Factory = ael::session::PublicFactory<
@@ -187,39 +188,43 @@ async fn decrypt_bytes_async(partition_id: String, data_row_record: String) -> P
 
 struct FactoryManager {
     factory: Arc<Factory>,
-    sessions: Mutex<HashMap<String, Arc<SessionHandle>>>,
+    /// Bounded LRU. `LruCache.get` already does move-to-MRU-on-hit;
+    /// `LruCache.put` evicts the LRU entry when at capacity. Honors
+    /// `SessionCacheMaxSize` from config (default 1000) — previously
+    /// hardcoded to 1000 with random-iteration eviction.
+    sessions: Mutex<LruCache<String, Arc<SessionHandle>>>,
     enable_session_caching: bool,
-    session_cache_max: usize,
 }
 
 impl FactoryManager {
     fn new(factory: Factory, applied: config::AppliedConfig) -> Self {
+        let cap = NonZeroUsize::new(applied.session_cache_max_size)
+            .or_else(|| NonZeroUsize::new(1000))
+            .expect("1000 is non-zero");
         Self {
             factory: Arc::new(factory),
-            sessions: Mutex::new(HashMap::new()),
+            sessions: Mutex::new(LruCache::new(cap)),
             enable_session_caching: applied.enable_session_caching,
-            session_cache_max: 1000,
         }
     }
 
     fn get_or_create_session(&self, partition: &str) -> Arc<SessionHandle> {
-        if self.enable_session_caching {
-            let mut sessions = self.sessions.lock();
-            let session = sessions
-                .entry(partition.to_string())
-                .or_insert_with(|| Arc::new(self.factory.get_session(partition)))
-                .clone();
-            // Evict oldest if over limit
-            while sessions.len() > self.session_cache_max {
-                if let Some(key) = sessions.keys().next().cloned() {
-                    sessions.remove(&key);
-                }
-            }
-            session
-            // Lock dropped here — crypto runs outside
-        } else {
-            Arc::new(self.factory.get_session(partition))
+        if !self.enable_session_caching {
+            return Arc::new(self.factory.get_session(partition));
         }
+
+        let mut sessions = self.sessions.lock();
+        if let Some(existing) = sessions.get(partition) {
+            return existing.clone();
+        }
+        let fresh = Arc::new(self.factory.get_session(partition));
+        // `put` returns the evicted (key, value) when at capacity; the
+        // dropped Arc here releases our reference to the LRU session.
+        // Other callers that already cloned the Arc keep it alive until
+        // they're done — no use-after-free for in-flight ops.
+        sessions.put(partition.to_string(), fresh.clone());
+        fresh
+        // Lock dropped here — crypto runs outside
     }
 
     fn shutdown(self) -> anyhow::Result<()> {

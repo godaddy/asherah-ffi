@@ -24,6 +24,7 @@ asherah-config = { path = "../asherah-config" }
 tokio = { version = "1", features = ["rt-multi-thread"] }
 once_cell = "1"
 parking_lot = "0.12"
+lru = "0.16"
 log = "0.4"
 
 [build-dependencies]

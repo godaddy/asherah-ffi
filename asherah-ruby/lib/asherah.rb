@@ -11,11 +11,20 @@ require_relative "asherah/session"
 require_relative "asherah/hooks"
 
 module Asherah
+  DEFAULT_SESSION_CACHE_MAX_SIZE = 1000
+
   @mutex = Mutex.new
   @factory = nil
+  # @sessions is an LRU cache. Ruby Hash preserves insertion order, so we
+  # implement LRU by delete-and-reinsert on hit (moves the entry to the
+  # end), and `shift` on overflow (removes the oldest, i.e. least-recently
+  # used). Bounded by @session_cache_max_size, which honors the
+  # SessionCacheMaxSize config field — same default (1000) as the Rust
+  # core and the other bindings.
   @sessions = {}
   @initialized = false
   @session_cache_enabled = true
+  @session_cache_max_size = DEFAULT_SESSION_CACHE_MAX_SIZE
   @verbose = false
 
   class << self
@@ -42,6 +51,7 @@ module Asherah
         @sessions = {}
         @initialized = true
         @session_cache_enabled = config.enable_session_caching != false
+        @session_cache_max_size = positive_int(config.session_cache_max_size) || DEFAULT_SESSION_CACHE_MAX_SIZE
         @verbose = config.verbose == true
       end
     end
@@ -62,6 +72,7 @@ module Asherah
         @sessions = {}
         @initialized = true
         @session_cache_enabled = truthy(normalized["EnableSessionCaching"], default: true)
+        @session_cache_max_size = positive_int(normalized["SessionCacheMaxSize"]) || DEFAULT_SESSION_CACHE_MAX_SIZE
         @verbose = truthy(normalized["Verbose"], default: false)
       end
 
@@ -240,15 +251,50 @@ module Asherah
     def resolve_session(partition_id)
       raise ArgumentError, "partition_id cannot be empty" if String(partition_id).empty?
 
-      # Brief mutex hold for hash lookup only — FFI call happens outside
-      @mutex.synchronize do
+      evicted = nil
+      session = @mutex.synchronize do
         raise Error::NotInitialized unless @initialized
-        if @session_cache_enabled
-          @sessions[partition_id] ||= @factory.get_session(partition_id)
-        else
-          @factory.get_session(partition_id)
+
+        unless @session_cache_enabled
+          break @factory.get_session(partition_id)
+        end
+
+        # LRU: on hit, delete + reinsert to move the entry to the
+        # most-recently-used end of the Hash (Ruby Hash is insertion-
+        # ordered). On miss + overflow, `shift` removes the oldest entry,
+        # which is the least-recently-used.
+        if (existing = @sessions.delete(partition_id))
+          @sessions[partition_id] = existing
+          break existing
+        end
+
+        fresh = @factory.get_session(partition_id)
+        @sessions[partition_id] = fresh
+        if @sessions.size > @session_cache_max_size
+          _, evicted = @sessions.shift
+        end
+        fresh
+      end
+
+      # Close evicted session outside the lock — close hits the FFI and
+      # we don't want to serialize all encrypts behind one eviction.
+      if evicted
+        begin
+          evicted.close unless evicted.closed?
+        rescue StandardError => e
+          warn "asherah: error closing evicted session: #{e.message}"
         end
       end
+
+      session
+    end
+
+    def positive_int(value)
+      return nil if value.nil?
+      n = Integer(value)
+      n.positive? ? n : nil
+    rescue ArgumentError, TypeError
+      nil
     end
   end
 end
