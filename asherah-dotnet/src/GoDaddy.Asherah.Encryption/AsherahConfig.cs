@@ -219,6 +219,14 @@ public sealed class AsherahConfig
         }
 
         /// <summary>
+        /// Intermediate-key expiration as a <see cref="TimeSpan"/>. Convenience
+        /// overload of <see cref="WithExpireAfter(long?)"/>; the value is
+        /// rounded down to whole seconds.
+        /// </summary>
+        public Builder WithExpireAfter(TimeSpan? duration) =>
+            WithExpireAfter(duration is null ? (long?)null : (long)duration.Value.TotalSeconds);
+
+        /// <summary>
         /// How often the session checks whether its cached intermediate key
         /// has been revoked, in seconds. Default: 60 minutes.
         /// </summary>
@@ -227,6 +235,14 @@ public sealed class AsherahConfig
             CheckInterval = seconds;
             return this;
         }
+
+        /// <summary>
+        /// Revoke-check interval as a <see cref="TimeSpan"/>. Convenience
+        /// overload of <see cref="WithCheckInterval(long?)"/>; the value is
+        /// rounded down to whole seconds.
+        /// </summary>
+        public Builder WithCheckInterval(TimeSpan? duration) =>
+            WithCheckInterval(duration is null ? (long?)null : (long)duration.Value.TotalSeconds);
 
         /// <summary>
         /// Required. Metastore selector. Accepts <c>"memory"</c> (testing —
@@ -239,6 +255,13 @@ public sealed class AsherahConfig
             Metastore = value;
             return this;
         }
+
+        /// <summary>
+        /// Required. Strongly-typed metastore selector. Equivalent to
+        /// <see cref="WithMetastore(string)"/> with the wire string mapped from
+        /// <see cref="MetastoreKind"/>.
+        /// </summary>
+        public Builder WithMetastore(MetastoreKind kind) => WithMetastore(kind.ToWireString());
 
         /// <summary>
         /// SQL connection string for the <c>"rdbms"</c> metastore. Required
@@ -264,6 +287,14 @@ public sealed class AsherahConfig
             ReplicaReadConsistency = value;
             return this;
         }
+
+        /// <summary>
+        /// Strongly-typed read-replica consistency. Equivalent to
+        /// <see cref="WithReplicaReadConsistency(string?)"/> with the wire
+        /// string mapped from <see cref="GoDaddy.Asherah.ReplicaReadConsistency"/>.
+        /// </summary>
+        public Builder WithReplicaReadConsistency(ReplicaReadConsistency? value) =>
+            WithReplicaReadConsistency(value?.ToWireString());
 
         /// <summary>
         /// DynamoDB endpoint URL. Set when targeting LocalStack or local
@@ -337,6 +368,14 @@ public sealed class AsherahConfig
         }
 
         /// <summary>
+        /// Session cache TTL as a <see cref="TimeSpan"/>. Convenience overload
+        /// of <see cref="WithSessionCacheDuration(long?)"/>; rounded down to
+        /// whole seconds.
+        /// </summary>
+        public Builder WithSessionCacheDuration(TimeSpan? duration) =>
+            WithSessionCacheDuration(duration is null ? (long?)null : (long)duration.Value.TotalSeconds);
+
+        /// <summary>
         /// KMS provider. Accepts <c>"static"</c> (default; testing only,
         /// uses <c>STATIC_MASTER_KEY_HEX</c>), <c>"aws"</c> (AWS KMS),
         /// <c>"secrets-manager"</c> (AWS Secrets Manager), or
@@ -349,6 +388,12 @@ public sealed class AsherahConfig
         }
 
         /// <summary>
+        /// Strongly-typed KMS provider. Equivalent to <see cref="WithKms(string)"/>
+        /// with the wire string mapped from <see cref="KmsKind"/>.
+        /// </summary>
+        public Builder WithKms(KmsKind kind) => WithKms(kind.ToWireString());
+
+        /// <summary>
         /// AWS KMS multi-region key-ARN map: region (e.g. <c>"us-east-1"</c>)
         /// → key ARN. Used with <see cref="WithKms"/> = <c>"aws"</c> for
         /// region-specific KMS keys; the active region is selected via
@@ -359,6 +404,18 @@ public sealed class AsherahConfig
         public Builder WithRegionMap(IDictionary<string, string>? value)
         {
             RegionMap = value == null ? null : new Dictionary<string, string>(value);
+            return this;
+        }
+
+        /// <summary>
+        /// Read-only overload of <see cref="WithRegionMap(IDictionary{string, string}?)"/>.
+        /// Convenient for callers handing in <c>ImmutableDictionary</c>,
+        /// <c>FrozenDictionary</c>, or other read-only collections.
+        /// </summary>
+        public Builder WithRegionMap(IReadOnlyDictionary<string, string>? value)
+        {
+            RegionMap = value == null ? null : new Dictionary<string, string>(
+                value as IEnumerable<KeyValuePair<string, string>>);
             return this;
         }
 
@@ -445,6 +502,14 @@ public sealed class AsherahConfig
         }
 
         /// <summary>
+        /// Max DB connection lifetime as a <see cref="TimeSpan"/>. Convenience
+        /// overload of <see cref="WithPoolMaxLifetime(long?)"/>; rounded down
+        /// to whole seconds.
+        /// </summary>
+        public Builder WithPoolMaxLifetime(TimeSpan? duration) =>
+            WithPoolMaxLifetime(duration is null ? (long?)null : (long)duration.Value.TotalSeconds);
+
+        /// <summary>
         /// Maximum idle time of a DB connection in seconds before it's
         /// closed and removed from the pool. <c>0</c> = unlimited. Affects
         /// <c>"rdbms"</c> only.
@@ -454,6 +519,14 @@ public sealed class AsherahConfig
             PoolMaxIdleTime = seconds;
             return this;
         }
+
+        /// <summary>
+        /// Max DB connection idle time as a <see cref="TimeSpan"/>. Convenience
+        /// overload of <see cref="WithPoolMaxIdleTime(long?)"/>; rounded down to
+        /// whole seconds.
+        /// </summary>
+        public Builder WithPoolMaxIdleTime(TimeSpan? duration) =>
+            WithPoolMaxIdleTime(duration is null ? (long?)null : (long)duration.Value.TotalSeconds);
 
         /// <summary>
         /// AWS KMS key ID or ARN for single-region KMS setups. Mutually
@@ -510,6 +583,14 @@ public sealed class AsherahConfig
             VaultAuthMethod = value;
             return this;
         }
+
+        /// <summary>
+        /// Strongly-typed Vault authentication method. Equivalent to
+        /// <see cref="WithVaultAuthMethod(string?)"/> with the wire string
+        /// mapped from <see cref="GoDaddy.Asherah.VaultAuthMethod"/>.
+        /// </summary>
+        public Builder WithVaultAuthMethod(VaultAuthMethod? value) =>
+            WithVaultAuthMethod(value?.ToWireString());
 
         /// <summary>
         /// Vault role name for Kubernetes or AppRole auth. Required for

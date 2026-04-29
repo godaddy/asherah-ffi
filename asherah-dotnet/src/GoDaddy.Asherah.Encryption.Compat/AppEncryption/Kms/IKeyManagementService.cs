@@ -41,8 +41,10 @@ public class AwsKeyManagementServiceImpl : IKeyManagementService
 
     public void ApplyConfig(AsherahConfig.Builder builder)
     {
+        // Cast disambiguates between the IDictionary and IReadOnlyDictionary
+        // WithRegionMap overloads — Dictionary<,> implements both.
         builder.WithKms("aws")
-               .WithRegionMap(_regionToArnMap)
+               .WithRegionMap((IDictionary<string, string>)_regionToArnMap)
                .WithPreferredRegion(_preferredRegion);
     }
 
