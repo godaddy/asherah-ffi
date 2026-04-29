@@ -34,13 +34,14 @@ public static class AsherahApi
     private static readonly object SetupLock = new();
     private static volatile AsherahFactory? _sharedFactory;
 
-    // Session cache: bounded LinkedHashMap-style — insertion-ordered with
-    // eviction of the oldest entry when the cache exceeds the configured
-    // bound. Matches the Rust core's `SessionCacheMaxSize` semantics and
-    // the other language bindings (Python, Node, Go, Ruby), all of which
-    // bound to 1000 by default. The previous implementation used an
-    // unbounded ConcurrentDictionary, which silently ignored
-    // `SessionCacheMaxSize` and grew without limit.
+    // Session cache: bounded LRU. `Dictionary<string, LinkedListNode>` +
+    // `LinkedList` give O(1) lookup, O(1) move-to-most-recent on hit, and
+    // O(1) evict-least-recently-used on insert overflow — the same shape
+    // as Java's LinkedHashMap and Python's OrderedDict. The bound is
+    // `SessionCacheMaxSize` (default 1000), matching the Rust core. The
+    // previous implementation used an unbounded ConcurrentDictionary,
+    // which silently ignored `SessionCacheMaxSize` and grew without
+    // limit.
     private static readonly object CacheLock = new();
     private static readonly Dictionary<string, LinkedListNode<CacheEntry>> SessionCache = new();
     private static readonly LinkedList<CacheEntry> SessionOrder = new();
@@ -322,6 +323,9 @@ public static class AsherahApi
         {
             if (SessionCache.TryGetValue(partitionId, out var node))
             {
+                // LRU: move the hit to the most-recently-used end.
+                SessionOrder.Remove(node);
+                SessionOrder.AddLast(node);
                 return node.Value.Session;
             }
         }
@@ -336,6 +340,10 @@ public static class AsherahApi
         {
             if (SessionCache.TryGetValue(partitionId, out var existing))
             {
+                // Lost the race — another thread inserted while we were
+                // creating. Move the winner to MRU and discard ours.
+                SessionOrder.Remove(existing);
+                SessionOrder.AddLast(existing);
                 fresh.Dispose();
                 return existing.Value.Session;
             }
@@ -344,19 +352,18 @@ public static class AsherahApi
             SessionCache[partitionId] = inserted;
             result = fresh;
 
-            // Insertion-order eviction. At most one entry can exceed the
-            // bound per insert (cache was at maxSize, we added one).
-            // Matches the established pattern in asherah-go and
-            // asherah-py / asherah-node.
+            // LRU eviction: at most one entry can exceed the bound per
+            // insert (cache was at maxSize, we added one), so a single
+            // RemoveFirst restores the invariant. The head is the
+            // least-recently-used entry because hits move to the tail.
             //
             // Race window: an evicted session may be in use by another
             // thread mid-encrypt; disposing it here will surface as an
             // FFI error on that thread. The same window exists in the
-            // Go binding. Accepted tradeoff — eviction is rare under
-            // typical workloads (hot partitions stay resident under
-            // insertion-order eviction with high re-use), and the
-            // alternative (refcounting AsherahSession) is a larger
-            // cross-binding change.
+            // Go binding. Accepted tradeoff — under LRU the evicted
+            // entry is by definition the coldest, so this is rare in
+            // typical workloads. A refcount-based fix would have to
+            // change AsherahSession's lifecycle and is out of scope.
             if (SessionCache.Count > _sessionCacheMaxSize && SessionOrder.First is { } first)
             {
                 SessionOrder.RemoveFirst();
