@@ -177,7 +177,7 @@ jobs:
           else
             VCPKG_TRIPLET="x64-windows-static-md"
           fi
-          vcpkg install "openssl:${VCPKG_TRIPLET}"
+          bash "$GITHUB_WORKSPACE/scripts/vcpkg-install-with-retry.sh" "openssl:${VCPKG_TRIPLET}"
           echo "OPENSSL_DIR=C:/vcpkg/installed/${VCPKG_TRIPLET}" >> "$GITHUB_ENV"
           echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
           echo "OPENSSL_NO_VENDOR=1" >> "$GITHUB_ENV"

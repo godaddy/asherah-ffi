@@ -535,7 +535,7 @@ jobs:
       - name: Install OpenSSL via vcpkg
         shell: bash
         run: |
-          vcpkg install openssl:x64-windows-static-md
+          bash "$GITHUB_WORKSPACE/scripts/vcpkg-install-with-retry.sh" openssl:x64-windows-static-md
           echo "OPENSSL_DIR=C:/vcpkg/installed/x64-windows-static-md" >> "$GITHUB_ENV"
           echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
           echo "OPENSSL_NO_VENDOR=1" >> "$GITHUB_ENV"
@@ -1284,7 +1284,7 @@ jobs:
       - name: Install OpenSSL via vcpkg
         shell: bash
         run: |
-          vcpkg install openssl:x64-windows-static-md
+          bash "$GITHUB_WORKSPACE/scripts/vcpkg-install-with-retry.sh" openssl:x64-windows-static-md
           echo "OPENSSL_DIR=C:/vcpkg/installed/x64-windows-static-md" >> "$GITHUB_ENV"
           echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
           echo "OPENSSL_NO_VENDOR=1" >> "$GITHUB_ENV"
@@ -1469,7 +1469,7 @@ jobs:
       - name: Install OpenSSL via vcpkg (arm64)
         shell: bash
         run: |
-          vcpkg install openssl:arm64-windows-static-md
+          bash "$GITHUB_WORKSPACE/scripts/vcpkg-install-with-retry.sh" openssl:arm64-windows-static-md
           echo "OPENSSL_DIR=C:/vcpkg/installed/arm64-windows-static-md" >> "$GITHUB_ENV"
           echo "OPENSSL_STATIC=1" >> "$GITHUB_ENV"
           echo "OPENSSL_NO_VENDOR=1" >> "$GITHUB_ENV"

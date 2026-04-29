@@ -137,7 +137,7 @@ jobs:
           - host: windows-latest
             target: x86_64-pc-windows-msvc
             build: |
-              vcpkg install openssl:x64-windows-static-md
+              bash "$GITHUB_WORKSPACE/scripts/vcpkg-install-with-retry.sh" openssl:x64-windows-static-md
               export OPENSSL_DIR="C:/vcpkg/installed/x64-windows-static-md"
               export OPENSSL_NO_VENDOR=1
               npm ci
@@ -145,7 +145,7 @@ jobs:
           - host: windows-latest
             target: aarch64-pc-windows-msvc
             build: |
-              vcpkg install openssl:arm64-windows-static-md
+              bash "$GITHUB_WORKSPACE/scripts/vcpkg-install-with-retry.sh" openssl:arm64-windows-static-md
               export OPENSSL_DIR="C:/vcpkg/installed/arm64-windows-static-md"
               export OPENSSL_NO_VENDOR=1
               rustup target add aarch64-pc-windows-msvc
