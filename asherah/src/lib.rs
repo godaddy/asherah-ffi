@@ -18,7 +18,6 @@
 
 pub mod aead;
 pub mod api;
-mod aws_sdk_load;
 pub mod builders;
 pub mod cache;
 pub mod config;
@@ -56,6 +55,9 @@ pub mod types;
 // Embedded low-level libs
 pub mod memcall;
 pub mod memguard;
+
+// Crate-private helpers (not re-exported)
+mod aws_sdk_load;
 
 pub use api::new_session_factory_with_options as NewSessionFactoryWithOptions;
 pub use api::{FactoryOption, NewSessionFactory};
