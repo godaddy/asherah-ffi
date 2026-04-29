@@ -27,6 +27,24 @@ The compat package is documented separately and brings `Newtonsoft.Json` /
 migrating existing code; new code should target `GoDaddy.Asherah.Encryption`
 directly.
 
+## Documentation
+
+This README covers the conceptual overview, full configuration
+reference, and quick-start examples. Task-oriented walkthroughs live
+under [`docs/`](./docs/):
+
+| Guide | When to read |
+|---|---|
+| [Getting started](./docs/getting-started.md) | First-time install through round-trip encrypt/decrypt. |
+| [Dependency injection](./docs/dependency-injection.md) | Registering Asherah types in ASP.NET Core, Worker Service, Generic Host. |
+| [AWS production setup](./docs/aws-production-setup.md) | End-to-end production config: KMS keys, DynamoDB, IAM policy, region routing. |
+| [Testing](./docs/testing.md) | In-memory + static-KMS fixtures, mocking `IAsherahApi`, integration tests against MySQL/Postgres. |
+| [Troubleshooting](./docs/troubleshooting.md) | Common errors with what to check first. Search by exception type or message text. |
+
+The runnable [sample app](../samples/dotnet/Program.cs) exercises
+every API style plus async, log hook, and metrics hook in one
+program.
+
 ## Choosing an API style
 
 Two coexisting API styles are exposed in `GoDaddy.Asherah.Encryption`. Both
