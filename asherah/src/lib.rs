@@ -56,6 +56,9 @@ pub mod types;
 pub mod memcall;
 pub mod memguard;
 
+// Crate-private helpers (not re-exported)
+mod aws_sdk_load;
+
 pub use api::new_session_factory_with_options as NewSessionFactoryWithOptions;
 pub use api::{FactoryOption, NewSessionFactory};
 pub use config::Config;

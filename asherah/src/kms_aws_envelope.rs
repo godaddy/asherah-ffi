@@ -53,8 +53,9 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
         aead: Arc<A>,
         key_id: String,
         region: Option<String>,
+        aws_profile_name: Option<&str>,
     ) -> anyhow::Result<Self> {
-        let (client, resolved_region, rt) = new_kms_client(region)?;
+        let (client, resolved_region, rt) = new_kms_client(region, aws_profile_name)?;
         let rc = RegionalClient {
             client,
             region: resolved_region,
@@ -72,6 +73,7 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
         aead: Arc<A>,
         preferred: usize,
         entries: Vec<(String, String)>,
+        aws_profile_name: Option<&str>,
     ) -> anyhow::Result<Self> {
         if entries.is_empty() {
             return Err(anyhow::anyhow!("no kms entries provided"));
@@ -81,7 +83,7 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
         let mut clients = Vec::with_capacity(entries.len());
         for (region, key) in entries.into_iter() {
             let (client, resolved_region, new_rt) =
-                new_kms_client_with_rt(region.clone(), rt.clone())?;
+                new_kms_client_with_rt(region.clone(), rt.clone(), aws_profile_name)?;
             if rt.is_none() {
                 rt = new_rt;
             }
@@ -109,8 +111,9 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
         aead: Arc<A>,
         key_id: String,
         region: Option<String>,
+        aws_profile_name: Option<&str>,
     ) -> anyhow::Result<Self> {
-        let (client, resolved_region) = new_kms_client_async(region).await?;
+        let (client, resolved_region) = new_kms_client_async(region, aws_profile_name).await?;
         let rc = RegionalClient {
             client,
             region: resolved_region,
@@ -130,13 +133,15 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
         aead: Arc<A>,
         preferred: usize,
         entries: Vec<(String, String)>,
+        aws_profile_name: Option<&str>,
     ) -> anyhow::Result<Self> {
         if entries.is_empty() {
             return Err(anyhow::anyhow!("no kms entries provided"));
         }
         let mut clients = Vec::with_capacity(entries.len());
         for (region, key) in entries.into_iter() {
-            let (client, resolved_region) = new_kms_client_async(Some(region)).await?;
+            let (client, resolved_region) =
+                new_kms_client_async(Some(region), aws_profile_name).await?;
             clients.push(RegionalClient {
                 client,
                 region: resolved_region,
@@ -309,16 +314,17 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
     }
 }
 
-async fn new_kms_client_async(region: Option<String>) -> anyhow::Result<(Client, String)> {
+async fn new_kms_client_async(
+    region: Option<String>,
+    aws_profile_name: Option<&str>,
+) -> anyhow::Result<(Client, String)> {
     let region_provider = if let Some(r) = region.clone() {
         RegionProviderChain::first_try(Region::new(r))
     } else {
         RegionProviderChain::default_provider()
     };
-    let shared_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .region(region_provider)
-        .load()
-        .await;
+    let shared_config =
+        crate::aws_sdk_load::load_sdk_config(region_provider, aws_profile_name).await;
     let mut b = aws_sdk_kms::config::Builder::from(&shared_config);
     if let Ok(url) = std::env::var("AWS_ENDPOINT_URL") {
         b = b.endpoint_url(url);
@@ -334,6 +340,7 @@ async fn new_kms_client_async(region: Option<String>) -> anyhow::Result<(Client,
 
 fn new_kms_client(
     region: Option<String>,
+    aws_profile_name: Option<&str>,
 ) -> anyhow::Result<(Client, String, Option<Arc<tokio::runtime::Runtime>>)> {
     let handle = tokio::runtime::Handle::try_current().ok();
     let rt = if handle.is_some() {
@@ -347,10 +354,8 @@ fn new_kms_client(
         RegionProviderChain::default_provider()
     };
     let conf_fut = async {
-        let shared_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(region_provider)
-            .load()
-            .await;
+        let shared_config =
+            crate::aws_sdk_load::load_sdk_config(region_provider, aws_profile_name).await;
         let mut b = aws_sdk_kms::config::Builder::from(&shared_config);
         if let Ok(url) = std::env::var("AWS_ENDPOINT_URL") {
             b = b.endpoint_url(url);
@@ -379,6 +384,7 @@ fn new_kms_client(
 fn new_kms_client_with_rt(
     region: String,
     rt: Option<Arc<tokio::runtime::Runtime>>,
+    aws_profile_name: Option<&str>,
 ) -> anyhow::Result<(Client, String, Option<Arc<tokio::runtime::Runtime>>)> {
     let handle = tokio::runtime::Handle::try_current().ok();
     let mut rt_local = rt;
@@ -387,10 +393,8 @@ fn new_kms_client_with_rt(
     }
     let region_provider = RegionProviderChain::first_try(Region::new(region.clone()));
     let conf_fut = async {
-        let shared_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(region_provider)
-            .load()
-            .await;
+        let shared_config =
+            crate::aws_sdk_load::load_sdk_config(region_provider, aws_profile_name).await;
         let mut b = aws_sdk_kms::config::Builder::from(&shared_config);
         if let Ok(url) = std::env::var("AWS_ENDPOINT_URL") {
             b = b.endpoint_url(url);
@@ -499,7 +503,7 @@ mod tests {
     #[test]
     fn new_multi_empty_entries_fails() {
         let aead = Arc::new(crate::aead::AES256GCM::new());
-        let result = AwsKmsEnvelope::new_multi(aead, 0, vec![]);
+        let result = AwsKmsEnvelope::new_multi(aead, 0, vec![], None);
         assert!(result.is_err());
         let msg = result.err().unwrap().to_string();
         assert!(

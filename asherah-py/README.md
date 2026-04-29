@@ -200,6 +200,7 @@ PascalCase keys to match the canonical Go/Java/.NET API:
 | `SessionCacheDuration` | int | | Session cache TTL in seconds. |
 | `RegionMap` | dict[str,str] | | AWS KMS multi-region key-ARN map. |
 | `PreferredRegion` | str | | Preferred region from `RegionMap`. |
+| `AwsProfileName` | str | | AWS shared-credentials profile name for KMS, DynamoDB, and Secrets Manager clients. |
 | `EnableRegionSuffix` | bool | | Append AWS region suffix to key IDs. |
 | `ExpireAfter` | int | | Intermediate-key expiration in seconds. Default 90 days. |
 | `CheckInterval` | int | | Revoke-check interval in seconds. Default 60 minutes. |

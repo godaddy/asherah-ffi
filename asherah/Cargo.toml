@@ -56,6 +56,9 @@ features = ["bundled"]
 [dependencies.aws-config]
 version = "1"
 
+[dependencies.aws-types]
+version = "1"
+
 [dependencies.aws-sdk-kms]
 version = "1"
 

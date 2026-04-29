@@ -49,6 +49,8 @@ pub struct ConfigOptions {
     pub region_map: Option<HashMap<String, String>>,
     #[serde(rename = "PreferredRegion")]
     pub preferred_region: Option<String>,
+    #[serde(rename = "AwsProfileName")]
+    pub aws_profile_name: Option<String>,
     #[serde(rename = "EnableRegionSuffix")]
     pub enable_region_suffix: Option<bool>,
     #[serde(rename = "EnableSessionCaching")]
@@ -237,6 +239,8 @@ impl ConfigOptions {
             }
         };
 
+        let aws_profile_name = self.aws_profile_name.clone();
+
         let kms_raw = self.kms.as_deref().unwrap_or("static");
         let kms_kind = normalize_alias(kms_raw);
         let kms = match kms_kind.as_str() {
@@ -298,6 +302,7 @@ impl ConfigOptions {
             service_name,
             product_id,
             region_suffix: None,
+            aws_profile_name,
             metastore,
             kms,
             policy,

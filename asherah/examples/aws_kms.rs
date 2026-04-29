@@ -13,7 +13,12 @@ fn main() -> anyhow::Result<()> {
     let region = std::env::var("AWS_REGION").ok();
     let crypto = Arc::new(ael::aead::AES256GCM::new());
 
-    let kms = Arc::new(ael::kms_aws::AwsKms::new(crypto.clone(), key_id, region)?);
+    let kms = Arc::new(ael::kms_aws::AwsKms::new(
+        crypto.clone(),
+        key_id,
+        region,
+        None,
+    )?);
     let metastore = Arc::new(ael::metastore::InMemoryMetastore::new());
     let cfg = ael::Config::new("service", "product");
 

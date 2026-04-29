@@ -23,10 +23,15 @@ impl<A: AEAD + Send + Sync + 'static> SecretsManagerKMS<A> {
     /// tokio runtime. The secret must be either:
     /// - A hex-encoded 32-byte key (64 hex characters) stored as SecretString, or
     /// - A raw 32-byte value stored as SecretBinary.
+    ///
+    /// `aws_profile_name` selects an aws-config named profile (typically
+    /// from `~/.aws/credentials`); pass `None` for the default credential
+    /// chain.
     pub fn new(
         aead: Arc<A>,
         secret_id: impl Into<String>,
         region: Option<String>,
+        aws_profile_name: Option<&str>,
     ) -> anyhow::Result<Self> {
         let secret_id = secret_id.into();
         let handle = tokio::runtime::Handle::try_current().ok();
@@ -35,7 +40,7 @@ impl<A: AEAD + Send + Sync + 'static> SecretsManagerKMS<A> {
         } else {
             Some(tokio::runtime::Runtime::new()?)
         };
-        let fetch_fut = fetch_secret(&secret_id, region);
+        let fetch_fut = fetch_secret(&secret_id, region, aws_profile_name);
         let master_key = match (&rt, handle) {
             (Some(rt), _) => {
                 if tokio::runtime::Handle::try_current().is_ok() {
@@ -60,9 +65,10 @@ impl<A: AEAD + Send + Sync + 'static> SecretsManagerKMS<A> {
         aead: Arc<A>,
         secret_id: impl Into<String>,
         region: Option<String>,
+        aws_profile_name: Option<&str>,
     ) -> anyhow::Result<Self> {
         let secret_id = secret_id.into();
-        let master_key = fetch_secret(&secret_id, region).await?;
+        let master_key = fetch_secret(&secret_id, region, aws_profile_name).await?;
         log::warn!(
             "Using static master key from Secrets Manager (secret_id={secret_id}). \
              This is better than an environment variable but the key is still static — \
@@ -75,16 +81,18 @@ impl<A: AEAD + Send + Sync + 'static> SecretsManagerKMS<A> {
 /// Fetch a 32-byte master key from AWS Secrets Manager.
 ///
 /// Tries SecretString first (hex-encoded), then SecretBinary (raw 32 bytes).
-async fn fetch_secret(secret_id: &str, region: Option<String>) -> anyhow::Result<Vec<u8>> {
+async fn fetch_secret(
+    secret_id: &str,
+    region: Option<String>,
+    aws_profile_name: Option<&str>,
+) -> anyhow::Result<Vec<u8>> {
     let region_provider = if let Some(r) = region {
         RegionProviderChain::first_try(Region::new(r))
     } else {
         RegionProviderChain::default_provider()
     };
-    let shared_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-        .region(region_provider)
-        .load()
-        .await;
+    let shared_config =
+        crate::aws_sdk_load::load_sdk_config(region_provider, aws_profile_name).await;
     let mut b = aws_sdk_secretsmanager::config::Builder::from(&shared_config);
     if let Ok(url) = std::env::var("AWS_ENDPOINT_URL") {
         b = b.endpoint_url(url);

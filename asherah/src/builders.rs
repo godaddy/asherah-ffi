@@ -473,6 +473,7 @@ pub struct ResolvedConfig {
     pub service_name: String,
     pub product_id: String,
     pub region_suffix: Option<String>,
+    pub aws_profile_name: Option<String>,
     pub metastore: MetastoreConfig,
     pub kms: KmsConfig,
     pub policy: PolicyConfig,
@@ -517,7 +518,10 @@ fn build_config_from_policy(
 }
 
 #[allow(unused_variables)]
-fn build_metastore(ms: &MetastoreConfig) -> anyhow::Result<Arc<dyn Metastore>> {
+fn build_metastore(
+    ms: &MetastoreConfig,
+    aws_profile_name: Option<&str>,
+) -> anyhow::Result<Arc<dyn Metastore>> {
     match ms {
         MetastoreConfig::Memory => Ok(Arc::new(crate::metastore::InMemoryMetastore::new())),
         MetastoreConfig::Sqlite { path } => {
@@ -589,6 +593,7 @@ fn build_metastore(ms: &MetastoreConfig) -> anyhow::Result<Arc<dyn Metastore>> {
                         region.clone(),
                         endpoint.clone(),
                         *region_suffix,
+                        aws_profile_name,
                     )?,
                 ))
             }
@@ -599,7 +604,10 @@ fn build_metastore(ms: &MetastoreConfig) -> anyhow::Result<Arc<dyn Metastore>> {
 }
 
 #[allow(unused_variables)]
-async fn build_metastore_async(ms: &MetastoreConfig) -> anyhow::Result<Arc<dyn Metastore>> {
+async fn build_metastore_async(
+    ms: &MetastoreConfig,
+    aws_profile_name: Option<&str>,
+) -> anyhow::Result<Arc<dyn Metastore>> {
     match ms {
         MetastoreConfig::Memory => Ok(Arc::new(crate::metastore::InMemoryMetastore::new())),
         MetastoreConfig::Sqlite { path } => {
@@ -684,6 +692,7 @@ async fn build_metastore_async(ms: &MetastoreConfig) -> anyhow::Result<Arc<dyn M
                         region.clone(),
                         endpoint.clone(),
                         *region_suffix,
+                        aws_profile_name,
                     )
                     .await?,
                 ))
@@ -717,6 +726,7 @@ fn decode_static_key_hex(hex: &str) -> anyhow::Result<Vec<u8>> {
 fn build_kms(
     kms: &KmsConfig,
     crypto: &Arc<crate::aead::AES256GCM>,
+    aws_profile_name: Option<&str>,
 ) -> anyhow::Result<Arc<dyn crate::traits::KeyManagementService>> {
     match kms {
         KmsConfig::Static { key_hex } => {
@@ -751,6 +761,7 @@ fn build_kms(
                     crypto.clone(),
                     pref_idx,
                     entries,
+                    aws_profile_name,
                 )?;
                 Ok(Arc::new(kms))
             } else {
@@ -761,6 +772,7 @@ fn build_kms(
                     crypto.clone(),
                     key_id.clone(),
                     region.clone(),
+                    aws_profile_name,
                 )?;
                 Ok(Arc::new(kms))
             }
@@ -772,6 +784,7 @@ fn build_kms(
                     crypto.clone(),
                     secret_id.clone(),
                     region.clone(),
+                    aws_profile_name,
                 )?;
                 Ok(Arc::new(kms))
             }
@@ -802,9 +815,10 @@ fn build_kms(
 async fn build_kms_async(
     kms: &KmsConfig,
     crypto: &Arc<crate::aead::AES256GCM>,
+    aws_profile_name: Option<&str>,
 ) -> anyhow::Result<Arc<dyn crate::traits::KeyManagementService>> {
     match kms {
-        KmsConfig::Static { .. } => build_kms(kms, crypto),
+        KmsConfig::Static { .. } => build_kms(kms, crypto, aws_profile_name),
         KmsConfig::Aws {
             region_map,
             preferred_region,
@@ -824,6 +838,7 @@ async fn build_kms_async(
                     crypto.clone(),
                     pref_idx,
                     entries,
+                    aws_profile_name,
                 )
                 .await?;
                 Ok(Arc::new(kms))
@@ -835,6 +850,7 @@ async fn build_kms_async(
                     crypto.clone(),
                     key_id.clone(),
                     region.clone(),
+                    aws_profile_name,
                 )
                 .await?;
                 Ok(Arc::new(kms))
@@ -847,6 +863,7 @@ async fn build_kms_async(
                     crypto.clone(),
                     secret_id.clone(),
                     region.clone(),
+                    aws_profile_name,
                 )
                 .await?;
                 Ok(Arc::new(kms))
@@ -879,16 +896,17 @@ async fn build_kms_async(
 pub fn factory_from_resolved(
     config: &ResolvedConfig,
 ) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
+    let aws_profile_name = config.aws_profile_name.as_deref();
     let cfg = build_config_from_policy(
         &config.service_name,
         &config.product_id,
         config.region_suffix.as_deref(),
         &config.policy,
     );
-    let store_dyn = build_metastore(&config.metastore)?;
+    let store_dyn = build_metastore(&config.metastore, aws_profile_name)?;
     let metastore = Arc::new(DynMetastore(store_dyn));
     let crypto = Arc::new(crate::aead::AES256GCM::new());
-    let kms_dyn = build_kms(&config.kms, &crypto)?;
+    let kms_dyn = build_kms(&config.kms, &crypto, aws_profile_name)?;
     let kms = Arc::new(DynKms(kms_dyn));
     Ok(crate::api::new_session_factory(cfg, metastore, kms, crypto))
 }
@@ -897,16 +915,17 @@ pub fn factory_from_resolved(
 pub async fn factory_from_resolved_async(
     config: &ResolvedConfig,
 ) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
+    let aws_profile_name = config.aws_profile_name.as_deref();
     let cfg = build_config_from_policy(
         &config.service_name,
         &config.product_id,
         config.region_suffix.as_deref(),
         &config.policy,
     );
-    let store_dyn = build_metastore_async(&config.metastore).await?;
+    let store_dyn = build_metastore_async(&config.metastore, aws_profile_name).await?;
     let metastore = Arc::new(DynMetastore(store_dyn));
     let crypto = Arc::new(crate::aead::AES256GCM::new());
-    let kms_dyn = build_kms_async(&config.kms, &crypto).await?;
+    let kms_dyn = build_kms_async(&config.kms, &crypto, aws_profile_name).await?;
     let kms = Arc::new(DynKms(kms_dyn));
     Ok(crate::api::new_session_factory(cfg, metastore, kms, crypto))
 }
@@ -1109,6 +1128,7 @@ pub fn resolve_from_env() -> anyhow::Result<ResolvedConfig> {
         service_name,
         product_id,
         region_suffix,
+        aws_profile_name: None,
         metastore,
         kms,
         policy,

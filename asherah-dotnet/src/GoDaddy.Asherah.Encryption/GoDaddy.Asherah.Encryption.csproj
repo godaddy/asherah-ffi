@@ -15,6 +15,10 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="GoDaddy.Asherah.Encryption.Tests" />
+  </ItemGroup>
+
   <!-- Include native libraries for all supported platforms.
        These are placed by the publish-nuget workflow before dotnet pack. -->
   <ItemGroup>

@@ -479,6 +479,7 @@ async fn kms_envelope_roundtrip() {
                 aead,
                 key_id,
                 Some("us-east-1".into()),
+                None,
             )
             .unwrap()
         });
@@ -569,6 +570,7 @@ async fn dynamodb_kms_full_stack_roundtrip() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -629,6 +631,7 @@ async fn kms_multi_region_envelope() {
                     ("us-east-1".into(), key_id_1),
                     ("us-east-1".into(), key_id_2), // same region endpoint, different key
                 ],
+                None,
             )
             .unwrap()
         });
@@ -861,6 +864,7 @@ async fn dynamodb_kms_key_rotation() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -970,7 +974,7 @@ async fn kms_direct_roundtrip() {
     tokio::task::spawn_blocking(move || {
         let kms = with_endpoint(&endpoint_clone, || {
             let aead = Arc::new(asherah::aead::AES256GCM::new());
-            asherah::kms_aws::AwsKms::new(aead, key_id, Some("us-east-1".into())).unwrap()
+            asherah::kms_aws::AwsKms::new(aead, key_id, Some("us-east-1".into()), None).unwrap()
         });
 
         let original_key = b"direct-kms-32-byte-test-key!!!!1";
@@ -1062,6 +1066,7 @@ async fn kms_encrypt_with_invalid_key_returns_error() {
                 aead,
                 "invalid-key-id-does-not-exist",
                 Some("us-east-1".into()),
+                None,
             )
             .unwrap() // construction succeeds — key isn't validated until use
         });
@@ -1087,7 +1092,7 @@ async fn kms_decrypt_garbage_returns_error() {
     tokio::task::spawn_blocking(move || {
         let kms = with_endpoint(&endpoint_clone, || {
             let aead = Arc::new(asherah::aead::AES256GCM::new());
-            asherah::kms_aws::AwsKms::new(aead, key_id, Some("us-east-1".into())).unwrap()
+            asherah::kms_aws::AwsKms::new(aead, key_id, Some("us-east-1".into()), None).unwrap()
         });
 
         let result = kms.decrypt_key(&(), b"this is not valid ciphertext");
@@ -1115,6 +1120,7 @@ async fn kms_envelope_decrypt_tampered_fails() {
                 aead,
                 key_id,
                 Some("us-east-1".into()),
+                None,
             )
             .unwrap()
         });
@@ -1221,6 +1227,7 @@ async fn mysql_kms_envelope_full_stack_roundtrip() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -1263,6 +1270,7 @@ async fn postgres_kms_envelope_full_stack_roundtrip() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -1771,6 +1779,7 @@ async fn mysql_kms_envelope_concurrent() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -1838,6 +1847,7 @@ async fn postgres_multi_region_kms_full_stack() {
                         ("us-east-1".into(), key_id_1),
                         ("us-east-1".into(), key_id_2),
                     ],
+                    None,
                 )
                 .unwrap(),
             );
@@ -1932,6 +1942,7 @@ async fn postgres_kms_envelope_key_rotation() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -2005,6 +2016,7 @@ async fn mysql_kms_envelope_key_rotation() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -2080,6 +2092,7 @@ async fn dynamodb_kms_envelope_concurrent() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -2243,6 +2256,7 @@ async fn postgres_kms_envelope_concurrent() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -2357,6 +2371,7 @@ async fn mysql_kms_envelope_cross_partition() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -2392,6 +2407,7 @@ async fn postgres_kms_envelope_cross_partition() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -2424,6 +2440,7 @@ async fn dynamodb_kms_envelope_cross_partition() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -2468,6 +2485,7 @@ async fn mysql_kms_envelope_tampered_drr() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -2505,6 +2523,7 @@ async fn postgres_kms_envelope_tampered_drr() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -2539,6 +2558,7 @@ async fn dynamodb_kms_envelope_tampered_drr() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -2610,6 +2630,7 @@ async fn mysql_kms_envelope_session_caching() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -2651,6 +2672,7 @@ async fn postgres_kms_envelope_session_caching() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -2727,6 +2749,7 @@ async fn dynamodb_kms_envelope_session_caching() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -2784,6 +2807,7 @@ async fn mysql_kms_envelope_region_suffix() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -2838,6 +2862,7 @@ async fn postgres_kms_envelope_region_suffix() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -2945,6 +2970,7 @@ async fn dynamodb_kms_envelope_region_suffix() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -3017,6 +3043,7 @@ async fn mysql_kms_envelope_store_load_api() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -3054,6 +3081,7 @@ async fn postgres_kms_envelope_store_load_api() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -3122,6 +3150,7 @@ async fn dynamodb_kms_envelope_store_load_api() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -3168,6 +3197,7 @@ async fn mysql_kms_envelope_shared_ik_cache() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -3212,6 +3242,7 @@ async fn postgres_kms_envelope_shared_ik_cache() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -3294,6 +3325,7 @@ async fn dynamodb_kms_envelope_shared_ik_cache() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -3497,6 +3529,7 @@ async fn mysql_kms_envelope_tinylfu_cache_eviction() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             )
@@ -3555,6 +3588,7 @@ async fn postgres_kms_envelope_lru_session_cache_eviction() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             )
@@ -3735,6 +3769,7 @@ async fn mysql_kms_envelope_lru_cache_eviction() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             )
@@ -3790,6 +3825,7 @@ async fn mysql_kms_envelope_lfu_cache_eviction() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             )
@@ -3845,6 +3881,7 @@ async fn mysql_kms_envelope_slru_cache_eviction() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             )
@@ -4024,6 +4061,7 @@ async fn postgres_kms_envelope_lfu_cache_eviction() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             )
@@ -4079,6 +4117,7 @@ async fn postgres_kms_envelope_slru_cache_eviction() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             )
@@ -4134,6 +4173,7 @@ async fn postgres_kms_envelope_tinylfu_cache_eviction() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             )
@@ -4349,6 +4389,7 @@ async fn dynamodb_kms_envelope_lru_cache_eviction() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -4409,6 +4450,7 @@ async fn dynamodb_kms_envelope_lfu_cache_eviction() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -4469,6 +4511,7 @@ async fn dynamodb_kms_envelope_slru_cache_eviction() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -4529,6 +4572,7 @@ async fn dynamodb_kms_envelope_tinylfu_cache_eviction() {
                     crypto.clone(),
                     key_id,
                     Some("us-east-1".into()),
+                    None,
                 )
                 .unwrap(),
             );
@@ -4663,6 +4707,7 @@ async fn kms_envelope_decrypt_fallback_when_preferred_region_not_in_envelope() {
                 crypto.clone(),
                 0,
                 vec![("us-east-1".into(), key_clone.clone())],
+                None,
             )
             .unwrap()
         });
@@ -4679,6 +4724,7 @@ async fn kms_envelope_decrypt_fallback_when_preferred_region_not_in_envelope() {
                     ("eu-west-1".into(), key_clone.clone()), // preferred but not in envelope
                     ("us-east-1".into(), key_clone.clone()), // fallback, IS in envelope
                 ],
+                None,
             )
             .unwrap()
         });
@@ -4916,6 +4962,7 @@ async fn kms_envelope_encrypt_fails_when_non_preferred_region_key_invalid() {
                             .into(),
                     ),
                 ],
+                None,
             )
             .unwrap()
         });
@@ -4957,6 +5004,7 @@ async fn kms_envelope_decrypt_fallback_on_preferred_api_error() {
                     ("us-east-1".into(), key_a.clone()),
                     ("eu-west-1".into(), key_b.clone()),
                 ],
+                None,
             )
             .unwrap()
         });
@@ -4979,6 +5027,7 @@ async fn kms_envelope_decrypt_fallback_on_preferred_api_error() {
                     ),
                     ("eu-west-1".into(), key_b.clone()), // fallback with correct key
                 ],
+                None,
             )
             .unwrap()
         });

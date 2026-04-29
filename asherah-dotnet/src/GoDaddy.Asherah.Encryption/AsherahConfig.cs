@@ -23,6 +23,7 @@ public sealed class AsherahConfig
     public string Kms { get; }
     public IReadOnlyDictionary<string, string>? RegionMap { get; }
     public string? PreferredRegion { get; }
+    public string? AwsProfileName { get; }
     public bool? EnableRegionSuffix { get; }
     public bool? EnableSessionCaching { get; }
     public bool? Verbose { get; }
@@ -65,6 +66,7 @@ public sealed class AsherahConfig
             ? null
             : new Dictionary<string, string>(builder.RegionMap);
         PreferredRegion = builder.PreferredRegion;
+        AwsProfileName = builder.AwsProfileName;
         EnableRegionSuffix = builder.EnableRegionSuffix;
         EnableSessionCaching = builder.EnableSessionCaching;
         Verbose = builder.Verbose;
@@ -118,6 +120,7 @@ public sealed class AsherahConfig
             ["KMS"] = Kms,
             ["RegionMap"] = RegionMap,
             ["PreferredRegion"] = PreferredRegion,
+            ["AwsProfileName"] = AwsProfileName,
             ["EnableRegionSuffix"] = EnableRegionSuffix,
             ["EnableSessionCaching"] = EnableSessionCaching,
             ["Verbose"] = Verbose,
@@ -168,6 +171,7 @@ public sealed class AsherahConfig
         public string Kms { get; private set; } = "static";
         public IDictionary<string, string>? RegionMap { get; private set; }
         public string? PreferredRegion { get; private set; }
+        public string? AwsProfileName { get; private set; }
         public bool? EnableRegionSuffix { get; private set; }
         public bool? EnableSessionCaching { get; private set; } = true;
         public bool? Verbose { get; private set; } = false;
@@ -436,6 +440,18 @@ public sealed class AsherahConfig
         public Builder WithPreferredRegion(string? value)
         {
             PreferredRegion = value;
+            return this;
+        }
+
+        /// <summary>
+        /// Optional AWS shared-credentials profile name (typically from
+        /// <c>~/.aws/credentials</c>). Passed to the Rust core's AWS SDK config
+        /// when creating KMS, DynamoDB, and Secrets Manager clients. Omit or
+        /// pass <c>null</c> to use the default credential chain.
+        /// </summary>
+        public Builder WithAwsProfileName(string? value)
+        {
+            AwsProfileName = value;
             return this;
         }
 
