@@ -3,7 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using GoDaddy.Asherah;
+using GoDaddy.Asherah.Encryption;
 using Xunit;
 
 namespace GoDaddy.Asherah.Encryption.Tests;

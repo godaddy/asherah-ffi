@@ -1,7 +1,7 @@
 using System;
 using System.Threading.Tasks;
 
-namespace GoDaddy.Asherah;
+namespace GoDaddy.Asherah.Encryption;
 
 public interface IAsherah
 {

@@ -1,7 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 
-namespace GoDaddy.Asherah;
+namespace GoDaddy.Asherah.Encryption;
 
 internal static class NativeMethods
 {

@@ -1,3 +1,5 @@
+using GoDaddy.Asherah.Encryption;
+
 namespace GoDaddy.Asherah.AppEncryption.Kms;
 
 /// <summary>KMS interface. In the FFI binding, KMS is handled by the native Rust layer.</summary>

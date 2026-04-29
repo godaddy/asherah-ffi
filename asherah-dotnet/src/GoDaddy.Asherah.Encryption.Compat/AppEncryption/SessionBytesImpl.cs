@@ -1,4 +1,5 @@
 using System.Text;
+using GoDaddy.Asherah.Encryption;
 using Newtonsoft.Json.Linq;
 
 namespace GoDaddy.Asherah.AppEncryption;

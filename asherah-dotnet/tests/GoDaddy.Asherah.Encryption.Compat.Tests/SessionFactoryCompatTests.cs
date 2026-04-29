@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
-using GoDaddy.Asherah;
+using GoDaddy.Asherah.Encryption;
 using GoDaddy.Asherah.AppEncryption;
 using GoDaddy.Asherah.AppEncryption.Crypto;
 using GoDaddy.Asherah.AppEncryption.Kms;

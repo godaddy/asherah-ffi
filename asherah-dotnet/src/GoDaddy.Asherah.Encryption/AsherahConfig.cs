@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace GoDaddy.Asherah;
+namespace GoDaddy.Asherah.Encryption;
 
 public sealed class AsherahConfig
 {

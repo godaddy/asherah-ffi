@@ -1,7 +1,7 @@
 using System;
 using System.Text;
 
-namespace GoDaddy.Asherah;
+namespace GoDaddy.Asherah.Encryption;
 
 public sealed class AsherahFactory : IAsherahFactory
 {

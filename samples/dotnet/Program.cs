@@ -1,5 +1,5 @@
 using System.Text;
-using GoDaddy.Asherah;
+using GoDaddy.Asherah.Encryption;
 
 // Testing only — production must use AWS KMS.
 Environment.SetEnvironmentVariable("STATIC_MASTER_KEY_HEX",

@@ -1,6 +1,6 @@
 using System.Threading.Tasks;
 
-namespace GoDaddy.Asherah;
+namespace GoDaddy.Asherah.Encryption;
 
 public sealed class AsherahClient : IAsherah
 {

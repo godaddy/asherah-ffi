@@ -13,7 +13,7 @@ using System.Threading.Tasks;
 // `.LogWarning`, etc.) we need below.
 using Microsoft.Extensions.Logging;
 
-namespace GoDaddy.Asherah;
+namespace GoDaddy.Asherah.Encryption;
 
 public static class Asherah
 {

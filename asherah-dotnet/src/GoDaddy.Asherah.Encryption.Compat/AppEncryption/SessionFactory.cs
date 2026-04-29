@@ -1,6 +1,7 @@
 using GoDaddy.Asherah.AppEncryption.Crypto;
 using GoDaddy.Asherah.AppEncryption.Kms;
 using GoDaddy.Asherah.AppEncryption.Persistence;
+using GoDaddy.Asherah.Encryption;
 using Newtonsoft.Json.Linq;
 
 namespace GoDaddy.Asherah.AppEncryption;
@@ -143,7 +144,11 @@ public class SessionFactory : IDisposable
             _kms?.ApplyConfig(cb);
 
             var config = cb.Build();
-            var nativeFactory = Asherah.FactoryFromConfig(config);
+            // Fully qualified to disambiguate from the parent `GoDaddy.Asherah`
+            // namespace shorthand: from inside `GoDaddy.Asherah.AppEncryption`,
+            // the bare identifier `Asherah` resolves to the parent namespace
+            // first and shadows the class via a `using` directive.
+            var nativeFactory = GoDaddy.Asherah.Encryption.Asherah.FactoryFromConfig(config);
             return new SessionFactory(nativeFactory);
         }
     }
