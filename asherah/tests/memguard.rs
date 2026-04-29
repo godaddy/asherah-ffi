@@ -125,7 +125,7 @@ fn buffer_scramble_changes_content() {
     for b in buf.bytes().iter_mut() {
         *b = 0;
     }
-    buf.scramble();
+    buf.scramble().expect("OsRng available");
     // After scramble, it's extremely unlikely all 64 bytes are still zero
     let all_zero = buf.as_slice().iter().all(|&b| b == 0);
     assert!(!all_zero, "scramble should produce non-zero random bytes");
@@ -461,7 +461,7 @@ fn locked_buffer_wipe_zeros_content() {
 fn locked_buffer_scramble_changes_content() {
     let lb = memguard::LockedBuffer::new(64).unwrap();
     lb.wipe(); // ensure all zeros first
-    lb.scramble();
+    lb.scramble().expect("OsRng available");
     let data = lb.bytes();
     let all_zero = data.iter().all(|&b| b == 0);
     assert!(!all_zero, "scramble should produce non-zero random bytes");
@@ -641,7 +641,7 @@ fn wipe_bytes_empty_is_noop() {
 #[test]
 fn scramble_bytes_fills_random() {
     let mut buf = [0_u8; 64];
-    memguard::scramble_bytes(&mut buf);
+    memguard::scramble_bytes(&mut buf).expect("OsRng available");
     let all_zero = buf.iter().all(|&b| b == 0);
     assert!(!all_zero, "scramble_bytes should produce random data");
 }
