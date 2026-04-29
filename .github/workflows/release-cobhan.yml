@@ -201,6 +201,12 @@ jobs:
 
       - name: Build asherah-ffi (musl)
         if: matrix.musl == true
+        # Rust defaults *-unknown-linux-musl to +crt-static, which silently
+        # drops the cdylib output ("dropping unsupported crate type cdylib
+        # for target ..."). Disable crt-static so cargo-zigbuild produces
+        # a real .so for asherah-ffi / asherah-java / asherah-cobhan.
+        env:
+          RUSTFLAGS: "-C target-feature=-crt-static"
         run: |
           cargo zigbuild --release -p asherah-ffi -p asherah-java --target ${{ matrix.target }}
 
