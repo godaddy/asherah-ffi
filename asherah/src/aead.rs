@@ -58,9 +58,15 @@ thread_local! {
 fn try_init_rng() -> Option<ChaCha20Rng> {
     use rand::SeedableRng;
     use rand::TryRngCore;
-    let mut seed = <ChaCha20Rng as SeedableRng>::Seed::default();
-    rand::rngs::OsRng.try_fill_bytes(&mut seed).ok()?;
-    Some(ChaCha20Rng::from_seed(seed))
+    use zeroize::Zeroizing;
+    // Wrap the seed in Zeroizing so the stack copy is volatile-zeroed when
+    // this frame returns. The seed is bootstrap material for the per-thread
+    // CSPRNG; with it an attacker can reproduce every output of this
+    // ChaCha20Rng instance.
+    let mut seed: Zeroizing<<ChaCha20Rng as SeedableRng>::Seed> =
+        Zeroizing::new(Default::default());
+    rand::rngs::OsRng.try_fill_bytes(seed.as_mut()).ok()?;
+    Some(ChaCha20Rng::from_seed(*seed))
 }
 
 /// Fill a buffer with random bytes using the thread-local CSPRNG.
