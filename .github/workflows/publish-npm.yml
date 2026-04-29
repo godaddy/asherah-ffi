@@ -178,8 +178,13 @@ jobs:
         with:
           tool: cargo-zigbuild
 
-      - name: Cache cargo
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      # Split into restore + save so a flaky post-job cache save (observed
+      # on windows-arm64 in run 25086881584 — tar process died mid-step
+      # with no error output) cannot mark the entire job as failed and
+      # skip the dependent `publish` job.
+      - name: Restore cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: |
             ~/.cargo/registry/index/
@@ -194,6 +199,19 @@ jobs:
         shell: bash
         run: ${{ matrix.settings.build }}
 
+      - name: Save cargo cache
+        if: ${{ always() && steps.cargo-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            .cargo-cache
+            target/
+          key: ${{ matrix.settings.target }}-cargo-${{ matrix.settings.host }}
+
       - name: Upload artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -204,6 +222,11 @@ jobs:
 
   publish:
     needs: build-bindings
+    # Without `always()`, this skips when any transitive `needs:` ancestor
+    # was skipped — including `verify-ci`, which only runs for release
+    # events. workflow_dispatch runs would otherwise build all bindings
+    # then silently skip the publish step.
+    if: ${{ always() && needs.build-bindings.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       actions: write
