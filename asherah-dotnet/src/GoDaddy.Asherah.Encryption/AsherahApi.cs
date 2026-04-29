@@ -80,19 +80,24 @@ public static class AsherahApi
 
             foreach (var session in SessionCache.Values)
             {
+                // Process-shutdown cleanup: swallow the realistic disposal
+                // failures so a single bad session can't abort teardown of
+                // the rest. ObjectDisposedException = double-dispose race;
+                // InvalidOperationException = handle in unexpected state.
+                // Anything else propagates — we don't want to hide an
+                // unexpected failure shape (e.g. AccessViolationException
+                // from native corruption) under a blanket catch.
                 try
                 {
                     session.Dispose();
                 }
-                catch (Exception)
+                catch (ObjectDisposedException)
                 {
-                    // Process-shutdown cleanup: swallow any individual session
-                    // disposal failure so a single bad session can't abort
-                    // teardown of the rest. ObjectDisposedException (double
-                    // dispose) and InvalidOperationException (handle in an
-                    // unexpected state) are the realistic shapes; we don't
-                    // discriminate because there's no useful recovery here
-                    // either way.
+                    // Already disposed — fine, that's our intent anyway.
+                }
+                catch (InvalidOperationException)
+                {
+                    // Handle in unexpected state — skip and continue.
                 }
             }
 
