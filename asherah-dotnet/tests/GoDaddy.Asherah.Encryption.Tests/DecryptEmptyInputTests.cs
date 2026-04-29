@@ -1,7 +1,7 @@
 using System;
 using System.IO;
 using System.Threading.Tasks;
-using GoDaddy.Asherah;
+using GoDaddy.Asherah.Encryption;
 using Xunit;
 
 namespace GoDaddy.Asherah.Encryption.Tests;
@@ -44,7 +44,7 @@ public class DecryptEmptyInputTests : IDisposable
             .WithMetastore("memory")
             .WithKms("static")
             .Build();
-        _factory = Asherah.FactoryFromConfig(config);
+        _factory = AsherahFactory.FromConfig(config);
         _session = _factory.GetSession("decrypt-empty-test-partition");
     }
 
