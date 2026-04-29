@@ -746,7 +746,7 @@ pub unsafe extern "C" fn Decrypt(
 
         // Get session and decrypt
         let session = factory.get_session(partition_id);
-        let plaintext = match session.decrypt(drr) {
+        let mut plaintext = match session.decrypt(drr) {
             Ok(p) => p,
             Err(e) => {
                 log::error!("Decrypt failed: {e:#}");
@@ -754,8 +754,13 @@ pub unsafe extern "C" fn Decrypt(
             }
         };
 
-        // Write output
-        cobhan_bytes_to_buffer(&plaintext, output_decrypted_data_ptr)
+        // Write output, then zero the Rust-side plaintext copy before it drops.
+        // zeroize uses volatile writes plus a SeqCst compiler fence to prevent
+        // dead-store elimination.
+        let result = cobhan_bytes_to_buffer(&plaintext, output_decrypted_data_ptr);
+        use zeroize::Zeroize;
+        plaintext.zeroize();
+        result
     })) {
         Ok(result) => result,
         Err(_) => {
@@ -887,7 +892,7 @@ pub unsafe extern "C" fn DecryptFromJson(
 
         // Get session and decrypt
         let session = factory.get_session(partition_id);
-        let plaintext = match session.decrypt(drr) {
+        let mut plaintext = match session.decrypt(drr) {
             Ok(p) => p,
             Err(e) => {
                 log::error!("DecryptFromJson failed: {e:#}");
@@ -895,8 +900,11 @@ pub unsafe extern "C" fn DecryptFromJson(
             }
         };
 
-        // Write output
-        cobhan_bytes_to_buffer(&plaintext, data_ptr)
+        // Write output, then zero the Rust-side plaintext copy before it drops.
+        let result = cobhan_bytes_to_buffer(&plaintext, data_ptr);
+        use zeroize::Zeroize;
+        plaintext.zeroize();
+        result
     })) {
         Ok(result) => result,
         Err(_) => {
