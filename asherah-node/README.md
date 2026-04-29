@@ -14,6 +14,18 @@ npm install asherah
 
 Requires Node.js >= 18.
 
+## Documentation
+
+Task-oriented walkthroughs under [`docs/`](./docs/):
+
+| Guide | When to read |
+|---|---|
+| [Getting started](./docs/getting-started.md) | First-time install through round-trip encrypt/decrypt. |
+| [Framework integration](./docs/framework-integration.md) | Express, Fastify, NestJS, Koa, AWS Lambda, worker patterns. |
+| [AWS production setup](./docs/aws-production-setup.md) | KMS keys, DynamoDB, IAM policy, region routing. |
+| [Testing](./docs/testing.md) | Jest/Vitest fixtures, Testcontainers, mocking patterns. |
+| [Troubleshooting](./docs/troubleshooting.md) | Common errors with what to check first. |
+
 ## Choosing an API style
 
 Two API styles are exposed; both are fully supported and produce the same

@@ -44,6 +44,18 @@ cargo build --release -p asherah-ffi
 export ASHERAH_GO_NATIVE=target/release
 ```
 
+## Documentation
+
+Task-oriented walkthroughs under [`docs/`](./docs/):
+
+| Guide | When to read |
+|---|---|
+| [Getting started](./docs/getting-started.md) | `go get` through round-trip encrypt/decrypt. |
+| [Framework integration](./docs/framework-integration.md) | `net/http`, Gin, Echo, chi, gRPC, AWS Lambda. |
+| [AWS production setup](./docs/aws-production-setup.md) | KMS keys, DynamoDB, IAM policy, region routing. |
+| [Testing](./docs/testing.md) | `testing` package patterns, httptest, Testcontainers, mocking via interfaces. |
+| [Troubleshooting](./docs/troubleshooting.md) | Common errors with what to check first. |
+
 ## Quick Start
 
 The simplest way to use Asherah is the global API. Call `Setup` once at startup and `Shutdown` on exit:
