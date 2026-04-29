@@ -63,6 +63,15 @@ public sealed class AsherahSession : IAsherahSession
         {
             throw new ArgumentNullException(nameof(ciphertextJson));
         }
+        if (ciphertextJson.Length == 0)
+        {
+            // Pre-FFI guard: empty input cannot be a valid DataRowRecord
+            // envelope (a real envelope is ~241+ bytes). Reject before
+            // crossing FFI to give a clear, actionable error instead of the
+            // forwarded serde "expected value at line 1 column 1".
+            throw new AsherahException(
+                "decrypt: ciphertext is empty (expected a DataRowRecord JSON envelope)");
+        }
         EnsureNotDisposed();
 
         var buffer = default(AsherahBuffer);
@@ -91,6 +100,11 @@ public sealed class AsherahSession : IAsherahSession
         if (ciphertextJson is null)
         {
             throw new ArgumentNullException(nameof(ciphertextJson));
+        }
+        if (ciphertextJson.Length == 0)
+        {
+            throw new AsherahException(
+                "decrypt: ciphertext is empty (expected a DataRowRecord JSON envelope)");
         }
         var bytes = Encoding.UTF8.GetBytes(ciphertextJson);
         var plaintext = DecryptBytes(bytes);
@@ -152,6 +166,16 @@ public sealed class AsherahSession : IAsherahSession
         {
             throw new ArgumentNullException(nameof(ciphertextJson));
         }
+        if (ciphertextJson.Length == 0)
+        {
+            // Surface as a faulted Task (consistent with how
+            // the C ABI surfaces errors via the async callback path)
+            // rather than throwing synchronously. ArgumentNullException
+            // (above) does throw sync — that's the established C# contract
+            // for null inputs across both sync and async APIs.
+            return Task.FromException<byte[]>(new AsherahException(
+                "decrypt: ciphertext is empty (expected a DataRowRecord JSON envelope)"));
+        }
         EnsureNotDisposed();
         Interlocked.Increment(ref _pendingOps);
 
@@ -183,6 +207,11 @@ public sealed class AsherahSession : IAsherahSession
         if (ciphertextJson is null)
         {
             throw new ArgumentNullException(nameof(ciphertextJson));
+        }
+        if (ciphertextJson.Length == 0)
+        {
+            throw new AsherahException(
+                "decrypt: ciphertext is empty (expected a DataRowRecord JSON envelope)");
         }
         var bytes = Encoding.UTF8.GetBytes(ciphertextJson);
         var result = await DecryptBytesAsync(bytes).ConfigureAwait(false);

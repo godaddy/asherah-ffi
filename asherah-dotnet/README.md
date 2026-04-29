@@ -223,9 +223,13 @@ deliberately stricter.)
   `Array.Empty<byte>()`.
 
 **Ciphertext** to decrypt:
-- `null` → `ArgumentNullException`.
-- Empty `string` / `byte[]` → `AsherahException` (not valid
-  `DataRowRecord` JSON).
+- `null` → `ArgumentNullException` (sync) / rejected `Task` (async).
+- Empty `string` / `byte[]` → `AsherahException` with the message
+  `"decrypt: ciphertext is empty (expected a DataRowRecord JSON envelope)"`.
+  Rejected at the C# boundary before any FFI call so callers get a
+  clear, actionable error instead of the forwarded Rust serde
+  diagnostic. The async overloads surface the empty-input error as a
+  faulted `Task`.
 
 **Do not short-circuit empty plaintext encryption in caller code** —
 empty data is real data, encrypting it produces a genuine envelope, and
