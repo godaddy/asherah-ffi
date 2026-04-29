@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
@@ -34,8 +33,32 @@ public static class AsherahApi
 {
     private static readonly object SetupLock = new();
     private static volatile AsherahFactory? _sharedFactory;
-    private static readonly ConcurrentDictionary<string, AsherahSession> SessionCache = new();
+
+    // Session cache: bounded LRU. `Dictionary<string, LinkedListNode>` +
+    // `LinkedList` give O(1) lookup, O(1) move-to-most-recent on hit, and
+    // O(1) evict-least-recently-used on insert overflow — the same shape
+    // as Java's LinkedHashMap and Python's OrderedDict. The bound is
+    // `SessionCacheMaxSize` (default 1000), matching the Rust core. The
+    // previous implementation used an unbounded ConcurrentDictionary,
+    // which silently ignored `SessionCacheMaxSize` and grew without
+    // limit.
+    private static readonly object CacheLock = new();
+    private static readonly Dictionary<string, LinkedListNode<CacheEntry>> SessionCache = new();
+    private static readonly LinkedList<CacheEntry> SessionOrder = new();
     private static volatile bool _sessionCachingEnabled = true;
+    private static int _sessionCacheMaxSize = 1000;
+
+    private readonly struct CacheEntry
+    {
+        public readonly string PartitionId;
+        public readonly AsherahSession Session;
+
+        public CacheEntry(string partitionId, AsherahSession session)
+        {
+            PartitionId = partitionId;
+            Session = session;
+        }
+    }
 
     /// <summary>
     /// Configure the process-global factory from an explicit
@@ -57,8 +80,13 @@ public static class AsherahApi
             }
 
             _sharedFactory = factory;
-            SessionCache.Clear();
+            lock (CacheLock)
+            {
+                SessionCache.Clear();
+                SessionOrder.Clear();
+            }
             _sessionCachingEnabled = config.SessionCachingEnabled;
+            _sessionCacheMaxSize = config.SessionCacheMaxSizeOrDefault;
         }
     }
 
@@ -94,7 +122,19 @@ public static class AsherahApi
             // fit, but the factory and other sessions still get disposed.
             List<Exception>? errors = null;
 
-            foreach (var session in SessionCache.Values)
+            List<AsherahSession> sessionsToDispose;
+            lock (CacheLock)
+            {
+                sessionsToDispose = new List<AsherahSession>(SessionCache.Count);
+                foreach (var node in SessionCache.Values)
+                {
+                    sessionsToDispose.Add(node.Value.Session);
+                }
+                SessionCache.Clear();
+                SessionOrder.Clear();
+            }
+
+            foreach (var session in sessionsToDispose)
             {
                 try
                 {
@@ -110,8 +150,6 @@ public static class AsherahApi
                     (errors ??= new List<Exception>()).Add(ex);
                 }
             }
-
-            SessionCache.Clear();
 
             try
             {
@@ -276,12 +314,66 @@ public static class AsherahApi
     private static AsherahSession AcquireSession(string partitionId)
     {
         EnsureConfigured();
-        if (_sessionCachingEnabled)
+        if (!_sessionCachingEnabled)
         {
-            return SessionCache.GetOrAdd(partitionId, static (pid, factory) => factory.GetSession(pid), SharedFactory());
+            return SharedFactory().GetSession(partitionId);
         }
 
-        return SharedFactory().GetSession(partitionId);
+        lock (CacheLock)
+        {
+            if (SessionCache.TryGetValue(partitionId, out var node))
+            {
+                // LRU: move the hit to the most-recently-used end.
+                SessionOrder.Remove(node);
+                SessionOrder.AddLast(node);
+                return node.Value.Session;
+            }
+        }
+
+        // Miss — create outside the lock so we don't hold it across an FFI
+        // call. Re-check after creation in case another thread raced us.
+        var fresh = SharedFactory().GetSession(partitionId);
+
+        AsherahSession? evicted = null;
+        AsherahSession result;
+        lock (CacheLock)
+        {
+            if (SessionCache.TryGetValue(partitionId, out var existing))
+            {
+                // Lost the race — another thread inserted while we were
+                // creating. Move the winner to MRU and discard ours.
+                SessionOrder.Remove(existing);
+                SessionOrder.AddLast(existing);
+                fresh.Dispose();
+                return existing.Value.Session;
+            }
+
+            var inserted = SessionOrder.AddLast(new CacheEntry(partitionId, fresh));
+            SessionCache[partitionId] = inserted;
+            result = fresh;
+
+            // LRU eviction: at most one entry can exceed the bound per
+            // insert (cache was at maxSize, we added one), so a single
+            // RemoveFirst restores the invariant. The head is the
+            // least-recently-used entry because hits move to the tail.
+            //
+            // Race window: an evicted session may be in use by another
+            // thread mid-encrypt; disposing it here will surface as an
+            // FFI error on that thread. The same window exists in the
+            // Go binding. Accepted tradeoff — under LRU the evicted
+            // entry is by definition the coldest, so this is rare in
+            // typical workloads. A refcount-based fix would have to
+            // change AsherahSession's lifecycle and is out of scope.
+            if (SessionCache.Count > _sessionCacheMaxSize && SessionOrder.First is { } first)
+            {
+                SessionOrder.RemoveFirst();
+                SessionCache.Remove(first.Value.PartitionId);
+                evicted = first.Value.Session;
+            }
+        }
+
+        evicted?.Dispose();
+        return result;
     }
 
     private static void ReleaseSession(string partitionId, AsherahSession session)
@@ -292,10 +384,20 @@ public static class AsherahApi
             return;
         }
 
-        if (!SessionCache.TryGetValue(partitionId, out var cached) || !ReferenceEquals(cached, session))
+        // If the cache no longer holds this session (e.g., it was evicted
+        // by another thread between Acquire and Release, or Shutdown
+        // cleared the cache), the caller is the last owner and must
+        // dispose. Otherwise the cache owns it.
+        lock (CacheLock)
         {
-            session.Dispose();
+            if (SessionCache.TryGetValue(partitionId, out var node)
+                && ReferenceEquals(node.Value.Session, session))
+            {
+                return;
+            }
         }
+
+        session.Dispose();
     }
 
     private static AsherahFactory SharedFactory() =>

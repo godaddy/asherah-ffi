@@ -1,6 +1,7 @@
 package asherah
 
 import (
+	"container/list"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,13 +13,25 @@ import (
 
 const defaultSessionCacheMaxSize = 1000
 
+// sessionCacheEntry holds the partition id alongside the session so an
+// eviction of the LRU element can clean up the map index in O(1).
+type sessionCacheEntry struct {
+	partition string
+	session   *Session
+}
+
 var (
-	globalMu             sync.RWMutex
-	globalFactory        *Factory
-	sessionCache         map[string]*Session
-	sessionCacheOrder    []string // insertion order for LRU eviction
-	sessionCacheMaxSize  int
-	sessionCaching       bool
+	globalMu            sync.RWMutex
+	globalFactory       *Factory
+	// sessionCache is a bounded LRU. The map gives O(1) lookup; the list
+	// orders entries by recency. On hit we move the element to the back
+	// (most-recently-used); on overflow we evict the front (least-
+	// recently-used). The previous implementation was insertion-ordered
+	// FIFO, which evicts hot entries that were re-used after insertion.
+	sessionCache        map[string]*list.Element
+	sessionLRU          *list.List
+	sessionCacheMaxSize int
+	sessionCaching      bool
 )
 
 // Setup configures the global Asherah factory using the provided configuration.
@@ -48,11 +61,11 @@ func Setup(cfg Config) error {
 		sessionCacheMaxSize = *cfg.SessionCacheMaxSize
 	}
 	if sessionCaching {
-		sessionCache = make(map[string]*Session)
-		sessionCacheOrder = nil
+		sessionCache = make(map[string]*list.Element)
+		sessionLRU = list.New()
 	} else {
 		sessionCache = nil
-		sessionCacheOrder = nil
+		sessionLRU = nil
 	}
 
 	return nil
@@ -75,7 +88,9 @@ func SetupFromEnv() error {
 
 	globalFactory = factory
 	sessionCaching = true
-	sessionCache = make(map[string]*Session)
+	sessionCacheMaxSize = defaultSessionCacheMaxSize
+	sessionCache = make(map[string]*list.Element)
+	sessionLRU = list.New()
 	return nil
 }
 
@@ -83,13 +98,20 @@ func SetupFromEnv() error {
 func Shutdown() {
 	globalMu.Lock()
 	factory := globalFactory
-	cached := sessionCache
+	var sessions []*Session
+	if sessionLRU != nil {
+		sessions = make([]*Session, 0, sessionLRU.Len())
+		for e := sessionLRU.Front(); e != nil; e = e.Next() {
+			sessions = append(sessions, e.Value.(sessionCacheEntry).session)
+		}
+	}
 	globalFactory = nil
 	sessionCache = nil
+	sessionLRU = nil
 	sessionCaching = false
 	globalMu.Unlock()
 
-	for _, sess := range cached {
+	for _, sess := range sessions {
 		sess.Close()
 	}
 
@@ -184,7 +206,10 @@ func acquireSession(partition string) (*Session, func(), error) {
 
 	if caching {
 		globalMu.Lock()
-		if sess, ok := sessionCache[partition]; ok {
+		if elem, ok := sessionCache[partition]; ok {
+			// LRU hit: move to back (most-recently-used).
+			sessionLRU.MoveToBack(elem)
+			sess := elem.Value.(sessionCacheEntry).session
 			globalMu.Unlock()
 			return sess, nil, nil
 		}
@@ -197,27 +222,38 @@ func acquireSession(partition string) (*Session, func(), error) {
 	}
 
 	if caching {
+		var evicted *Session
 		globalMu.Lock()
-		if existing, ok := sessionCache[partition]; ok {
+		if elem, ok := sessionCache[partition]; ok {
+			// Lost the race — another goroutine inserted while we created.
+			sessionLRU.MoveToBack(elem)
+			existing := elem.Value.(sessionCacheEntry).session
 			globalMu.Unlock()
 			sess.Close()
 			return existing, nil, nil
 		}
 		if sessionCache == nil {
-			sessionCache = make(map[string]*Session)
+			sessionCache = make(map[string]*list.Element)
+			sessionLRU = list.New()
 		}
-		sessionCache[partition] = sess
-		sessionCacheOrder = append(sessionCacheOrder, partition)
-		// Evict oldest entries if cache exceeds max size
-		for len(sessionCache) > sessionCacheMaxSize && len(sessionCacheOrder) > 0 {
-			oldest := sessionCacheOrder[0]
-			sessionCacheOrder = sessionCacheOrder[1:]
-			if evicted, ok := sessionCache[oldest]; ok {
-				delete(sessionCache, oldest)
-				evicted.Close()
+		entry := sessionCacheEntry{partition: partition, session: sess}
+		sessionCache[partition] = sessionLRU.PushBack(entry)
+		// Evict the LRU entry if we're now over the bound.
+		if sessionLRU.Len() > sessionCacheMaxSize {
+			front := sessionLRU.Front()
+			if front != nil {
+				lruEntry := front.Value.(sessionCacheEntry)
+				sessionLRU.Remove(front)
+				delete(sessionCache, lruEntry.partition)
+				evicted = lruEntry.session
 			}
 		}
 		globalMu.Unlock()
+		// Close evicted session outside the lock — Close hits the FFI
+		// and we don't want to serialize all encrypts behind eviction.
+		if evicted != nil {
+			evicted.Close()
+		}
 		return sess, nil, nil
 	}
 

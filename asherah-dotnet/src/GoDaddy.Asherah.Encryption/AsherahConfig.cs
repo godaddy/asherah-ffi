@@ -92,6 +92,14 @@ public sealed class AsherahConfig
 
     internal bool SessionCachingEnabled => EnableSessionCaching.GetValueOrDefault(true);
 
+    /// <summary>
+    /// Effective session cache bound. Matches the Rust core default
+    /// (1000) and the other language bindings, so a value applied here is
+    /// the same bound the native session cache enforces.
+    /// </summary>
+    internal int SessionCacheMaxSizeOrDefault =>
+        SessionCacheMaxSize is { } v && v > 0 ? v : 1000;
+
     internal string ToJson()
     {
         var payload = new Dictionary<string, object?>
