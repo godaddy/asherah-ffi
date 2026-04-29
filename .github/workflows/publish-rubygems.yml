@@ -39,9 +39,13 @@ jobs:
       - name: Download native libraries from release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKFLOW_RUN_EVENT: ${{ github.event.workflow_run.event }}
           WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
-          if [ -n "$WORKFLOW_RUN_BRANCH" ]; then
+          # Use the upstream tag only when the triggering workflow_run was
+          # a release event. For workflow_dispatch upstreams, head_branch
+          # is the dispatched ref (e.g. "main") — fall back to latest.
+          if [ "$WORKFLOW_RUN_EVENT" = "release" ] && [ -n "$WORKFLOW_RUN_BRANCH" ]; then
             TAG="$WORKFLOW_RUN_BRANCH"
           else
             TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
@@ -70,6 +74,7 @@ jobs:
         working-directory: asherah-ruby
         env:
           INPUT_VERSION: ${{ github.event.inputs.version }}
+          WORKFLOW_RUN_EVENT: ${{ github.event.workflow_run.event }}
           WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -78,8 +83,10 @@ jobs:
           elif [ -n "${{ vars.RUBYGEMS_VERSION }}" ]; then
             VERSION="${{ vars.RUBYGEMS_VERSION }}"
           else
-            # Fallback: derive from triggering release tag
-            if [ -n "$WORKFLOW_RUN_BRANCH" ]; then
+            # Fallback: derive from triggering release tag (only when the
+            # upstream was a release event — workflow_dispatch head_branch
+            # is "main" or similar, not a tag).
+            if [ "$WORKFLOW_RUN_EVENT" = "release" ] && [ -n "$WORKFLOW_RUN_BRANCH" ]; then
               TAG="$WORKFLOW_RUN_BRANCH"
             else
               TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
