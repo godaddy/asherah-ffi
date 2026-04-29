@@ -31,15 +31,17 @@ directly.
 
 This README covers the conceptual overview, full configuration
 reference, and quick-start examples. Task-oriented walkthroughs live
-under [`docs/`](./docs/):
+under `[docs/](./docs/)`:
 
-| Guide | When to read |
-|---|---|
-| [Getting started](./docs/getting-started.md) | First-time install through round-trip encrypt/decrypt. |
-| [Dependency injection](./docs/dependency-injection.md) | Registering Asherah types in ASP.NET Core, Worker Service, Generic Host. |
-| [AWS production setup](./docs/aws-production-setup.md) | End-to-end production config: KMS keys, DynamoDB, IAM policy, region routing. |
-| [Testing](./docs/testing.md) | In-memory + static-KMS fixtures, mocking `IAsherahApi`, integration tests against MySQL/Postgres. |
-| [Troubleshooting](./docs/troubleshooting.md) | Common errors with what to check first. Search by exception type or message text. |
+
+| Guide                                                  | When to read                                                                                      |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| [Getting started](./docs/getting-started.md)           | First-time install through round-trip encrypt/decrypt.                                            |
+| [Dependency injection](./docs/dependency-injection.md) | Registering Asherah types in ASP.NET Core, Worker Service, Generic Host.                          |
+| [AWS production setup](./docs/aws-production-setup.md) | End-to-end production config: KMS keys, DynamoDB, IAM policy, region routing.                     |
+| [Testing](./docs/testing.md)                           | In-memory + static-KMS fixtures, mocking `IAsherahApi`, integration tests against MySQL/Postgres. |
+| [Troubleshooting](./docs/troubleshooting.md)           | Common errors with what to check first. Search by exception type or message text.                 |
+
 
 The runnable [sample app](../samples/dotnet/Program.cs) exercises
 every API style plus async, log hook, and metrics hook in one
@@ -51,10 +53,12 @@ Two coexisting API styles are exposed in `GoDaddy.Asherah.Encryption`. Both
 produce the same wire format and operate on the same native core; pick by
 operational style, not by feature.
 
-| Style | Entry point | When to use |
-|---|---|---|
-| **Single-shot** | `AsherahApi.Setup` / `AsherahApi.Encrypt` / `AsherahApi.Decrypt` | Configure once, call encrypt/decrypt with a partition id. No factory or session lifecycle to manage. Simplest call surface. |
-| **Factory / Session** | `AsherahFactory.FromConfig(...)` / `factory.GetSession(...)` | Explicit lifecycle, no hidden process-global singleton, `IDisposable` resource management, multi-tenant isolation is obvious in code, multiple factories with different configs in one process. |
+
+| Style                 | Entry point                                                      | When to use                                                                                                                                                                                     |
+| --------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Single-shot**       | `AsherahApi.Setup` / `AsherahApi.Encrypt` / `AsherahApi.Decrypt` | Configure once, call encrypt/decrypt with a partition id. No factory or session lifecycle to manage. Simplest call surface.                                                                     |
+| **Factory / Session** | `AsherahFactory.FromConfig(...)` / `factory.GetSession(...)`     | Explicit lifecycle, no hidden process-global singleton, `IDisposable` resource management, multi-tenant isolation is obvious in code, multiple factories with different configs in one process. |
+
 
 Either style accepts the same `AsherahConfig` builder. Observability hooks
 (`AsherahHooks.SetLogHook` / `SetMetricsHook`) are configured separately and
@@ -63,13 +67,13 @@ apply globally regardless of which style created the factory or session.
 For DI scenarios:
 
 - `IAsherahApi` + `AsherahApiClient` — instance-shaped wrapper for the
-  single-shot API.
+single-shot API.
 - `IAsherahFactory` / `IAsherahSession` — interfaces on the factory/session
-  types.
+types.
 
 A complete runnable example exercising both styles plus async, log hook,
 and metrics hook is in
-[`samples/dotnet/Program.cs`](../samples/dotnet/Program.cs).
+`[samples/dotnet/Program.cs](../samples/dotnet/Program.cs)`.
 
 > **Sync vs async:** prefer sync for Asherah's hot encrypt/decrypt paths.
 > The native operation is sub-microsecond — the async state-machine
@@ -132,12 +136,14 @@ var pt = await AsherahApi.DecryptStringAsync("user-42", ct);
 await AsherahApi.ShutdownAsync();
 ```
 
-| Metastore | Async pattern | Blocks ThreadPool? |
-|-----------|--------------|-------------------|
-| In-memory | tokio worker thread | No |
-| DynamoDB  | true async AWS SDK calls on tokio | No |
-| MySQL     | `spawn_blocking` (sync driver on tokio thread pool) | No |
-| Postgres  | `spawn_blocking` (sync driver on tokio thread pool) | No |
+
+| Metastore | Async pattern                                       | Blocks ThreadPool? |
+| --------- | --------------------------------------------------- | ------------------ |
+| In-memory | tokio worker thread                                 | No                 |
+| DynamoDB  | true async AWS SDK calls on tokio                   | No                 |
+| MySQL     | `spawn_blocking` (sync driver on tokio thread pool) | No                 |
+| Postgres  | `spawn_blocking` (sync driver on tokio thread pool) | No                 |
+
 
 Tradeoff: ~9.8 µs async vs ~0.7 µs sync per call (hot cache, 64 B
 payload). Use sync in tight loops; use async for ASP.NET Core request
@@ -277,20 +283,22 @@ silently and persists `_IK__service_product` rows; this binding is
 deliberately stricter.)
 
 **Plaintext** to encrypt:
+
 - `null` → `ArgumentNullException` (sync) / rejected `Task` (async).
 - Empty `string` (`""`) and empty `byte[]` (`Array.Empty<byte>()`) are
-  **valid** plaintexts. `Encrypt(...)` produces a real `DataRowRecord`
-  envelope; the matching `Decrypt(...)` returns exactly `""` or
-  `Array.Empty<byte>()`.
+**valid** plaintexts. `Encrypt(...)` produces a real `DataRowRecord`
+envelope; the matching `Decrypt(...)` returns exactly `""` or
+`Array.Empty<byte>()`.
 
 **Ciphertext** to decrypt:
+
 - `null` → `ArgumentNullException` (sync) / rejected `Task` (async).
 - Empty `string` / `byte[]` → `AsherahException` with the message
-  `"decrypt: ciphertext is empty (expected a DataRowRecord JSON envelope)"`.
-  Rejected at the C# boundary before any FFI call so callers get a
-  clear, actionable error instead of the forwarded Rust serde
-  diagnostic. The async overloads surface the empty-input error as a
-  faulted `Task`.
+`"decrypt: ciphertext is empty (expected a DataRowRecord JSON envelope)"`.
+Rejected at the C# boundary before any FFI call so callers get a
+clear, actionable error instead of the forwarded Rust serde
+diagnostic. The async overloads surface the empty-input error as a
+faulted `Task`.
 
 **Do not short-circuit empty plaintext encryption in caller code** —
 empty data is real data, encrypting it produces a genuine envelope, and
@@ -324,14 +332,16 @@ var pt = session.Decrypt(ct);
 For new code, target `GoDaddy.Asherah.Encryption` directly using either
 the single-shot `AsherahApi` or the factory/session pattern above.
 
-| | Canonical (`GoDaddy.Asherah.AppEncryption@0.x`) | This repo (`GoDaddy.Asherah.Encryption`) |
-|---|---|---|
-| Implementation | Pure C# / Bouncy Castle | Native Rust via P/Invoke |
-| Performance | ~50 µs encrypt | ~0.7 µs encrypt |
-| Async | Sync only | Native async via tokio callbacks |
-| Hooks | Not exposed | `AsherahHooks.SetLogHook`, `SetMetricsHook` |
-| Null partition | Silently accepted, persists `_IK__service_product` | `ArgumentNullException` (intentional hardening) |
-| Newtonsoft.Json / LanguageExt | Required | Not required (only the `Compat` package transitively pulls them) |
+
+|                               | Canonical (`GoDaddy.Asherah.AppEncryption@0.x`)    | This repo (`GoDaddy.Asherah.Encryption`)                         |
+| ----------------------------- | -------------------------------------------------- | ---------------------------------------------------------------- |
+| Implementation                | Pure C# / Bouncy Castle                            | Native Rust via P/Invoke                                         |
+| Performance                   | ~50 µs encrypt                                     | ~0.7 µs encrypt                                                  |
+| Async                         | Sync only                                          | Native async via tokio callbacks                                 |
+| Hooks                         | Not exposed                                        | `AsherahHooks.SetLogHook`, `SetMetricsHook`                      |
+| Null partition                | Silently accepted, persists `_IK__service_product` | `ArgumentNullException` (intentional hardening)                  |
+| Newtonsoft.Json / LanguageExt | Required                                           | Not required (only the `Compat` package transitively pulls them) |
+
 
 ### Earlier preview namespace `GoDaddy.Asherah`
 
@@ -353,14 +363,16 @@ Earlier preview builds of this package exposed types under namespace
 
 Map of preview names → current names:
 
-| Preview | Current |
-|---|---|
-| `GoDaddy.Asherah` (namespace) | `GoDaddy.Asherah.Encryption` |
-| `Asherah.Setup` / `Shutdown` / `Encrypt` / `Decrypt` / `SetEnv` etc. | `AsherahApi.Setup` / `Shutdown` / `Encrypt` / … |
-| `Asherah.FactoryFromConfig(config)` | `AsherahFactory.FromConfig(config)` |
-| `Asherah.FactoryFromEnv()` | `AsherahFactory.FromEnv()` |
-| `Asherah.SetLogHook` / `SetMetricsHook` / `ClearLogHook` / … | `AsherahHooks.SetLogHook` / `SetMetricsHook` / `ClearLogHook` / … |
-| `IAsherah` / `AsherahClient` | `IAsherahApi` / `AsherahApiClient` |
+
+| Preview                                                              | Current                                                           |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `GoDaddy.Asherah` (namespace)                                        | `GoDaddy.Asherah.Encryption`                                      |
+| `Asherah.Setup` / `Shutdown` / `Encrypt` / `Decrypt` / `SetEnv` etc. | `AsherahApi.Setup` / `Shutdown` / `Encrypt` / …                   |
+| `Asherah.FactoryFromConfig(config)`                                  | `AsherahFactory.FromConfig(config)`                               |
+| `Asherah.FactoryFromEnv()`                                           | `AsherahFactory.FromEnv()`                                        |
+| `Asherah.SetLogHook` / `SetMetricsHook` / `ClearLogHook` / …         | `AsherahHooks.SetLogHook` / `SetMetricsHook` / `ClearLogHook` / … |
+| `IAsherah` / `AsherahClient`                                         | `IAsherahApi` / `AsherahApiClient`                                |
+
 
 ## Configuration
 
@@ -368,40 +380,44 @@ Build a config with the fluent `AsherahConfig.CreateBuilder()`. Pass it
 to `AsherahApi.Setup()`, `AsherahApi.SetupAsync()`, or
 `AsherahFactory.FromConfig()`.
 
-| Builder method | Description |
-|---|---|
-| `WithServiceName(string)` | **Required.** Service identifier for the key hierarchy. |
-| `WithProductId(string)` | **Required.** Product identifier for the key hierarchy. |
-| `WithMetastore(string)` | **Required.** `"memory"` (testing), `"rdbms"`, or `"dynamodb"`. |
-| `WithKms(string)` | `"static"` (default; testing) or `"aws"`. |
-| `WithConnectionString(string?)` | SQL connection string for `"rdbms"`. |
-| `WithSqlMetastoreDbType(string?)` | `"mysql"` or `"postgres"`. |
-| `WithEnableSessionCaching(bool?)` | Cache `AsherahSession` by partition. Default `true`. |
-| `WithSessionCacheMaxSize(int?)` | Max cached sessions. Default 1000. |
-| `WithSessionCacheDuration(long?)` | Session cache TTL in seconds. |
-| `WithRegionMap(IDictionary<string,string>?)` | AWS KMS multi-region key-ARN map. |
-| `WithPreferredRegion(string?)` | Preferred AWS region from `RegionMap`. |
-| `WithAwsProfileName(string?)` | Optional AWS shared-credentials profile name for KMS/DynamoDB/Secrets Manager SDK clients. |
-| `WithEnableRegionSuffix(bool?)` | Append AWS region suffix to key IDs. |
-| `WithExpireAfter(long?)` | Intermediate-key expiration in seconds. Default 90 days. |
-| `WithCheckInterval(long?)` | Revoke-check interval in seconds. Default 60 minutes. |
-| `WithDynamoDbEndpoint(string?)` | DynamoDB endpoint URL (for local DynamoDB). |
-| `WithDynamoDbRegion(string?)` | AWS region for DynamoDB. |
-| `WithDynamoDbSigningRegion(string?)` | Region used for SigV4 signing. |
-| `WithDynamoDbTableName(string?)` | DynamoDB table name. |
-| `WithReplicaReadConsistency(string?)` | Aurora MySQL replica consistency: `"eventual"`, `"global"`, or `"session"`. |
-| `WithVerbose(bool?)` | Emit verbose log events from the Rust core (use a log hook to consume). |
-| `WithPoolMaxOpen(int?)` | Max open DB connections (0 = unlimited). |
-| `WithPoolMaxIdle(int?)` | Max idle DB connections to retain. |
-| `WithPoolMaxLifetime(long?)` | Max connection lifetime in seconds (0 = unlimited). |
-| `WithPoolMaxIdleTime(long?)` | Max idle time in seconds per connection (0 = unlimited). |
+
+| Builder method                               | Description                                                                                |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `WithServiceName(string)`                    | **Required.** Service identifier for the key hierarchy.                                    |
+| `WithProductId(string)`                      | **Required.** Product identifier for the key hierarchy.                                    |
+| `WithMetastore(string)`                      | **Required.** `"memory"` (testing), `"rdbms"`, or `"dynamodb"`.                            |
+| `WithKms(string)`                            | `"static"` (default; testing) or `"aws"`.                                                  |
+| `WithConnectionString(string?)`              | SQL connection string for `"rdbms"`.                                                       |
+| `WithSqlMetastoreDbType(string?)`            | `"mysql"` or `"postgres"`.                                                                 |
+| `WithEnableSessionCaching(bool?)`            | Cache `AsherahSession` by partition. Default `true`.                                       |
+| `WithSessionCacheMaxSize(int?)`              | Max cached sessions. Default 1000.                                                         |
+| `WithSessionCacheDuration(long?)`            | Session cache TTL in seconds.                                                              |
+| `WithRegionMap(IDictionary<string,string>?)` | AWS KMS multi-region key-ARN map.                                                          |
+| `WithPreferredRegion(string?)`               | Preferred AWS region from `RegionMap`.                                                     |
+| `WithAwsProfileName(string?)`                | Optional AWS shared-credentials profile name for KMS/DynamoDB/Secrets Manager SDK clients. |
+| `WithEnableRegionSuffix(bool?)`              | Append AWS region suffix to key IDs.                                                       |
+| `WithExpireAfter(long?)`                     | Intermediate-key expiration in seconds. Default 90 days.                                   |
+| `WithCheckInterval(long?)`                   | Revoke-check interval in seconds. Default 60 minutes.                                      |
+| `WithDynamoDbEndpoint(string?)`              | DynamoDB endpoint URL (for local DynamoDB).                                                |
+| `WithDynamoDbRegion(string?)`                | AWS region for DynamoDB.                                                                   |
+| `WithDynamoDbSigningRegion(string?)`         | Region used for SigV4 signing.                                                             |
+| `WithDynamoDbTableName(string?)`             | DynamoDB table name.                                                                       |
+| `WithReplicaReadConsistency(string?)`        | Aurora MySQL replica consistency: `"eventual"`, `"global"`, or `"session"`.                |
+| `WithVerbose(bool?)`                         | Emit verbose log events from the Rust core (use a log hook to consume).                    |
+| `WithPoolMaxOpen(int?)`                      | Max open DB connections (0 = unlimited).                                                   |
+| `WithPoolMaxIdle(int?)`                      | Max idle DB connections to retain.                                                         |
+| `WithPoolMaxLifetime(long?)`                 | Max connection lifetime in seconds (0 = unlimited).                                        |
+| `WithPoolMaxIdleTime(long?)`                 | Max idle time in seconds per connection (0 = unlimited).                                   |
+
 
 ### Environment variables
 
-| Variable | Effect |
-|---|---|
+
+| Variable                | Effect                                                    |
+| ----------------------- | --------------------------------------------------------- |
 | `STATIC_MASTER_KEY_HEX` | 64 hex chars (32 bytes) for static KMS. **Testing only.** |
-| `ASHERAH_DOTNET_NATIVE` | Override the native binary search path (used by tests). |
+| `ASHERAH_DOTNET_NATIVE` | Override the native binary search path (used by tests).   |
+
 
 ### AWS credentials
 
@@ -417,10 +433,12 @@ configured via `aws sso login` are picked up automatically — no additional
 Native Rust via P/Invoke. Typical latencies on Apple M4 Max (in-memory
 metastore, session caching enabled, 64-byte payload):
 
-| Operation | Sync | Async |
-|-----------|------|-------|
+
+| Operation | Sync    | Async   |
+| --------- | ------- | ------- |
 | Encrypt   | ~0.7 µs | ~9.8 µs |
 | Decrypt   | ~0.9 µs | ~9.8 µs |
+
 
 See `scripts/benchmark.sh` for head-to-head comparisons with the
 canonical pure-C# implementation.
@@ -436,68 +454,78 @@ canonical pure-C# implementation.
 
 #### Lifecycle
 
-| Method | Description |
-|---|---|
-| `Setup(AsherahConfig)` | Initialize the process-global instance. Throws if already configured. |
-| `SetupAsync(AsherahConfig)` | Async variant. Returns `Task`. |
-| `Shutdown()` | Tear down the process-global instance. Idempotent. |
-| `ShutdownAsync()` | Async variant. Returns `Task`. |
-| `GetSetupStatus()` | `bool` — true after `Setup()` and before `Shutdown()`. |
-| `SetEnv(IDictionary<string, string?>)` | Apply env vars before `Setup()`. |
+
+| Method                                 | Description                                                           |
+| -------------------------------------- | --------------------------------------------------------------------- |
+| `Setup(AsherahConfig)`                 | Initialize the process-global instance. Throws if already configured. |
+| `SetupAsync(AsherahConfig)`            | Async variant. Returns `Task`.                                        |
+| `Shutdown()`                           | Tear down the process-global instance. Idempotent.                    |
+| `ShutdownAsync()`                      | Async variant. Returns `Task`.                                        |
+| `GetSetupStatus()`                     | `bool` — true after `Setup()` and before `Shutdown()`.                |
+| `SetEnv(IDictionary<string, string?>)` | Apply env vars before `Setup()`.                                      |
+
 
 #### Encrypt / decrypt
 
-| Method | Param 1 | Param 2 | Returns |
-|---|---|---|---|
-| `Encrypt(partitionId, plaintext)` | `string` (non-empty) | `byte[]` (empty OK) | `byte[]` (DRR JSON bytes) |
-| `EncryptAsync(partitionId, plaintext)` | `string` | `byte[]` | `Task<byte[]>` |
-| `EncryptString(partitionId, plaintext)` | `string` | `string` (empty OK) | `string` (DRR JSON) |
-| `EncryptStringAsync(partitionId, plaintext)` | `string` | `string` | `Task<string>` |
-| `Decrypt(partitionId, drr)` | `string` | `byte[]` | `byte[]` |
-| `DecryptJson(partitionId, drr)` | `string` | `string` | `byte[]` |
-| `DecryptString(partitionId, drr)` | `string` | `string` | `string` |
-| `DecryptAsync(partitionId, drr)` | `string` | `byte[]` | `Task<byte[]>` |
-| `DecryptStringAsync(partitionId, drr)` | `string` | `string` | `Task<string>` |
+
+| Method                                       | Param 1              | Param 2             | Returns                   |
+| -------------------------------------------- | -------------------- | ------------------- | ------------------------- |
+| `Encrypt(partitionId, plaintext)`            | `string` (non-empty) | `byte[]` (empty OK) | `byte[]` (DRR JSON bytes) |
+| `EncryptAsync(partitionId, plaintext)`       | `string`             | `byte[]`            | `Task<byte[]>`            |
+| `EncryptString(partitionId, plaintext)`      | `string`             | `string` (empty OK) | `string` (DRR JSON)       |
+| `EncryptStringAsync(partitionId, plaintext)` | `string`             | `string`            | `Task<string>`            |
+| `Decrypt(partitionId, drr)`                  | `string`             | `byte[]`            | `byte[]`                  |
+| `DecryptJson(partitionId, drr)`              | `string`             | `string`            | `byte[]`                  |
+| `DecryptString(partitionId, drr)`            | `string`             | `string`            | `string`                  |
+| `DecryptAsync(partitionId, drr)`             | `string`             | `byte[]`            | `Task<byte[]>`            |
+| `DecryptStringAsync(partitionId, drr)`       | `string`             | `string`            | `Task<string>`            |
+
 
 ### Factory / Session API
 
 #### `AsherahFactory : IAsherahFactory, IDisposable`
 
-| Member | Description |
-|---|---|
-| `static AsherahFactory.FromConfig(AsherahConfig)` | Construct a factory from an explicit config. |
-| `static AsherahFactory.FromEnv()` | Construct a factory from environment variables. |
-| `factory.GetSession(string partitionId)` | Get a per-partition session. Throws on null/empty partition. |
-| `factory.Dispose()` | Release native resources. After dispose, `GetSession()` throws. |
+
+| Member                                            | Description                                                     |
+| ------------------------------------------------- | --------------------------------------------------------------- |
+| `static AsherahFactory.FromConfig(AsherahConfig)` | Construct a factory from an explicit config.                    |
+| `static AsherahFactory.FromEnv()`                 | Construct a factory from environment variables.                 |
+| `factory.GetSession(string partitionId)`          | Get a per-partition session. Throws on null/empty partition.    |
+| `factory.Dispose()`                               | Release native resources. After dispose, `GetSession()` throws. |
+
 
 #### `AsherahSession : IAsherahSession, IDisposable`
 
-| Member | Description |
-|---|---|
-| `EncryptBytes(byte[])` | `byte[]` → DRR JSON bytes. Empty `byte[]` is valid. |
-| `EncryptString(string)` | `string` → DRR JSON string. Empty `string` is valid. |
-| `EncryptBytesAsync(byte[])` / `EncryptStringAsync(string)` | True async via tokio callback. |
-| `DecryptBytes(byte[])` / `DecryptString(string)` | DRR → plaintext. |
-| `DecryptBytesAsync(...)` / `DecryptStringAsync(...)` | Async variants. |
-| `Dispose()` | Release native resources. |
+
+| Member                                                     | Description                                          |
+| ---------------------------------------------------------- | ---------------------------------------------------- |
+| `EncryptBytes(byte[])`                                     | `byte[]` → DRR JSON bytes. Empty `byte[]` is valid.  |
+| `EncryptString(string)`                                    | `string` → DRR JSON string. Empty `string` is valid. |
+| `EncryptBytesAsync(byte[])` / `EncryptStringAsync(string)` | True async via tokio callback.                       |
+| `DecryptBytes(byte[])` / `DecryptString(string)`           | DRR → plaintext.                                     |
+| `DecryptBytesAsync(...)` / `DecryptStringAsync(...)`       | Async variants.                                      |
+| `Dispose()`                                                | Release native resources.                            |
+
 
 ### `AsherahHooks` (static class — observability)
 
-| Method | Description |
-|---|---|
-| `SetLogHook(Action<LogEvent>?)` | Register a structured-event log callback. Pass `null` to deregister. |
-| `SetLogHook(Action<LogEvent>?, int queueCapacity, LogLevel minLevel)` | Configurable variant: queue size + producer-side level filter. |
-| `SetLogHook(ILogger)` / `SetLogHook(ILoggerFactory)` | Bridge to `Microsoft.Extensions.Logging`. |
-| `SetLogHookSync(Action<LogEvent>?, LogLevel minLevel = Warning)` | Synchronous variant; fires on the encrypt/decrypt thread. |
-| `SetLogHookSync(ILogger, LogLevel)` / `SetLogHookSync(ILoggerFactory, LogLevel)` | Sync `ILogger` bridges. |
-| `ClearLogHook()` | Convenience for `SetLogHook(null)`. |
-| `LogDroppedCount()` | Cumulative count of log records dropped due to a full queue. |
-| `SetMetricsHook(Action<MetricsEvent>?)` | Register a metrics callback. Pass `null` to deregister. |
-| `SetMetricsHook(Action<MetricsEvent>?, int queueCapacity)` | Configurable variant. |
-| `SetMetricsHook(Meter)` | Bridge to `System.Diagnostics.Metrics` — creates standard instruments. |
-| `SetMetricsHookSync(Action<MetricsEvent>?)` / `SetMetricsHookSync(Meter)` | Synchronous variants. |
-| `ClearMetricsHook()` | Convenience for `SetMetricsHook(null)`. |
-| `MetricsDroppedCount()` | Cumulative count of metrics events dropped due to a full queue. |
+
+| Method                                                                           | Description                                                            |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `SetLogHook(Action<LogEvent>?)`                                                  | Register a structured-event log callback. Pass `null` to deregister.   |
+| `SetLogHook(Action<LogEvent>?, int queueCapacity, LogLevel minLevel)`            | Configurable variant: queue size + producer-side level filter.         |
+| `SetLogHook(ILogger)` / `SetLogHook(ILoggerFactory)`                             | Bridge to `Microsoft.Extensions.Logging`.                              |
+| `SetLogHookSync(Action<LogEvent>?, LogLevel minLevel = Warning)`                 | Synchronous variant; fires on the encrypt/decrypt thread.              |
+| `SetLogHookSync(ILogger, LogLevel)` / `SetLogHookSync(ILoggerFactory, LogLevel)` | Sync `ILogger` bridges.                                                |
+| `ClearLogHook()`                                                                 | Convenience for `SetLogHook(null)`.                                    |
+| `LogDroppedCount()`                                                              | Cumulative count of log records dropped due to a full queue.           |
+| `SetMetricsHook(Action<MetricsEvent>?)`                                          | Register a metrics callback. Pass `null` to deregister.                |
+| `SetMetricsHook(Action<MetricsEvent>?, int queueCapacity)`                       | Configurable variant.                                                  |
+| `SetMetricsHook(Meter)`                                                          | Bridge to `System.Diagnostics.Metrics` — creates standard instruments. |
+| `SetMetricsHookSync(Action<MetricsEvent>?)` / `SetMetricsHookSync(Meter)`        | Synchronous variants.                                                  |
+| `ClearMetricsHook()`                                                             | Convenience for `SetMetricsHook(null)`.                                |
+| `MetricsDroppedCount()`                                                          | Cumulative count of metrics events dropped due to a full queue.        |
+
 
 ### Observability types
 

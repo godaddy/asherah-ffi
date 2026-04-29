@@ -435,12 +435,18 @@ public sealed class AsherahConfig
             return this;
         }
 
+        /// <summary>
+        /// Optional AWS shared-credentials profile name (typically from
+        /// <c>~/.aws/credentials</c>). Passed to the Rust core's AWS SDK config
+        /// when creating KMS, DynamoDB, and Secrets Manager clients. Omit or
+        /// pass <c>null</c> to use the default credential chain.
+        /// </summary>
         public Builder WithAwsProfileName(string? value)
         {
             AwsProfileName = value;
             return this;
         }
-		
+
         /// <summary>
         /// When <c>true</c>, append the AWS region as a suffix to generated
         /// key IDs (e.g. <c>_IK_partition_service_product_us-east-1</c>).
