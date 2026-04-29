@@ -288,6 +288,7 @@ to `Asherah.Setup()`, `Asherah.SetupAsync()`, or
 | `WithSessionCacheDuration(long?)` | Session cache TTL in seconds. |
 | `WithRegionMap(IDictionary<string,string>?)` | AWS KMS multi-region key-ARN map. |
 | `WithPreferredRegion(string?)` | Preferred AWS region from `RegionMap`. |
+| `WithAwsProfileName(string?)` | Optional AWS shared-credentials profile name for KMS/DynamoDB/Secrets Manager SDK clients. |
 | `WithEnableRegionSuffix(bool?)` | Append AWS region suffix to key IDs. |
 | `WithExpireAfter(long?)` | Intermediate-key expiration in seconds. Default 90 days. |
 | `WithCheckInterval(long?)` | Revoke-check interval in seconds. Default 60 minutes. |
