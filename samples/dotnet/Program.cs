@@ -15,25 +15,25 @@ var config = AsherahConfig.CreateBuilder()
 
 // --- 1. Static API (simplest, manages sessions internally) ---
 
-Asherah.Setup(config);
+AsherahApi.Setup(config);
 try
 {
     // String encrypt/decrypt
-    var cipher = Asherah.EncryptString("partition-1", "Hello from .NET!");
-    Console.WriteLine($"Static string:  {Asherah.DecryptString("partition-1", cipher)}");
+    var cipher = AsherahApi.EncryptString("partition-1", "Hello from .NET!");
+    Console.WriteLine($"Static string:  {AsherahApi.DecryptString("partition-1", cipher)}");
 
     // Byte encrypt/decrypt
-    var cipherBytes = Asherah.Encrypt("partition-1", Encoding.UTF8.GetBytes("byte payload"));
-    Console.WriteLine($"Static bytes:   {Encoding.UTF8.GetString(Asherah.Decrypt("partition-1", cipherBytes))}");
+    var cipherBytes = AsherahApi.Encrypt("partition-1", Encoding.UTF8.GetBytes("byte payload"));
+    Console.WriteLine($"Static bytes:   {Encoding.UTF8.GetString(AsherahApi.Decrypt("partition-1", cipherBytes))}");
 }
 finally
 {
-    Asherah.Shutdown();
+    AsherahApi.Shutdown();
 }
 
 // --- 2. Factory/Session API (recommended — explicit session lifecycle) ---
 
-using (var factory = Asherah.FactoryFromConfig(config))
+using (var factory = AsherahFactory.FromConfig(config))
 {
     using (var session = factory.GetSession("partition-2"))
     {
@@ -60,19 +60,19 @@ static async Task RunAsyncExample()
         .Build();
 
     // Static async
-    Asherah.Setup(cfg);
+    AsherahApi.Setup(cfg);
     try
     {
-        var cipher = await Asherah.EncryptStringAsync("partition-3", "async static");
-        Console.WriteLine($"Async static:   {await Asherah.DecryptStringAsync("partition-3", cipher)}");
+        var cipher = await AsherahApi.EncryptStringAsync("partition-3", "async static");
+        Console.WriteLine($"Async static:   {await AsherahApi.DecryptStringAsync("partition-3", cipher)}");
     }
     finally
     {
-        Asherah.Shutdown();
+        AsherahApi.Shutdown();
     }
 
     // Session async
-    using var factory = Asherah.FactoryFromConfig(cfg);
+    using var factory = AsherahFactory.FromConfig(cfg);
     using var session = factory.GetSession("partition-4");
     var enc = await session.EncryptBytesAsync(Encoding.UTF8.GetBytes("async session"));
     Console.WriteLine($"Async session:  {Encoding.UTF8.GetString(await session.DecryptBytesAsync(enc))}");
@@ -83,7 +83,7 @@ static async Task RunAsyncExample()
 // see info/debug-level setup messages, or always-on for warn/error.
 
 var logEvents = new System.Collections.Concurrent.ConcurrentBag<LogEvent>();
-Asherah.SetLogHook(e =>
+AsherahHooks.SetLogHook(e =>
 {
     if (e.Level == LogLevel.Warn || e.Level == LogLevel.Error)
     {
@@ -100,30 +100,30 @@ var verboseConfig = AsherahConfig.CreateBuilder()
     .WithVerbose(true)
     .Build();
 
-Asherah.Setup(verboseConfig);
-Asherah.EncryptString("partition-5", "with-log-hook");
-Asherah.Shutdown();
+AsherahApi.Setup(verboseConfig);
+AsherahApi.EncryptString("partition-5", "with-log-hook");
+AsherahApi.Shutdown();
 Console.WriteLine($"[log] received {logEvents.Count} log events total");
-Asherah.SetLogHook(null);
+AsherahHooks.SetLogHook(null);
 
 // --- 5. Metrics hook (observability) ---
 // Receives encrypt/decrypt/store/load timings plus key cache hit/miss/stale.
 
 var metricCounts = new System.Collections.Concurrent.ConcurrentDictionary<MetricsEventType, int>();
-Asherah.SetMetricsHook(e =>
+AsherahHooks.SetMetricsHook(e =>
 {
     metricCounts.AddOrUpdate(e.Type, 1, (_, c) => c + 1);
 });
 
-Asherah.Setup(config);
+AsherahApi.Setup(config);
 for (int i = 0; i < 5; i++)
 {
-    var ct = Asherah.EncryptString("metrics-test", $"payload-{i}");
-    Asherah.DecryptString("metrics-test", ct);
+    var ct = AsherahApi.EncryptString("metrics-test", $"payload-{i}");
+    AsherahApi.DecryptString("metrics-test", ct);
 }
-Asherah.Shutdown();
+AsherahApi.Shutdown();
 Console.WriteLine($"[metrics] {string.Join(", ", metricCounts.Select(kv => $"{kv.Key}={kv.Value}"))}");
-Asherah.SetMetricsHook(null);
+AsherahHooks.SetMetricsHook(null);
 
 // --- 6. Production config (uncomment and fill in real values) ---
 //

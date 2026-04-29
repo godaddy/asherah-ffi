@@ -82,13 +82,13 @@ public class AsherahBenchmark
             }
         }
         var config = ffiBuilder.Build();
-        GoDaddy.Asherah.Encryption.Asherah.Setup(config);
+        GoDaddy.Asherah.Encryption.AsherahApi.Setup(config);
 
         _payload = new byte[PayloadSize];
         Random.Shared.NextBytes(_payload);
         if (_mode is "memory" or "hot")
         {
-            _ffiCiphertext = GoDaddy.Asherah.Encryption.Asherah.Encrypt(PartitionId, _payload);
+            _ffiCiphertext = GoDaddy.Asherah.Encryption.AsherahApi.Encrypt(PartitionId, _payload);
             _ffiPartitionPool = Array.Empty<string>();
             _ffiCiphertextPool = Array.Empty<byte[]>();
         }
@@ -101,7 +101,7 @@ public class AsherahBenchmark
             {
                 var partition = $"bench-{_mode}-{PayloadSize}-{i}";
                 _ffiPartitionPool[i] = partition;
-                _ffiCiphertextPool[i] = GoDaddy.Asherah.Encryption.Asherah.Encrypt(partition, _payload);
+                _ffiCiphertextPool[i] = GoDaddy.Asherah.Encryption.AsherahApi.Encrypt(partition, _payload);
             }
             _ffiCiphertext = _ffiCiphertextPool[0];
             _ffiEncryptPoolIndex = 0;
@@ -110,8 +110,8 @@ public class AsherahBenchmark
 
         // Verify round-trip correctness
         var ffiDecrypted = _mode is "memory" or "hot"
-            ? GoDaddy.Asherah.Encryption.Asherah.Decrypt(PartitionId, _ffiCiphertext)
-            : GoDaddy.Asherah.Encryption.Asherah.Decrypt(_ffiPartitionPool[0], _ffiCiphertextPool[0]);
+            ? GoDaddy.Asherah.Encryption.AsherahApi.Decrypt(PartitionId, _ffiCiphertext)
+            : GoDaddy.Asherah.Encryption.AsherahApi.Decrypt(_ffiPartitionPool[0], _ffiCiphertextPool[0]);
         if (!ffiDecrypted.AsSpan().SequenceEqual(_payload))
             throw new Exception($"Rust FFI round-trip verification failed for {PayloadSize}B");
     }
@@ -119,51 +119,51 @@ public class AsherahBenchmark
     [GlobalCleanup]
     public void Cleanup()
     {
-        GoDaddy.Asherah.Encryption.Asherah.Shutdown();
+        GoDaddy.Asherah.Encryption.AsherahApi.Shutdown();
     }
 
     [Benchmark(Description = "Rust FFI (sync)"), BenchmarkCategory("Encrypt")]
     public byte[] RustFfiEncrypt()
     {
         if (_mode is "memory" or "hot")
-            return GoDaddy.Asherah.Encryption.Asherah.Encrypt(PartitionId, _payload);
+            return GoDaddy.Asherah.Encryption.AsherahApi.Encrypt(PartitionId, _payload);
 
         var idx = _ffiEncryptPoolIndex;
         _ffiEncryptPoolIndex = (_ffiEncryptPoolIndex + 1) % _ffiPartitionPool.Length;
-        return GoDaddy.Asherah.Encryption.Asherah.Encrypt(_ffiPartitionPool[idx], _payload);
+        return GoDaddy.Asherah.Encryption.AsherahApi.Encrypt(_ffiPartitionPool[idx], _payload);
     }
 
     [Benchmark(Description = "Rust FFI (async)"), BenchmarkCategory("Encrypt")]
     public async Task<byte[]> RustFfiEncryptAsync()
     {
         if (_mode is "memory" or "hot")
-            return await GoDaddy.Asherah.Encryption.Asherah.EncryptAsync(PartitionId, _payload);
+            return await GoDaddy.Asherah.Encryption.AsherahApi.EncryptAsync(PartitionId, _payload);
 
         var idx = _ffiEncryptPoolIndex;
         _ffiEncryptPoolIndex = (_ffiEncryptPoolIndex + 1) % _ffiPartitionPool.Length;
-        return await GoDaddy.Asherah.Encryption.Asherah.EncryptAsync(_ffiPartitionPool[idx], _payload);
+        return await GoDaddy.Asherah.Encryption.AsherahApi.EncryptAsync(_ffiPartitionPool[idx], _payload);
     }
 
     [Benchmark(Description = "Rust FFI (sync)"), BenchmarkCategory("Decrypt")]
     public byte[] RustFfiDecrypt()
     {
         if (_mode is "memory" or "hot")
-            return GoDaddy.Asherah.Encryption.Asherah.Decrypt(PartitionId, _ffiCiphertext);
+            return GoDaddy.Asherah.Encryption.AsherahApi.Decrypt(PartitionId, _ffiCiphertext);
 
         var idx = _ffiDecryptPoolIndex;
         _ffiDecryptPoolIndex = (_ffiDecryptPoolIndex + 1) % _ffiPartitionPool.Length;
-        return GoDaddy.Asherah.Encryption.Asherah.Decrypt(_ffiPartitionPool[idx], _ffiCiphertextPool[idx]);
+        return GoDaddy.Asherah.Encryption.AsherahApi.Decrypt(_ffiPartitionPool[idx], _ffiCiphertextPool[idx]);
     }
 
     [Benchmark(Description = "Rust FFI (async)"), BenchmarkCategory("Decrypt")]
     public async Task<byte[]> RustFfiDecryptAsync()
     {
         if (_mode is "memory" or "hot")
-            return await GoDaddy.Asherah.Encryption.Asherah.DecryptAsync(PartitionId, _ffiCiphertext);
+            return await GoDaddy.Asherah.Encryption.AsherahApi.DecryptAsync(PartitionId, _ffiCiphertext);
 
         var idx = _ffiDecryptPoolIndex;
         _ffiDecryptPoolIndex = (_ffiDecryptPoolIndex + 1) % _ffiPartitionPool.Length;
-        return await GoDaddy.Asherah.Encryption.Asherah.DecryptAsync(_ffiPartitionPool[idx], _ffiCiphertextPool[idx]);
+        return await GoDaddy.Asherah.Encryption.AsherahApi.DecryptAsync(_ffiPartitionPool[idx], _ffiCiphertextPool[idx]);
     }
 
     private static string ResolveMode()

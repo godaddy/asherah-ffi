@@ -144,11 +144,7 @@ public class SessionFactory : IDisposable
             _kms?.ApplyConfig(cb);
 
             var config = cb.Build();
-            // Fully qualified to disambiguate from the parent `GoDaddy.Asherah`
-            // namespace shorthand: from inside `GoDaddy.Asherah.AppEncryption`,
-            // the bare identifier `Asherah` resolves to the parent namespace
-            // first and shadows the class via a `using` directive.
-            var nativeFactory = GoDaddy.Asherah.Encryption.Asherah.FactoryFromConfig(config);
+            var nativeFactory = AsherahFactory.FromConfig(config);
             return new SessionFactory(nativeFactory);
         }
     }

@@ -3,7 +3,14 @@ using System.Threading.Tasks;
 
 namespace GoDaddy.Asherah.Encryption;
 
-public interface IAsherah
+/// <summary>
+/// DI-friendly interface mirror of <see cref="AsherahApi"/>. Inject
+/// <see cref="IAsherahApi"/> in services that want the single-shot
+/// API but need testability or DI lifetime control. The default
+/// implementation is <see cref="AsherahApiClient"/>, which forwards every
+/// call to the corresponding <see cref="AsherahApi"/> static method.
+/// </summary>
+public interface IAsherahApi
 {
     void Setup(AsherahConfig config);
     Task SetupAsync(AsherahConfig config);
