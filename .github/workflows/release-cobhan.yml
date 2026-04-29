@@ -139,8 +139,13 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Cache cargo
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+      # Split into restore + save so a flaky post-job cache save cannot
+      # mark the entire matrix entry as failed and skip `package` /
+      # `upload-release` (no release would ship). See windows-arm64
+      # incident in run 25086881584.
+      - name: Restore cargo cache
+        id: cargo-cache
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
           path: |
             ~/.cargo/registry/index/
@@ -209,6 +214,18 @@ jobs:
           RUSTFLAGS: "-C target-feature=-crt-static"
         run: |
           cargo zigbuild --release -p asherah-ffi -p asherah-java --target ${{ matrix.target }}
+
+      - name: Save cargo cache
+        if: ${{ always() && steps.cargo-cache.outputs.cache-hit != 'true' }}
+        continue-on-error: true
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ matrix.target }}-cargo-ffi-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Strip binary (Linux/macOS)
         if: matrix.os != 'windows-latest'

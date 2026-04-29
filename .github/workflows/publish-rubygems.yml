@@ -25,7 +25,11 @@ on:
 
 jobs:
   package-and-publish:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # See note in publish-nuget.yml: only auto-fire when the upstream
+    # release-cobhan run was triggered by a release event. Reruns via
+    # workflow_dispatch would otherwise re-publish "latest release"
+    # under a fresh gem version.
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release') }}
     runs-on: ubuntu-latest
     permissions:
       packages: write

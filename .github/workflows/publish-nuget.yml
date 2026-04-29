@@ -22,7 +22,13 @@ on:
 
 jobs:
   publish:
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    # workflow_run fires whenever release-cobhan completes — including
+    # workflow_dispatch reruns of the latter. Auto-firing in that case
+    # would re-publish whatever asset set is "latest" (since the dispatch
+    # ref is not a release tag) under a freshly-bumped version variable,
+    # which is not what anyone wants. Restrict auto-firing to release-event
+    # upstreams; manual workflow_dispatch on this workflow still works.
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
