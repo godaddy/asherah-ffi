@@ -145,6 +145,12 @@ pub struct AppliedConfig {
     pub verbose: bool,
     pub enable_session_caching: bool,
     pub enable_canaries: bool,
+    /// Bound for the binding-layer session cache (the per-language wrapper
+    /// cache that holds language-native session handles, separate from the
+    /// Rust core's `PolicyConfig::session_cache_max_size`). Bindings honor
+    /// this when caching their own session wrappers; defaults to 1000 to
+    /// match the core's default.
+    pub session_cache_max_size: usize,
 }
 
 use asherah::builders::{KmsConfig, MetastoreConfig, PolicyConfig, PoolConfig, ResolvedConfig};
@@ -282,6 +288,11 @@ impl ConfigOptions {
         let enable_session_caching = self.enable_session_caching.unwrap_or(true);
         let verbose = self.verbose.unwrap_or(false);
         let enable_canaries = self.enable_canaries.unwrap_or(false);
+        let session_cache_max_size = self
+            .session_cache_max_size
+            .map(|v| v as usize)
+            .filter(|v| *v > 0)
+            .unwrap_or(1000);
 
         let resolved = ResolvedConfig {
             service_name,
@@ -296,6 +307,7 @@ impl ConfigOptions {
             verbose,
             enable_session_caching,
             enable_canaries,
+            session_cache_max_size,
         };
 
         Ok((resolved, applied))

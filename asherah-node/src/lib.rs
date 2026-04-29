@@ -1,7 +1,9 @@
 #![allow(unsafe_code)]
 #![deny(clippy::all)]
+use lru::LruCache;
 use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::OnceLock;
@@ -35,9 +37,11 @@ type Session = asherah::session::PublicSession<
 
 struct GlobalState {
     factory: Factory,
-    sessions: HashMap<String, Arc<Session>>,
+    /// Bounded LRU. `LruCache.get` does move-to-MRU on hit; `LruCache.put`
+    /// evicts the LRU entry at capacity. Honors `SessionCacheMaxSize` —
+    /// previously a HashMap with `keys().next()` (random) eviction.
+    sessions: LruCache<String, Arc<Session>>,
     session_caching: bool,
-    session_cache_max: usize,
 }
 
 static STATE: Lazy<Mutex<Option<GlobalState>>> = Lazy::new(|| Mutex::new(None));
@@ -178,12 +182,13 @@ pub fn setup(config: AsherahConfig) -> Result<()> {
         ));
     }
 
-    let max_size = config.session_cache_max_size.unwrap_or(1000) as usize;
+    let cap = NonZeroUsize::new(applied.session_cache_max_size)
+        .or_else(|| NonZeroUsize::new(1000))
+        .expect("1000 is non-zero");
     *guard = Some(GlobalState {
         factory,
-        sessions: HashMap::new(),
+        sessions: LruCache::new(cap),
         session_caching: applied.enable_session_caching,
-        session_cache_max: max_size,
     });
     Ok(())
 }
@@ -214,12 +219,13 @@ pub async fn setup_async(config: AsherahConfig) -> Result<()> {
         ));
     }
 
-    let max_size = config.session_cache_max_size.unwrap_or(1000) as usize;
+    let cap = NonZeroUsize::new(applied.session_cache_max_size)
+        .or_else(|| NonZeroUsize::new(1000))
+        .expect("1000 is non-zero");
     *guard = Some(GlobalState {
         factory,
-        sessions: HashMap::new(),
+        sessions: LruCache::new(cap),
         session_caching: applied.enable_session_caching,
-        session_cache_max: max_size,
     });
     Ok(())
 }
@@ -228,7 +234,7 @@ pub async fn setup_async(config: AsherahConfig) -> Result<()> {
 pub fn shutdown() -> Result<()> {
     let mut guard = STATE.lock();
     if let Some(mut state) = guard.take() {
-        for (_, session) in state.sessions.drain() {
+        while let Some((_, session)) = state.sessions.pop_lru() {
             drop(session.close());
         }
         state
@@ -261,18 +267,17 @@ fn with_session<R>(partition_id: &str, fcall: impl FnOnce(&Session) -> Result<R>
             .ok_or_else(|| Error::from_reason("asherah not configured; call setup() first"))?;
 
         if state.session_caching {
-            session_arc = state
-                .sessions
-                .entry(partition_id.to_string())
-                .or_insert_with(|| Arc::new(state.factory.get_session(partition_id)))
-                .clone();
-
-            // Evict oldest if over limit (simple eviction: remove arbitrary entry)
-            while state.sessions.len() > state.session_cache_max {
-                if let Some(key) = state.sessions.keys().next().cloned() {
-                    state.sessions.remove(&key);
-                }
-            }
+            // LruCache::get reorders to MRU on hit; put inserts and may
+            // evict the LRU at capacity. Sessions are reference-counted
+            // (Arc), so an evicted entry stays alive for any in-flight
+            // caller until they drop their clone.
+            session_arc = if let Some(existing) = state.sessions.get(partition_id) {
+                existing.clone()
+            } else {
+                let fresh = Arc::new(state.factory.get_session(partition_id));
+                state.sessions.put(partition_id.to_string(), fresh.clone());
+                fresh
+            };
         } else {
             let session = state.factory.get_session(partition_id);
             drop(guard);
@@ -303,16 +308,13 @@ fn get_session_arc(partition_id: &str) -> Result<(Arc<Session>, bool)> {
         .ok_or_else(|| Error::from_reason("asherah not configured; call setup() first"))?;
 
     if state.session_caching {
-        let session = state
-            .sessions
-            .entry(partition_id.to_string())
-            .or_insert_with(|| Arc::new(state.factory.get_session(partition_id)))
-            .clone();
-        while state.sessions.len() > state.session_cache_max {
-            if let Some(key) = state.sessions.keys().next().cloned() {
-                state.sessions.remove(&key);
-            }
-        }
+        let session = if let Some(existing) = state.sessions.get(partition_id) {
+            existing.clone()
+        } else {
+            let fresh = Arc::new(state.factory.get_session(partition_id));
+            state.sessions.put(partition_id.to_string(), fresh.clone());
+            fresh
+        };
         Ok((session, true))
     } else {
         let session = Arc::new(state.factory.get_session(partition_id));
