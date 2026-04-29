@@ -84,9 +84,15 @@ public static class AsherahApi
                 {
                     session.Dispose();
                 }
-                catch
+                catch (Exception)
                 {
-                    // ignore
+                    // Process-shutdown cleanup: swallow any individual session
+                    // disposal failure so a single bad session can't abort
+                    // teardown of the rest. ObjectDisposedException (double
+                    // dispose) and InvalidOperationException (handle in an
+                    // unexpected state) are the realistic shapes; we don't
+                    // discriminate because there's no useful recovery here
+                    // either way.
                 }
             }
 
