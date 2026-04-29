@@ -92,7 +92,7 @@ export type AsherahConfig = {
   regionMap?: Record<string, string> | null;
   /** Preferred AWS region when `regionMap` is set. */
   preferredRegion?: string | null;
-  /** AWS shared-credentials profile name (`~/.aws/config`); forwarded to the Rust aws-config loader. Same optional-string semantics as `preferredRegion`. */
+  /** AWS shared-credentials profile name (typically from `~/.aws/credentials`); forwarded to the Rust aws-config loader for KMS, DynamoDB, and Secrets Manager clients. Omit to use the default credential chain. */
   awsProfileName?: string | null;
   /** Append the AWS region as a suffix to the key ID. */
   enableRegionSuffix?: boolean | null;

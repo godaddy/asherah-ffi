@@ -555,7 +555,7 @@ mod secrets_manager_tests {
     fn make_sm_kms(endpoint: &str, secret_id: &str) -> SecretsManagerKMS<asherah::aead::AES256GCM> {
         let crypto = Arc::new(asherah::aead::AES256GCM::new());
         with_endpoint(endpoint, || {
-            SecretsManagerKMS::new(crypto, secret_id, Some("us-east-1".to_string())).unwrap()
+            SecretsManagerKMS::new(crypto, secret_id, Some("us-east-1".to_string()), None).unwrap()
         })
     }
 
@@ -624,9 +624,10 @@ mod secrets_manager_tests {
             std::env::set_var("AWS_ENDPOINT_URL", &endpoint);
             drop(guard);
         }
-        let kms = SecretsManagerKMS::new_async(crypto, &secret_id, Some("us-east-1".to_string()))
-            .await
-            .unwrap();
+        let kms =
+            SecretsManagerKMS::new_async(crypto, &secret_id, Some("us-east-1".to_string()), None)
+                .await
+                .unwrap();
 
         let original = b"async constructor test data!!!!!!";
         let encrypted = kms.encrypt_key(&(), original).unwrap();
@@ -651,6 +652,7 @@ mod secrets_manager_tests {
                     crypto,
                     "nonexistent/secret/id",
                     Some("us-east-1".to_string()),
+                    None,
                 )
             });
             let err = result

@@ -21,6 +21,7 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
         aead: Arc<A>,
         key_id: impl Into<String>,
         region: Option<String>,
+        aws_profile_name: Option<&str>,
     ) -> anyhow::Result<Self> {
         // Build a dedicated runtime to block_on AWS async calls
         // Attempt to use existing runtime when available to avoid nested-runtime issues
@@ -36,7 +37,8 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
             RegionProviderChain::default_provider()
         };
         let conf_fut = async {
-            let shared_config = crate::aws_sdk_load::load_sdk_config(region_provider, None).await;
+            let shared_config =
+                crate::aws_sdk_load::load_sdk_config(region_provider, aws_profile_name).await;
             let mut b = aws_sdk_kms::config::Builder::from(&shared_config);
             if let Ok(url) = std::env::var("AWS_ENDPOINT_URL") {
                 b = b.endpoint_url(url);
@@ -68,13 +70,15 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
         aead: Arc<A>,
         key_id: impl Into<String>,
         region: Option<String>,
+        aws_profile_name: Option<&str>,
     ) -> anyhow::Result<Self> {
         let region_provider = if let Some(r) = region {
             RegionProviderChain::first_try(Region::new(r))
         } else {
             RegionProviderChain::default_provider()
         };
-        let shared_config = crate::aws_sdk_load::load_sdk_config(region_provider, None).await;
+        let shared_config =
+            crate::aws_sdk_load::load_sdk_config(region_provider, aws_profile_name).await;
         let mut b = aws_sdk_kms::config::Builder::from(&shared_config);
         if let Ok(url) = std::env::var("AWS_ENDPOINT_URL") {
             b = b.endpoint_url(url);

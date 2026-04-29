@@ -1,5 +1,4 @@
 using System.Text.Json;
-using GoDaddy.Asherah;
 using Xunit;
 
 namespace GoDaddy.Asherah.Encryption.Tests;

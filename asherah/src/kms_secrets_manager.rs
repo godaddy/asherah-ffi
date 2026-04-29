@@ -23,16 +23,11 @@ impl<A: AEAD + Send + Sync + 'static> SecretsManagerKMS<A> {
     /// tokio runtime. The secret must be either:
     /// - A hex-encoded 32-byte key (64 hex characters) stored as SecretString, or
     /// - A raw 32-byte value stored as SecretBinary.
+    ///
+    /// `aws_profile_name` selects an aws-config named profile (typically
+    /// from `~/.aws/credentials`); pass `None` for the default credential
+    /// chain.
     pub fn new(
-        aead: Arc<A>,
-        secret_id: impl Into<String>,
-        region: Option<String>,
-    ) -> anyhow::Result<Self> {
-        Self::new_with_profile(aead, secret_id, region, None)
-    }
-
-    /// Same as [`new`](Self::new) with optional aws-config named profile.
-    pub(crate) fn new_with_profile(
         aead: Arc<A>,
         secret_id: impl Into<String>,
         region: Option<String>,
@@ -67,14 +62,6 @@ impl<A: AEAD + Send + Sync + 'static> SecretsManagerKMS<A> {
 
     /// Async constructor — fetches the secret on the caller's runtime.
     pub async fn new_async(
-        aead: Arc<A>,
-        secret_id: impl Into<String>,
-        region: Option<String>,
-    ) -> anyhow::Result<Self> {
-        Self::new_async_with_profile(aead, secret_id, region, None).await
-    }
-
-    pub(crate) async fn new_async_with_profile(
         aead: Arc<A>,
         secret_id: impl Into<String>,
         region: Option<String>,

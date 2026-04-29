@@ -53,14 +53,6 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
         aead: Arc<A>,
         key_id: String,
         region: Option<String>,
-    ) -> anyhow::Result<Self> {
-        Self::new_single_with_profile(aead, key_id, region, None)
-    }
-
-    pub(crate) fn new_single_with_profile(
-        aead: Arc<A>,
-        key_id: String,
-        region: Option<String>,
         aws_profile_name: Option<&str>,
     ) -> anyhow::Result<Self> {
         let (client, resolved_region, rt) = new_kms_client(region, aws_profile_name)?;
@@ -78,14 +70,6 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
     }
 
     pub fn new_multi(
-        aead: Arc<A>,
-        preferred: usize,
-        entries: Vec<(String, String)>,
-    ) -> anyhow::Result<Self> {
-        Self::new_multi_with_profile(aead, preferred, entries, None)
-    }
-
-    pub(crate) fn new_multi_with_profile(
         aead: Arc<A>,
         preferred: usize,
         entries: Vec<(String, String)>,
@@ -127,14 +111,6 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
         aead: Arc<A>,
         key_id: String,
         region: Option<String>,
-    ) -> anyhow::Result<Self> {
-        Self::new_single_async_with_profile(aead, key_id, region, None).await
-    }
-
-    pub(crate) async fn new_single_async_with_profile(
-        aead: Arc<A>,
-        key_id: String,
-        region: Option<String>,
         aws_profile_name: Option<&str>,
     ) -> anyhow::Result<Self> {
         let (client, resolved_region) = new_kms_client_async(region, aws_profile_name).await?;
@@ -154,14 +130,6 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
 
     /// Async constructor — multi region, loads config on caller's runtime.
     pub async fn new_multi_async(
-        aead: Arc<A>,
-        preferred: usize,
-        entries: Vec<(String, String)>,
-    ) -> anyhow::Result<Self> {
-        Self::new_multi_async_with_profile(aead, preferred, entries, None).await
-    }
-
-    pub(crate) async fn new_multi_async_with_profile(
         aead: Arc<A>,
         preferred: usize,
         entries: Vec<(String, String)>,
@@ -535,7 +503,7 @@ mod tests {
     #[test]
     fn new_multi_empty_entries_fails() {
         let aead = Arc::new(crate::aead::AES256GCM::new());
-        let result = AwsKmsEnvelope::new_multi(aead, 0, vec![]);
+        let result = AwsKmsEnvelope::new_multi(aead, 0, vec![], None);
         assert!(result.is_err());
         let msg = result.err().unwrap().to_string();
         assert!(

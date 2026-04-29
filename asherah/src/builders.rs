@@ -757,7 +757,7 @@ fn build_kms(
                     }
                     entries.push((r.clone(), k.clone()));
                 }
-                let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_multi_with_profile(
+                let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_multi(
                     crypto.clone(),
                     pref_idx,
                     entries,
@@ -768,7 +768,7 @@ fn build_kms(
                 let key_id = key_id
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("KMS_KEY_ID required for KMS=aws"))?;
-                let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_single_with_profile(
+                let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_single(
                     crypto.clone(),
                     key_id.clone(),
                     region.clone(),
@@ -780,7 +780,7 @@ fn build_kms(
         KmsConfig::SecretsManager { secret_id, region } => {
             #[cfg(feature = "secrets-manager")]
             {
-                let kms = crate::kms_secrets_manager::SecretsManagerKMS::new_with_profile(
+                let kms = crate::kms_secrets_manager::SecretsManagerKMS::new(
                     crypto.clone(),
                     secret_id.clone(),
                     region.clone(),
@@ -834,7 +834,7 @@ async fn build_kms_async(
                     }
                     entries.push((r.clone(), k.clone()));
                 }
-                let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_multi_async_with_profile(
+                let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_multi_async(
                     crypto.clone(),
                     pref_idx,
                     entries,
@@ -846,7 +846,7 @@ async fn build_kms_async(
                 let key_id = key_id
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("KMS_KEY_ID required for KMS=aws"))?;
-                let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_single_async_with_profile(
+                let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_single_async(
                     crypto.clone(),
                     key_id.clone(),
                     region.clone(),
@@ -859,7 +859,7 @@ async fn build_kms_async(
         KmsConfig::SecretsManager { secret_id, region } => {
             #[cfg(feature = "secrets-manager")]
             {
-                let kms = crate::kms_secrets_manager::SecretsManagerKMS::new_async_with_profile(
+                let kms = crate::kms_secrets_manager::SecretsManagerKMS::new_async(
                     crypto.clone(),
                     secret_id.clone(),
                     region.clone(),
