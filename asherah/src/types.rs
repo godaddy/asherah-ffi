@@ -408,11 +408,30 @@ mod tests {
         assert!(json.contains("\"Key\":\""), "key not base64: {json}");
     }
 
+    // Helpers: EnvelopeKeyRecord.id is `#[serde(skip)]` and intentionally does
+    // NOT round-trip through JSON. Whole-struct compares would always fail on
+    // it, so the helpers reset the deserialized id to match the source. Every
+    // other field is checked via the derived PartialEq, which catches any
+    // future serializer/parser divergence — including fields the original
+    // tests skipped (parent_key_meta.created, etc.).
+    fn ekr_for_compare(mut got: EnvelopeKeyRecord, want_id: &str) -> EnvelopeKeyRecord {
+        got.id = want_id.into();
+        got
+    }
+
+    fn drr_for_compare(mut got: DataRowRecord, want: &DataRowRecord) -> DataRowRecord {
+        if let (Some(g), Some(w)) = (got.key.as_mut(), want.key.as_ref()) {
+            g.id = w.id.clone();
+        }
+        got
+    }
+
     #[test]
     fn envelope_key_record_to_json_fast_matches_serde() {
-        // Verify that to_json_fast produces JSON that serde_json can parse
-        // to the same value. Any divergence would silently break round-trips
-        // between the encrypt (fast path) and decrypt (serde path) code.
+        // Verify that to_json_fast produces JSON that serde_json parses to the
+        // same struct. Any divergence (including in fields the field-by-field
+        // tests skipped, e.g. parent_key_meta.created) would silently break
+        // round-trips between the encrypt (fast path) and decrypt (serde path).
         let record = EnvelopeKeyRecord {
             revoked: Some(false),
             id: "test-ik-id".into(),
@@ -426,20 +445,14 @@ mod tests {
         let fast_json = record.to_json_fast();
         let from_fast: EnvelopeKeyRecord =
             serde_json::from_str(&fast_json).expect("fast JSON must parse with serde");
-        assert_eq!(from_fast.created, record.created);
-        assert_eq!(from_fast.encrypted_key, record.encrypted_key);
-        assert_eq!(from_fast.revoked, record.revoked);
-        assert_eq!(
-            from_fast.parent_key_meta.as_ref().map(|m| m.id.as_str()),
-            record.parent_key_meta.as_ref().map(|m| m.id.as_str())
-        );
+        assert_eq!(ekr_for_compare(from_fast, &record.id), record);
     }
 
     #[test]
     fn envelope_key_record_from_json_fast_matches_serde() {
-        // Verify that from_json_fast parses serde-generated JSON to the same
-        // value as serde. Mismatches here would silently corrupt key records
-        // on load from the metastore.
+        // Verify that from_json_fast parses serde-generated JSON to a struct
+        // equal to the original. Mismatches here would silently corrupt key
+        // records on load from the metastore.
         let record = EnvelopeKeyRecord {
             revoked: None,
             id: "ik-42".into(),
@@ -453,9 +466,7 @@ mod tests {
         let serde_json = serde_json::to_string(&record).expect("serde must serialize");
         let from_fast = EnvelopeKeyRecord::from_json_fast(&serde_json)
             .expect("fast parser must parse serde JSON");
-        assert_eq!(from_fast.created, record.created);
-        assert_eq!(from_fast.encrypted_key, record.encrypted_key);
-        assert_eq!(from_fast.revoked, record.revoked);
+        assert_eq!(ekr_for_compare(from_fast, &record.id), record);
     }
 
     #[test]
@@ -466,23 +477,24 @@ mod tests {
             id: "rt-key".into(),
             created: 9_999,
             encrypted_key: (0_u8..32).collect(),
-            parent_key_meta: None,
+            parent_key_meta: Some(KeyMeta {
+                id: "sk-rt".into(),
+                created: 8_888,
+            }),
         };
         let json = record.to_json_fast();
         let parsed = EnvelopeKeyRecord::from_json_fast(&json).expect("round-trip must succeed");
-        assert_eq!(parsed.created, record.created);
-        assert_eq!(parsed.encrypted_key, record.encrypted_key);
-        assert_eq!(parsed.revoked, record.revoked);
+        assert_eq!(ekr_for_compare(parsed, &record.id), record);
     }
 
     #[test]
     fn data_row_record_to_json_fast_matches_serde() {
         // asherah_encrypt_to_json uses DataRowRecord::to_json_fast to serialize;
         // asherah_decrypt_from_json uses serde_json to deserialize. Both must
-        // produce and consume compatible JSON.
+        // produce and consume compatible JSON across every field.
         let drr = DataRowRecord {
             key: Some(EnvelopeKeyRecord {
-                revoked: None,
+                revoked: Some(false),
                 id: String::new(),
                 created: 100,
                 encrypted_key: vec![0xca, 0xfe, 0xba, 0xbe],
@@ -494,14 +506,8 @@ mod tests {
             data: vec![0xde, 0xad, 0xbe, 0xef],
         };
         let fast_json = drr.to_json_fast();
-        // Decrypt path uses serde_json::from_slice; verify it can parse the
-        // JSON produced by the encrypt path's to_json_fast.
         let parsed: DataRowRecord =
             serde_json::from_str(&fast_json).expect("serde must parse fast JSON");
-        assert_eq!(parsed.data, drr.data);
-        assert_eq!(
-            parsed.key.as_ref().map(|k| k.encrypted_key.as_slice()),
-            drr.key.as_ref().map(|k| k.encrypted_key.as_slice())
-        );
+        assert_eq!(drr_for_compare(parsed, &drr), drr);
     }
 }
