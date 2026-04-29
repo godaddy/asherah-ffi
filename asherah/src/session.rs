@@ -807,7 +807,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             }
         }
         let mut drk = DrkGuard([0_u8; 32]);
-        crate::aead::fast_random_bytes(&mut drk.0);
+        crate::aead::fast_random_bytes(&mut drk.0)?;
         // Create DRK LessSafeKey once, use for both data + DRK encryption
         let drk_lsk = crate::aead::make_lsk(&drk.0).context("encrypt: failed to create DRK key")?;
         let enc_data = crate::aead::encrypt_with_lsk(data, &drk_lsk)
@@ -1194,7 +1194,7 @@ impl<
             }
         }
         let mut drk = DrkGuard([0_u8; 32]);
-        crate::aead::fast_random_bytes(&mut drk.0);
+        crate::aead::fast_random_bytes(&mut drk.0)?;
         let drk_lsk =
             crate::aead::make_lsk(&drk.0).context("encrypt_async: failed to create DRK key")?;
         let enc_data = crate::aead::encrypt_with_lsk(data, &drk_lsk)

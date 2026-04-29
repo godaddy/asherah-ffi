@@ -48,24 +48,47 @@ impl Default for AES256GCM {
 
 const GCM_NONCE_SIZE: usize = 12;
 
-// Thread-local ChaCha20Rng seeded from OsRng (avoids getrandom syscall per call)
+// Thread-local ChaCha20Rng seeded from OsRng (avoids getrandom syscall per call).
+// Initialized lazily on first use so that OsRng failure returns an error rather
+// than panicking at thread-local initialization time.
 thread_local! {
-    static FAST_RNG: RefCell<ChaCha20Rng> = RefCell::new({
-        use rand::SeedableRng;
-        ChaCha20Rng::from_os_rng()
-    });
+    static FAST_RNG: RefCell<Option<ChaCha20Rng>> = const { RefCell::new(None) };
 }
 
-/// Use the thread-local fast CSPRNG.
-#[inline(always)]
-pub fn fast_rng<R>(f: impl FnOnce(&mut ChaCha20Rng) -> R) -> R {
-    FAST_RNG.with(|cell| f(&mut cell.borrow_mut()))
+fn try_init_rng() -> Option<ChaCha20Rng> {
+    use rand::SeedableRng;
+    use rand::TryRngCore;
+    use zeroize::Zeroizing;
+    // Wrap the seed in Zeroizing so the stack copy is volatile-zeroed when
+    // this frame returns. The seed is bootstrap material for the per-thread
+    // CSPRNG; with it an attacker can reproduce every output of this
+    // ChaCha20Rng instance.
+    let mut seed: Zeroizing<<ChaCha20Rng as SeedableRng>::Seed> =
+        Zeroizing::new(Default::default());
+    rand::rngs::OsRng.try_fill_bytes(seed.as_mut()).ok()?;
+    Some(ChaCha20Rng::from_seed(*seed))
 }
 
 /// Fill a buffer with random bytes using the thread-local CSPRNG.
+/// Returns `Err` if the OS entropy source is unavailable rather than panicking.
 #[inline(always)]
-pub fn fast_random_bytes(buf: &mut [u8]) {
-    fast_rng(|rng| rng.fill_bytes(buf));
+pub fn fast_random_bytes(buf: &mut [u8]) -> anyhow::Result<()> {
+    use rand::TryRngCore;
+    FAST_RNG.with(|cell| {
+        let mut opt = cell.borrow_mut();
+        if opt.is_none() {
+            *opt = try_init_rng();
+        }
+        match opt.as_mut() {
+            Some(rng) => {
+                rng.fill_bytes(buf);
+                Ok(())
+            }
+            None => rand::rngs::OsRng
+                .try_fill_bytes(buf)
+                .map_err(|e| anyhow::anyhow!("OsRng failed: {e}")),
+        }
+    })
 }
 
 impl AeadTrait for AES256GCM {
@@ -110,7 +133,7 @@ impl AeadTrait for AES256GCM {
 #[inline(always)]
 pub fn encrypt_with_lsk(data: &[u8], key: &LessSafeKey) -> Result<Vec<u8>, anyhow::Error> {
     let mut nonce = [0_u8; GCM_NONCE_SIZE];
-    fast_random_bytes(&mut nonce);
+    fast_random_bytes(&mut nonce)?;
     let nonce_obj = Nonce::assume_unique_for_key(nonce);
     let nonce_bytes = *nonce_obj.as_ref();
     let mut in_out = Vec::with_capacity(data.len() + AES256GCM::TAG_SIZE + GCM_NONCE_SIZE);
