@@ -49,8 +49,6 @@ pub struct ConfigOptions {
     pub region_map: Option<HashMap<String, String>>,
     #[serde(rename = "PreferredRegion")]
     pub preferred_region: Option<String>,
-    /// Named AWS shared-credentials profile (`~/.aws/config`); forwarded to `aws-config` as `profile_name` when loading KMS / DynamoDB / Secrets Manager clients.
-    /// Same optional passthrough semantics as [`preferred_region`](Self::preferred_region). JSON key **`AwsProfileName`**.
     #[serde(rename = "AwsProfileName")]
     pub aws_profile_name: Option<String>,
     #[serde(rename = "EnableRegionSuffix")]
