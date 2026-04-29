@@ -36,10 +36,7 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
             RegionProviderChain::default_provider()
         };
         let conf_fut = async {
-            let shared_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-                .region(region_provider)
-                .load()
-                .await;
+            let shared_config = crate::aws_sdk_load::load_sdk_config(region_provider, None).await;
             let mut b = aws_sdk_kms::config::Builder::from(&shared_config);
             if let Ok(url) = std::env::var("AWS_ENDPOINT_URL") {
                 b = b.endpoint_url(url);
@@ -77,10 +74,7 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
         } else {
             RegionProviderChain::default_provider()
         };
-        let shared_config = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(region_provider)
-            .load()
-            .await;
+        let shared_config = crate::aws_sdk_load::load_sdk_config(region_provider, None).await;
         let mut b = aws_sdk_kms::config::Builder::from(&shared_config);
         if let Ok(url) = std::env::var("AWS_ENDPOINT_URL") {
             b = b.endpoint_url(url);

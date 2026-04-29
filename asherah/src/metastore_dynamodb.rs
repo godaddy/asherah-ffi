@@ -36,6 +36,7 @@ impl DynamoDbMetastore {
         region: Option<String>,
         endpoint: Option<String>,
         region_suffix: bool,
+        aws_profile_name: Option<&str>,
     ) -> anyhow::Result<Self> {
         let rt = tokio::runtime::Runtime::new()?;
         let region_provider = if let Some(r) = region.clone() {
@@ -44,10 +45,7 @@ impl DynamoDbMetastore {
             RegionProviderChain::default_provider()
         };
         let conf = Self::block_on_maybe(&rt, async {
-            let cfg = aws_config::defaults(aws_config::BehaviorVersion::latest())
-                .region(region_provider)
-                .load()
-                .await;
+            let cfg = crate::aws_sdk_load::load_sdk_config(region_provider, aws_profile_name).await;
             let mut b = aws_sdk_dynamodb::config::Builder::from(&cfg);
             if let Some(ref url) = endpoint {
                 b = b.endpoint_url(url);
@@ -86,7 +84,7 @@ impl DynamoDbMetastore {
             .ok()
             .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
             .unwrap_or(false);
-        Self::new_with(table, region, endpoint, with_suffix)
+        Self::new_with(table, region, endpoint, with_suffix, None)
     }
 
     /// Async constructor with explicit config — no env var reads.
@@ -95,6 +93,7 @@ impl DynamoDbMetastore {
         region: Option<String>,
         endpoint: Option<String>,
         region_suffix: bool,
+        aws_profile_name: Option<&str>,
     ) -> anyhow::Result<Self> {
         let region_provider = if let Some(r) = region.clone() {
             RegionProviderChain::first_try(Region::new(r))
@@ -102,10 +101,7 @@ impl DynamoDbMetastore {
             RegionProviderChain::default_provider()
         };
         let conf = {
-            let cfg = aws_config::defaults(aws_config::BehaviorVersion::latest())
-                .region(region_provider)
-                .load()
-                .await;
+            let cfg = crate::aws_sdk_load::load_sdk_config(region_provider, aws_profile_name).await;
             let mut b = aws_sdk_dynamodb::config::Builder::from(&cfg);
             if let Some(ref url) = endpoint {
                 b = b.endpoint_url(url);
@@ -154,7 +150,7 @@ impl DynamoDbMetastore {
             .ok()
             .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
             .unwrap_or(false);
-        Self::new_with_async(table, region, endpoint, with_suffix).await
+        Self::new_with_async(table, region, endpoint, with_suffix, None).await
     }
 
     /// Get the client for async operations. If we were constructed sync,

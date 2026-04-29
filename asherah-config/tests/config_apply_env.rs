@@ -392,6 +392,16 @@ fn test_preferred_region_set() {
     }
 }
 
+fn test_aws_profile_name_optional() {
+    let resolved = resolve(&ConfigOptions {
+        aws_profile_name: Some("prod".into()),
+        ..base_config()
+    });
+    assert_eq!(resolved.aws_profile_name.as_deref(), Some("prod"));
+
+    assert!(resolve(&base_config()).aws_profile_name.is_none());
+}
+
 fn test_replica_read_consistency_set() {
     let cfg = ConfigOptions {
         metastore: Some("rdbms".into()),
@@ -650,6 +660,10 @@ fn main() {
         test_session_caching_default_true
     );
     run_test!("test_preferred_region_set", test_preferred_region_set);
+    run_test!(
+        "test_aws_profile_name_optional",
+        test_aws_profile_name_optional
+    );
     run_test!(
         "test_replica_read_consistency_set",
         test_replica_read_consistency_set

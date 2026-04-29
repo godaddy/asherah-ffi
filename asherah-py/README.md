@@ -19,13 +19,15 @@ Requires Python ≥ 3.8.
 Two API styles are exposed; both are fully supported and produce the same
 wire format. New code should prefer the **Factory / Session API**.
 
-| Style | When to use |
-|---|---|
-| **Static / module-level** (`asherah.setup`, `asherah.encrypt_bytes`, …) | Drop-in compatibility with the canonical `godaddy/asherah-python` package. Simplest call surface. Singleton lifecycle (`setup()` once, `shutdown()` once). |
-| **Factory / Session** (`asherah.SessionFactory`, `factory.get_session(...)`) | Recommended for new code. Explicit lifecycle, no hidden singleton, multi-tenant isolation is obvious in code. Context-manager friendly. |
+
+| Style                                                                        | When to use                                                                                                                                                |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Static / module-level** (`asherah.setup`, `asherah.encrypt_bytes`, …)      | Drop-in compatibility with the canonical `godaddy/asherah-python` package. Simplest call surface. Singleton lifecycle (`setup()` once, `shutdown()` once). |
+| **Factory / Session** (`asherah.SessionFactory`, `factory.get_session(...)`) | Recommended for new code. Explicit lifecycle, no hidden singleton, multi-tenant isolation is obvious in code. Context-manager friendly.                    |
+
 
 A complete runnable example exercising both styles plus async, log hook, and
-metrics hook is in [`samples/python/sample.py`](../samples/python/sample.py).
+metrics hook is in `[samples/python/sample.py](../samples/python/sample.py)`.
 
 ## Quick start (static API)
 
@@ -69,14 +71,13 @@ with asherah.SessionFactory() as factory:
 There are two flavors of async to choose from depending on your call pattern:
 
 - **Module-level async** (`encrypt_string_async`, `decrypt_string_async`,
-  `setup_async`, `shutdown_async`) — wraps the sync calls with
-  `loop.run_in_executor`. Lowest setup, but the sync work runs on the
-  default thread pool executor.
-
+`setup_async`, `shutdown_async`) — wraps the sync calls with
+`loop.run_in_executor`. Lowest setup, but the sync work runs on the
+default thread pool executor.
 - **Session-level async** (`session.encrypt_bytes_async`,
-  `session.decrypt_bytes_async`) — true async PyO3 coroutines that run
-  on the Rust tokio runtime. The asyncio event loop is not blocked, and
-  there is no thread pool overhead.
+`session.decrypt_bytes_async`) — true async PyO3 coroutines that run
+on the Rust tokio runtime. The asyncio event loop is not blocked, and
+there is no thread pool overhead.
 
 ```python
 import asyncio
@@ -153,16 +154,18 @@ cannot be empty"). No row is ever written to the metastore under a
 degenerate partition ID.
 
 **Plaintext** to encrypt:
+
 - `None` → `TypeError` from PyO3 type conversion before any native call.
 - Empty `str` (`""`) and empty `bytes` (`b""`) are **valid** plaintexts.
-  `encrypt_string` / `encrypt_bytes` produce a real `DataRowRecord`
-  envelope; `decrypt_string` / `decrypt_bytes` return exactly `""` or
-  `b""`.
+`encrypt_string` / `encrypt_bytes` produce a real `DataRowRecord`
+envelope; `decrypt_string` / `decrypt_bytes` return exactly `""` or
+`b""`.
 
 **Ciphertext** to decrypt:
+
 - `None` → `TypeError`.
 - Empty `str` / `bytes` → exception from JSON parse (not valid
-  `DataRowRecord`).
+`DataRowRecord`).
 
 **Do not short-circuit empty plaintext encryption in caller code** —
 empty data is real data, encrypting it produces a genuine envelope, and
@@ -175,38 +178,42 @@ rationale.
 `setup()` accepts a dict (or any JSON-serializable object) using
 PascalCase keys to match the canonical Go/Java/.NET API:
 
-| Key | Type | Required | Description |
-|-----|------|----------|-------------|
-| `ServiceName` | str | yes | Service identifier for the key hierarchy. |
-| `ProductID` | str | yes | Product identifier for the key hierarchy. |
-| `Metastore` | str | yes | `"memory"`, `"rdbms"`, or `"dynamodb"`. `"memory"` is testing-only. |
-| `KMS` | str | | `"static"` (default; testing) or `"aws"`. |
-| `ConnectionString` | str | | SQL connection string for `rdbms`. |
-| `SQLMetastoreDBType` | str | | `"mysql"` or `"postgres"` (paired with `Metastore: "rdbms"`). |
-| `EnableSessionCaching` | bool | | Cache `Session` objects by partition ID. Default `True`. |
-| `SessionCacheMaxSize` | int | | Max cached sessions. Default 1000. |
-| `SessionCacheDuration` | int | | Session cache TTL in seconds. |
-| `RegionMap` | dict[str,str] | | AWS KMS multi-region key-ARN map. |
-| `PreferredRegion` | str | | Preferred region from `RegionMap`. |
-| `EnableRegionSuffix` | bool | | Append AWS region suffix to key IDs. |
-| `ExpireAfter` | int | | Intermediate-key expiration in seconds. Default 90 days. |
-| `CheckInterval` | int | | Revoke-check interval in seconds. Default 60 minutes. |
-| `DynamoDBEndpoint` | str | | DynamoDB endpoint URL (for local DynamoDB). |
-| `DynamoDBRegion` | str | | AWS region for DynamoDB. |
-| `DynamoDBTableName` | str | | DynamoDB table name. Default `EncryptionKey`. |
-| `ReplicaReadConsistency` | str | | DynamoDB consistency. |
-| `Verbose` | bool | | Emit verbose log events (use a log hook to consume). |
-| `EnableCanaries` | bool | | Enable in-memory canary buffers around plaintexts. |
+
+| Key                      | Type          | Required | Description                                                         |
+| ------------------------ | ------------- | -------- | ------------------------------------------------------------------- |
+| `ServiceName`            | str           | yes      | Service identifier for the key hierarchy.                           |
+| `ProductID`              | str           | yes      | Product identifier for the key hierarchy.                           |
+| `Metastore`              | str           | yes      | `"memory"`, `"rdbms"`, or `"dynamodb"`. `"memory"` is testing-only. |
+| `KMS`                    | str           |          | `"static"` (default; testing) or `"aws"`.                           |
+| `ConnectionString`       | str           |          | SQL connection string for `rdbms`.                                  |
+| `SQLMetastoreDBType`     | str           |          | `"mysql"` or `"postgres"` (paired with `Metastore: "rdbms"`).       |
+| `EnableSessionCaching`   | bool          |          | Cache `Session` objects by partition ID. Default `True`.            |
+| `SessionCacheMaxSize`    | int           |          | Max cached sessions. Default 1000.                                  |
+| `SessionCacheDuration`   | int           |          | Session cache TTL in seconds.                                       |
+| `RegionMap`              | dict[str,str] |          | AWS KMS multi-region key-ARN map.                                   |
+| `PreferredRegion`        | str           |          | Preferred region from `RegionMap`.                                  |
+| `EnableRegionSuffix`     | bool          |          | Append AWS region suffix to key IDs.                                |
+| `ExpireAfter`            | int           |          | Intermediate-key expiration in seconds. Default 90 days.            |
+| `CheckInterval`          | int           |          | Revoke-check interval in seconds. Default 60 minutes.               |
+| `DynamoDBEndpoint`       | str           |          | DynamoDB endpoint URL (for local DynamoDB).                         |
+| `DynamoDBRegion`         | str           |          | AWS region for DynamoDB.                                            |
+| `DynamoDBTableName`      | str           |          | DynamoDB table name. Default `EncryptionKey`.                       |
+| `ReplicaReadConsistency` | str           |          | DynamoDB consistency.                                               |
+| `Verbose`                | bool          |          | Emit verbose log events (use a log hook to consume).                |
+| `EnableCanaries`         | bool          |          | Enable in-memory canary buffers around plaintexts.                  |
+
 
 Both PascalCase and snake_case keys are accepted; PascalCase is
 canonical.
 
 ### Environment variables
 
-| Variable | Effect |
-|---|---|
-| `STATIC_MASTER_KEY_HEX` | 64 hex chars (32 bytes) for static KMS. **Testing only.** |
-| `SERVICE_NAME` / `PRODUCT_ID` / `Metastore` / `KMS` | Read by `SessionFactory()` (no-config constructor). |
+
+| Variable                                            | Effect                                                    |
+| --------------------------------------------------- | --------------------------------------------------------- |
+| `STATIC_MASTER_KEY_HEX`                             | 64 hex chars (32 bytes) for static KMS. **Testing only.** |
+| `SERVICE_NAME` / `PRODUCT_ID` / `Metastore` / `KMS` | Read by `SessionFactory()` (no-config constructor).       |
+
 
 ### AWS KMS example
 
@@ -230,10 +237,12 @@ asherah.setup({
 Native Rust implementation. Typical latencies on Apple M4 Max (in-memory
 metastore, session caching enabled, 64-byte payload):
 
-| Operation | Sync | Async (session-level, true async) |
-|-----------|------|------------------------------------|
-| Encrypt   | ~1 µs | ~37 µs |
-| Decrypt   | ~1.2 µs | ~37 µs |
+
+| Operation | Sync    | Async (session-level, true async) |
+| --------- | ------- | --------------------------------- |
+| Encrypt   | ~1 µs   | ~37 µs                            |
+| Decrypt   | ~1.2 µs | ~37 µs                            |
+
 
 Async overhead is from the asyncio event loop dispatch + GIL handoff.
 Use sync for CPU-bound batches; use async when you need non-blocking
@@ -249,60 +258,70 @@ behavior in an asyncio application.
 
 #### Lifecycle
 
-| Function | Description |
-|---|---|
-| `setup(config: dict)` | Initialize the global instance. Raises if already configured. |
-| `setup_async(config: dict)` | Async wrapper. Returns a coroutine. |
-| `shutdown()` | Tear down the global instance. Idempotent. |
-| `shutdown_async()` | Async wrapper. |
-| `get_setup_status() -> bool` | True iff `setup()` has been called and `shutdown()` has not. |
-| `setenv(env: dict)` | Apply env vars before `setup()`. Values may be `None` to delete. |
-| `version() -> str` | Package version string. |
+
+| Function                     | Description                                                      |
+| ---------------------------- | ---------------------------------------------------------------- |
+| `setup(config: dict)`        | Initialize the global instance. Raises if already configured.    |
+| `setup_async(config: dict)`  | Async wrapper. Returns a coroutine.                              |
+| `shutdown()`                 | Tear down the global instance. Idempotent.                       |
+| `shutdown_async()`           | Async wrapper.                                                   |
+| `get_setup_status() -> bool` | True iff `setup()` has been called and `shutdown()` has not.     |
+| `setenv(env: dict)`          | Apply env vars before `setup()`. Values may be `None` to delete. |
+| `version() -> str`           | Package version string.                                          |
+
 
 #### Encrypt / decrypt
 
-| Function | Param 1 | Param 2 | Returns |
-|---|---|---|---|
-| `encrypt_bytes(partition_id, data)` | `str` (non-empty) | `bytes` (empty OK) | `str` (DRR JSON) |
-| `encrypt_string(partition_id, text)` | `str` | `str` (empty OK) | `str` (DRR JSON) |
-| `decrypt_bytes(partition_id, drr)` | `str` | `str` | `bytes` |
-| `decrypt_string(partition_id, drr)` | `str` | `str` | `str` |
-| `encrypt_bytes_async(partition_id, data)` | `str` | `bytes` | `Awaitable[str]` |
-| `decrypt_bytes_async(partition_id, drr)` | `str` | `str` or `bytes` | `Awaitable[bytes]` |
-| `encrypt_string_async(partition_id, text)` | `str` | `str` | `Awaitable[str]` |
-| `decrypt_string_async(partition_id, drr)` | `str` | `str` | `Awaitable[str]` |
+
+| Function                                   | Param 1           | Param 2            | Returns            |
+| ------------------------------------------ | ----------------- | ------------------ | ------------------ |
+| `encrypt_bytes(partition_id, data)`        | `str` (non-empty) | `bytes` (empty OK) | `str` (DRR JSON)   |
+| `encrypt_string(partition_id, text)`       | `str`             | `str` (empty OK)   | `str` (DRR JSON)   |
+| `decrypt_bytes(partition_id, drr)`         | `str`             | `str`              | `bytes`            |
+| `decrypt_string(partition_id, drr)`        | `str`             | `str`              | `str`              |
+| `encrypt_bytes_async(partition_id, data)`  | `str`             | `bytes`            | `Awaitable[str]`   |
+| `decrypt_bytes_async(partition_id, drr)`   | `str`             | `str` or `bytes`   | `Awaitable[bytes]` |
+| `encrypt_string_async(partition_id, text)` | `str`             | `str`              | `Awaitable[str]`   |
+| `decrypt_string_async(partition_id, drr)`  | `str`             | `str`              | `Awaitable[str]`   |
+
 
 #### Hooks
 
-| Function | Description |
-|---|---|
-| `set_log_hook(callback)` | Register a `(event_dict) -> None` log callback. Pass `None` to deregister. |
+
+| Function                     | Description                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------ |
+| `set_log_hook(callback)`     | Register a `(event_dict) -> None` log callback. Pass `None` to deregister.     |
 | `set_metrics_hook(callback)` | Register a `(event_dict) -> None` metrics callback. Pass `None` to deregister. |
+
 
 ### Factory / Session API (recommended)
 
 #### `class SessionFactory`
 
-| Member | Description |
-|---|---|
-| `SessionFactory()` | Construct from environment variables. |
-| `SessionFactory.from_env()` | Same as `SessionFactory()` — provided for SDK parity. |
+
+| Member                              | Description                                                    |
+| ----------------------------------- | -------------------------------------------------------------- |
+| `SessionFactory()`                  | Construct from environment variables.                          |
+| `SessionFactory.from_env()`         | Same as `SessionFactory()` — provided for SDK parity.          |
 | `factory.get_session(partition_id)` | Get a per-partition `Session`. Raises on null/empty partition. |
-| `factory.close()` | Release native resources. |
-| `with SessionFactory() as factory:` | Context manager — `close()` runs on exit. |
+| `factory.close()`                   | Release native resources.                                      |
+| `with SessionFactory() as factory:` | Context manager — `close()` runs on exit.                      |
+
 
 #### `class Session`
 
-| Member | Description |
-|---|---|
-| `session.encrypt_bytes(data)` | `bytes` → DRR JSON `str`. Empty `bytes` is valid. |
-| `session.encrypt_text(text)` | `str` → DRR JSON `str`. Empty string is valid. |
-| `session.decrypt_bytes(drr)` | DRR JSON `str` → `bytes`. |
-| `session.decrypt_text(drr)` | DRR JSON `str` → `str`. |
-| `session.encrypt_bytes_async(data)` | `Awaitable[str]` — true async on tokio. |
-| `session.decrypt_bytes_async(drr)` | `Awaitable[bytes]` — true async on tokio. |
-| `session.close()` | Release native resources. |
-| `with session as ...:` | Context manager — `close()` runs on exit. |
+
+| Member                              | Description                                       |
+| ----------------------------------- | ------------------------------------------------- |
+| `session.encrypt_bytes(data)`       | `bytes` → DRR JSON `str`. Empty `bytes` is valid. |
+| `session.encrypt_text(text)`        | `str` → DRR JSON `str`. Empty string is valid.    |
+| `session.decrypt_bytes(drr)`        | DRR JSON `str` → `bytes`.                         |
+| `session.decrypt_text(drr)`         | DRR JSON `str` → `str`.                           |
+| `session.encrypt_bytes_async(data)` | `Awaitable[str]` — true async on tokio.           |
+| `session.decrypt_bytes_async(drr)`  | `Awaitable[bytes]` — true async on tokio.         |
+| `session.close()`                   | Release native resources.                         |
+| `with session as ...:`              | Context manager — `close()` runs on exit.         |
+
 
 ### Event dict shapes
 

@@ -116,6 +116,7 @@ const CONFIG_MAP = {
   KMS: 'kms',
   RegionMap: 'regionMap',
   PreferredRegion: 'preferredRegion',
+  AwsProfileName: 'awsProfileName',
   EnableRegionSuffix: 'enableRegionSuffix',
   EnableSessionCaching: 'enableSessionCaching',
   Verbose: 'verbose',

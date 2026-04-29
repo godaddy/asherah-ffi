@@ -70,6 +70,7 @@ pub struct AsherahConfig {
     pub kms: Option<String>, // "aws" | "static" | "vault" | "secrets-manager"
     pub region_map: Option<HashMap<String, String>>, // region -> arn
     pub preferred_region: Option<String>,
+    pub aws_profile_name: Option<String>,
     pub enable_region_suffix: Option<bool>,
     pub enable_session_caching: Option<bool>,
     pub replica_read_consistency: Option<String>,
@@ -123,6 +124,7 @@ fn to_config_options(cfg: &AsherahConfig) -> asherah_config::ConfigOptions {
         static_master_key_hex: cfg.static_master_key_hex.clone(),
         region_map: cfg.region_map.clone(),
         preferred_region: cfg.preferred_region.clone(),
+        aws_profile_name: cfg.aws_profile_name.clone(),
         enable_region_suffix: cfg.enable_region_suffix,
         enable_session_caching: cfg.enable_session_caching,
         verbose: cfg.verbose,

@@ -18,6 +18,7 @@
 
 pub mod aead;
 pub mod api;
+mod aws_sdk_load;
 pub mod builders;
 pub mod cache;
 pub mod config;

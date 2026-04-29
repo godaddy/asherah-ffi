@@ -201,6 +201,7 @@ SDK) — both are auto-mapped. Pass to `setup()`, `setupAsync()`, or the
 | `sessionCacheDuration` | `number` | | Session cache TTL in seconds. |
 | `regionMap` | `Record<string, string>` | | AWS KMS multi-region key ARN map. |
 | `preferredRegion` | `string` | | Preferred AWS region from `regionMap`. |
+| `awsProfileName` | `string` | | AWS shared-credentials profile name (`~/.aws/config`); forwarded to [`aws-config` `profile_name`](https://docs.rs/aws-config/latest/aws_config/struct.ConfigLoader.html#method.profile_name). Optional string, same passthrough semantics as `preferredRegion`. |
 | `enableRegionSuffix` | `boolean` | | Append AWS region suffix to key IDs. |
 | `expireAfter` | `number` | 90 days | Intermediate-key expiration in seconds. |
 | `checkInterval` | `number` | 60 minutes | Revoke-check interval in seconds. |
