@@ -69,6 +69,14 @@ public static class AsherahApi
     /// Dispose the process-global factory and any cached sessions. Safe
     /// to call when not configured (no-op).
     /// </summary>
+    /// <exception cref="AggregateException">
+    /// Thrown if one or more sessions or the factory itself failed to
+    /// dispose. Teardown completes regardless — every session is given
+    /// a chance to dispose and the factory is disposed last — and all
+    /// collected failures are reported together. Callers in host
+    /// shutdown contexts that want strictly fire-and-forget semantics
+    /// should wrap the call in a try/catch.
+    /// </exception>
     public static void Shutdown()
     {
         lock (SetupLock)
@@ -78,32 +86,61 @@ public static class AsherahApi
                 return;
             }
 
+            // Collect all disposal failures so a single bad session can't
+            // abort teardown of the rest. We still surface them via
+            // AggregateException at the end so unexpected failures (e.g.,
+            // a native crash inside a session handle release) aren't
+            // silently lost — the caller can log or escalate as they see
+            // fit, but the factory and other sessions still get disposed.
+            List<Exception>? errors = null;
+
             foreach (var session in SessionCache.Values)
             {
-                // Process-shutdown cleanup: swallow the realistic disposal
-                // failures so a single bad session can't abort teardown of
-                // the rest. ObjectDisposedException = double-dispose race;
-                // InvalidOperationException = handle in unexpected state.
-                // Anything else propagates — we don't want to hide an
-                // unexpected failure shape (e.g. AccessViolationException
-                // from native corruption) under a blanket catch.
                 try
                 {
                     session.Dispose();
                 }
                 catch (ObjectDisposedException)
                 {
-                    // Already disposed — fine, that's our intent anyway.
+                    // Double-dispose race during shutdown is expected and
+                    // matches our intent: just skip.
                 }
-                catch (InvalidOperationException)
+                catch (Exception ex)
                 {
-                    // Handle in unexpected state — skip and continue.
+                    (errors ??= new List<Exception>()).Add(ex);
                 }
             }
 
             SessionCache.Clear();
-            _sharedFactory.Dispose();
+
+            try
+            {
+                _sharedFactory.Dispose();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Already disposed — fine.
+            }
+            catch (Exception ex)
+            {
+                (errors ??= new List<Exception>()).Add(ex);
+            }
+
+            // Null out the factory regardless of dispose outcome so the
+            // process can be reconfigured via Setup() after a failed
+            // Shutdown.
             _sharedFactory = null;
+
+            if (errors is { Count: > 0 })
+            {
+                throw new AggregateException(
+                    $"AsherahApi.Shutdown completed with {errors.Count} disposal " +
+                    "failure(s). Teardown finished — the factory is gone and the " +
+                    "session cache is cleared — but one or more sessions or the " +
+                    "factory itself threw on Dispose. Inspect the inner exceptions " +
+                    "to investigate.",
+                    errors);
+            }
         }
     }
 
