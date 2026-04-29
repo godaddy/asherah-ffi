@@ -36,14 +36,27 @@ fn round_to_page_size(len: usize) -> usize {
     (len + (ps - 1)) & !(ps - 1)
 }
 
-pub fn scramble_bytes(buf: &mut [u8]) {
-    // Random overwrite is preferred over zero-fill for forensic reasons.
-    // If OsRng fails, fall back to zero-fill rather than panicking: a panic
-    // here prevents wipe/destroy from running at all, leaving key material
-    // in memory without any overwrite.
-    if OsRng.try_fill_bytes(buf).is_err() {
+/// Overwrite `buf` with random bytes from OsRng.
+///
+/// On OsRng failure, `buf` is zero-filled (so the buffer is left in a
+/// deterministic state, not partially-random / partially-undefined per
+/// `try_fill_bytes`'s contract) and an `Err` is returned. The original
+/// fall-back-and-pretend-nothing-happened behavior was unsafe for the
+/// Coffer-init and `LockedBuffer::random` call sites: a silent zero-fill
+/// of the master key would let the system keep running with cryptography
+/// reduced to a known key. Callers in destruct paths (memory about to be
+/// freed, where zero-fill is genuinely safe) can use `let _ = ...` to
+/// keep the previous best-effort semantics; crypto-critical callers must
+/// `?`-propagate.
+pub fn scramble_bytes(buf: &mut [u8]) -> Result<(), Error> {
+    if let Err(e) = OsRng.try_fill_bytes(buf) {
+        log::error!("scramble_bytes: OsRng failed: {e}; falling back to zero-fill");
         wipe_bytes(buf);
+        return Err(Error::Mem(memcall::MemError::Sys(format!(
+            "OsRng failed: {e}"
+        ))));
     }
+    Ok(())
 }
 pub fn wipe_bytes(buf: &mut [u8]) {
     for b in buf {
@@ -124,7 +137,7 @@ impl Buffer {
         let canary_len = inner_len - size;
         if canary_len > 0 {
             let canary = unsafe { std::slice::from_raw_parts_mut(inner, canary_len) };
-            scramble_bytes(canary);
+            scramble_bytes(canary)?;
             let pre_s = unsafe { std::slice::from_raw_parts_mut(pre, ps) };
             let post_s = unsafe { std::slice::from_raw_parts_mut(post, ps) };
             for (idx, slot) in pre_s.iter_mut().enumerate() {
@@ -218,7 +231,12 @@ impl Buffer {
         }
         Ok(())
     }
-    pub fn scramble(&mut self) {
+    /// Overwrite the buffer's data with OsRng bytes.
+    ///
+    /// Returns `Err` if OsRng fails. The buffer is zero-filled in that case,
+    /// so callers in destruct paths can safely `let _ = scramble()` if the
+    /// memory is about to be freed; crypto-critical callers must propagate.
+    pub fn scramble(&mut self) -> Result<(), Error> {
         scramble_bytes(self.bytes())
     }
     pub fn destroy(&mut self) -> Result<(), Error> {
@@ -344,7 +362,10 @@ impl Enclave {
         }
         let ct = encrypt(buf.as_slice(), key.bytes())?;
         buf.melt()?;
-        buf.scramble();
+        // Destruct path: best-effort scramble before destroy. On OsRng failure
+        // the buffer is zero-filled by scramble_bytes (see its docs); destroy
+        // then runs and overwrites again, so an OsRng outage here is safe.
+        drop(buf.scramble());
         buf.destroy()?;
         pool_release(key);
         Ok(Self {
@@ -424,11 +445,14 @@ impl SecureSlab {
         wipe_bytes(page.bytes());
         let slot_count = ps / SLOT_SIZE;
 
-        // Initialize Coffer: slots 0 (left) and 1 (right)
+        // Initialize Coffer: slots 0 (left) and 1 (right). Both halves are
+        // crypto-critical — they form the AES-256 master key for every
+        // Enclave seal/unseal. If OsRng fails we MUST propagate; a silent
+        // zero-fill here would let the system run with a known master key.
         let left = unsafe { std::slice::from_raw_parts_mut(base, SLOT_SIZE) };
-        scramble_bytes(left);
+        scramble_bytes(left)?;
         let right = unsafe { std::slice::from_raw_parts_mut(base.add(SLOT_SIZE), SLOT_SIZE) };
-        scramble_bytes(right);
+        scramble_bytes(right)?;
         let hr = hash(right);
         let left = unsafe { std::slice::from_raw_parts_mut(base, SLOT_SIZE) };
         for (slot, hash_byte) in left.iter_mut().zip(hr.iter()) {
@@ -513,16 +537,21 @@ impl SecureSlab {
     }
 
     /// Re-initialize Coffer with a new random key (for purge/rekey).
-    fn rekey_coffer(&mut self) {
+    ///
+    /// Returns `Err` if OsRng fails: a silent zero-fill of the master key
+    /// would silently break enclave protection for every key sealed after
+    /// the rekey. Callers (purge) propagate.
+    fn rekey_coffer(&mut self) -> Result<(), Error> {
         let left = self.slot_slice_mut(COFFER_LEFT);
-        scramble_bytes(left);
+        scramble_bytes(left)?;
         let right = self.slot_slice_mut(COFFER_RIGHT);
-        scramble_bytes(right);
+        scramble_bytes(right)?;
         let hr = hash(right);
         let left = self.slot_slice_mut(COFFER_LEFT);
         for (slot, hash_byte) in left.iter_mut().zip(hr.iter()) {
             *slot ^= hash_byte;
         }
+        Ok(())
     }
 
     /// Wipe Coffer key material (for shutdown).
@@ -725,7 +754,10 @@ impl LockedBuffer {
     }
     pub fn random(size: usize) -> Result<Self, Error> {
         let mut b = Buffer::new(size)?;
-        b.scramble();
+        // Crypto-critical: a caller asking for a "random" buffer is using it
+        // as key material. Propagate OsRng failure rather than handing back
+        // a zero-filled buffer that the caller will treat as random.
+        b.scramble()?;
         b.freeze()?;
         Ok(Self::from_buffer_owned(b))
     }
@@ -749,7 +781,7 @@ impl LockedBuffer {
     pub fn melt(&self) -> Result<(), Error> {
         self.0.lock().melt()
     }
-    pub fn scramble(&self) {
+    pub fn scramble(&self) -> Result<(), Error> {
         self.0.lock().scramble()
     }
     pub fn wipe(&self) {
@@ -806,7 +838,7 @@ pub fn purge() -> Result<(), Error> {
     {
         let mut slab = SLAB.lock();
         slab.clear_cache();
-        slab.rekey_coffer();
+        slab.rekey_coffer()?;
     }
     let snapshot = registry_flush();
     let mut op_err: Option<String> = None;

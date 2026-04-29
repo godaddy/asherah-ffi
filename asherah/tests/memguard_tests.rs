@@ -82,7 +82,7 @@ fn wipe_bytes_zeros() {
 #[test]
 fn scramble_bytes_changes_content() {
     let mut buf = [0_u8; 32];
-    memguard::scramble_bytes(&mut buf);
+    memguard::scramble_bytes(&mut buf).expect("OsRng available");
     // Extremely unlikely all 32 bytes are zero after random fill
     assert!(!buf.iter().all(|b| *b == 0), "scramble should randomize");
 }
@@ -128,7 +128,7 @@ fn buffer_scramble() {
     for b in buf.bytes().iter_mut() {
         *b = 0;
     }
-    buf.scramble();
+    buf.scramble().expect("OsRng available");
     // Should be randomized
     assert!(!buf.as_slice().iter().all(|b| *b == 0));
 }
