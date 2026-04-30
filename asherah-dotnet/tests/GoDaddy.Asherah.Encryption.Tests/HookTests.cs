@@ -1,4 +1,4 @@
-using System;
+using GoDaddy.Asherah;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
@@ -44,8 +44,8 @@ public class HookTests
         AsherahConfig.CreateBuilder()
             .WithServiceName("hook-test-svc")
             .WithProductId("hook-test-prod")
-            .WithMetastore("memory")
-            .WithKms("static")
+            .WithMetastore(MetastoreKind.Memory)
+            .WithKms(KmsKind.Static)
             .WithEnableSessionCaching(true)
             .WithVerbose(verbose)
             .Build();

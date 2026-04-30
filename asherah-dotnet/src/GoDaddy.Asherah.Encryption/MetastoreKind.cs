@@ -4,18 +4,15 @@ namespace GoDaddy.Asherah;
 
 /// <summary>
 /// Strongly-typed metastore selector for
-/// <see cref="AsherahConfig.Builder.WithMetastore(MetastoreKind)"/>.
+/// <see cref="GoDaddy.Asherah.Encryption.AsherahConfig.Builder.WithMetastore(MetastoreKind)"/>.
 ///
 /// Each value maps 1:1 to a wire string accepted by the native Rust core.
-/// Use this enum overload in new code; the
-/// <see cref="AsherahConfig.Builder.WithMetastore(string)"/> string overload
-/// is retained for source-level compatibility.
 /// </summary>
 public enum MetastoreKind
 {
     /// <summary>In-process volatile metastore. Wire value: <c>"memory"</c>. Testing only — keys do not survive process restart.</summary>
     Memory,
-    /// <summary>SQL metastore (MySQL or PostgreSQL via <see cref="AsherahConfig.Builder.WithSqlMetastoreDbType(string?)"/>). Wire value: <c>"rdbms"</c>.</summary>
+    /// <summary>SQL metastore (MySQL or PostgreSQL via <see cref="GoDaddy.Asherah.Encryption.AsherahConfig.Builder.WithConnectionString(System.String)"/>). Wire value: <c>"rdbms"</c>.</summary>
     Rdbms,
     /// <summary>AWS DynamoDB metastore. Wire value: <c>"dynamodb"</c>.</summary>
     DynamoDb,

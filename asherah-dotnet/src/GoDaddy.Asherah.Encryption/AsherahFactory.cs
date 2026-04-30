@@ -3,6 +3,10 @@ using System.Text;
 
 namespace GoDaddy.Asherah.Encryption;
 
+/// <summary>
+/// Native-backed session factory (<c>asherah_factory_*</c>). Prefer
+/// <see cref="FromConfig"/> for programmatic configuration or <see cref="FromEnv"/> for environment variables.
+/// </summary>
 public sealed class AsherahFactory : IAsherahFactory
 {
     private readonly SafeFactoryHandle _handle;
@@ -58,6 +62,10 @@ public sealed class AsherahFactory : IAsherahFactory
         return new AsherahFactory(new SafeFactoryHandle(ptr));
     }
 
+    /// <summary>
+    /// Acquires or creates an <see cref="AsherahSession"/> bound to <paramref name="partitionId"/>.
+    /// </summary>
+    /// <param name="partitionId">Logical tenant or user partition (<c>null</c> rejected).</param>
     public unsafe AsherahSession GetSession(string partitionId)
     {
         if (partitionId is null)
@@ -85,6 +93,7 @@ public sealed class AsherahFactory : IAsherahFactory
 
     IAsherahSession IAsherahFactory.GetSession(string partitionId) => GetSession(partitionId);
 
+    /// <inheritdoc />
     public void Dispose()
     {
         if (_disposed)

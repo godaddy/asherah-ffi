@@ -1,5 +1,7 @@
 using System.Text;
+using GoDaddy.Asherah;
 using GoDaddy.Asherah.Encryption;
+using Microsoft.Extensions.Logging;
 
 // Testing only — production must use AWS KMS.
 Environment.SetEnvironmentVariable("STATIC_MASTER_KEY_HEX",
@@ -8,8 +10,8 @@ Environment.SetEnvironmentVariable("STATIC_MASTER_KEY_HEX",
 var config = AsherahConfig.CreateBuilder()
     .WithServiceName("sample-service")
     .WithProductId("sample-product")
-    .WithMetastore("memory")         // testing only — use "mysql", "postgres", or "dynamodb"
-    .WithKms("static")               // testing only — use "aws" with RegionMap
+    .WithMetastore(MetastoreKind.Memory)   // testing only — use MetastoreKind.Rdbms + connection string etc. in production
+    .WithKms(KmsKind.Static)               // testing only — use KmsKind.Aws with RegionMap in production
     .WithEnableSessionCaching(true)
     .Build();
 
@@ -54,8 +56,8 @@ static async Task RunAsyncExample()
     var cfg = AsherahConfig.CreateBuilder()
         .WithServiceName("sample-service")
         .WithProductId("sample-product")
-        .WithMetastore("memory")
-        .WithKms("static")
+        .WithMetastore(MetastoreKind.Memory)
+        .WithKms(KmsKind.Static)
         .WithEnableSessionCaching(true)
         .Build();
 
@@ -85,7 +87,7 @@ static async Task RunAsyncExample()
 var logEvents = new System.Collections.Concurrent.ConcurrentBag<LogEvent>();
 AsherahHooks.SetLogHook(e =>
 {
-    if (e.Level == LogLevel.Warn || e.Level == LogLevel.Error)
+    if (e.Level == LogLevel.Warning || e.Level == LogLevel.Error)
     {
         Console.WriteLine($"[log] {e.Level}: {e.Message}");
     }
@@ -95,8 +97,8 @@ AsherahHooks.SetLogHook(e =>
 var verboseConfig = AsherahConfig.CreateBuilder()
     .WithServiceName("sample-service")
     .WithProductId("sample-product")
-    .WithMetastore("memory")
-    .WithKms("static")
+    .WithMetastore(MetastoreKind.Memory)
+    .WithKms(KmsKind.Static)
     .WithVerbose(true)
     .Build();
 
@@ -104,7 +106,7 @@ AsherahApi.Setup(verboseConfig);
 AsherahApi.EncryptString("partition-5", "with-log-hook");
 AsherahApi.Shutdown();
 Console.WriteLine($"[log] received {logEvents.Count} log events total");
-AsherahHooks.SetLogHook(null);
+AsherahHooks.SetLogHook((Action<LogEvent>?)null);
 
 // --- 5. Metrics hook (observability) ---
 // Receives encrypt/decrypt/store/load timings plus key cache hit/miss/stale.
@@ -123,16 +125,16 @@ for (int i = 0; i < 5; i++)
 }
 AsherahApi.Shutdown();
 Console.WriteLine($"[metrics] {string.Join(", ", metricCounts.Select(kv => $"{kv.Key}={kv.Value}"))}");
-AsherahHooks.SetMetricsHook(null);
+AsherahHooks.SetMetricsHook((Action<MetricsEvent>?)null);
 
 // --- 6. Production config (uncomment and fill in real values) ---
 //
 // var prodConfig = AsherahConfig.CreateBuilder()
 //     .WithServiceName("my-service")
 //     .WithProductId("my-product")
-//     .WithMetastore("mysql")
+//     .WithMetastore(MetastoreKind.Rdbms)
 //     .WithConnectionString("server=db.example.com;database=asherah;user=app;password=secret")
-//     .WithKms("aws")
+//     .WithKms(KmsKind.Aws)
 //     .WithRegionMap(new Dictionary<string, string>
 //     {
 //         ["us-west-2"] = "arn:aws:kms:us-west-2:111122223333:key/example-key-id",
@@ -140,5 +142,5 @@ AsherahHooks.SetMetricsHook(null);
 //     .WithPreferredRegion("us-west-2")
 //     .WithEnableSessionCaching(true)
 //     .WithSessionCacheMaxSize(1000)
-//     .WithSessionCacheDuration(120)
+//     .WithSessionCacheDuration(TimeSpan.FromSeconds(120))
 //     .Build();

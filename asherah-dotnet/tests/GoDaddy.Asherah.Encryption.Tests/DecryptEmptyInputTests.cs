@@ -1,4 +1,4 @@
-using System;
+using GoDaddy.Asherah;
 using System.IO;
 using System.Threading.Tasks;
 using GoDaddy.Asherah.Encryption;
@@ -41,8 +41,8 @@ public class DecryptEmptyInputTests : IDisposable
         var config = AsherahConfig.CreateBuilder()
             .WithServiceName("decrypt-empty-test-svc")
             .WithProductId("decrypt-empty-test-prod")
-            .WithMetastore("memory")
-            .WithKms("static")
+            .WithMetastore(MetastoreKind.Memory)
+            .WithKms(KmsKind.Static)
             .Build();
         _factory = AsherahFactory.FromConfig(config);
         _session = _factory.GetSession("decrypt-empty-test-partition");

@@ -7,6 +7,9 @@
 
     <!-- PackageId / assembly name default to the .csproj filename (GoDaddy.Asherah.Encryption). -->
     <Description>Asherah application-layer encryption for .NET with automatic key rotation, powered by the native Rust implementation.</Description>
+
+    <!-- Ship IntelliSense/API docs with the NuGet package. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>

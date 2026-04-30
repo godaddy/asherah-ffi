@@ -4,7 +4,7 @@ namespace GoDaddy.Asherah;
 
 /// <summary>
 /// Strongly-typed Aurora MySQL read-replica consistency selector for
-/// <see cref="AsherahConfig.Builder.WithReplicaReadConsistency(ReplicaReadConsistency?)"/>.
+/// <see cref="GoDaddy.Asherah.Encryption.AsherahConfig.Builder.WithReplicaReadConsistency(System.Nullable{ReplicaReadConsistency})"/>.
 ///
 /// Applies only when the metastore is <see cref="MetastoreKind.Rdbms"/> and
 /// the connection points at an Aurora MySQL cluster with read replicas.

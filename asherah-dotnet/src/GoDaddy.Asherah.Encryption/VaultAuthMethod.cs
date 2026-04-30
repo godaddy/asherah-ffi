@@ -4,19 +4,19 @@ namespace GoDaddy.Asherah;
 
 /// <summary>
 /// Strongly-typed HashiCorp Vault authentication method selector for
-/// <see cref="AsherahConfig.Builder.WithVaultAuthMethod(VaultAuthMethod?)"/>.
+/// <see cref="GoDaddy.Asherah.Encryption.AsherahConfig.Builder.WithVaultAuthMethod(System.Nullable{VaultAuthMethod})"/>.
 ///
-/// Applies only when <see cref="AsherahConfig.Builder.WithKms(KmsKind)"/> is
+/// Applies only when <see cref="GoDaddy.Asherah.Encryption.AsherahConfig.Builder.WithKms(KmsKind)"/> is
 /// <see cref="KmsKind.Vault"/>. If <c>VAULT_TOKEN</c> is set in the
 /// environment, token auth is used and this setting is unused.
 /// </summary>
 public enum VaultAuthMethod
 {
-    /// <summary>Kubernetes service-account JWT auth. Wire value: <c>"kubernetes"</c>. Requires <see cref="AsherahConfig.Builder.WithVaultAuthRole(string?)"/>; the JWT path defaults to the standard service-account mount but is overridable via <see cref="AsherahConfig.Builder.WithVaultK8sTokenPath(string?)"/>.</summary>
+    /// <summary>Kubernetes service-account JWT auth. Wire value: <c>"kubernetes"</c>. Requires <see cref="GoDaddy.Asherah.Encryption.AsherahConfig.Builder.WithVaultAuthRole(System.String)"/>; the JWT path defaults to the standard service-account mount but is overridable via <see cref="GoDaddy.Asherah.Encryption.AsherahConfig.Builder.WithVaultK8sTokenPath(System.String)"/>.</summary>
     Kubernetes,
-    /// <summary>AppRole auth. Wire value: <c>"approle"</c>. Requires <see cref="AsherahConfig.Builder.WithVaultApproleRoleId(string?)"/> (and optionally <see cref="AsherahConfig.Builder.WithVaultApproleSecretId(string?)"/>).</summary>
+    /// <summary>AppRole auth. Wire value: <c>"approle"</c>. Requires <see cref="GoDaddy.Asherah.Encryption.AsherahConfig.Builder.WithVaultApproleRoleId(System.String)"/> (and optionally <see cref="GoDaddy.Asherah.Encryption.AsherahConfig.Builder.WithVaultApproleSecretId(System.String)"/>).</summary>
     AppRole,
-    /// <summary>TLS client certificate auth. Wire value: <c>"cert"</c>. Requires <see cref="AsherahConfig.Builder.WithVaultClientCert(string?)"/> and <see cref="AsherahConfig.Builder.WithVaultClientKey(string?)"/>.</summary>
+    /// <summary>TLS client certificate auth. Wire value: <c>"cert"</c>. Requires <see cref="GoDaddy.Asherah.Encryption.AsherahConfig.Builder.WithVaultClientCert(System.String)"/> and <see cref="GoDaddy.Asherah.Encryption.AsherahConfig.Builder.WithVaultClientKey(System.String)"/>.</summary>
     Cert,
 }
 

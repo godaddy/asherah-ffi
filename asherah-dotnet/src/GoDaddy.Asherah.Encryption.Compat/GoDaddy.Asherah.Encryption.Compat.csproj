@@ -2,6 +2,8 @@
   <PropertyGroup>
     <!-- PackageId / assembly name default to the .csproj filename; public API namespaces remain GoDaddy.Asherah.AppEncryption.* -->
     <Description>Drop-in compatibility layer for migrating from the canonical godaddy/asherah C# SDK to the Rust-backed implementation. Provides SessionFactory builder, Session&lt;TP,TD&gt; generics, Persistence&lt;T&gt;, LanguageExt.Option&lt;T&gt; shim, and Newtonsoft.Json JObject support.</Description>
+
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>

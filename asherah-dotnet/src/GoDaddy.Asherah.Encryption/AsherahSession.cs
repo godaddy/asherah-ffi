@@ -7,6 +7,10 @@ using System.Threading.Tasks;
 
 namespace GoDaddy.Asherah.Encryption;
 
+/// <summary>
+/// FFI session handle for encrypt/decrypt in a fixed partition (<c>asherah_encrypt_to_json</c> /
+/// <c>asherah_decrypt_from_json</c> and async variants).
+/// </summary>
 public sealed class AsherahSession : IAsherahSession
 {
     private readonly SafeSessionHandle _handle;
@@ -18,6 +22,9 @@ public sealed class AsherahSession : IAsherahSession
         _handle = handle;
     }
 
+    /// <summary>
+    /// Synchronous encrypt: returns UTF-8 bytes of JSON <c>DataRowRecord</c>.
+    /// </summary>
     public unsafe byte[] EncryptBytes(byte[] plaintext)
     {
         if (plaintext is null)
@@ -47,6 +54,7 @@ public sealed class AsherahSession : IAsherahSession
         }
     }
 
+    /// <summary>Encrypts plaintext string (UTF-8) and returns JSON ciphertext string.</summary>
     public string EncryptString(string plaintext)
     {
         if (plaintext is null)
@@ -57,6 +65,10 @@ public sealed class AsherahSession : IAsherahSession
         return Encoding.UTF8.GetString(EncryptBytes(bytes));
     }
 
+    /// <summary>
+    /// Synchronous decrypt: <paramref name="ciphertextJson"/> is UTF-8 JSON envelope bytes.
+    /// Empty input throws <see cref="AsherahException"/> before FFI.
+    /// </summary>
     public unsafe byte[] DecryptBytes(byte[] ciphertextJson)
     {
         if (ciphertextJson is null)
@@ -95,6 +107,7 @@ public sealed class AsherahSession : IAsherahSession
         }
     }
 
+    /// <summary>Decrypt UTF-8 JSON envelope string back to plaintext string.</summary>
     public string DecryptString(string ciphertextJson)
     {
         if (ciphertextJson is null)
@@ -146,6 +159,7 @@ public sealed class AsherahSession : IAsherahSession
         return tcs.Task;
     }
 
+    /// <inheritdoc cref="EncryptString(string)"/>
     public async Task<string> EncryptStringAsync(string plaintext)
     {
         if (plaintext is null)
@@ -202,6 +216,7 @@ public sealed class AsherahSession : IAsherahSession
         return tcs.Task;
     }
 
+    /// <inheritdoc cref="DecryptString(string)"/>
     public async Task<string> DecryptStringAsync(string ciphertextJson)
     {
         if (ciphertextJson is null)
@@ -218,6 +233,9 @@ public sealed class AsherahSession : IAsherahSession
         return Encoding.UTF8.GetString(result);
     }
 
+    /// <summary>
+    /// Releases the native session. Waits for in-flight async operations to finish.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed)

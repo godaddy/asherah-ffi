@@ -1,11 +1,14 @@
 using System.Text.Json;
+using GoDaddy.Asherah;
+using GoDaddy.Asherah.Encryption;
 using Xunit;
 
 namespace GoDaddy.Asherah.Encryption.Tests;
 
 /// <summary>
 /// Unit tests for config serialization (native JSON contract); does not call native FFI.
-/// Optional fields use null JSON values when unset — same pattern as other builder properties.
+/// Optional fields are omitted from JSON when unset so the Rust FFI layer treats them as absent
+/// (same effect as serde <c>None</c> for optional config fields).
 /// </summary>
 public class AsherahConfigTests
 {
@@ -14,8 +17,8 @@ public class AsherahConfigTests
         var b = AsherahConfig.CreateBuilder()
             .WithServiceName("svc")
             .WithProductId("prod")
-            .WithMetastore("memory")
-            .WithKms("static");
+            .WithMetastore(MetastoreKind.Memory)
+            .WithKms(KmsKind.Static);
         configure?.Invoke(b);
         return b.Build();
     }
@@ -42,12 +45,11 @@ public class AsherahConfigTests
     }
 
     [Fact]
-    public void ToJson_AwsProfileName_IsNull_WhenUnset()
+    public void ToJson_OmitsAwsProfileName_WhenUnset()
     {
         var json = BuildMinimal().ToJson();
         using var doc = JsonDocument.Parse(json);
-        Assert.True(doc.RootElement.TryGetProperty("AwsProfileName", out var prop));
-        Assert.Equal(JsonValueKind.Null, prop.ValueKind);
+        Assert.False(doc.RootElement.TryGetProperty("AwsProfileName", out _));
     }
 
     [Fact]
@@ -61,11 +63,10 @@ public class AsherahConfigTests
     }
 
     [Fact]
-    public void ToJson_AwsProfileName_IsNull_WhenClearedWithNull()
+    public void ToJson_OmitsAwsProfileName_WhenClearedWithNull()
     {
         var json = BuildMinimal(b => b.WithAwsProfileName("staging").WithAwsProfileName(null)).ToJson();
         using var doc = JsonDocument.Parse(json);
-        Assert.True(doc.RootElement.TryGetProperty("AwsProfileName", out var prop));
-        Assert.Equal(JsonValueKind.Null, prop.ValueKind);
+        Assert.False(doc.RootElement.TryGetProperty("AwsProfileName", out _));
     }
 }

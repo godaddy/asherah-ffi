@@ -1,4 +1,5 @@
-using System;
+using GoDaddy.Asherah;
+
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
@@ -61,18 +62,18 @@ public class AsherahBenchmark
         var ffiBuilder = GoDaddy.Asherah.Encryption.AsherahConfig.CreateBuilder()
             .WithServiceName(ServiceName)
             .WithProductId(ProductId)
-            .WithKms("static")
+            .WithKms(KmsKind.Static)
             .WithEnableSessionCaching(_mode != "cold");
 
         if (_mode == "memory")
         {
-            ffiBuilder.WithMetastore("memory");
+            ffiBuilder.WithMetastore(MetastoreKind.Memory);
         }
         else
         {
             var mysqlUrl = ResolveMysqlUrl();
             ffiBuilder
-                .WithMetastore("rdbms")
+                .WithMetastore(MetastoreKind.Rdbms)
                 .WithConnectionString(mysqlUrl);
             if (_mode == "warm")
             {

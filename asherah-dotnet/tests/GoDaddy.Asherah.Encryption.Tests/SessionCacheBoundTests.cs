@@ -1,5 +1,6 @@
-using System;
 using System.Text;
+using GoDaddy.Asherah;
+using GoDaddy.Asherah.Encryption;
 using Xunit;
 
 namespace GoDaddy.Asherah.Encryption.Tests;
@@ -12,13 +13,22 @@ namespace GoDaddy.Asherah.Encryption.Tests;
 /// </summary>
 public class SessionCacheBoundTests
 {
+    static SessionCacheBoundTests()
+    {
+        Environment.SetEnvironmentVariable(
+            "STATIC_MASTER_KEY_HEX",
+            Environment.GetEnvironmentVariable("STATIC_MASTER_KEY_HEX")
+                ?? "2222222222222222222222222222222222222222222222222222222222222222");
+        TestNativeLibraryPath.EnsureConfigured();
+    }
+
     private static AsherahConfig BuildConfig(int? maxSize)
     {
         var b = AsherahConfig.CreateBuilder()
             .WithServiceName("test-svc")
             .WithProductId("test-prod")
-            .WithMetastore("memory")
-            .WithKms("static")
+            .WithMetastore(MetastoreKind.Memory)
+            .WithKms(KmsKind.Static)
             .WithEnableSessionCaching(true);
         if (maxSize is { } v)
         {
@@ -103,8 +113,8 @@ public class SessionCacheBoundTests
         var cfg = AsherahConfig.CreateBuilder()
             .WithServiceName("test-svc")
             .WithProductId("test-prod")
-            .WithMetastore("memory")
-            .WithKms("static")
+            .WithMetastore(MetastoreKind.Memory)
+            .WithKms(KmsKind.Static)
             .WithEnableSessionCaching(false)
             .Build();
         AsherahApi.Setup(cfg);

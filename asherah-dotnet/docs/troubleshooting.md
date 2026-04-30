@@ -78,13 +78,12 @@ that ID exists in your metastore.
 
 The native core rejected the supplied configuration. Common subtypes:
 
-- `Unknown metastore kind 'x'` — `WithMetastore(string)` got a value
-  that isn't `"memory"`, `"rdbms"`, `"dynamodb"`, or `"sqlite"`. Use
-  the `WithMetastore(MetastoreKind)` overload to avoid this.
+- `Unknown metastore kind 'x'` — the native core rejected the metastore selector.
+  Prefer `WithMetastore(MetastoreKind)` so only valid variants are compiled in.
 - `Unknown KMS type 'x'` — same shape. Use `WithKms(KmsKind)`.
-- `connection string required` — you set `WithMetastore("rdbms")` but
+- `connection string required` — you set `WithMetastore(MetastoreKind.Rdbms)` but
   not `WithConnectionString`.
-- `KmsKeyId or RegionMap required` — `WithKms("aws")` needs at least
+- `KmsKeyId or RegionMap required` — `WithKms(KmsKind.Aws)` needs at least
   one of the two.
 
 ## `ArgumentNullException`

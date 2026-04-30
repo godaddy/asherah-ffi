@@ -4,7 +4,7 @@ namespace GoDaddy.Asherah.Encryption;
 
 /// <summary>
 /// A structured log event delivered to a callback registered with
-/// <see cref="Asherah.SetLogHook(System.Action{LogEvent}?)"/>.
+/// <see cref="AsherahHooks.SetLogHook(System.Action{LogEvent})"/>.
 /// </summary>
 /// <param name="Level">
 /// Severity, mapped 1:1 from the underlying Rust <c>log::Level</c> onto the
