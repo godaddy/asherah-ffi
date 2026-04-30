@@ -29,6 +29,7 @@ module Asherah
       enable_region_suffix: :EnableRegionSuffix,
       region_map: :RegionMap,
       preferred_region: :PreferredRegion,
+      aws_profile_name: :AwsProfileName,
       session_cache_max_size: :SessionCacheMaxSize,
       session_cache_duration: :SessionCacheDuration,
       enable_session_caching: :EnableSessionCaching,

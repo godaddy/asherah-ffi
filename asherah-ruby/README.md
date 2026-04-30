@@ -224,6 +224,7 @@ Keys are PascalCase strings matching the Asherah configuration format:
 | `DynamoDBTableName` | `String` | No | DynamoDB table name |
 | `RegionMap` | `Hash` | No | AWS KMS region-to-ARN map |
 | `PreferredRegion` | `String` | No | Preferred AWS KMS region |
+| `AwsProfileName` | `String` | No | AWS shared-credentials profile for KMS, DynamoDB, and Secrets Manager clients (native Rust SDK) |
 | `EnableRegionSuffix` | `Boolean` | No | Append region suffix to key IDs |
 | `EnableSessionCaching` | `Boolean` | No | Enable session caching (default: true) |
 | `SessionCacheMaxSize` | `Integer` | No | Max cached sessions |
@@ -235,6 +236,8 @@ Keys are PascalCase strings matching the Asherah configuration format:
 | `PoolMaxIdle` | `Integer` | No | Max idle connections to retain (default: 2) |
 | `PoolMaxLifetime` | `Integer` | No | Max connection lifetime in seconds (default: 0 = unlimited) |
 | `PoolMaxIdleTime` | `Integer` | No | Max idle time per connection in seconds (default: 0 = unlimited) |
+
+For AWS KMS, DynamoDB, or Secrets Manager, when `AwsProfileName` is omitted the native Rust credential chain applies (including `AWS_PROFILE` and shared config under `~/.aws/`). Setting `AwsProfileName` / `aws_profile_name` selects a named profile explicitly.
 
 ### `configure` (block style)
 
@@ -252,6 +255,7 @@ Uses snake_case attribute accessors:
 | `dynamo_db_table_name` | `DynamoDBTableName` |
 | `region_map` | `RegionMap` |
 | `preferred_region` | `PreferredRegion` |
+| `aws_profile_name` | `AwsProfileName` |
 | `enable_region_suffix` | `EnableRegionSuffix` |
 | `enable_session_caching` | `EnableSessionCaching` |
 | `session_cache_max_size` | `SessionCacheMaxSize` |
