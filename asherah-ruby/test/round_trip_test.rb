@@ -438,6 +438,21 @@ class CanonicalCompatTest < Minitest::Test
     refute h.key?(:ConnectionString) # nil values excluded
   end
 
+  def test_config_aws_profile_name_maps_and_omitted_when_nil
+    config = Asherah::Config.new
+    config.service_name = "svc"
+    config.product_id = "prod"
+    config.kms = "static"
+    config.metastore = "memory"
+    config.aws_profile_name = "staging"
+    h = config.to_h
+    assert_equal "staging", h[:AwsProfileName]
+
+    config.aws_profile_name = nil
+    h_cleared = config.to_h
+    refute h_cleared.key?(:AwsProfileName)
+  end
+
   def test_config_validate_raises_on_missing_fields
     config = Asherah::Config.new
     assert_raises(Asherah::Error::ConfigError) { config.validate! }
