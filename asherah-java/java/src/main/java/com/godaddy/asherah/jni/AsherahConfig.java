@@ -22,6 +22,7 @@ public final class AsherahConfig {
   private final String staticMasterKeyHex;
   private final Map<String, String> regionMap;
   private final String preferredRegion;
+  private final String awsProfileName;
   private final Boolean enableRegionSuffix;
   private final Boolean enableSessionCaching;
   private final Boolean verbose;
@@ -62,6 +63,7 @@ public final class AsherahConfig {
     this.staticMasterKeyHex = builder.staticMasterKeyHex;
     this.regionMap = builder.regionMap;
     this.preferredRegion = builder.preferredRegion;
+    this.awsProfileName = builder.awsProfileName;
     this.enableRegionSuffix = builder.enableRegionSuffix;
     this.enableSessionCaching = builder.enableSessionCaching;
     this.verbose = builder.verbose;
@@ -104,6 +106,7 @@ public final class AsherahConfig {
     json.put("StaticMasterKeyHex", staticMasterKeyHex);
     json.put("RegionMap", regionMap == null ? null : new LinkedHashMap<>(regionMap));
     json.put("PreferredRegion", preferredRegion);
+    json.put("AwsProfileName", awsProfileName);
     json.put("EnableRegionSuffix", enableRegionSuffix);
     json.put("EnableSessionCaching", enableSessionCaching);
     json.put("Verbose", verbose);
@@ -158,6 +161,7 @@ public final class AsherahConfig {
     private String staticMasterKeyHex;
     private Map<String, String> regionMap;
     private String preferredRegion;
+    private String awsProfileName;
     private Boolean enableRegionSuffix;
     private Boolean enableSessionCaching = Boolean.TRUE;
     private Boolean verbose = Boolean.FALSE;
@@ -264,6 +268,11 @@ public final class AsherahConfig {
 
     public Builder preferredRegion(final String value) {
       this.preferredRegion = value;
+      return this;
+    }
+
+    public Builder awsProfileName(final String value) {
+      this.awsProfileName = value;
       return this;
     }
 
