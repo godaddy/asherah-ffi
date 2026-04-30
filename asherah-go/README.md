@@ -263,6 +263,7 @@ Benchmarked on Apple M4 Max, 64-byte payload, hot session cache:
 | `DynamoDBTableName` | `*string` | No | DynamoDB table name |
 | `RegionMap` | `map[string]string` | No | AWS KMS region-to-ARN map |
 | `PreferredRegion` | `*string` | No | Preferred AWS KMS region |
+| `AwsProfileName` | `*string` | No | AWS shared-credentials profile for KMS, DynamoDB, and Secrets Manager clients (native Rust SDK) |
 | `EnableRegionSuffix` | `*bool` | No | Append region suffix to key IDs |
 | `EnableSessionCaching` | `*bool` | No | Enable session caching (default: true) |
 | `SessionCacheMaxSize` | `*int` | No | Max cached sessions (default: 1000) |
@@ -274,6 +275,8 @@ Benchmarked on Apple M4 Max, 64-byte payload, hot session cache:
 | `PoolMaxIdle` | `*int` | No | Max idle connections to retain (default: 2) |
 | `PoolMaxLifetime` | `*int64` | No | Max connection lifetime in seconds (default: 0 = unlimited) |
 | `PoolMaxIdleTime` | `*int64` | No | Max idle time per connection in seconds (default: 0 = unlimited) |
+
+For AWS KMS, DynamoDB, or Secrets Manager, when `AwsProfileName` is omitted the native Rust credential chain applies (including `AWS_PROFILE` and shared config under `~/.aws/`). Setting `AwsProfileName` selects a named profile explicitly.
 
 You can also initialize from environment variables:
 

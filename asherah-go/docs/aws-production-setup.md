@@ -15,6 +15,9 @@ for the master key and **DynamoDB** for the metastore.
    in the native FFI layer via purego) reads from the standard
    credential chain. The `aws-sdk-go-v2` SDK's credential cache is
    **not** consulted.
+3. Optional: set `Config.AwsProfileName` so the Rust layer uses a named
+   profile from `~/.aws/credentials` (or config) regardless of process
+   `AWS_PROFILE`. Omit it to rely on the default chain.
 
 ## Step 1: create KMS keys
 
@@ -163,6 +166,7 @@ metastore round-trip — until expiry (default 90 days).
 
 | Setting | What it controls |
 |---|---|
+| `AwsProfileName` | Optional named profile for the Rust AWS config (KMS/DynamoDB/Secrets Manager). Omit to use the default credential chain. |
 | `DynamoDBRegion` | Endpoint region for DynamoDB SDK client. |
 | `DynamoDBSigningRegion` | SigV4 signing region. Defaults to endpoint region. |
 | `PreferredRegion` | Which entry of `RegionMap` AWS KMS uses for *new* envelope encryption. |
