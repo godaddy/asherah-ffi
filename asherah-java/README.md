@@ -227,6 +227,7 @@ All configuration is done through `AsherahConfig.builder()`:
 | `dynamoDbTableName` | `String` | No | DynamoDB table name |
 | `regionMap` | `Map<String, String>` | No | AWS KMS region-to-ARN map |
 | `preferredRegion` | `String` | No | Preferred AWS KMS region |
+| `awsProfileName` | `String` | No | AWS shared-credentials profile for KMS, DynamoDB, and Secrets Manager clients (native Rust SDK), e.g. from `~/.aws/credentials` |
 | `enableRegionSuffix` | `Boolean` | No | Append region suffix to key IDs |
 | `enableSessionCaching` | `Boolean` | No | Enable session caching (default: true) |
 | `sessionCacheMaxSize` | `Integer` | No | Max cached sessions |
@@ -239,6 +240,8 @@ All configuration is done through `AsherahConfig.builder()`:
 | `poolMaxIdle` | `Integer` | No | Max idle connections to retain (default: 2) |
 | `poolMaxLifetime` | `Long` | No | Max connection lifetime in seconds (default: 0 = unlimited) |
 | `poolMaxIdleTime` | `Long` | No | Max idle time per connection in seconds (default: 0 = unlimited) |
+
+For AWS KMS, DynamoDB, or Secrets Manager, when `awsProfileName` is omitted the native Rust credential chain applies (including `AWS_PROFILE` and shared config files under `~/.aws/`). Passing `awsProfileName(...)` selects a named profile explicitly.
 
 You can also initialize from environment variables:
 
