@@ -19,6 +19,7 @@ type Config struct {
 	KMS                    string            `json:"KMS,omitempty"`
 	RegionMap              map[string]string `json:"RegionMap,omitempty"`
 	PreferredRegion        *string           `json:"PreferredRegion,omitempty"`
+	AwsProfileName         *string           `json:"AwsProfileName,omitempty"`
 	EnableRegionSuffix     *bool             `json:"EnableRegionSuffix,omitempty"`
 	EnableSessionCaching   *bool             `json:"EnableSessionCaching,omitempty"`
 	Verbose                *bool             `json:"Verbose,omitempty"`
