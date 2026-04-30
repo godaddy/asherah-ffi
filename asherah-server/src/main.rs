@@ -47,6 +47,12 @@ struct Cli {
     #[arg(long, env = "ASHERAH_PREFERRED_REGION")]
     preferred_region: Option<String>,
 
+    /// AWS shared-credentials profile name for KMS, DynamoDB, and Secrets Manager
+    /// clients. When unset, the standard AWS credential chain (including
+    /// AWS_PROFILE) is used.
+    #[arg(long, env = "ASHERAH_AWS_PROFILE_NAME")]
+    aws_profile_name: Option<String>,
+
     /// The amount of time a key is considered valid
     #[arg(long, value_parser = parse_go_duration, env = "ASHERAH_EXPIRE_AFTER")]
     expire_after: Option<i64>,
@@ -135,6 +141,7 @@ fn cli_to_config(cli: &Cli) -> asherah_config::ConfigOptions {
         kms: Some(cli.kms.clone()),
         region_map,
         preferred_region: cli.preferred_region.clone(),
+        aws_profile_name: cli.aws_profile_name.clone(),
         expire_after: cli.expire_after,
         check_interval: cli.check_interval,
         enable_session_caching: Some(cli.enable_session_caching),
