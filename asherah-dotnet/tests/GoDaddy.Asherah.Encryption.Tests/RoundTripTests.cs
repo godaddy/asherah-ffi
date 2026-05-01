@@ -1,4 +1,5 @@
 using System;
+using GoDaddy.Asherah;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -33,8 +34,8 @@ public class RoundTripTests
         return AsherahConfig.CreateBuilder()
             .WithServiceName("test-svc")
             .WithProductId("test-prod")
-            .WithMetastore("memory")
-            .WithKms("static")
+            .WithMetastore(MetastoreKind.Memory)
+            .WithKms(KmsKind.Static)
             .WithEnableSessionCaching(sessionCaching)
             .Build();
     }
@@ -319,7 +320,7 @@ public class RoundTripTests
         Assert.Throws<InvalidOperationException>(() =>
             AsherahConfig.CreateBuilder()
                 .WithProductId("prod")
-                .WithMetastore("memory")
+                .WithMetastore(MetastoreKind.Memory)
                 .Build());
     }
 
@@ -329,7 +330,7 @@ public class RoundTripTests
         Assert.Throws<InvalidOperationException>(() =>
             AsherahConfig.CreateBuilder()
                 .WithServiceName("svc")
-                .WithMetastore("memory")
+                .WithMetastore(MetastoreKind.Memory)
                 .Build());
     }
 

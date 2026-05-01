@@ -10,15 +10,18 @@ using Xunit;
 namespace GoDaddy.Asherah.Encryption.Tests;
 
 /// <summary>
-/// Asserts that the strongly-typed enum / TimeSpan / IReadOnlyDictionary
-/// overloads on <see cref="AsherahConfig.Builder"/> produce wire JSON
-/// byte-identical to the existing string / long-seconds / IDictionary
-/// overloads they delegate to.
+/// Asserts emitted native JSON matches expected wire values when building with
+/// <see cref="TimeSpan"/> durations (truncated toward whole seconds), nullable enums,
+/// and <see cref="IReadOnlyDictionary{TKey,TValue}"/> for region maps — the shapes the FFI layer consumes.
+///
+/// Enum-only settings (e.g. <see cref="MetastoreKind"/>, <see cref="KmsKind"/>,
+/// <see cref="ReplicaReadConsistency"/>, <see cref="VaultAuthMethod"/>)
+/// are covered by explicit wire-string assertions earlier in this suite.
 ///
 /// The wire format is what the Rust core actually consumes, so a
 /// JSON-equality assertion is the strongest possible compatibility check
 /// — any divergence (typo in the wire string, conversion bug in the
-/// TimeSpan→seconds math, missing key in the dictionary copy) would
+/// TimeSpan→seconds math, wrong RegionMap wiring) would
 /// immediately surface here.
 /// </summary>
 public class BuilderEnumOverloadTests
@@ -36,8 +39,8 @@ public class BuilderEnumOverloadTests
         AsherahConfig.CreateBuilder()
             .WithServiceName("svc")
             .WithProductId("prod")
-            .WithMetastore("memory")
-            .WithKms("static");
+            .WithMetastore(MetastoreKind.Memory)
+            .WithKms(KmsKind.Static);
 
     private static void AssertJsonEqual(string a, string b)
     {
@@ -94,15 +97,11 @@ public class BuilderEnumOverloadTests
     [InlineData(MetastoreKind.Rdbms, "rdbms")]
     [InlineData(MetastoreKind.DynamoDb, "dynamodb")]
     [InlineData(MetastoreKind.Sqlite, "sqlite")]
-    public void WithMetastore_EnumOverload_MatchesStringOverload(MetastoreKind kind, string wire)
+    public void WithMetastore_SerializesExpectedWire(MetastoreKind kind, string expectedMetastore)
     {
-        var fromEnum = AsherahConfig.CreateBuilder()
-            .WithServiceName("svc").WithProductId("prod").WithKms("static")
-            .WithMetastore(kind).Build();
-        var fromString = AsherahConfig.CreateBuilder()
-            .WithServiceName("svc").WithProductId("prod").WithKms("static")
-            .WithMetastore(wire).Build();
-        AssertJsonEqual(ConfigToJson(fromEnum), ConfigToJson(fromString));
+        var cfg = BaseBuilder().WithMetastore(kind).Build();
+        using var doc = JsonDocument.Parse(ConfigToJson(cfg));
+        Assert.Equal(expectedMetastore, doc.RootElement.GetProperty("Metastore").GetString());
     }
 
     // ───── Kms ───────────────────────────────────────────────────────
@@ -112,11 +111,11 @@ public class BuilderEnumOverloadTests
     [InlineData(KmsKind.Aws, "aws")]
     [InlineData(KmsKind.SecretsManager, "secrets-manager")]
     [InlineData(KmsKind.Vault, "vault")]
-    public void WithKms_EnumOverload_MatchesStringOverload(KmsKind kind, string wire)
+    public void WithKms_SerializesExpectedWire(KmsKind kind, string expectedKms)
     {
-        var fromEnum = BaseBuilder().WithKms(kind).Build();
-        var fromString = BaseBuilder().WithKms(wire).Build();
-        AssertJsonEqual(ConfigToJson(fromEnum), ConfigToJson(fromString));
+        var cfg = BaseBuilder().WithKms(kind).Build();
+        using var doc = JsonDocument.Parse(ConfigToJson(cfg));
+        Assert.Equal(expectedKms, doc.RootElement.GetProperty("KMS").GetString());
     }
 
     // ───── ReplicaReadConsistency ────────────────────────────────────
@@ -125,12 +124,12 @@ public class BuilderEnumOverloadTests
     [InlineData(ReplicaReadConsistency.Eventual, "eventual")]
     [InlineData(ReplicaReadConsistency.Global, "global")]
     [InlineData(ReplicaReadConsistency.Session, "session")]
-    public void WithReplicaReadConsistency_EnumOverload_MatchesStringOverload(
-        ReplicaReadConsistency value, string wire)
+    public void WithReplicaReadConsistency_SerializesExpectedWire(
+        ReplicaReadConsistency value, string expectedWire)
     {
-        var fromEnum = BaseBuilder().WithReplicaReadConsistency(value).Build();
-        var fromString = BaseBuilder().WithReplicaReadConsistency(wire).Build();
-        AssertJsonEqual(ConfigToJson(fromEnum), ConfigToJson(fromString));
+        var cfg = BaseBuilder().WithReplicaReadConsistency(value).Build();
+        using var doc = JsonDocument.Parse(ConfigToJson(cfg));
+        Assert.Equal(expectedWire, doc.RootElement.GetProperty("ReplicaReadConsistency").GetString());
     }
 
     [Fact]
@@ -148,12 +147,11 @@ public class BuilderEnumOverloadTests
     [InlineData(VaultAuthMethod.Kubernetes, "kubernetes")]
     [InlineData(VaultAuthMethod.AppRole, "approle")]
     [InlineData(VaultAuthMethod.Cert, "cert")]
-    public void WithVaultAuthMethod_EnumOverload_MatchesStringOverload(
-        VaultAuthMethod value, string wire)
+    public void WithVaultAuthMethod_SerializesExpectedWire(VaultAuthMethod value, string expectedWire)
     {
-        var fromEnum = BaseBuilder().WithKms(KmsKind.Vault).WithVaultAuthMethod(value).Build();
-        var fromString = BaseBuilder().WithKms("vault").WithVaultAuthMethod(wire).Build();
-        AssertJsonEqual(ConfigToJson(fromEnum), ConfigToJson(fromString));
+        var cfg = BaseBuilder().WithKms(KmsKind.Vault).WithVaultAuthMethod(value).Build();
+        using var doc = JsonDocument.Parse(ConfigToJson(cfg));
+        Assert.Equal(expectedWire, doc.RootElement.GetProperty("VaultAuthMethod").GetString());
     }
 
     [Fact]
@@ -164,84 +162,72 @@ public class BuilderEnumOverloadTests
         AssertJsonEqual(ConfigToJson(fromEnum), ConfigToJson(fromBase));
     }
 
-    // ───── TimeSpan overloads ────────────────────────────────────────
-
-    [Fact]
-    public void WithExpireAfter_TimeSpan_MatchesSecondsOverload()
-    {
-        var fromTs = BaseBuilder().WithExpireAfter(TimeSpan.FromDays(90)).Build();
-        var fromLong = BaseBuilder().WithExpireAfter(90L * 24 * 60 * 60).Build();
-        AssertJsonEqual(ConfigToJson(fromTs), ConfigToJson(fromLong));
-    }
+    // ───── TimeSpan durations (truncated → whole-second JSON integers) ─
 
     [Fact]
     public void WithExpireAfter_NullTimeSpan_OmitsField()
     {
-        var fromTs = BaseBuilder().WithExpireAfter((TimeSpan?)null).Build();
-        var fromBase = BaseBuilder().Build();
-        AssertJsonEqual(ConfigToJson(fromTs), ConfigToJson(fromBase));
+        var cfg = BaseBuilder().WithExpireAfter((TimeSpan?)null).Build();
+        using var doc = JsonDocument.Parse(ConfigToJson(cfg));
+        Assert.False(doc.RootElement.TryGetProperty("ExpireAfter", out _));
     }
 
     [Fact]
-    public void WithExpireAfter_TimeSpan_RoundsDownToWholeSeconds()
+    public void WithExpireAfter_TruncatesSubsecond_Portions_ToWholeSecondsJson()
     {
-        // 1.5s → 1s (truncated). Verifies the (long)TotalSeconds semantics.
-        var fromTs = BaseBuilder().WithExpireAfter(TimeSpan.FromMilliseconds(1500)).Build();
-        var fromLong = BaseBuilder().WithExpireAfter(1L).Build();
-        AssertJsonEqual(ConfigToJson(fromTs), ConfigToJson(fromLong));
+        var cfg = BaseBuilder().WithExpireAfter(TimeSpan.FromMilliseconds(1500)).Build();
+        Assert.Equal(1L, cfg.ExpireAfter);
+        using var doc = JsonDocument.Parse(ConfigToJson(cfg));
+        Assert.Equal(1, doc.RootElement.GetProperty("ExpireAfter").GetInt64());
     }
 
     [Fact]
-    public void WithCheckInterval_TimeSpan_MatchesSecondsOverload()
+    public void WithCheckInterval_SerializesWholeSeconds_FromTimeSpan()
     {
-        var fromTs = BaseBuilder().WithCheckInterval(TimeSpan.FromMinutes(60)).Build();
-        var fromLong = BaseBuilder().WithCheckInterval(3600L).Build();
-        AssertJsonEqual(ConfigToJson(fromTs), ConfigToJson(fromLong));
+        var cfg = BaseBuilder().WithCheckInterval(TimeSpan.FromMinutes(60)).Build();
+        using var doc = JsonDocument.Parse(ConfigToJson(cfg));
+        Assert.Equal(3600, doc.RootElement.GetProperty("CheckInterval").GetInt64());
     }
 
     [Fact]
-    public void WithSessionCacheDuration_TimeSpan_MatchesSecondsOverload()
+    public void WithSessionCacheDuration_SerializesWholeSeconds_FromTimeSpan()
     {
-        var fromTs = BaseBuilder().WithSessionCacheDuration(TimeSpan.FromMinutes(15)).Build();
-        var fromLong = BaseBuilder().WithSessionCacheDuration(900L).Build();
-        AssertJsonEqual(ConfigToJson(fromTs), ConfigToJson(fromLong));
+        var cfg = BaseBuilder().WithSessionCacheDuration(TimeSpan.FromMinutes(15)).Build();
+        using var doc = JsonDocument.Parse(ConfigToJson(cfg));
+        Assert.Equal(900, doc.RootElement.GetProperty("SessionCacheDuration").GetInt64());
     }
 
     [Fact]
-    public void WithPoolMaxLifetime_TimeSpan_MatchesSecondsOverload()
+    public void WithPoolMaxLifetime_AndPoolMaxIdleTime_SerializeTruncatedWholeSeconds()
     {
-        var fromTs = BaseBuilder().WithPoolMaxLifetime(TimeSpan.FromMinutes(30)).Build();
-        var fromLong = BaseBuilder().WithPoolMaxLifetime(1800L).Build();
-        AssertJsonEqual(ConfigToJson(fromTs), ConfigToJson(fromLong));
+        var cfg = BaseBuilder()
+            .WithPoolMaxLifetime(TimeSpan.FromMinutes(30))
+            .WithPoolMaxIdleTime(TimeSpan.FromMinutes(5))
+            .Build();
+        using var doc = JsonDocument.Parse(ConfigToJson(cfg));
+        Assert.Equal(1800, doc.RootElement.GetProperty("PoolMaxLifetime").GetInt64());
+        Assert.Equal(300, doc.RootElement.GetProperty("PoolMaxIdleTime").GetInt64());
     }
 
-    [Fact]
-    public void WithPoolMaxIdleTime_TimeSpan_MatchesSecondsOverload()
-    {
-        var fromTs = BaseBuilder().WithPoolMaxIdleTime(TimeSpan.FromMinutes(5)).Build();
-        var fromLong = BaseBuilder().WithPoolMaxIdleTime(300L).Build();
-        AssertJsonEqual(ConfigToJson(fromTs), ConfigToJson(fromLong));
-    }
-
-    // ───── WithRegionMap IReadOnlyDictionary overload ────────────────
+    // ───── WithRegionMap (IReadOnlyDictionary) ─────────────────
 
     [Fact]
-    public void WithRegionMap_ReadOnlyDictionary_MatchesIDictionaryOverload()
+    public void WithRegionMap_Dictionary_AndImmutableDictionary_SameWireJson()
     {
         var src = new Dictionary<string, string>
         {
             ["us-east-1"] = "arn:aws:kms:us-east-1:111111111111:key/abc",
             ["us-west-2"] = "arn:aws:kms:us-west-2:111111111111:key/def",
         };
-        var fromReadOnly = BaseBuilder()
+        var fromDict = BaseBuilder()
             .WithKms(KmsKind.Aws)
-            .WithRegionMap((IReadOnlyDictionary<string, string>)src.ToImmutableDictionary())
+            .WithRegionMap(src)
             .Build();
-        var fromIDict = BaseBuilder()
-            .WithKms("aws")
-            .WithRegionMap((IDictionary<string, string>)new Dictionary<string, string>(src))
+        var fromImm = BaseBuilder()
+            .WithKms(KmsKind.Aws)
+            .WithRegionMap(src.ToImmutableDictionary())
             .Build();
-        AssertJsonEqual(ConfigToJson(fromReadOnly), ConfigToJson(fromIDict));
+        AssertJsonEqual(ConfigToJson(fromDict), ConfigToJson(fromImm));
     }
 
     [Fact]
@@ -251,23 +237,20 @@ public class BuilderEnumOverloadTests
             .WithKms(KmsKind.Aws)
             .WithRegionMap((IReadOnlyDictionary<string, string>?)null)
             .Build();
-        var fromBase = BaseBuilder().WithKms("aws").Build();
+        var fromBase = BaseBuilder().WithKms(KmsKind.Aws).Build();
         AssertJsonEqual(ConfigToJson(fromNull), ConfigToJson(fromBase));
     }
 
     [Fact]
-    public void WithRegionMap_ReadOnlyDictionary_IsCopied()
+    public void WithRegionMap_StoresReference_BuiltConfigAliasesSameInstance()
     {
-        // Mutate the source after Build(); the built config must not see it.
         var src = new Dictionary<string, string> { ["us-east-1"] = "a" };
         var built = BaseBuilder()
             .WithKms(KmsKind.Aws)
-            .WithRegionMap((IReadOnlyDictionary<string, string>)src)
+            .WithRegionMap(src)
             .Build();
-        src["us-east-1"] = "MUTATED";
-        src["us-west-2"] = "ADDED";
-        Assert.NotNull(built.RegionMap);
-        Assert.Equal("a", built.RegionMap!["us-east-1"]);
-        Assert.False(built.RegionMap.ContainsKey("us-west-2"));
+        Assert.Same(src, built.RegionMap);
+        src["us-east-1"] = "b";
+        Assert.Equal("b", built.RegionMap!["us-east-1"]);
     }
 }

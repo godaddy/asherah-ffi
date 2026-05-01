@@ -82,6 +82,7 @@ and metrics hook is in
 ## Quick start (single-shot API)
 
 ```csharp
+using GoDaddy.Asherah;
 using GoDaddy.Asherah.Encryption;
 
 Environment.SetEnvironmentVariable("STATIC_MASTER_KEY_HEX", new string('2', 64));
@@ -89,8 +90,8 @@ Environment.SetEnvironmentVariable("STATIC_MASTER_KEY_HEX", new string('2', 64))
 var config = AsherahConfig.CreateBuilder()
     .WithServiceName("my-service")
     .WithProductId("my-product")
-    .WithMetastore("memory")  // testing only — use "rdbms" or "dynamodb" in production
-    .WithKms("static")        // testing only — use "aws" in production
+    .WithMetastore(MetastoreKind.Memory)       // testing only — use MetastoreKind.* in production
+    .WithKms(KmsKind.Static)       // testing only — use KmsKind.Aws in production
     .Build();
 
 AsherahApi.Setup(config);
@@ -257,6 +258,8 @@ AsherahHooks.SetMetricsHook(evt =>
 
 // later:
 AsherahHooks.SetMetricsHook(null);   // or AsherahHooks.ClearMetricsHook();
+// If the compiler cannot pick an overload (`Meter` vs callback), use:
+// AsherahHooks.SetMetricsHook((Action<MetricsEvent>?)null);
 ```
 
 Metrics collection is enabled automatically when a hook is installed
@@ -335,8 +338,11 @@ the single-shot `AsherahApi` or the factory/session pattern above.
 
 ### Earlier preview namespace `GoDaddy.Asherah`
 
-Earlier preview builds of this package exposed types under namespace
-`GoDaddy.Asherah` and a static class also named `Asherah`. Both moved:
+Earlier preview builds exposed the singleton-style API as a static class
+named `Asherah` alongside shared enums under `GoDaddy.Asherah`. The façade
+methods live in **`GoDaddy.Asherah.Encryption`** now (`AsherahApi`, …).
+**`KmsKind`, `MetastoreKind`, … remain in `GoDaddy.Asherah`** — add the second
+`using` and keep `using GoDaddy.Asherah` for those types:
 
 ```diff
 -using GoDaddy.Asherah;
@@ -344,6 +350,7 @@ Earlier preview builds of this package exposed types under namespace
 -var ct = Asherah.EncryptString("user-42", "secret");
 -Asherah.SetLogHook(myLogger);
 -using var factory = Asherah.FactoryFromConfig(config);
++using GoDaddy.Asherah;
 +using GoDaddy.Asherah.Encryption;
 +AsherahApi.Setup(config);
 +var ct = AsherahApi.EncryptString("user-42", "secret");
@@ -355,12 +362,14 @@ Map of preview names → current names:
 
 | Preview | Current |
 |---|---|
-| `GoDaddy.Asherah` (namespace) | `GoDaddy.Asherah.Encryption` |
+| `Asherah` static class (`GoDaddy.Asherah`) | `AsherahApi`, `AsherahFactory`, `AsherahHooks`, `AsherahConfig`, … in `GoDaddy.Asherah.Encryption` |
 | `Asherah.Setup` / `Shutdown` / `Encrypt` / `Decrypt` / `SetEnv` etc. | `AsherahApi.Setup` / `Shutdown` / `Encrypt` / … |
 | `Asherah.FactoryFromConfig(config)` | `AsherahFactory.FromConfig(config)` |
 | `Asherah.FactoryFromEnv()` | `AsherahFactory.FromEnv()` |
 | `Asherah.SetLogHook` / `SetMetricsHook` / `ClearLogHook` / … | `AsherahHooks.SetLogHook` / `SetMetricsHook` / `ClearLogHook` / … |
 | `IAsherah` / `AsherahClient` | `IAsherahApi` / `AsherahApiClient` |
+
+The **`GoDaddy.Asherah` namespace is still used** for small shared types such as `KmsKind`, `MetastoreKind`, `ReplicaReadConsistency`, and `VaultAuthMethod`. Typical code uses both `using GoDaddy.Asherah;` and `using GoDaddy.Asherah.Encryption;`.
 
 ## Configuration
 
@@ -368,33 +377,80 @@ Build a config with the fluent `AsherahConfig.CreateBuilder()`. Pass it
 to `AsherahApi.Setup()`, `AsherahApi.SetupAsync()`, or
 `AsherahFactory.FromConfig()`.
 
+The tables below list every `With*` on `AsherahConfig.Builder`. For edge cases
+and wire semantics, prefer the XML docs on each member (IntelliSense).
+
+### Core
+
 | Builder method | Description |
 |---|---|
 | `WithServiceName(string)` | **Required.** Service identifier for the key hierarchy. |
 | `WithProductId(string)` | **Required.** Product identifier for the key hierarchy. |
-| `WithMetastore(string)` | **Required.** `"memory"` (testing), `"rdbms"`, or `"dynamodb"`. |
-| `WithKms(string)` | `"static"` (default; testing) or `"aws"`. |
-| `WithConnectionString(string?)` | SQL connection string for `"rdbms"`. |
-| `WithSqlMetastoreDbType(string?)` | `"mysql"` or `"postgres"`. |
+| `WithMetastore(MetastoreKind)` | **Required.** `MetastoreKind.Memory` (testing), `MetastoreKind.Rdbms` (+ `WithConnectionString`), `MetastoreKind.DynamoDb` (+ DynamoDB fields below), or `MetastoreKind.Sqlite`. |
+| `WithKms(KmsKind)` | Defaults to `KmsKind.Static` if unset. Production: `KmsKind.Aws`, `KmsKind.SecretsManager`, or `KmsKind.Vault` with the matching fields below. |
+| `WithConnectionString(string?)` | SQL connection string when metastore is `MetastoreKind.Rdbms`. MySQL vs PostgreSQL is determined by the connection string / URL form the Rust SQL driver expects — there is **no** separate `WithSqlMetastoreDbType` on this builder. |
+| `WithReplicaReadConsistency(ReplicaReadConsistency?)` | Aurora MySQL read-replica consistency when using RDBMS. |
+| `WithExpireAfter(TimeSpan?)` | Intermediate-key expiration (truncated to whole seconds on the wire). `null` omits — Rust default (~90 days). |
+| `WithCheckInterval(TimeSpan?)` | Revoke-check interval (truncated to whole seconds). `null` omits — Rust default (~60 minutes). |
+| `WithAwsProfileName(string?)` | AWS shared-credentials profile for KMS, DynamoDB, and Secrets Manager clients. |
+| `WithVerbose(bool?)` | Verbose log emission from the Rust core (still filtered by hook `minLevel` until you lower it). |
+
+### Session cache
+
+| Builder method | Description |
+|---|---|
 | `WithEnableSessionCaching(bool?)` | Cache `AsherahSession` by partition. Default `true`. |
-| `WithSessionCacheMaxSize(int?)` | Max cached sessions. Default 1000. |
-| `WithSessionCacheDuration(long?)` | Session cache TTL in seconds. |
-| `WithRegionMap(IDictionary<string,string>?)` | AWS KMS multi-region key-ARN map. |
-| `WithPreferredRegion(string?)` | Preferred AWS region from `RegionMap`. |
-| `WithAwsProfileName(string?)` | AWS shared-credentials profile name (typically from `~/.aws/credentials`) for KMS, DynamoDB, and Secrets Manager clients. |
-| `WithEnableRegionSuffix(bool?)` | Append AWS region suffix to key IDs. |
-| `WithExpireAfter(long?)` | Intermediate-key expiration in seconds. Default 90 days. |
-| `WithCheckInterval(long?)` | Revoke-check interval in seconds. Default 60 minutes. |
-| `WithDynamoDbEndpoint(string?)` | DynamoDB endpoint URL (for local DynamoDB). |
-| `WithDynamoDbRegion(string?)` | AWS region for DynamoDB. |
-| `WithDynamoDbSigningRegion(string?)` | Region used for SigV4 signing. |
-| `WithDynamoDbTableName(string?)` | DynamoDB table name. |
-| `WithReplicaReadConsistency(string?)` | Aurora MySQL replica consistency: `"eventual"`, `"global"`, or `"session"`. |
-| `WithVerbose(bool?)` | Emit verbose log events from the Rust core (use a log hook to consume). |
-| `WithPoolMaxOpen(int?)` | Max open DB connections (0 = unlimited). |
-| `WithPoolMaxIdle(int?)` | Max idle DB connections to retain. |
-| `WithPoolMaxLifetime(long?)` | Max connection lifetime in seconds (0 = unlimited). |
-| `WithPoolMaxIdleTime(long?)` | Max idle time in seconds per connection (0 = unlimited). |
+| `WithSessionCacheMaxSize(int?)` | Max cached sessions. Default 1000 in the binding when unset. |
+| `WithSessionCacheDuration(TimeSpan?)` | Session cache TTL (truncated to whole seconds). `null` omits — Rust supplies a default. |
+
+### AWS KMS (`KmsKind.Aws`)
+
+| Builder method | Description |
+|---|---|
+| `WithRegionMap(IReadOnlyDictionary<string,string>?)` | Region → KMS key ARN map. `Dictionary<,>` implements `IReadOnlyDictionary<,>`. The reference is stored; do not mutate the map after configuration if you rely on stable JSON. |
+| `WithPreferredRegion(string?)` | Active region / key choice from `RegionMap`. |
+| `WithKmsKeyId(string?)` | Single-region key id or ARN; ignored on the wire if `RegionMap` is set (map wins). |
+| `WithEnableRegionSuffix(bool?)` | Append region suffix to generated key IDs for multi-region setups. |
+
+### AWS Secrets Manager (`KmsKind.SecretsManager`)
+
+| Builder method | Description |
+|---|---|
+| `WithSecretsManagerSecretId(string?)` | Secret id for the master key material. |
+
+### DynamoDB metastore (`MetastoreKind.DynamoDb`)
+
+| Builder method | Description |
+|---|---|
+| `WithDynamoDbEndpoint(string?)` | Endpoint URL for LocalStack / local DynamoDB; omit for AWS. |
+| `WithDynamoDbRegion(string?)` | AWS region for the DynamoDB client. |
+| `WithDynamoDbSigningRegion(string?)` | SigV4 signing region (distinct from endpoint region when needed). |
+| `WithDynamoDbTableName(string?)` | Table name (`EncryptionKey` default). |
+
+### RDBMS connection pool (`MetastoreKind.Rdbms`)
+
+| Builder method | Description |
+|---|---|
+| `WithPoolMaxOpen(int?)` | Max open connections (`0` = unlimited). |
+| `WithPoolMaxIdle(int?)` | Max idle connections retained. |
+| `WithPoolMaxLifetime(TimeSpan?)` | Max connection lifetime (`TimeSpan.Zero` → `0` / Rust “unbounded”; `null` omits the JSON field). |
+| `WithPoolMaxIdleTime(TimeSpan?)` | Max idle time per connection (`TimeSpan.Zero` → unlimited in Rust convention; `null` omits). |
+
+### HashiCorp Vault KMS (`KmsKind.Vault`)
+
+| Builder method | Description |
+|---|---|
+| `WithVaultAddr(string?)` | Vault server URL. **Required** for Vault KMS. |
+| `WithVaultToken(string?)` | Pre-acquired token; when set, other Vault auth settings are skipped. |
+| `WithVaultAuthMethod(VaultAuthMethod?)` | `VaultAuthMethod.Kubernetes`, `VaultAuthMethod.AppRole`, or `VaultAuthMethod.Cert` when not using token auth. |
+| `WithVaultAuthRole(string?)` | Role for Kubernetes or AppRole auth. |
+| `WithVaultAuthMount(string?)` | Auth backend mount path; defaults follow Vault wire conventions. |
+| `WithVaultApproleRoleId(string?)` | AppRole role id. |
+| `WithVaultApproleSecretId(string?)` | AppRole secret id. |
+| `WithVaultClientCert(string?)` / `WithVaultClientKey(string?)` | PEM TLS client credential for cert auth. |
+| `WithVaultK8sTokenPath(string?)` | K8s SA JWT path override. |
+| `WithVaultTransitKey(string?)` | Transit engine key name. **Required** for Vault KMS. |
+| `WithVaultTransitMount(string?)` | Transit mount path (`transit` default). |
 
 ### Environment variables
 

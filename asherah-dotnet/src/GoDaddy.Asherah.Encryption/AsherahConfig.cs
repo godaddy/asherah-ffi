@@ -5,45 +5,131 @@ using System.Text.Json.Serialization;
 
 namespace GoDaddy.Asherah.Encryption;
 
+/// <summary>
+/// Immutable Asherah configuration snapshot produced by
+/// <see cref="Builder.Build"/>. Holds JSON wire values sent to native FFI (<see cref="ToJson"/>).
+/// Start with <see cref="CreateBuilder"/> and fluent <see cref="Builder"/> methods.
+/// </summary>
 public sealed class AsherahConfig
 {
+    /// <summary>Service identifier (JSON <c>ServiceName</c>).</summary>
     public string ServiceName { get; }
+
+    /// <summary>Product identifier (JSON <c>ProductID</c>).</summary>
     public string ProductId { get; }
+
+    /// <summary>
+    /// Intermediate-key expiration in whole seconds, or <c>null</c> to omit and use the Rust default.
+    /// Derived from fluent <see cref="Builder.WithExpireAfter"/>.
+    /// </summary>
     public long? ExpireAfter { get; }
+
+    /// <summary>
+    /// Intermediate-key revocation check interval in whole seconds; <c>null</c> omits (Rust default).
+    /// Fluent: <see cref="Builder.WithCheckInterval"/>.
+    /// </summary>
     public long? CheckInterval { get; }
+
+    /// <summary>KMS metastore discriminator string (<c>"memory"</c>, <c>"rdbms"</c>, <c>"dynamodb"</c>, <c>"sqlite"</c>).</summary>
     public string Metastore { get; }
+
+    /// <summary>RDBMS connection string when <see cref="Metastore"/> is <c>"rdbms"</c>; otherwise unused.</summary>
     public string? ConnectionString { get; }
+
+    /// <summary>Optional Aurora replica read-consistency wire value for RDBMS.</summary>
     public string? ReplicaReadConsistency { get; }
+
+    /// <summary>DynamoDB endpoint override (<c>null</c> for default AWS).</summary>
     public string? DynamoDbEndpoint { get; }
+
+    /// <summary>DynamoDB client region.</summary>
     public string? DynamoDbRegion { get; }
+
+    /// <summary>DynamoDB SigV4 signing region.</summary>
     public string? DynamoDbSigningRegion { get; }
+
+    /// <summary>DynamoDB table name.</summary>
     public string? DynamoDbTableName { get; }
+
+    /// <summary>Session cache LRU bound (<c>null</c> omit → binding applies default).</summary>
     public int? SessionCacheMaxSize { get; }
+
+    /// <summary>Session cache TTL in seconds; <c>null</c> omit.</summary>
     public long? SessionCacheDuration { get; }
+
+    /// <summary>KMS discriminator string (<c>"static"</c>, <c>"aws"</c>, <c>"secrets-manager"</c>, <c>"vault"</c>).</summary>
     public string Kms { get; }
+
+    /// <summary>AWS region→KMS ARN wire map (<c>null</c> omit). Same instance last passed to <see cref="Builder.WithRegionMap"/>.</summary>
     public IReadOnlyDictionary<string, string>? RegionMap { get; }
+
+    /// <summary>Preferred region when using <see cref="RegionMap"/>.</summary>
     public string? PreferredRegion { get; }
+
+    /// <summary>AWS shared-credentials profile applied by the Rust credential chain.</summary>
     public string? AwsProfileName { get; }
+
+    /// <summary>Whether envelope key IDs append a region suffix in multi-region setups.</summary>
     public bool? EnableRegionSuffix { get; }
+
+    /// <summary><c>false</c> disables per-process session caching in bindings that honor it.</summary>
     public bool? EnableSessionCaching { get; }
+
+    /// <summary>Verbose diagnostics from Rust (filtered by hook <c>minLevel</c> until lowered).</summary>
     public bool? Verbose { get; }
+
+    /// <summary>RDBMS pool maximum open connections; <c>0</c> unlimited.</summary>
     public int? PoolMaxOpen { get; }
+
+    /// <summary>RDBMS pool maximum idle connections.</summary>
     public int? PoolMaxIdle { get; }
+
+    /// <summary>RDBMS pool maximum connection lifetime in seconds.</summary>
     public long? PoolMaxLifetime { get; }
+
+    /// <summary>RDBMS pool idle timeout in seconds.</summary>
     public long? PoolMaxIdleTime { get; }
+
+    /// <summary>Single-region KMS key id/ARN (<c>null</c> when using <see cref="RegionMap"/> alone).</summary>
     public string? KmsKeyId { get; }
+
+    /// <summary>Secrets Manager secret containing static master material.</summary>
     public string? SecretsManagerSecretId { get; }
+
+    /// <summary>Vault listener URL (<c>http(s)://...</c>) for <c>kms=vault</c>.</summary>
     public string? VaultAddr { get; }
+
+    /// <summary>Optional pre-created Vault token; bypasses mounted auth flows when set.</summary>
     public string? VaultToken { get; }
+
+    /// <summary>Vault authentication method wire value.</summary>
     public string? VaultAuthMethod { get; }
+
+    /// <summary>Kubernetes/AppRole Vault role binding.</summary>
     public string? VaultAuthRole { get; }
+
+    /// <summary>Vault auth backend mount.</summary>
     public string? VaultAuthMount { get; }
+
+    /// <summary>AppRole role-id.</summary>
     public string? VaultApproleRoleId { get; }
+
+    /// <summary>AppRole secret-id.</summary>
     public string? VaultApproleSecretId { get; }
+
+    /// <summary>PEM client certificate for Vault cert auth.</summary>
     public string? VaultClientCert { get; }
+
+    /// <summary>PEM private key paired with <see cref="VaultClientCert"/>.</summary>
     public string? VaultClientKey { get; }
+
+    /// <summary>Path to Kubernetes service-account JWT.</summary>
     public string? VaultK8sTokenPath { get; }
+
+    /// <summary>Vault Transit wrapping key.</summary>
     public string? VaultTransitKey { get; }
+
+    /// <summary>Vault Transit engine mount (<c>null</c> → default).</summary>
     public string? VaultTransitMount { get; }
 
     private AsherahConfig(Builder builder)
@@ -62,9 +148,7 @@ public sealed class AsherahConfig
         SessionCacheMaxSize = builder.SessionCacheMaxSize;
         SessionCacheDuration = builder.SessionCacheDuration;
         Kms = builder.Kms;
-        RegionMap = builder.RegionMap == null
-            ? null
-            : new Dictionary<string, string>(builder.RegionMap);
+        RegionMap = builder.RegionMap;
         PreferredRegion = builder.PreferredRegion;
         AwsProfileName = builder.AwsProfileName;
         EnableRegionSuffix = builder.EnableRegionSuffix;
@@ -106,43 +190,52 @@ public sealed class AsherahConfig
         {
             ["ServiceName"] = ServiceName,
             ["ProductID"] = ProductId,
-            ["ExpireAfter"] = ExpireAfter,
-            ["CheckInterval"] = CheckInterval,
             ["Metastore"] = Metastore,
-            ["ConnectionString"] = ConnectionString,
-            ["ReplicaReadConsistency"] = ReplicaReadConsistency,
-            ["DynamoDBEndpoint"] = DynamoDbEndpoint,
-            ["DynamoDBRegion"] = DynamoDbRegion,
-            ["DynamoDBSigningRegion"] = DynamoDbSigningRegion,
-            ["DynamoDBTableName"] = DynamoDbTableName,
-            ["SessionCacheMaxSize"] = SessionCacheMaxSize,
-            ["SessionCacheDuration"] = SessionCacheDuration,
             ["KMS"] = Kms,
-            ["RegionMap"] = RegionMap,
-            ["PreferredRegion"] = PreferredRegion,
-            ["AwsProfileName"] = AwsProfileName,
-            ["EnableRegionSuffix"] = EnableRegionSuffix,
-            ["EnableSessionCaching"] = EnableSessionCaching,
-            ["Verbose"] = Verbose,
-            ["PoolMaxOpen"] = PoolMaxOpen,
-            ["PoolMaxIdle"] = PoolMaxIdle,
-            ["PoolMaxLifetime"] = PoolMaxLifetime,
-            ["PoolMaxIdleTime"] = PoolMaxIdleTime,
-            ["KmsKeyId"] = KmsKeyId,
-            ["SecretsManagerSecretId"] = SecretsManagerSecretId,
-            ["VaultAddr"] = VaultAddr,
-            ["VaultToken"] = VaultToken,
-            ["VaultAuthMethod"] = VaultAuthMethod,
-            ["VaultAuthRole"] = VaultAuthRole,
-            ["VaultAuthMount"] = VaultAuthMount,
-            ["VaultApproleRoleId"] = VaultApproleRoleId,
-            ["VaultApproleSecretId"] = VaultApproleSecretId,
-            ["VaultClientCert"] = VaultClientCert,
-            ["VaultClientKey"] = VaultClientKey,
-            ["VaultK8sTokenPath"] = VaultK8sTokenPath,
-            ["VaultTransitKey"] = VaultTransitKey,
-            ["VaultTransitMount"] = VaultTransitMount,
         };
+
+        void AddOptional(string key, object? value)
+        {
+            if (value is not null)
+            {
+                payload[key] = value;
+            }
+        }
+
+        AddOptional("ExpireAfter", ExpireAfter);
+        AddOptional("CheckInterval", CheckInterval);
+        AddOptional("ConnectionString", ConnectionString);
+        AddOptional("ReplicaReadConsistency", ReplicaReadConsistency);
+        AddOptional("DynamoDBEndpoint", DynamoDbEndpoint);
+        AddOptional("DynamoDBRegion", DynamoDbRegion);
+        AddOptional("DynamoDBSigningRegion", DynamoDbSigningRegion);
+        AddOptional("DynamoDBTableName", DynamoDbTableName);
+        AddOptional("SessionCacheMaxSize", SessionCacheMaxSize);
+        AddOptional("SessionCacheDuration", SessionCacheDuration);
+        AddOptional("RegionMap", RegionMap);
+        AddOptional("PreferredRegion", PreferredRegion);
+        AddOptional("AwsProfileName", AwsProfileName);
+        AddOptional("EnableRegionSuffix", EnableRegionSuffix);
+        AddOptional("EnableSessionCaching", EnableSessionCaching);
+        AddOptional("Verbose", Verbose);
+        AddOptional("PoolMaxOpen", PoolMaxOpen);
+        AddOptional("PoolMaxIdle", PoolMaxIdle);
+        AddOptional("PoolMaxLifetime", PoolMaxLifetime);
+        AddOptional("PoolMaxIdleTime", PoolMaxIdleTime);
+        AddOptional("KmsKeyId", KmsKeyId);
+        AddOptional("SecretsManagerSecretId", SecretsManagerSecretId);
+        AddOptional("VaultAddr", VaultAddr);
+        AddOptional("VaultToken", VaultToken);
+        AddOptional("VaultAuthMethod", VaultAuthMethod);
+        AddOptional("VaultAuthRole", VaultAuthRole);
+        AddOptional("VaultAuthMount", VaultAuthMount);
+        AddOptional("VaultApproleRoleId", VaultApproleRoleId);
+        AddOptional("VaultApproleSecretId", VaultApproleSecretId);
+        AddOptional("VaultClientCert", VaultClientCert);
+        AddOptional("VaultClientKey", VaultClientKey);
+        AddOptional("VaultK8sTokenPath", VaultK8sTokenPath);
+        AddOptional("VaultTransitKey", VaultTransitKey);
+        AddOptional("VaultTransitMount", VaultTransitMount);
 
         var options = new JsonSerializerOptions
         {
@@ -151,47 +244,130 @@ public sealed class AsherahConfig
         return JsonSerializer.Serialize(payload, options);
     }
 
+    /// <summary>Creates a fluent <see cref="Builder"/> for constructing an <see cref="AsherahConfig"/>.</summary>
     public static Builder CreateBuilder() => new();
 
+    /// <summary>
+    /// Mutable fluent configuration. Call <c>With*</c> methods, then <see cref="Build"/>.
+    /// Public properties mirror current values while building (mostly for diagnostics).
+    /// </summary>
     public sealed class Builder
     {
+        /// <summary>Value set by <see cref="WithServiceName"/> (required before <see cref="Build"/>).</summary>
         public string ServiceName { get; private set; } = null!;
+
+        /// <summary>Value set by <see cref="WithProductId"/>.</summary>
         public string ProductId { get; private set; } = null!;
+
+        /// <summary>Seconds value from <see cref="WithExpireAfter"/>.</summary>
         public long? ExpireAfter { get; private set; }
+
+        /// <summary>Seconds value from <see cref="WithCheckInterval"/>.</summary>
         public long? CheckInterval { get; private set; }
+
+        /// <summary>Wire metastore discriminator from <see cref="WithMetastore"/>.</summary>
         public string Metastore { get; private set; } = null!;
+
+        /// <summary>From <see cref="WithConnectionString"/>.</summary>
         public string? ConnectionString { get; private set; }
+
+        /// <summary>From <see cref="WithReplicaReadConsistency"/>.</summary>
         public string? ReplicaReadConsistency { get; private set; }
+
+        /// <summary>From <see cref="WithDynamoDbEndpoint"/>.</summary>
         public string? DynamoDbEndpoint { get; private set; }
+
+        /// <summary>From <see cref="WithDynamoDbRegion"/>.</summary>
         public string? DynamoDbRegion { get; private set; }
+
+        /// <summary>From <see cref="WithDynamoDbSigningRegion"/>.</summary>
         public string? DynamoDbSigningRegion { get; private set; }
+
+        /// <summary>From <see cref="WithDynamoDbTableName"/>.</summary>
         public string? DynamoDbTableName { get; private set; }
+
+        /// <summary>From <see cref="WithSessionCacheMaxSize"/>.</summary>
         public int? SessionCacheMaxSize { get; private set; }
+
+        /// <summary>Seconds from <see cref="WithSessionCacheDuration"/>.</summary>
         public long? SessionCacheDuration { get; private set; }
+
+        /// <summary>Wire KMS discriminator from <see cref="WithKms"/>.</summary>
         public string Kms { get; private set; } = "static";
-        public IDictionary<string, string>? RegionMap { get; private set; }
+
+        /// <summary>
+        /// Same <see cref="IReadOnlyDictionary{TKey,TValue}"/> reference last passed to <see cref="WithRegionMap"/>.
+        /// Surfaced unchanged on <see cref="AsherahConfig.RegionMap"/> after <see cref="Build"/>.
+        /// </summary>
+        public IReadOnlyDictionary<string, string>? RegionMap { get; private set; }
+
+        /// <summary>From <see cref="WithPreferredRegion"/>.</summary>
         public string? PreferredRegion { get; private set; }
+
+        /// <summary>From <see cref="WithAwsProfileName"/>.</summary>
         public string? AwsProfileName { get; private set; }
+
+        /// <summary>From <see cref="WithEnableRegionSuffix"/>.</summary>
         public bool? EnableRegionSuffix { get; private set; }
+
+        /// <summary>From <see cref="WithEnableSessionCaching"/>.</summary>
         public bool? EnableSessionCaching { get; private set; } = true;
+
+        /// <summary>From <see cref="WithVerbose"/>.</summary>
         public bool? Verbose { get; private set; } = false;
+
+        /// <summary>From <see cref="WithPoolMaxOpen"/>.</summary>
         public int? PoolMaxOpen { get; private set; }
+
+        /// <summary>From <see cref="WithPoolMaxIdle"/>.</summary>
         public int? PoolMaxIdle { get; private set; }
+
+        /// <summary>Seconds from <see cref="WithPoolMaxLifetime"/>.</summary>
         public long? PoolMaxLifetime { get; private set; }
+
+        /// <summary>Seconds from <see cref="WithPoolMaxIdleTime"/>.</summary>
         public long? PoolMaxIdleTime { get; private set; }
+
+        /// <summary>From <see cref="WithKmsKeyId"/>.</summary>
         public string? KmsKeyId { get; private set; }
+
+        /// <summary>From <see cref="WithSecretsManagerSecretId"/>.</summary>
         public string? SecretsManagerSecretId { get; private set; }
+
+        /// <summary>From <see cref="WithVaultAddr"/>.</summary>
         public string? VaultAddr { get; private set; }
+
+        /// <summary>From <see cref="WithVaultToken"/>.</summary>
         public string? VaultToken { get; private set; }
+
+        /// <summary>From <see cref="WithVaultAuthMethod"/>.</summary>
         public string? VaultAuthMethod { get; private set; }
+
+        /// <summary>From <see cref="WithVaultAuthRole"/>.</summary>
         public string? VaultAuthRole { get; private set; }
+
+        /// <summary>From <see cref="WithVaultAuthMount"/>.</summary>
         public string? VaultAuthMount { get; private set; }
+
+        /// <summary>From <see cref="WithVaultApproleRoleId"/>.</summary>
         public string? VaultApproleRoleId { get; private set; }
+
+        /// <summary>From <see cref="WithVaultApproleSecretId"/>.</summary>
         public string? VaultApproleSecretId { get; private set; }
+
+        /// <summary>From <see cref="WithVaultClientCert"/>.</summary>
         public string? VaultClientCert { get; private set; }
+
+        /// <summary>From <see cref="WithVaultClientKey"/>.</summary>
         public string? VaultClientKey { get; private set; }
+
+        /// <summary>From <see cref="WithVaultK8sTokenPath"/>.</summary>
         public string? VaultK8sTokenPath { get; private set; }
+
+        /// <summary>From <see cref="WithVaultTransitKey"/>.</summary>
         public string? VaultTransitKey { get; private set; }
+
+        /// <summary>From <see cref="WithVaultTransitMount"/>.</summary>
         public string? VaultTransitMount { get; private set; }
 
         internal Builder() {}
@@ -219,65 +395,42 @@ public sealed class AsherahConfig
         }
 
         /// <summary>
-        /// Intermediate-key expiration in seconds. After this duration a new
-        /// IK is generated on the next encrypt; old IKs remain decryptable
-        /// for revoke-checking purposes. Default: 90 days (when omitted, the
-        /// Rust core supplies the default).
+        /// Intermediate-key expiration. After this duration a new IK is generated on the next encrypt;
+        /// older IKs stay decryptable for revoke checking. Mapped to JSON as whole seconds at the FFI
+        /// boundary (<see cref="TimeSpan.TotalSeconds"/> truncated toward zero).
+        /// Pass <c>null</c> to omit the JSON field — the Rust core then applies its default (~90 days).
         /// </summary>
-        public Builder WithExpireAfter(long? seconds)
+        public Builder WithExpireAfter(TimeSpan? duration)
         {
-            ExpireAfter = seconds;
+            ExpireAfter = duration is null ? null : (long)duration.Value.TotalSeconds;
             return this;
         }
 
         /// <summary>
-        /// Intermediate-key expiration as a <see cref="TimeSpan"/>. Convenience
-        /// overload of <see cref="WithExpireAfter(long?)"/>; the value is
-        /// rounded down to whole seconds.
+        /// How often the session checks whether its cached intermediate key has been revoked.
+        /// Stored as whole seconds (truncated). Pass <c>null</c> for the Rust core default (~60 minutes).
         /// </summary>
-        public Builder WithExpireAfter(TimeSpan? duration) =>
-            WithExpireAfter(duration is null ? (long?)null : (long)duration.Value.TotalSeconds);
-
-        /// <summary>
-        /// How often the session checks whether its cached intermediate key
-        /// has been revoked, in seconds. Default: 60 minutes.
-        /// </summary>
-        public Builder WithCheckInterval(long? seconds)
+        public Builder WithCheckInterval(TimeSpan? duration)
         {
-            CheckInterval = seconds;
+            CheckInterval = duration is null ? null : (long)duration.Value.TotalSeconds;
             return this;
         }
 
         /// <summary>
-        /// Revoke-check interval as a <see cref="TimeSpan"/>. Convenience
-        /// overload of <see cref="WithCheckInterval(long?)"/>; the value is
-        /// rounded down to whole seconds.
+        /// Required. Metastore selector. Maps to the wire strings consumed by
+        /// the native core: <see cref="MetastoreKind.Memory"/> (<c>"memory"</c>),
+        /// <see cref="MetastoreKind.Rdbms"/> with <see cref="WithConnectionString"/>,
+        /// <see cref="MetastoreKind.DynamoDb"/>, or <see cref="MetastoreKind.Sqlite"/>.
         /// </summary>
-        public Builder WithCheckInterval(TimeSpan? duration) =>
-            WithCheckInterval(duration is null ? (long?)null : (long)duration.Value.TotalSeconds);
-
-        /// <summary>
-        /// Required. Metastore selector. Accepts <c>"memory"</c> (testing —
-        /// keys are lost on process restart), <c>"rdbms"</c> (MySQL or
-        /// PostgreSQL via <see cref="WithConnectionString"/>),
-        /// <c>"dynamodb"</c>, or <c>"sqlite"</c>.
-        /// </summary>
-        public Builder WithMetastore(string value)
+        public Builder WithMetastore(MetastoreKind kind)
         {
-            Metastore = value;
+            Metastore = kind.ToWireString();
             return this;
         }
 
         /// <summary>
-        /// Required. Strongly-typed metastore selector. Equivalent to
-        /// <see cref="WithMetastore(string)"/> with the wire string mapped from
-        /// <see cref="MetastoreKind"/>.
-        /// </summary>
-        public Builder WithMetastore(MetastoreKind kind) => WithMetastore(kind.ToWireString());
-
-        /// <summary>
-        /// SQL connection string for the <c>"rdbms"</c> metastore. Required
-        /// when <see cref="WithMetastore"/> is <c>"rdbms"</c>; ignored
+        /// SQL connection string for the relational metastore. Required when
+        /// the metastore selector is <see cref="MetastoreKind.Rdbms"/>; ignored
         /// otherwise. Connection-string format is the dialect's standard
         /// (e.g. <c>"mysql://user:pass@host:3306/db"</c>).
         /// </summary>
@@ -288,25 +441,15 @@ public sealed class AsherahConfig
         }
 
         /// <summary>
-        /// Aurora MySQL read-replica consistency. Accepts <c>"eventual"</c>
-        /// (default — read from the nearest replica without waiting),
-        /// <c>"global"</c> (Aurora global-database read-after-write
-        /// consistency), or <c>"session"</c> (session-level read-after-write
-        /// consistency). Ignored for non-Aurora metastores.
+        /// Aurora MySQL read-replica consistency selector. Ignored unless the metastore is
+        /// <see cref="MetastoreKind.Rdbms"/> and the connection targets Aurora MySQL with replicas.
+        /// Pass <c>null</c> to omit the JSON field so the Rust default applies.
         /// </summary>
-        public Builder WithReplicaReadConsistency(string? value)
+        public Builder WithReplicaReadConsistency(ReplicaReadConsistency? value)
         {
-            ReplicaReadConsistency = value;
+            ReplicaReadConsistency = value?.ToWireString();
             return this;
         }
-
-        /// <summary>
-        /// Strongly-typed read-replica consistency. Equivalent to
-        /// <see cref="WithReplicaReadConsistency(string?)"/> with the wire
-        /// string mapped from <see cref="GoDaddy.Asherah.ReplicaReadConsistency"/>.
-        /// </summary>
-        public Builder WithReplicaReadConsistency(ReplicaReadConsistency? value) =>
-            WithReplicaReadConsistency(value?.ToWireString());
 
         /// <summary>
         /// DynamoDB endpoint URL. Set when targeting LocalStack or local
@@ -369,65 +512,40 @@ public sealed class AsherahConfig
         }
 
         /// <summary>
-        /// Session cache TTL in seconds. After this duration a cached
-        /// session is treated as stale and recreated on the next
-        /// <c>GetSession</c> call.
+        /// Session cache TTL. Stored as whole seconds (truncated). After this duration a cached
+        /// session is treated as stale on the next <c>GetSession</c>.
+        /// Pass <c>null</c> to omit — the Rust core supplies a default TTL.
         /// </summary>
-        public Builder WithSessionCacheDuration(long? value)
+        public Builder WithSessionCacheDuration(TimeSpan? duration)
         {
-            SessionCacheDuration = value;
+            SessionCacheDuration = duration is null ? null : (long)duration.Value.TotalSeconds;
             return this;
         }
 
         /// <summary>
-        /// Session cache TTL as a <see cref="TimeSpan"/>. Convenience overload
-        /// of <see cref="WithSessionCacheDuration(long?)"/>; rounded down to
-        /// whole seconds.
+        /// KMS provider. Maps to the wire strings consumed by the native core:
+        /// <see cref="KmsKind.Static"/> (<c>"static"</c>; testing only, uses <c>STATIC_MASTER_KEY_HEX</c>),
+        /// <see cref="KmsKind.Aws"/> (<c>"aws"</c>),
+        /// <see cref="KmsKind.SecretsManager"/> (<c>"secrets-manager"</c>),
+        /// <see cref="KmsKind.Vault"/> (<c>"vault"</c>, HashiCorp Vault Transit).
         /// </summary>
-        public Builder WithSessionCacheDuration(TimeSpan? duration) =>
-            WithSessionCacheDuration(duration is null ? (long?)null : (long)duration.Value.TotalSeconds);
-
-        /// <summary>
-        /// KMS provider. Accepts <c>"static"</c> (default; testing only,
-        /// uses <c>STATIC_MASTER_KEY_HEX</c>), <c>"aws"</c> (AWS KMS),
-        /// <c>"secrets-manager"</c> (AWS Secrets Manager), or
-        /// <c>"vault"</c> (HashiCorp Vault Transit).
-        /// </summary>
-        public Builder WithKms(string value)
+        public Builder WithKms(KmsKind kind)
         {
-            Kms = value;
+            Kms = kind.ToWireString();
             return this;
         }
-
-        /// <summary>
-        /// Strongly-typed KMS provider. Equivalent to <see cref="WithKms(string)"/>
-        /// with the wire string mapped from <see cref="KmsKind"/>.
-        /// </summary>
-        public Builder WithKms(KmsKind kind) => WithKms(kind.ToWireString());
 
         /// <summary>
         /// AWS KMS multi-region key-ARN map: region (e.g. <c>"us-east-1"</c>)
-        /// → key ARN. Used with <see cref="WithKms"/> = <c>"aws"</c> for
-        /// region-specific KMS keys; the active region is selected via
-        /// <see cref="WithPreferredRegion"/>. The supplied dictionary is
-        /// copied — subsequent edits to the caller's dictionary do not
-        /// affect the built config.
-        /// </summary>
-        public Builder WithRegionMap(IDictionary<string, string>? value)
-        {
-            RegionMap = value == null ? null : new Dictionary<string, string>(value);
-            return this;
-        }
-
-        /// <summary>
-        /// Read-only overload of <see cref="WithRegionMap(IDictionary{string, string}?)"/>.
-        /// Convenient for callers handing in <c>ImmutableDictionary</c>,
-        /// <c>FrozenDictionary</c>, or other read-only collections.
+        /// → ARN. Applies when KMS is <see cref="KmsKind.Aws"/> (active signing region via
+        /// <see cref="WithPreferredRegion"/>). Stores the supplied reference as-is (no copy);
+        /// factory JSON is derived from whatever the map contains when you call <see cref="Build"/>
+        /// and the core reads the config. Assign <c>null</c> to clear. A later <see cref="WithRegionMap"/>
+        /// replaces the stored reference without affecting configs already built from older references.
         /// </summary>
         public Builder WithRegionMap(IReadOnlyDictionary<string, string>? value)
         {
-            RegionMap = value == null ? null : new Dictionary<string, string>(
-                value as IEnumerable<KeyValuePair<string, string>>);
+            RegionMap = value;
             return this;
         }
 
@@ -496,7 +614,7 @@ public sealed class AsherahConfig
 
         /// <summary>
         /// Maximum open DB connections in the metastore pool. <c>0</c> =
-        /// unlimited. Affects <c>"rdbms"</c> only.
+        /// unlimited. Applies when the metastore is <see cref="MetastoreKind.Rdbms"/> only.
         /// </summary>
         public Builder WithPoolMaxOpen(int? value)
         {
@@ -506,7 +624,7 @@ public sealed class AsherahConfig
 
         /// <summary>
         /// Maximum idle DB connections retained in the pool. Affects
-        /// <c>"rdbms"</c> only.
+        /// <see cref="MetastoreKind.Rdbms"/> only.
         /// </summary>
         public Builder WithPoolMaxIdle(int? value)
         {
@@ -515,48 +633,34 @@ public sealed class AsherahConfig
         }
 
         /// <summary>
-        /// Maximum lifetime of a DB connection in seconds. <c>0</c> =
-        /// unlimited. Connections older than this are recycled on next
-        /// release. Affects <c>"rdbms"</c> only.
+        /// Maximum lifetime of a pooled DB connection in whole seconds (<see cref="TimeSpan.TotalSeconds"/>
+        /// truncated toward zero). <see cref="TimeSpan.Zero"/> writes <c>0</c>, which the Rust pool treats as
+        /// unlimited lifetime. Pass <c>null</c> to omit the JSON field entirely.
+        /// Applies when the metastore is <see cref="MetastoreKind.Rdbms"/> only.
         /// </summary>
-        public Builder WithPoolMaxLifetime(long? seconds)
+        public Builder WithPoolMaxLifetime(TimeSpan? duration)
         {
-            PoolMaxLifetime = seconds;
+            PoolMaxLifetime = duration is null ? null : (long)duration.Value.TotalSeconds;
             return this;
         }
 
         /// <summary>
-        /// Max DB connection lifetime as a <see cref="TimeSpan"/>. Convenience
-        /// overload of <see cref="WithPoolMaxLifetime(long?)"/>; rounded down
-        /// to whole seconds.
+        /// Maximum idle time before a pooled connection is discarded, in whole seconds (truncated toward zero).
+        /// <see cref="TimeSpan.Zero"/> writes <c>0</c> for unlimited idle retention (Rust convention).
+        /// Pass <c>null</c> to omit this JSON field entirely.
+        /// Applies when the metastore is <see cref="MetastoreKind.Rdbms"/> only.
         /// </summary>
-        public Builder WithPoolMaxLifetime(TimeSpan? duration) =>
-            WithPoolMaxLifetime(duration is null ? (long?)null : (long)duration.Value.TotalSeconds);
-
-        /// <summary>
-        /// Maximum idle time of a DB connection in seconds before it's
-        /// closed and removed from the pool. <c>0</c> = unlimited. Affects
-        /// <c>"rdbms"</c> only.
-        /// </summary>
-        public Builder WithPoolMaxIdleTime(long? seconds)
+        public Builder WithPoolMaxIdleTime(TimeSpan? duration)
         {
-            PoolMaxIdleTime = seconds;
+            PoolMaxIdleTime = duration is null ? null : (long)duration.Value.TotalSeconds;
             return this;
         }
-
-        /// <summary>
-        /// Max DB connection idle time as a <see cref="TimeSpan"/>. Convenience
-        /// overload of <see cref="WithPoolMaxIdleTime(long?)"/>; rounded down to
-        /// whole seconds.
-        /// </summary>
-        public Builder WithPoolMaxIdleTime(TimeSpan? duration) =>
-            WithPoolMaxIdleTime(duration is null ? (long?)null : (long)duration.Value.TotalSeconds);
 
         /// <summary>
         /// AWS KMS key ID or ARN for single-region KMS setups. Mutually
         /// exclusive with <see cref="WithRegionMap"/>; the latter takes
-        /// precedence when both are set. Used with <see cref="WithKms"/>
-        /// = <c>"aws"</c>.
+        /// precedence when both are set. Used when the KMS selector is
+        /// <see cref="KmsKind.Aws"/>.
         /// </summary>
         public Builder WithKmsKeyId(string? value)
         {
@@ -565,8 +669,8 @@ public sealed class AsherahConfig
         }
 
         /// <summary>
-        /// AWS Secrets Manager secret ID for the master key, used with
-        /// <see cref="WithKms"/> = <c>"secrets-manager"</c>.
+        /// AWS Secrets Manager secret ID for the master key,
+        /// used when the KMS selector is <see cref="KmsKind.SecretsManager"/>.
         /// </summary>
         public Builder WithSecretsManagerSecretId(string? value)
         {
@@ -576,7 +680,7 @@ public sealed class AsherahConfig
 
         /// <summary>
         /// HashiCorp Vault address (e.g. <c>"https://vault.example.com:8200"</c>).
-        /// Required when <see cref="WithKms"/> = <c>"vault"</c>.
+        /// Required when the KMS selector is <see cref="KmsKind.Vault"/>.
         /// </summary>
         public Builder WithVaultAddr(string? value)
         {
@@ -596,29 +700,19 @@ public sealed class AsherahConfig
         }
 
         /// <summary>
-        /// Vault authentication method. Accepts <c>"kubernetes"</c>
-        /// (service-account JWT), <c>"approle"</c>, or <c>"cert"</c>
-        /// (TLS client cert). Ignored if <see cref="WithVaultToken"/> or
-        /// the <c>VAULT_TOKEN</c> environment variable is set (token auth
-        /// is implicit).
+        /// Vault authentication method selector. Ignored if <see cref="WithVaultToken"/> or the
+        /// <c>VAULT_TOKEN</c> environment variable is set (implicit token auth). Pass <c>null</c>
+        /// to omit the JSON field.
         /// </summary>
-        public Builder WithVaultAuthMethod(string? value)
+        public Builder WithVaultAuthMethod(VaultAuthMethod? value)
         {
-            VaultAuthMethod = value;
+            VaultAuthMethod = value?.ToWireString();
             return this;
         }
 
         /// <summary>
-        /// Strongly-typed Vault authentication method. Equivalent to
-        /// <see cref="WithVaultAuthMethod(string?)"/> with the wire string
-        /// mapped from <see cref="GoDaddy.Asherah.VaultAuthMethod"/>.
-        /// </summary>
-        public Builder WithVaultAuthMethod(VaultAuthMethod? value) =>
-            WithVaultAuthMethod(value?.ToWireString());
-
-        /// <summary>
-        /// Vault role name for Kubernetes or AppRole auth. Required for
-        /// <see cref="WithVaultAuthMethod"/> = <c>"kubernetes"</c>.
+        /// Vault role name for Kubernetes or AppRole auth. Required when authentication uses
+        /// <see cref="VaultAuthMethod.Kubernetes"/> or <see cref="VaultAuthMethod.AppRole"/>.
         /// </summary>
         public Builder WithVaultAuthRole(string? value)
         {
@@ -638,8 +732,7 @@ public sealed class AsherahConfig
         }
 
         /// <summary>
-        /// AppRole role-id. Required when
-        /// <see cref="WithVaultAuthMethod"/> = <c>"approle"</c>.
+        /// AppRole role-id. Required when authentication uses <see cref="VaultAuthMethod.AppRole"/>.
         /// </summary>
         public Builder WithVaultApproleRoleId(string? value)
         {
@@ -658,9 +751,8 @@ public sealed class AsherahConfig
         }
 
         /// <summary>
-        /// PEM-encoded client certificate for Vault TLS cert auth. Used
-        /// when <see cref="WithVaultAuthMethod"/> = <c>"cert"</c>; pair
-        /// with <see cref="WithVaultClientKey"/>.
+        /// PEM-encoded client certificate for Vault TLS cert auth. Used when authentication uses
+        /// <see cref="VaultAuthMethod.Cert"/>; pair with <see cref="WithVaultClientKey"/>.
         /// </summary>
         public Builder WithVaultClientCert(string? value)
         {
@@ -691,7 +783,7 @@ public sealed class AsherahConfig
 
         /// <summary>
         /// Vault Transit key name used to wrap/unwrap Asherah envelope
-        /// keys. Required when <see cref="WithKms"/> = <c>"vault"</c>.
+        /// keys. Required when the KMS selector is <see cref="KmsKind.Vault"/>.
         /// </summary>
         public Builder WithVaultTransitKey(string? value)
         {
@@ -710,6 +802,10 @@ public sealed class AsherahConfig
             return this;
         }
 
+        /// <summary>
+        /// Finalizes validation and builds an immutable <see cref="AsherahConfig"/> snapshot.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">Required fields are missing.</exception>
         public AsherahConfig Build()
         {
             if (ServiceName is null)

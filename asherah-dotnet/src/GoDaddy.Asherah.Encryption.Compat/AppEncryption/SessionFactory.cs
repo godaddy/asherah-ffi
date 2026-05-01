@@ -19,47 +19,66 @@ public class SessionFactory : IDisposable
         _nativeFactory = nativeFactory;
     }
 
+    /// <summary>Returns a JSON-object session with binary UTF-8 encoded data row records.</summary>
     public Session<JObject, byte[]> GetSessionJson(string partitionId)
         => new SessionJsonImpl<byte[]>(_nativeFactory.GetSession(partitionId), false);
 
+    /// <summary>Returns a byte-payload session with binary data row records (JSON ciphertext envelope).</summary>
     public Session<byte[], byte[]> GetSessionBytes(string partitionId)
         => new SessionBytesImpl<byte[]>(_nativeFactory.GetSession(partitionId), false);
 
+    /// <summary>Returns a JSON-object session whose data row records are <see cref="JObject"/>.</summary>
     public Session<JObject, JObject> GetSessionJsonAsJson(string partitionId)
         => new SessionJsonImpl<JObject>(_nativeFactory.GetSession(partitionId), true);
 
+    /// <summary>Returns a byte-payload session whose data row records are <see cref="JObject"/>.</summary>
     public Session<byte[], JObject> GetSessionBytesAsJson(string partitionId)
         => new SessionBytesImpl<JObject>(_nativeFactory.GetSession(partitionId), true);
 
+    /// <summary>Releases the underlying native factory.</summary>
     public void Dispose() => _nativeFactory.Dispose();
 
+    /// <summary>Begins building a <see cref="SessionFactory"/> for the given product and service identifiers.</summary>
     public static IMetastoreStep NewBuilder(string productId, string serviceId)
         => new FactoryBuilder(productId, serviceId);
 
     // --- Builder step interfaces ---
 
+    /// <summary>Builder step: choose metastore configuration.</summary>
     public interface IMetastoreStep
     {
+        /// <summary>Uses the in-process in-memory metastore (testing / dev).</summary>
         ICryptoPolicyStep WithInMemoryMetastore();
+        /// <summary>Uses a supported metastore adapter (in-memory, ADO, or DynamoDB).</summary>
         ICryptoPolicyStep WithMetastore(IMetastore<JObject> metastore);
     }
 
+    /// <summary>Builder step: choose crypto policy.</summary>
     public interface ICryptoPolicyStep
     {
+        /// <summary>Uses keys that never expire per <see cref="NeverExpiredCryptoPolicy"/>.</summary>
         IKeyManagementServiceStep WithNeverExpiredCryptoPolicy();
+        /// <summary>Uses the supplied <paramref name="cryptoPolicy"/>.</summary>
         IKeyManagementServiceStep WithCryptoPolicy(CryptoPolicy cryptoPolicy);
     }
 
+    /// <summary>Builder step: choose key management (KMS).</summary>
     public interface IKeyManagementServiceStep
     {
+        /// <summary>Static master key (testing only; sets environment for native static KMS).</summary>
         IBuildStep WithStaticKeyManagementService(string staticMasterKey);
+        /// <summary>Uses a supported KMS implementation (static or AWS).</summary>
         IBuildStep WithKeyManagementService(IKeyManagementService kms);
     }
 
+    /// <summary>Final builder step: optional hooks and <see cref="Build"/>.</summary>
     public interface IBuildStep
     {
+        /// <summary>Reserved for API parity; metrics are handled by the native layer when configured.</summary>
         IBuildStep WithMetrics(object? metrics);
+        /// <summary>Reserved for API parity; logging is handled by the native layer when configured.</summary>
         IBuildStep WithLogger(object? logger);
+        /// <summary>Builds the configured factory.</summary>
         SessionFactory Build();
     }
 

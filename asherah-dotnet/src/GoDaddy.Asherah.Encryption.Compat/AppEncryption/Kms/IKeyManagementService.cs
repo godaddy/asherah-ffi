@@ -1,3 +1,4 @@
+using GoDaddy.Asherah;
 using GoDaddy.Asherah.Encryption;
 
 namespace GoDaddy.Asherah.AppEncryption.Kms;
@@ -5,6 +6,7 @@ namespace GoDaddy.Asherah.AppEncryption.Kms;
 /// <summary>KMS interface. In the FFI binding, KMS is handled by the native Rust layer.</summary>
 public interface IKeyManagementService
 {
+    /// <summary>Merges this KMS adapter into <paramref name="builder"/>.</summary>
     void ApplyConfig(AsherahConfig.Builder builder);
 }
 
@@ -13,14 +15,16 @@ public class StaticKeyManagementServiceImpl : IKeyManagementService
 {
     private readonly string _masterKeyHex;
 
+    /// <summary>Initializes static KMS using <paramref name="key"/> UTF-8 bytes as the master key material (testing).</summary>
     public StaticKeyManagementServiceImpl(string key)
     {
         _masterKeyHex = Convert.ToHexString(System.Text.Encoding.UTF8.GetBytes(key)).ToLowerInvariant();
     }
 
+    /// <inheritdoc />
     public void ApplyConfig(AsherahConfig.Builder builder)
     {
-        builder.WithKms("static");
+        builder.WithKms(KmsKind.Static);
         Environment.SetEnvironmentVariable("STATIC_MASTER_KEY_HEX", _masterKeyHex);
     }
 
@@ -39,18 +43,19 @@ public class AwsKeyManagementServiceImpl : IKeyManagementService
         _preferredRegion = builder.PreferredRegion;
     }
 
+    /// <inheritdoc />
     public void ApplyConfig(AsherahConfig.Builder builder)
     {
-        // Cast disambiguates between the IDictionary and IReadOnlyDictionary
-        // WithRegionMap overloads — Dictionary<,> implements both.
-        builder.WithKms("aws")
-               .WithRegionMap((IDictionary<string, string>)_regionToArnMap)
+        builder.WithKms(KmsKind.Aws)
+               .WithRegionMap(_regionToArnMap)
                .WithPreferredRegion(_preferredRegion);
     }
 
+    /// <summary>Creates a fluent builder from region-to-key-ARN mappings.</summary>
     public static Builder NewBuilder(Dictionary<string, string> regionToArnMap, string preferredRegion)
         => new(regionToArnMap, preferredRegion);
 
+    /// <summary>Fluent builder for <see cref="AwsKeyManagementServiceImpl"/>.</summary>
     public class Builder
     {
         internal Dictionary<string, string> RegionToArnMap { get; }
@@ -62,6 +67,7 @@ public class AwsKeyManagementServiceImpl : IKeyManagementService
             PreferredRegion = preferredRegion ?? throw new ArgumentNullException(nameof(preferredRegion));
         }
 
+        /// <summary>Builds the AWS KMS adapter for use with <see cref="SessionFactory.IKeyManagementServiceStep.WithKeyManagementService"/>.</summary>
         public AwsKeyManagementServiceImpl Build() => new(this);
     }
 }

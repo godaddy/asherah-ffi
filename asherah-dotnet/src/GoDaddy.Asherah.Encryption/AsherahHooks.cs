@@ -236,7 +236,7 @@ public static class AsherahHooks
     /// <summary>
     /// Synchronous variant of <see cref="SetMetricsHook(Action{MetricsEvent}?)"/>.
     /// The callback fires on the encrypt/decrypt thread before the
-    /// operation returns. See <see cref="SetLogHookSync"/> for when to use
+    /// operation returns. See <see cref="SetLogHookSync(System.Action{LogEvent},Microsoft.Extensions.Logging.LogLevel)"/> for when to use
     /// this and the trade-off.
     /// </summary>
     public static unsafe void SetMetricsHookSync(Action<MetricsEvent>? callback)

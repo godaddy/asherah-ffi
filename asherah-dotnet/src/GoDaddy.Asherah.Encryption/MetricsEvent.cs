@@ -2,7 +2,7 @@ namespace GoDaddy.Asherah.Encryption;
 
 /// <summary>
 /// Type of metrics event delivered to a callback registered with
-/// <see cref="Asherah.SetMetricsHook"/>. Timing events
+/// <see cref="AsherahHooks.SetMetricsHook(System.Action{MetricsEvent})"/>. Timing events
 /// (<see cref="Encrypt"/>, <see cref="Decrypt"/>, <see cref="Store"/>,
 /// <see cref="Load"/>) carry <see cref="MetricsEvent.DurationNs"/>; cache
 /// events (<see cref="CacheHit"/>, <see cref="CacheMiss"/>,
@@ -28,7 +28,7 @@ public enum MetricsEventType
 
 /// <summary>
 /// A metrics event delivered to a callback registered with
-/// <see cref="Asherah.SetMetricsHook"/>.
+/// <see cref="AsherahHooks.SetMetricsHook(System.Action{MetricsEvent})"/>.
 /// </summary>
 /// <param name="Type">The event type.</param>
 /// <param name="DurationNs">Elapsed time in nanoseconds for timing events.

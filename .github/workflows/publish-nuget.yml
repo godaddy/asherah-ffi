@@ -57,10 +57,10 @@ jobs:
             exit 1
           fi
           if ! printf '%s\n' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::Version must be semver X.Y.Z with no label (got: ${VERSION}). Prerelease -alpha is appended automatically for NuGet pack."
+            echo "::error::Version must be semver X.Y.Z with no label (got: ${VERSION}). Prerelease -beta is appended automatically for NuGet pack."
             exit 1
           fi
-          PACK_VERSION="${VERSION}-alpha"
+          PACK_VERSION="${VERSION}-beta"
           echo "NuGet base (repo variable / bump): ${VERSION}"
           echo "NuGet package version (pack/push): ${PACK_VERSION}"
           echo "NUGET_VERSION=${VERSION}" >> "$GITHUB_ENV"

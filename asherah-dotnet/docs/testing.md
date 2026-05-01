@@ -152,7 +152,6 @@ public class SqlMetastoreFixture : IAsyncLifetime
             .WithProductId("test-prod")
             .WithMetastore(MetastoreKind.Rdbms)
             .WithConnectionString(_container.GetConnectionString())
-            .WithSqlMetastoreDbType("mysql")
             .WithKms(KmsKind.Static)
             .Build();
 
