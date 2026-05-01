@@ -259,7 +259,8 @@ Benchmarked on Apple M4 Max, 64-byte payload, hot session cache:
 | `ConnectionString` | `*string` | No | RDBMS connection string |
 | `ReplicaReadConsistency` | `*string` | No | DynamoDB read consistency |
 | `DynamoDBEndpoint` | `*string` | No | Custom DynamoDB endpoint |
-| `DynamoDBRegion` | `*string` | No | DynamoDB region |
+| `DynamoDBRegion` | `*string` | No | DynamoDB region — drives endpoint URL resolution and (when `DynamoDBSigningRegion` is unset) SigV4 signing |
+| `DynamoDBSigningRegion` | `*string` | No | SigV4 signing region. When set distinct from `DynamoDBRegion`, the URL is built from `DynamoDBRegion` but SigV4 signs as `DynamoDBSigningRegion` |
 | `DynamoDBTableName` | `*string` | No | DynamoDB table name |
 | `RegionMap` | `map[string]string` | No | AWS KMS region-to-ARN map |
 | `PreferredRegion` | `*string` | No | Preferred AWS KMS region |

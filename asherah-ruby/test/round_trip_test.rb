@@ -453,6 +453,24 @@ class CanonicalCompatTest < Minitest::Test
     refute h_cleared.key?(:AwsProfileName)
   end
 
+  def test_config_dynamo_db_signing_region_maps_and_omitted_when_nil
+    config = Asherah::Config.new
+    config.service_name = "svc"
+    config.product_id = "prod"
+    config.kms = "static"
+    config.metastore = "dynamodb"
+    config.dynamo_db_region = "us-east-1"
+    config.dynamo_db_signing_region = "us-west-2"
+    h = config.to_h
+    assert_equal "us-east-1", h[:DynamoDBRegion]
+    assert_equal "us-west-2", h[:DynamoDBSigningRegion]
+
+    config.dynamo_db_signing_region = nil
+    h_cleared = config.to_h
+    refute h_cleared.key?(:DynamoDBSigningRegion)
+    assert_equal "us-east-1", h_cleared[:DynamoDBRegion]
+  end
+
   def test_config_validate_raises_on_missing_fields
     config = Asherah::Config.new
     assert_raises(Asherah::Error::ConfigError) { config.validate! }

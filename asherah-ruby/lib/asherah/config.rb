@@ -25,6 +25,7 @@ module Asherah
       sql_metastore_db_type: :SQLMetastoreDBType,
       dynamo_db_endpoint: :DynamoDBEndpoint,
       dynamo_db_region: :DynamoDBRegion,
+      dynamo_db_signing_region: :DynamoDBSigningRegion,
       dynamo_db_table_name: :DynamoDBTableName,
       enable_region_suffix: :EnableRegionSuffix,
       region_map: :RegionMap,
