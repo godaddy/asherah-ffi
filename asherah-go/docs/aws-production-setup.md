@@ -167,14 +167,28 @@ metastore round-trip — until expiry (default 90 days).
 | Setting | What it controls |
 |---|---|
 | `AwsProfileName` | Optional named profile for the Rust AWS config (KMS/DynamoDB/Secrets Manager). Omit to use the default credential chain. |
-| `DynamoDBRegion` | Endpoint region for DynamoDB SDK client. |
-| `DynamoDBSigningRegion` | SigV4 signing region. Defaults to endpoint region. |
+| `DynamoDBRegion` | Endpoint region for the DynamoDB SDK client. Drives URL resolution and (when `DynamoDBSigningRegion` is unset) SigV4 signing. |
+| `DynamoDBSigningRegion` | SigV4 signing region. Defaults to `DynamoDBRegion`. When set distinct, the URL is still built from `DynamoDBRegion` but SigV4 signs as `DynamoDBSigningRegion` — required when fronting DynamoDB through a proxy/PrivateLink whose hostname implies a different region than the auth handler expects. |
+| `DynamoDBEndpoint` | Explicit endpoint URL. When set, takes precedence over the URL derived from `DynamoDBRegion` (for DynamoDB Local, custom proxies, or VPC interface endpoints). |
 | `PreferredRegion` | Which entry of `RegionMap` AWS KMS uses for *new* envelope encryption. |
 
-In single-region all three are equal. In multi-region active/passive,
-all three on the active side are the active region; the passive side
-switches `DynamoDBRegion` to its region but may keep
+In single-region all three regional fields are equal. In multi-region
+active/passive, all three on the active side are the active region; the
+passive side switches `DynamoDBRegion` to its region but may keep
 `PreferredRegion` on the active KMS key until promotion.
+
+### Precedence of DynamoDB endpoint resolution
+
+1. If `DynamoDBEndpoint` is set, that URL is used verbatim. SigV4 signs as
+   `DynamoDBSigningRegion` (or `DynamoDBRegion` if signing region unset).
+2. Otherwise if `DynamoDBRegion` and `DynamoDBSigningRegion` are both set
+   and differ, the URL is `https://dynamodb.<DynamoDBRegion>.amazonaws.com`
+   (with partition-aware DNS suffix for `cn-*`, `us-iso-*`, `us-isob-*`)
+   and SigV4 signs as `DynamoDBSigningRegion`.
+3. Otherwise the SDK derives the URL and signs against whichever single
+   region was provided (`DynamoDBSigningRegion` wins if both are set
+   equal; `DynamoDBRegion` is used otherwise; default credential chain
+   provides the region if neither is set).
 
 ## Common production pitfalls
 

@@ -13,6 +13,7 @@ type Config struct {
 	ReplicaReadConsistency *string           `json:"ReplicaReadConsistency,omitempty"`
 	DynamoDBEndpoint       *string           `json:"DynamoDBEndpoint,omitempty"`
 	DynamoDBRegion         *string           `json:"DynamoDBRegion,omitempty"`
+	DynamoDBSigningRegion  *string           `json:"DynamoDBSigningRegion,omitempty"`
 	DynamoDBTableName      *string           `json:"DynamoDBTableName,omitempty"`
 	SessionCacheMaxSize    *int              `json:"SessionCacheMaxSize,omitempty"`
 	SessionCacheDuration   *int64            `json:"SessionCacheDuration,omitempty"`

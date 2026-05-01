@@ -219,18 +219,23 @@ impl ConfigOptions {
                 )?
             }
             "dynamodb" => {
-                let effective_region = self
+                let signing_region = self
                     .dynamo_db_signing_region
                     .as_deref()
                     .or(self.dynamo_db_region.as_deref())
                     .map(String::from);
+                let endpoint = resolve_dynamodb_endpoint(
+                    self.dynamo_db_endpoint.as_deref(),
+                    self.dynamo_db_region.as_deref(),
+                    self.dynamo_db_signing_region.as_deref(),
+                );
                 MetastoreConfig::DynamoDb {
                     table: self
                         .dynamo_db_table_name
                         .clone()
                         .unwrap_or_else(|| "EncryptionKey".to_string()),
-                    region: effective_region,
-                    endpoint: self.dynamo_db_endpoint.clone(),
+                    region: signing_region,
+                    endpoint,
                     region_suffix: self.enable_region_suffix.unwrap_or(false),
                 }
             }
@@ -398,4 +403,175 @@ pub async fn factory_from_config_async(config: &ConfigOptions) -> Result<(Factor
     let (resolved, applied) = config.resolve()?;
     let factory = asherah::builders::factory_from_resolved_async(&resolved).await?;
     Ok((factory, applied))
+}
+
+/// Resolve the DynamoDB endpoint URL given the user-supplied
+/// `DynamoDBEndpoint` plus `DynamoDBRegion` / `DynamoDBSigningRegion`.
+///
+/// - Explicit endpoint always wins (user knows best).
+/// - When both region fields are set and differ, derive the endpoint URL
+///   from `DynamoDBRegion` so SigV4 (driven by `DynamoDBSigningRegion`)
+///   can target a different region than the URL — matches canonical
+///   Asherah Go's two-knob contract.
+/// - All other cases return `None` so the SDK derives the URL from the
+///   single configured region.
+fn resolve_dynamodb_endpoint(
+    explicit: Option<&str>,
+    region: Option<&str>,
+    signing_region: Option<&str>,
+) -> Option<String> {
+    if let Some(url) = explicit {
+        return Some(url.to_string());
+    }
+    match (region, signing_region) {
+        (Some(r), Some(s)) if r != s => Some(dynamodb_endpoint_for_region(r)),
+        _ => None,
+    }
+}
+
+fn dynamodb_endpoint_for_region(region: &str) -> String {
+    format!("https://dynamodb.{region}.{}", aws_dns_suffix(region))
+}
+
+fn aws_dns_suffix(region: &str) -> &'static str {
+    if region.starts_with("cn-") {
+        "amazonaws.com.cn"
+    } else if region.starts_with("us-iso-") {
+        "c2s.ic.gov"
+    } else if region.starts_with("us-isob-") {
+        "sc2s.sgov.gov"
+    } else {
+        "amazonaws.com"
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::panic, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    fn ddb(cfg: ConfigOptions) -> (Option<String>, Option<String>) {
+        let (resolved, _) = cfg.resolve().expect("resolve");
+        match resolved.metastore {
+            MetastoreConfig::DynamoDb {
+                region, endpoint, ..
+            } => (region, endpoint),
+            other => panic!("expected dynamodb metastore, got {other:?}"),
+        }
+    }
+
+    fn base() -> ConfigOptions {
+        ConfigOptions {
+            service_name: Some("svc".into()),
+            product_id: Some("prod".into()),
+            metastore: Some("dynamodb".into()),
+            kms: Some("static".into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn ddb_only_region_set_drives_signing_and_endpoint_resolution() {
+        let cfg = ConfigOptions {
+            dynamo_db_region: Some("us-east-1".into()),
+            ..base()
+        };
+        let (region, endpoint) = ddb(cfg);
+        assert_eq!(region.as_deref(), Some("us-east-1"));
+        assert_eq!(endpoint, None, "SDK derives URL from region");
+    }
+
+    #[test]
+    fn ddb_only_signing_region_set_falls_through_to_signing_region() {
+        let cfg = ConfigOptions {
+            dynamo_db_signing_region: Some("us-west-2".into()),
+            ..base()
+        };
+        let (region, endpoint) = ddb(cfg);
+        assert_eq!(region.as_deref(), Some("us-west-2"));
+        assert_eq!(endpoint, None);
+    }
+
+    #[test]
+    fn ddb_both_set_equal_no_endpoint_override() {
+        let cfg = ConfigOptions {
+            dynamo_db_region: Some("us-east-1".into()),
+            dynamo_db_signing_region: Some("us-east-1".into()),
+            ..base()
+        };
+        let (region, endpoint) = ddb(cfg);
+        assert_eq!(region.as_deref(), Some("us-east-1"));
+        assert_eq!(endpoint, None);
+    }
+
+    #[test]
+    fn ddb_split_region_derives_endpoint_from_region_keeps_signing_region() {
+        let cfg = ConfigOptions {
+            dynamo_db_region: Some("us-east-1".into()),
+            dynamo_db_signing_region: Some("us-west-2".into()),
+            ..base()
+        };
+        let (region, endpoint) = ddb(cfg);
+        assert_eq!(
+            region.as_deref(),
+            Some("us-west-2"),
+            "SigV4 region from DynamoDBSigningRegion"
+        );
+        assert_eq!(
+            endpoint.as_deref(),
+            Some("https://dynamodb.us-east-1.amazonaws.com"),
+            "endpoint URL derived from DynamoDBRegion"
+        );
+    }
+
+    #[test]
+    fn ddb_split_region_with_explicit_endpoint_keeps_explicit() {
+        let cfg = ConfigOptions {
+            dynamo_db_region: Some("us-east-1".into()),
+            dynamo_db_signing_region: Some("us-west-2".into()),
+            dynamo_db_endpoint: Some(
+                "https://vpce-abc123.dynamodb.us-east-1.vpce.amazonaws.com".into(),
+            ),
+            ..base()
+        };
+        let (region, endpoint) = ddb(cfg);
+        assert_eq!(region.as_deref(), Some("us-west-2"));
+        assert_eq!(
+            endpoint.as_deref(),
+            Some("https://vpce-abc123.dynamodb.us-east-1.vpce.amazonaws.com"),
+            "explicit endpoint always wins over derived URL"
+        );
+    }
+
+    #[test]
+    fn ddb_china_partition_endpoint_derivation() {
+        assert_eq!(
+            dynamodb_endpoint_for_region("cn-north-1"),
+            "https://dynamodb.cn-north-1.amazonaws.com.cn"
+        );
+        assert_eq!(
+            dynamodb_endpoint_for_region("cn-northwest-1"),
+            "https://dynamodb.cn-northwest-1.amazonaws.com.cn"
+        );
+    }
+
+    #[test]
+    fn ddb_govcloud_partition_uses_amazonaws_com() {
+        assert_eq!(
+            dynamodb_endpoint_for_region("us-gov-east-1"),
+            "https://dynamodb.us-gov-east-1.amazonaws.com"
+        );
+    }
+
+    #[test]
+    fn ddb_iso_partitions() {
+        assert_eq!(
+            dynamodb_endpoint_for_region("us-iso-east-1"),
+            "https://dynamodb.us-iso-east-1.c2s.ic.gov"
+        );
+        assert_eq!(
+            dynamodb_endpoint_for_region("us-isob-east-1"),
+            "https://dynamodb.us-isob-east-1.sc2s.sgov.gov"
+        );
+    }
 }

@@ -220,7 +220,8 @@ Keys are PascalCase strings matching the Asherah configuration format:
 | `KMS` | `String` | Yes | `"static"` or `"aws"` |
 | `ConnectionString` | `String` | No | RDBMS connection string |
 | `DynamoDBEndpoint` | `String` | No | Custom DynamoDB endpoint |
-| `DynamoDBRegion` | `String` | No | DynamoDB region |
+| `DynamoDBRegion` | `String` | No | DynamoDB region — drives endpoint URL resolution and (when `DynamoDBSigningRegion` is unset) SigV4 signing |
+| `DynamoDBSigningRegion` | `String` | No | SigV4 signing region. When set distinct from `DynamoDBRegion`, the URL is built from `DynamoDBRegion` but SigV4 signs as `DynamoDBSigningRegion` |
 | `DynamoDBTableName` | `String` | No | DynamoDB table name |
 | `RegionMap` | `Hash` | No | AWS KMS region-to-ARN map |
 | `PreferredRegion` | `String` | No | Preferred AWS KMS region |
@@ -252,6 +253,7 @@ Uses snake_case attribute accessors:
 | `connection_string` | `ConnectionString` |
 | `dynamo_db_endpoint` | `DynamoDBEndpoint` |
 | `dynamo_db_region` | `DynamoDBRegion` |
+| `dynamo_db_signing_region` | `DynamoDBSigningRegion` |
 | `dynamo_db_table_name` | `DynamoDBTableName` |
 | `region_map` | `RegionMap` |
 | `preferred_region` | `PreferredRegion` |
