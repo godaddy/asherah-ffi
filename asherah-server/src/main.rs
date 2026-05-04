@@ -235,7 +235,13 @@ async fn main() -> Result<()> {
             .map(|m| m.file_type().is_socket())
             .unwrap_or(false)
         {
-            drop(std::fs::remove_file(&cli.socket_file));
+            if let Err(err) = std::fs::remove_file(&cli.socket_file) {
+                log::warn!(
+                    "failed to remove socket file '{}' during shutdown: {}",
+                    cli.socket_file,
+                    err
+                );
+            }
         }
     }
     #[cfg(not(unix))]
