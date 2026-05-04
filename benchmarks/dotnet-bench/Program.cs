@@ -46,7 +46,7 @@ public class AsherahBenchmark
             foreach (var candidate in new[]
             {
                 Path.GetFullPath(nativePath),
-                Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", nativePath),
+                Path.Join(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", nativePath),
             })
             {
                 if (Directory.Exists(candidate))
