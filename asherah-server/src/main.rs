@@ -114,7 +114,11 @@ fn parse_region_map(s: &str) -> Option<std::collections::HashMap<String, String>
             continue;
         }
         if let Some((k, v)) = pair.split_once('=') {
-            if v.is_empty() {
+            let k = k.trim();
+            let v = v.trim();
+            if k.is_empty() {
+                log::warn!("region-map: ignoring entry with empty key: '{pair}'");
+            } else if v.is_empty() {
                 log::warn!("region-map: ignoring entry with empty value: '{pair}'");
             } else {
                 map.insert(k.to_string(), v.to_string());
@@ -179,7 +183,13 @@ async fn main() -> Result<()> {
         {
             use std::os::unix::fs::FileTypeExt;
             if meta.file_type().is_socket() {
-                drop(std::fs::remove_file(&cli.socket_file));
+                if let Err(err) = std::fs::remove_file(&cli.socket_file) {
+                    log::warn!(
+                        "failed to remove stale socket file '{}': {}",
+                        cli.socket_file,
+                        err
+                    );
+                }
             } else {
                 anyhow::bail!(
                     "socket path '{}' exists but is not a Unix socket",
@@ -235,7 +245,13 @@ async fn main() -> Result<()> {
             .map(|m| m.file_type().is_socket())
             .unwrap_or(false)
         {
-            drop(std::fs::remove_file(&cli.socket_file));
+            if let Err(err) = std::fs::remove_file(&cli.socket_file) {
+                log::warn!(
+                    "failed to remove socket file '{}' during shutdown: {}",
+                    cli.socket_file,
+                    err
+                );
+            }
         }
     }
     #[cfg(not(unix))]
