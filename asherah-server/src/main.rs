@@ -114,7 +114,11 @@ fn parse_region_map(s: &str) -> Option<std::collections::HashMap<String, String>
             continue;
         }
         if let Some((k, v)) = pair.split_once('=') {
-            if v.is_empty() {
+            let k = k.trim();
+            let v = v.trim();
+            if k.is_empty() {
+                log::warn!("region-map: ignoring entry with empty key: '{pair}'");
+            } else if v.is_empty() {
                 log::warn!("region-map: ignoring entry with empty value: '{pair}'");
             } else {
                 map.insert(k.to_string(), v.to_string());
