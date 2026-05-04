@@ -244,6 +244,7 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 async fn shutdown_signal() {
     use tokio::signal::unix::{signal, SignalKind};
 
@@ -254,4 +255,9 @@ async fn shutdown_signal() {
         _ = ctrl_c => {}
         _ = sigterm.recv() => {}
     }
+}
+
+#[cfg(not(unix))]
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
 }
