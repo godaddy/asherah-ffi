@@ -179,7 +179,13 @@ async fn main() -> Result<()> {
         {
             use std::os::unix::fs::FileTypeExt;
             if meta.file_type().is_socket() {
-                drop(std::fs::remove_file(&cli.socket_file));
+                if let Err(err) = std::fs::remove_file(&cli.socket_file) {
+                    log::warn!(
+                        "failed to remove stale socket file '{}': {}",
+                        cli.socket_file,
+                        err
+                    );
+                }
             } else {
                 anyhow::bail!(
                     "socket path '{}' exists but is not a Unix socket",
