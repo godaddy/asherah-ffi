@@ -64,7 +64,7 @@ mod vault_tests {
     /// Start a Vault container in dev mode and configure Transit secrets engine.
     async fn start_vault() -> Option<(ContainerAsync<GenericImage>, String)> {
         for attempt in 0..3 {
-            let container = match GenericImage::new("hashicorp/vault", "latest")
+            let container = match GenericImage::new("hashicorp/vault", "1.15.0")
                 .with_exposed_port(8200.tcp())
                 .with_wait_for(WaitFor::message_on_stderr("==> Vault server started!"))
                 .with_env_var("VAULT_DEV_ROOT_TOKEN_ID", "test-token")
