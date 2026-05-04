@@ -61,14 +61,20 @@ version = "1"
 
 [dependencies.aws-sdk-kms]
 version = "1"
+default-features = false
+features = ["default-https-client", "rt-tokio"]
 
 [dependencies.aws-sdk-dynamodb]
 version = "1"
 optional = true
+default-features = false
+features = ["default-https-client", "rt-tokio"]
 
 [dependencies.aws-sdk-secretsmanager]
 version = "1"
 optional = true
+default-features = false
+features = ["default-https-client", "rt-tokio"]
 
 [dependencies.tokio]
 version = "1"
