@@ -52,7 +52,8 @@ def _reset_hooks(asherah):
         try:
             clear(None)
         except Exception:
-            pass
+            # Intentionally ignore cleanup failures; keep teardown resilient.
+            continue
 
 
 @pytest.fixture(autouse=True)
