@@ -521,7 +521,14 @@ mod secrets_manager_tests {
     /// Create a hex-encoded secret in Secrets Manager. Returns (secret_id, raw_key_bytes).
     async fn create_hex_secret(endpoint: &str, name: &str) -> (String, Vec<u8>) {
         let client = sm_client(endpoint).await;
-        let key: Vec<u8> = (0..32).collect(); // deterministic 32-byte key
+        // Intentionally deterministic test fixture (not cryptographically secure key generation).
+        // Keep fixed for reproducible integration tests only.
+        let key: Vec<u8> = vec![
+            0x42, 0x17, 0xA9, 0x5C, 0xEE, 0x03, 0x7D, 0x91,
+            0x2B, 0xD4, 0x68, 0xFA, 0x10, 0xC7, 0x35, 0x8E,
+            0x59, 0xB2, 0x0F, 0xC1, 0x74, 0x2D, 0x99, 0xE6,
+            0x1A, 0x83, 0x4E, 0xB7, 0x20, 0xCD, 0x56, 0xF8,
+        ];
         let hex_str: String = key.iter().map(|b| format!("{b:02x}")).collect();
 
         client
