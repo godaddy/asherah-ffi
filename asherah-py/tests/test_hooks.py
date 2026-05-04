@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import os
 import threading
-import time
 
 import pytest
 
@@ -44,33 +43,30 @@ def _config(verbose: bool = False):
 _LOCK = threading.Lock()
 
 
+def _reset_hooks(asherah):
+    # Best-effort cleanup: a previous test may have panicked before its
+    # own teardown ran, leaving hook state behind. We deliberately swallow
+    # any exception here so a stuck hook can't cascade into later test
+    # failures — this is fixture cleanup, not the code under test.
+    for clear in (asherah.set_log_hook, asherah.set_metrics_hook):
+        try:
+            clear(None)
+        except Exception:
+            # Intentionally ignore cleanup failures; keep teardown resilient.
+            continue
+
+
 @pytest.fixture(autouse=True)
 def _serial_and_clean():
     pytest.importorskip("asherah")
     import asherah
 
     with _LOCK:
-        # Wipe any leftover hook state from a previous test that might
-        # have panicked before its cleanup ran.
-        try:
-            asherah.set_log_hook(None)
-        except Exception:
-            pass
-        try:
-            asherah.set_metrics_hook(None)
-        except Exception:
-            pass
+        _reset_hooks(asherah)
         if asherah.get_setup_status():
             asherah.shutdown()
         yield
-        try:
-            asherah.set_log_hook(None)
-        except Exception:
-            pass
-        try:
-            asherah.set_metrics_hook(None)
-        except Exception:
-            pass
+        _reset_hooks(asherah)
         if asherah.get_setup_status():
             asherah.shutdown()
 
