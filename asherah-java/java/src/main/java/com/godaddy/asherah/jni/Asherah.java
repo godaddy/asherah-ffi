@@ -103,7 +103,7 @@ public final class Asherah {
       try {
         return session.encryptBytes(plaintext);
       } finally {
-        releaseSession(partitionId, session);
+        releaseSession(session);
       }
     } finally {
       LOCK.readLock().unlock();
@@ -129,7 +129,7 @@ public final class Asherah {
     }
     LOCK.readLock().unlock();
     return session.encryptBytesAsync(plaintext)
-        .whenComplete((r, e) -> releaseSession(partitionId, session));
+        .whenComplete((r, e) -> releaseSession(session));
   }
 
   public static CompletableFuture<String> encryptStringAsync(
@@ -147,7 +147,7 @@ public final class Asherah {
       try {
         return session.decryptBytes(dataRowRecordJson);
       } finally {
-        releaseSession(partitionId, session);
+        releaseSession(session);
       }
     } finally {
       LOCK.readLock().unlock();
@@ -177,7 +177,7 @@ public final class Asherah {
     }
     LOCK.readLock().unlock();
     return session.decryptBytesAsync(dataRowRecordJson)
-        .whenComplete((r, e) -> releaseSession(partitionId, session));
+        .whenComplete((r, e) -> releaseSession(session));
   }
 
   public static CompletableFuture<String> decryptStringAsync(
@@ -194,7 +194,7 @@ public final class Asherah {
     return sharedFactory.getSession(partitionId);
   }
 
-  private static void releaseSession(final String partitionId, final AsherahSession session) {
+  private static void releaseSession(final AsherahSession session) {
     if (!sessionCachingEnabled) {
       session.close();
     }

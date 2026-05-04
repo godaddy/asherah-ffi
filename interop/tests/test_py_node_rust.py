@@ -6,8 +6,6 @@ import os
 import subprocess
 from pathlib import Path
 
-import pytest
-
 # build_artifacts (autouse, session-scoped) lives in conftest.py and is
 # applied to every test in this directory automatically. We import the
 # whole module (rather than `from conftest import …`) so that mutable

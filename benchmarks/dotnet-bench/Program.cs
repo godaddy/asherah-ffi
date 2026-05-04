@@ -43,17 +43,14 @@ public class AsherahBenchmark
         var nativePath = Environment.GetEnvironmentVariable("ASHERAH_DOTNET_NATIVE");
         if (!string.IsNullOrEmpty(nativePath) && !Path.IsPathRooted(nativePath))
         {
-            foreach (var candidate in new[]
+            var resolved = new[]
             {
                 Path.GetFullPath(nativePath),
                 Path.Join(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "..", nativePath),
-            })
+            }.FirstOrDefault(Directory.Exists);
+            if (resolved is not null)
             {
-                if (Directory.Exists(candidate))
-                {
-                    Environment.SetEnvironmentVariable("ASHERAH_DOTNET_NATIVE", candidate);
-                    break;
-                }
+                Environment.SetEnvironmentVariable("ASHERAH_DOTNET_NATIVE", resolved);
             }
         }
 

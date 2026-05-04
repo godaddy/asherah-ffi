@@ -13,7 +13,7 @@
 
 const assert = require('assert');
 const path = require('path');
-const { execSync, spawn } = require('child_process');
+const { execSync } = require('child_process');
 
 const asherah = require(path.resolve(__dirname, '../npm/index.js'));
 

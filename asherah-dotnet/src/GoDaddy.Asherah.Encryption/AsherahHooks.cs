@@ -318,7 +318,7 @@ public static class AsherahHooks
         }
         catch
         {
-            // Swallow.
+            // Swallow — we cannot let exceptions cross the FFI boundary.
         }
     }
 
