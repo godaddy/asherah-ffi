@@ -6,7 +6,7 @@ class RoundTripTest < Minitest::Test
     ENV["PRODUCT_ID"] = "prod"
     ENV["KMS"] = "static"
     ENV["STATIC_MASTER_KEY_HEX"] = "22" * 32
-    ENV["Metastore"] = "memory"
+    ENV["METASTORE"] = "memory"
     ENV["SESSION_CACHE"] = "0"
     config = {
       "ServiceName" => "svc",
