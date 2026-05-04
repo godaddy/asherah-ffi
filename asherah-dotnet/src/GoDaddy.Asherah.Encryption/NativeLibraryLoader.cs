@@ -72,7 +72,7 @@ internal static class NativeLibraryLoader
         var candidate = root;
         if (Directory.Exists(root))
         {
-            candidate = Path.Combine(root, GetPlatformLibraryName());
+            candidate = Path.Join(root, GetPlatformLibraryName());
         }
 
         return Path.GetFullPath(candidate);

@@ -36,7 +36,7 @@ public class HookTests
         {
             var root = LocateRepoRoot();
             Environment.SetEnvironmentVariable(
-                "ASHERAH_DOTNET_NATIVE", Path.Combine(root, "target", "debug"));
+                "ASHERAH_DOTNET_NATIVE", Path.Join(root, "target", "debug"));
         }
     }
 
@@ -563,7 +563,7 @@ public class HookTests
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "Cargo.toml")))
+            if (File.Exists(Path.Join(dir.FullName, "Cargo.toml")))
             {
                 return dir.FullName;
             }

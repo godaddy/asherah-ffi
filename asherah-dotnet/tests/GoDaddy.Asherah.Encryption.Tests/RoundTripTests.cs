@@ -24,7 +24,7 @@ public class RoundTripTests
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASHERAH_DOTNET_NATIVE")))
         {
             var root = LocateRepoRoot();
-            var nativeRoot = Path.Combine(root, "target", "debug");
+            var nativeRoot = Path.Join(root, "target", "debug");
             Environment.SetEnvironmentVariable("ASHERAH_DOTNET_NATIVE", nativeRoot);
         }
     }
@@ -747,7 +747,7 @@ public class RoundTripTests
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "Cargo.toml")))
+            if (File.Exists(Path.Join(dir.FullName, "Cargo.toml")))
             {
                 return dir.FullName;
             }

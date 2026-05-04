@@ -29,7 +29,7 @@ public class DecryptEmptyInputTests : IDisposable
         {
             var root = LocateRepoRoot();
             Environment.SetEnvironmentVariable(
-                "ASHERAH_DOTNET_NATIVE", Path.Combine(root, "target", "debug"));
+                "ASHERAH_DOTNET_NATIVE", Path.Join(root, "target", "debug"));
         }
     }
 
@@ -148,7 +148,7 @@ public class DecryptEmptyInputTests : IDisposable
         var dir = AppContext.BaseDirectory;
         for (int i = 0; i < 8 && dir is not null; i++)
         {
-            if (File.Exists(Path.Combine(dir, "Cargo.toml"))) return dir;
+            if (File.Exists(Path.Join(dir, "Cargo.toml"))) return dir;
             dir = Path.GetDirectoryName(dir);
         }
         throw new InvalidOperationException("Could not locate repo root from " + AppContext.BaseDirectory);
