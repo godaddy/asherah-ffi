@@ -247,10 +247,10 @@ class FactorySessionTest < Minitest::Test
     begin
       session = factory.get_session("factory-str")
       begin
-        text = "hello from factory string api"
-        json = session.encrypt_bytes(text)
+        payload = "hello from factory string api"
+        json = session.encrypt_bytes(payload)
         recovered = session.decrypt_bytes(json).force_encoding("UTF-8")
-        assert_equal text, recovered
+        assert_equal payload, recovered
       ensure
         session.close
       end
