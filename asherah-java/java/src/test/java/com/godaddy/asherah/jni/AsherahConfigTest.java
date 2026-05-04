@@ -37,10 +37,10 @@ class AsherahConfigTest {
 
   @Test
   void toJson_includesAwsProfileNameWhenSet() {
-    final String json = minimal(b -> b.awsProfileName("prod")).toJson();
+    final String json = minimal(b -> b.awsProfileName("test-profile")).toJson();
     final JSONObject o = new JSONObject(json);
     assertTrue(o.has("AwsProfileName"));
-    assertEquals("prod", o.getString("AwsProfileName"));
+    assertEquals("test-profile", o.getString("AwsProfileName"));
   }
 
   @Test
