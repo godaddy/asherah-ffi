@@ -1,4 +1,5 @@
 using GoDaddy.Asherah;
+using System.Threading;
 
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
@@ -129,8 +130,8 @@ public class AsherahBenchmark
         if (_mode is "memory" or "hot")
             return GoDaddy.Asherah.Encryption.AsherahApi.Encrypt(PartitionId, _payload);
 
-        var idx = _ffiEncryptPoolIndex;
-        _ffiEncryptPoolIndex = (_ffiEncryptPoolIndex + 1) % _ffiPartitionPool.Length;
+        var idx = Interlocked.Increment(ref _ffiEncryptPoolIndex);
+        idx %= _ffiPartitionPool.Length;
         return GoDaddy.Asherah.Encryption.AsherahApi.Encrypt(_ffiPartitionPool[idx], _payload);
     }
 
@@ -140,8 +141,8 @@ public class AsherahBenchmark
         if (_mode is "memory" or "hot")
             return await GoDaddy.Asherah.Encryption.AsherahApi.EncryptAsync(PartitionId, _payload);
 
-        var idx = _ffiEncryptPoolIndex;
-        _ffiEncryptPoolIndex = (_ffiEncryptPoolIndex + 1) % _ffiPartitionPool.Length;
+        var idx = Interlocked.Increment(ref _ffiEncryptPoolIndex);
+        idx %= _ffiPartitionPool.Length;
         return await GoDaddy.Asherah.Encryption.AsherahApi.EncryptAsync(_ffiPartitionPool[idx], _payload);
     }
 
@@ -151,8 +152,8 @@ public class AsherahBenchmark
         if (_mode is "memory" or "hot")
             return GoDaddy.Asherah.Encryption.AsherahApi.Decrypt(PartitionId, _ffiCiphertext);
 
-        var idx = _ffiDecryptPoolIndex;
-        _ffiDecryptPoolIndex = (_ffiDecryptPoolIndex + 1) % _ffiPartitionPool.Length;
+        var idx = Interlocked.Increment(ref _ffiDecryptPoolIndex);
+        idx %= _ffiPartitionPool.Length;
         return GoDaddy.Asherah.Encryption.AsherahApi.Decrypt(_ffiPartitionPool[idx], _ffiCiphertextPool[idx]);
     }
 
@@ -162,8 +163,8 @@ public class AsherahBenchmark
         if (_mode is "memory" or "hot")
             return await GoDaddy.Asherah.Encryption.AsherahApi.DecryptAsync(PartitionId, _ffiCiphertext);
 
-        var idx = _ffiDecryptPoolIndex;
-        _ffiDecryptPoolIndex = (_ffiDecryptPoolIndex + 1) % _ffiPartitionPool.Length;
+        var idx = Interlocked.Increment(ref _ffiDecryptPoolIndex);
+        idx %= _ffiPartitionPool.Length;
         return await GoDaddy.Asherah.Encryption.AsherahApi.DecryptAsync(_ffiPartitionPool[idx], _ffiCiphertextPool[idx]);
     }
 
