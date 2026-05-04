@@ -538,7 +538,9 @@ mod secrets_manager_tests {
     /// Create a binary secret in Secrets Manager. Returns (secret_id, raw_key_bytes).
     async fn create_binary_secret(endpoint: &str, name: &str) -> (String, Vec<u8>) {
         let client = sm_client(endpoint).await;
-        let key: Vec<u8> = (0..32).map(|i| 255 - i).collect(); // deterministic 32-byte key
+        // Intentionally predictable test vector for reproducibility in integration tests only.
+        // This is intentionally weak key material and MUST NOT be used in production.
+        let key: Vec<u8> = (0..32).map(|i| 255 - i).collect();
 
         client
             .create_secret()
