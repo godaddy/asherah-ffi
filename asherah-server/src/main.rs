@@ -188,7 +188,7 @@ async fn main() -> Result<()> {
             }
         }
         #[cfg(not(unix))]
-        drop(std::fs::remove_file(&cli.socket_file));
+        std::fs::remove_file(&cli.socket_file).context("failed to remove stale socket path")?;
     }
 
     let listener =
