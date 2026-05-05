@@ -230,7 +230,13 @@ impl SimpleKeyCache {
         let (interned_id, created) = self.latest.read(id, |k, &v| (k.clone(), v))?;
 
         let result = self.by_meta.read(&(interned_id, created), |_, entry| {
-            let loaded = entry.loaded_at_ms.load(Ordering::Relaxed);
+            // Acquire to synchronize with `try_claim_reload_*`'s
+            // Release-side CAS — without an Acquire load here a thread
+            // can observe the bumped `loaded_at_ms` from another thread's
+            // claim without seeing any subsequent metadata writes that
+            // claim might have published. T-finding "Mixed Relaxed reads
+            // + AcqRel CAS" in `docs/review-2026-05-05-findings.md`.
+            let loaded = entry.loaded_at_ms.load(Ordering::Acquire);
             let expired = self.is_expired(loaded, entry.ttl_jitter_ms);
             let invalid = self.is_invalid(&entry.key);
             entry
@@ -254,7 +260,8 @@ impl SimpleKeyCache {
     fn get_meta_if_fresh(&self, meta: &KeyMeta) -> Option<(Arc<CryptoKey>, bool)> {
         let cache_key = (Arc::<str>::from(meta.id.as_str()), meta.created);
         let result = self.by_meta.read(&cache_key, |_, entry| {
-            let loaded = entry.loaded_at_ms.load(Ordering::Relaxed);
+            // Acquire — see the matching note in `get_latest_if_fresh`.
+            let loaded = entry.loaded_at_ms.load(Ordering::Acquire);
             let mut expired = self.is_expired(loaded, entry.ttl_jitter_ms);
             if entry.key.revoked() {
                 expired = false;
@@ -474,11 +481,15 @@ impl SimpleKeyCache {
         let fresh = now_ms();
         let mut claimed = false;
         self.by_meta.read(&(interned_id, created), |_, entry| {
-            let old = entry.loaded_at_ms.load(Ordering::Relaxed);
+            // Acquire load + AcqRel-success / Acquire-failure CAS so the
+            // post-CAS reader's freshness signal is fully synchronized
+            // with this thread's claim. T-finding "Mixed Relaxed reads +
+            // AcqRel CAS" in `docs/review-2026-05-05-findings.md`.
+            let old = entry.loaded_at_ms.load(Ordering::Acquire);
             if fresh.saturating_sub(old) >= self.ttl_ms + entry.ttl_jitter_ms {
                 claimed = entry
                     .loaded_at_ms
-                    .compare_exchange(old, fresh, Ordering::AcqRel, Ordering::Relaxed)
+                    .compare_exchange(old, fresh, Ordering::AcqRel, Ordering::Acquire)
                     .is_ok();
             }
         });
@@ -494,11 +505,15 @@ impl SimpleKeyCache {
         let fresh = now_ms();
         let mut claimed = false;
         self.by_meta.read(&cache_key, |_, entry| {
-            let old = entry.loaded_at_ms.load(Ordering::Relaxed);
+            // Acquire load + AcqRel-success / Acquire-failure CAS so the
+            // post-CAS reader's freshness signal is fully synchronized
+            // with this thread's claim. T-finding "Mixed Relaxed reads +
+            // AcqRel CAS" in `docs/review-2026-05-05-findings.md`.
+            let old = entry.loaded_at_ms.load(Ordering::Acquire);
             if fresh.saturating_sub(old) >= self.ttl_ms + entry.ttl_jitter_ms {
                 claimed = entry
                     .loaded_at_ms
-                    .compare_exchange(old, fresh, Ordering::AcqRel, Ordering::Relaxed)
+                    .compare_exchange(old, fresh, Ordering::AcqRel, Ordering::Acquire)
                     .is_ok();
             }
         });

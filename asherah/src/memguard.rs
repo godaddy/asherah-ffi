@@ -356,6 +356,39 @@ pub const OVERHEAD: usize = 12 + 16; // nonce + tag
 
 static NONCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Random per-process prefix for the AES-GCM nonce. The 12-byte nonce is
+/// composed of `[NONCE_PREFIX (4 bytes) || NONCE_COUNTER (8 bytes LE)]`.
+///
+/// `NONCE_COUNTER` resets to 0 every process restart but persists across
+/// `rekey_coffer` calls. With the previous all-zero prefix, a counter
+/// reset paired with the same ciphertext-storage-across-rekey path
+/// could replay the same nonce under a freshly rekeyed key — a
+/// catastrophic AES-GCM nonce-reuse. The random prefix breaks that
+/// alignment: even if two process lifetimes both restart the counter
+/// from 0, their nonces don't collide.
+///
+/// T-finding "AES-GCM nonce uses 4 zero bytes + counter; rekey_coffer
+/// doesn't reset counter" in `docs/review-2026-05-05-findings.md`.
+static NONCE_PREFIX: std::sync::OnceLock<[u8; 4]> = std::sync::OnceLock::new();
+
+fn nonce_prefix() -> [u8; 4] {
+    *NONCE_PREFIX.get_or_init(|| {
+        let mut buf = [0_u8; 4];
+        if scramble_bytes(&mut buf).is_err() {
+            // OsRng failure during init is rare but recoverable —
+            // fall back to a hash of the process start time, which
+            // still provides cross-process distinctness even if not
+            // cryptographically random.
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0) as u32;
+            buf.copy_from_slice(&nanos.to_le_bytes());
+        }
+        buf
+    })
+}
+
 pub fn encrypt(plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>, Error> {
     if key.len() != 32 {
         return Err(Error::InvalidKeyLength);
@@ -364,6 +397,7 @@ pub fn encrypt(plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>, Error> {
     let aead_key = LessSafeKey::new(unbound);
     let ctr = NONCE_COUNTER.fetch_add(1, Ordering::Relaxed);
     let mut nonce_bytes = [0_u8; 12];
+    nonce_bytes[..4].copy_from_slice(&nonce_prefix());
     nonce_bytes[4..].copy_from_slice(&ctr.to_le_bytes());
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
     let mut in_out = plaintext.to_vec();
