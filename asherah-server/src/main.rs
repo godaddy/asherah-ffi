@@ -1,7 +1,10 @@
 use anyhow::{Context, Result};
 use asherah_server::{parse_go_duration, proto};
 use clap::Parser;
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
+use tokio::task::JoinSet;
 use tonic::transport::Server;
 
 #[derive(Parser, Debug)]
@@ -237,7 +240,18 @@ async fn main() -> Result<()> {
             .context("factory init task panicked")?
             .context("failed to initialize Asherah")?;
 
-    let svc = asherah_server::service::AppEncryptionService::new(factory);
+    // Track in-flight per-session tasks so we can `join_next()` them on
+    // shutdown and force-cancel any stragglers that exceed the drain
+    // deadline. Without this, the server future is dropped at the
+    // timeout and abandons in-flight `s.close()` calls — leaking
+    // memguard-locked pages and skipping IK-cache cleanup.
+    let session_tasks: Arc<Mutex<JoinSet<()>>> = Arc::new(Mutex::new(JoinSet::new()));
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let svc = asherah_server::service::AppEncryptionService::with_lifecycle(
+        factory,
+        shutdown_rx.clone(),
+        session_tasks.clone(),
+    );
     let grpc_svc = proto::app_encryption_server::AppEncryptionServer::new(svc);
 
     // Remove stale socket file from previous run (only if it's a socket)
@@ -291,8 +305,6 @@ async fn main() -> Result<()> {
         cli.socket_mode
     );
 
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
-
     // Spawn a task that listens for SIGTERM/SIGINT and broadcasts shutdown.
     // shutdown_signal returns a Result so signal-registration failures (a
     // seccomp-restricted host or a runtime that already owns the signal
@@ -308,7 +320,7 @@ async fn main() -> Result<()> {
         let _ = shutdown_tx.send(true);
     });
 
-    let mut drain_rx = shutdown_rx.clone();
+    let mut server_shutdown_rx = shutdown_rx.clone();
     let server = Server::builder()
         .add_service(grpc_svc)
         .serve_with_incoming_shutdown(incoming, async move {
@@ -319,7 +331,7 @@ async fn main() -> Result<()> {
             // it apart from a SIGTERM-driven shutdown. T-finding
             // "drop(shutdown_rx.changed().await) discards the Result"
             // in `docs/review-2026-05-05-findings.md`.
-            if let Err(e) = shutdown_rx.changed().await {
+            if let Err(e) = server_shutdown_rx.changed().await {
                 log::warn!(
                     "shutdown signal channel closed unexpectedly ({e}); \
                      server will drain immediately"
@@ -328,39 +340,86 @@ async fn main() -> Result<()> {
         });
 
     // Race graceful shutdown against a configurable hard drain timeout.
-    // When the timeout wins the server future is dropped — any in-flight
-    // session tasks are abandoned. The default is 30s (raised from the
-    // hard-coded 5s); operators can tune via --shutdown-drain-timeout or
-    // ASHERAH_SHUTDOWN_DRAIN_TIMEOUT.
+    // The drain phase observes the session JoinSet directly: when the
+    // shutdown signal fires, every in-flight per-session task drops out
+    // of its `inbound.message()` loop (drops the response sender so
+    // tonic can return promptly) and then runs `s.close()` on the
+    // blocking pool. After the server future resolves we `join_next()`
+    // the set until it's empty (clean drain) or the deadline passes
+    // (force-cancel via `set.shutdown()`), ensuring `close()` actually
+    // runs before the runtime tears down — the previous design dropped
+    // the server future on timeout and abandoned in-flight `close()`s.
     let drain_timeout = if cli.shutdown_drain_timeout > 0 {
         Duration::from_secs(cli.shutdown_drain_timeout as u64)
     } else {
         Duration::from_secs(30)
     };
-    tokio::select! {
-        result = server => {
-            result.context("server error")?;
+
+    tokio::pin!(server);
+    let mut shutdown_observer = shutdown_rx.clone();
+    let shutdown_received = tokio::select! {
+        biased;
+        res = &mut server => {
+            // Server exited on its own (bind error, shutdown future
+            // already completed, etc.) — fall through to drain.
+            if let Err(e) = res {
+                log::warn!("server exited with error: {e:#}");
+            }
+            false
         }
-        _ = async {
-            // Same Err(RecvError) handling as the shutdown future above —
-            // log unexpected channel closure so it doesn't look like a
-            // normal SIGTERM-driven drain.
-            if let Err(e) = drain_rx.changed().await {
+        res = shutdown_observer.changed() => {
+            if let Err(e) = res {
                 log::warn!(
                     "shutdown signal channel closed unexpectedly ({e}); \
-                     starting drain timer immediately"
+                     draining immediately"
                 );
             }
-            log::info!(
-                "received shutdown signal, draining connections (timeout {drain_timeout:?})..."
-            );
-            tokio::time::sleep(drain_timeout).await;
-        } => {
-            log::warn!(
-                "graceful drain timed out after {drain_timeout:?}, forcing shutdown"
-            );
+            true
+        }
+    };
+
+    let drain_deadline = tokio::time::Instant::now() + drain_timeout;
+
+    if shutdown_received {
+        log::info!("received shutdown signal, draining (timeout {drain_timeout:?})...");
+        // Give tonic up to `drain_timeout` to finish its in-flight
+        // streams and return. If it doesn't, we drop the server future
+        // (cancelling any blocked HTTP/2 work) and proceed to force the
+        // session JoinSet down.
+        match tokio::time::timeout_at(drain_deadline, &mut server).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => log::warn!("server exited with error during drain: {e:#}"),
+            Err(_) => log::warn!(
+                "server didn't finish draining within {drain_timeout:?}; \
+                 cancelling and force-shutting session tasks"
+            ),
         }
     }
+
+    {
+        let mut set = session_tasks.lock().await;
+        while !set.is_empty() {
+            match tokio::time::timeout_at(drain_deadline, set.join_next()).await {
+                Ok(Some(Ok(()))) => {}
+                Ok(Some(Err(join_err))) => {
+                    if !join_err.is_cancelled() {
+                        log::debug!("session task ended: {join_err}");
+                    }
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    let remaining = set.len();
+                    log::warn!(
+                        "graceful drain timed out after {drain_timeout:?} with \
+                         {remaining} session task(s) in flight; force-cancelling"
+                    );
+                    set.shutdown().await;
+                    break;
+                }
+            }
+        }
+    }
+    drop(shutdown_rx);
 
     log::info!("shutting down");
     // Only remove if it's still a socket (could have been replaced during runtime)

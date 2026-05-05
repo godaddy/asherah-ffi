@@ -160,10 +160,10 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 
 - [x] **B — `asherah-server/src/main.rs:174-175`** Sync `factory_from_config` blocks Tokio main thread. — *fixed in `384c439`; wrapped in `tokio::task::spawn_blocking`.*
 - [x] **B — `asherah-server/src/service.rs:77`** Sync `s.close()` on Tokio worker. — *fixed in `384c439`; close runs in `spawn_blocking` via the spawned session task.*
-- [ ] **B — `asherah-server/src/main.rs:226-237`** Drain timeout `select!` drops server future. — *partial in `384c439`; the timeout is now configurable via `--shutdown-drain-timeout`. The full force-shutdown JoinSet refactor is a follow-up.*
+- [x] **B — `asherah-server/src/main.rs:226-237`** Drain timeout `select!` drops server future. — *fixed in this commit; per-session tasks are tracked in a shared `Arc<Mutex<JoinSet<()>>>`. Shutdown signal is observed inside the per-session select! loop so streams break out, drop their response sender, and run `s.close()` on the blocking pool. After the server future resolves (or hits the deadline) `main.rs` `join_next()`s the set to drain `close()`s, force-cancelling stragglers via `JoinSet::shutdown()` past the deadline.*
 - [x] **B — `asherah-server/src/main.rs:266`** `signal(SignalKind::terminate()).expect(...)`. — *fixed in `384c439`; `shutdown_signal()` returns `io::Result<()>` and the caller logs registration failures.*
 - [ ] **B — `asherah-server/src/main.rs:181-202, 244-256`** `std::fs::symlink_metadata`/`remove_file` on Tokio runtime; should use `tokio::fs`. — *deferred (acceptable at startup/shutdown; mostly cosmetic).*
-- [ ] **B — `asherah-server/src/service.rs:55,57-81`** Spawned session task detached with no JoinHandle. — *deferred (needs JoinSet refactor — paired with the drain-timeout follow-up above).*
+- [x] **B — `asherah-server/src/service.rs:55,57-81`** Spawned session task detached with no JoinHandle. — *fixed in this commit; tasks are now spawned into the shared `JoinSet`, see the drain-timeout entry above.*
 - [ ] **B — `logging.rs:182`, `metrics.rs:210`** `.expect("spawn worker")` aborts cdylib-loaded process on EAGAIN. — *deferred (changing the constructor signature is a public API change; needs separate plan).*
 - [x] **B — `metrics.rs:48,54`** `if let Ok(mut guard) = SINK.write()` swallows lock poisoning permanently. — *fixed in `96d8802`; both `set_sink` and `clear_sink` recover via `poisoned.into_inner()` (safe because they always overwrite the value) and emit a warn log.*
 - [x] **S — `asherah-server/src/service.rs:97`** No length/charset validation on client-supplied `partition_id`. — *fixed in `2467d97`; 256-byte cap and control-character rejection.*
@@ -307,6 +307,7 @@ Items already addressed are crossed out; the remainder are still open.
 24. ~~api.rs FactoryOption::SecretFactory doc-hidden.~~ — `2fc2464`
 25. ~~Cache atomic ordering + memguard nonce prefix randomization.~~ — `69467ec`
 26. ~~Legacy `Session::encrypt` race-loss recovery.~~ — `8d85a6b`
+27. ~~Server graceful drain via JoinSet (no more abandoned in-flight `close()` calls).~~ — pending commit
 
 ## Open follow-ups (not addressed in this branch)
 
@@ -326,7 +327,6 @@ are deliberately deferred:
 - **metastore_region.rs** — `region_suffix` trait `Option<String>` → `Option<&str>`
 
 **Server**
-- **asherah-server/src/main.rs:226-237 + service.rs:55,57-81** — JoinSet refactor for graceful drain
 - **asherah-server/src/main.rs typed enums** — clap `value_parser = ["..."]` → typed enums
 
 **Bindings / FFI**

@@ -1,7 +1,8 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch, Mutex};
+use tokio::task::JoinSet;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 
@@ -24,8 +25,22 @@ type Session = asherah::Session<
 type SessionStream =
     Pin<Box<dyn tokio_stream::Stream<Item = Result<proto::SessionResponse, Status>> + Send>>;
 
+/// Shared handle to the set of in-flight per-session tasks. `main.rs`
+/// retains a clone so it can drain the set during graceful shutdown,
+/// then force-cancel any stragglers that exceed the drain timeout.
+pub type SessionTasks = Arc<Mutex<JoinSet<()>>>;
+
 pub struct AppEncryptionService {
     factory: Arc<Factory>,
+    shutdown_rx: watch::Receiver<bool>,
+    tasks: SessionTasks,
+    /// Held only when the service was constructed via `new()` (tests).
+    /// `watch::Receiver::changed()` returns `Err` when every sender has
+    /// been dropped, which would make the per-session task's `select!`
+    /// arm fire immediately and break the loop before any request runs.
+    /// Keeping a sender alive here turns the receiver into "never
+    /// signals" semantics for the test path.
+    _shutdown_keepalive: Option<watch::Sender<bool>>,
 }
 
 impl std::fmt::Debug for AppEncryptionService {
@@ -35,9 +50,35 @@ impl std::fmt::Debug for AppEncryptionService {
 }
 
 impl AppEncryptionService {
+    /// Construct a service with no shutdown wiring — used by tests that
+    /// build their own short-lived runtime. The watch channel created
+    /// here never fires; the sender is retained inside the service so
+    /// the receiver doesn't immediately read as "channel closed".
     pub fn new(factory: Factory) -> Self {
+        let (tx, rx) = watch::channel(false);
         Self {
             factory: Arc::new(factory),
+            shutdown_rx: rx,
+            tasks: Arc::new(Mutex::new(JoinSet::new())),
+            _shutdown_keepalive: Some(tx),
+        }
+    }
+
+    /// Construct a service that participates in graceful shutdown. The
+    /// `shutdown_rx` is observed by every spawned per-session task; when
+    /// it flips, the task stops reading new requests, runs `close()` on
+    /// the blocking pool, and exits. The `tasks` handle lets `main.rs`
+    /// `join_next()` until empty (or until a drain deadline expires).
+    pub fn with_lifecycle(
+        factory: Factory,
+        shutdown_rx: watch::Receiver<bool>,
+        tasks: SessionTasks,
+    ) -> Self {
+        Self {
+            factory: Arc::new(factory),
+            shutdown_rx,
+            tasks,
+            _shutdown_keepalive: None,
         }
     }
 }
@@ -51,27 +92,57 @@ impl AppEncryption for AppEncryptionService {
         request: Request<Streaming<proto::SessionRequest>>,
     ) -> Result<Response<Self::SessionStream>, Status> {
         let factory = self.factory.clone();
+        let mut shutdown_rx = self.shutdown_rx.clone();
         let mut inbound = request.into_inner();
         let (tx, rx) = mpsc::channel(16);
 
-        tokio::spawn(async move {
+        let task = async move {
             let mut session: Option<Session> = None;
 
             loop {
-                let req = match inbound.message().await {
-                    Ok(Some(req)) => req,
-                    Ok(None) => break,
-                    Err(e) => {
-                        log::debug!("stream error: {e}");
-                        break;
+                tokio::select! {
+                    biased;
+                    // On shutdown, stop reading new requests and drop into
+                    // the close path. Without this, an idle stream that
+                    // never sends a request would keep the task alive past
+                    // the drain deadline.
+                    //
+                    // `Err` would mean every sender has been dropped, but
+                    // `AppEncryptionService::new` retains a sender (see
+                    // `_shutdown_keepalive`) and `with_lifecycle` keeps
+                    // its sender alive in `main.rs` until after this set
+                    // is drained. So Err is only possible during an
+                    // already-cancelled tokio runtime teardown — break
+                    // out so we still hit `close()`.
+                    res = shutdown_rx.changed() => {
+                        match res {
+                            Ok(()) if *shutdown_rx.borrow() => break,
+                            Ok(()) => continue,
+                            Err(_) => break,
+                        }
                     }
-                };
-
-                let response = process_request(&factory, &mut session, req).await;
-                if tx.send(Ok(response)).await.is_err() {
-                    break;
+                    msg = inbound.message() => {
+                        let req = match msg {
+                            Ok(Some(req)) => req,
+                            Ok(None) => break,
+                            Err(e) => {
+                                log::debug!("stream error: {e}");
+                                break;
+                            }
+                        };
+                        let response = process_request(&factory, &mut session, req).await;
+                        if tx.send(Ok(response)).await.is_err() {
+                            break;
+                        }
+                    }
                 }
             }
+
+            // Drop the response sender before running `close()` so tonic
+            // observes the stream as finished immediately and can return
+            // from `serve_with_incoming_shutdown` while we run the
+            // (potentially slow) close path on the blocking pool.
+            drop(tx);
 
             if let Some(s) = session.take() {
                 // PublicSession::close walks IK and session caches, frees
@@ -89,8 +160,13 @@ impl AppEncryption for AppEncryptionService {
                     log::warn!("session close error: {e}");
                 }
             }
-        });
+        };
 
+        // Register the task so `main.rs` can await it during graceful
+        // drain. `JoinSet::spawn` requires `&mut self`, so we serialize
+        // through the Mutex; contention is bounded by stream-creation
+        // rate (not per-message), so this is not on a hot path.
+        self.tasks.lock().await.spawn(task);
         Ok(Response::new(Box::pin(ReceiverStream::new(rx))))
     }
 }
