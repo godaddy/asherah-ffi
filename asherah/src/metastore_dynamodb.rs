@@ -53,8 +53,21 @@ impl DynamoDbMetastore {
             b.build()
         });
         let client = Client::from_conf(conf.clone());
+        // If the caller asked for region-suffixed key IDs but the resolved
+        // SDK config has no region (e.g. the default credential chain
+        // returned nothing), fail loudly rather than silently dropping
+        // the suffix. The Go reference also requires an explicit region
+        // when EnableRegionSuffix=true. T-finding "region_suffix_enabled
+        // with no region produces silent None" in
+        // docs/review-2026-05-05-findings.md.
         let suffix = if region_suffix {
-            conf.region().map(|r| r.to_string())
+            match conf.region() {
+                Some(r) => Some(r.to_string()),
+                None => anyhow::bail!(
+                    "DynamoDB metastore: region_suffix=true but no AWS region resolved. \
+                     Set AWS_REGION (or DynamoDBRegion) explicitly."
+                ),
+            }
         } else {
             None
         };
@@ -392,7 +405,14 @@ impl DynamoDbMetastore {
             .get("Key")
             .and_then(|v| v.as_s().ok())
             .ok_or_else(|| anyhow::anyhow!("missing Key in KeyRecord"))?;
-        let encrypted_key = base64::engine::general_purpose::STANDARD.decode(key_b64)?;
+        // Don't propagate the base64 crate's error verbatim — its Display
+        // includes the offending byte index and (on some versions) the
+        // raw character, which leaks ciphertext-structure information.
+        // T-finding "Base64 errors propagated verbatim" in
+        // docs/review-2026-05-05-findings.md.
+        let encrypted_key = base64::engine::general_purpose::STANDARD
+            .decode(key_b64)
+            .map_err(|_| anyhow::anyhow!("KeyRecord.Key is not valid base64"))?;
         let parent_key_meta = if let Some(pk) = m.get("ParentKeyMeta").and_then(|v| v.as_m().ok()) {
             let kid = pk
                 .get("KeyId")
