@@ -398,7 +398,30 @@ impl Drop for Enclave {
         // plaintext key bytes are wiped immediately when the owning CryptoKey
         // is dropped (e.g. on cache eviction), rather than waiting for LRU
         // pressure to evict them.
-        cache_evict(self.id);
+        //
+        // SLAB.lock() can `panic` if the slab mutex is poisoned (a previous
+        // holder panicked) or if this Drop runs during another panic
+        // unwind. A double-panic would abort the process and skip every
+        // other Drop in the unwind path — including page-wipes for other
+        // CryptoKeys. Catch and log instead. T-finding "Enclave::Drop
+        // takes SLAB.lock(); reachable from a panic unwind" in
+        // `docs/review-2026-05-05-findings.md`.
+        let id = self.id;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            cache_evict(id);
+        }));
+        if let Err(payload) = result {
+            // Don't `resume_unwind` — that would re-trigger the
+            // double-panic abort we're trying to avoid. Just log.
+            let msg = if let Some(s) = payload.downcast_ref::<&'static str>() {
+                (*s).to_string()
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown panic payload".to_string()
+            };
+            log::error!("Enclave::drop: cache_evict({id}) panicked: {msg}");
+        }
     }
 }
 

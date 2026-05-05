@@ -34,7 +34,7 @@
 //! they need to retain them.
 
 use std::os::raw::{c_char, c_int, c_void};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -80,10 +80,21 @@ struct LogHookRegistration {
 
 static LOG_HOOK: Mutex<Option<LogHookRegistration>> = Mutex::new(None);
 
+/// Fast-path probe for `LOG_HOOK`. Lets the hot-path `LogSink::log` skip
+/// the parking_lot mutex acquisition entirely when no hook is installed,
+/// matching the AtomicUsize gate the metrics path already uses (T-finding
+/// "CallbackLogSink reads LOG_HOOK under a mutex on every record" in
+/// `docs/review-2026-05-05-findings.md`). Updated in `set/clear_log_hook`
+/// while the mutex is held so the gate is consistent with the slot.
+static LOG_HOOK_INSTALLED: AtomicBool = AtomicBool::new(false);
+
 struct CallbackLogSink;
 
 impl LogSink for CallbackLogSink {
     fn log(&self, record: &log::Record<'_>) {
+        if !LOG_HOOK_INSTALLED.load(Ordering::Acquire) {
+            return;
+        }
         let registration = match LOG_HOOK.lock().as_ref() {
             Some(r) => LogHookRegistration {
                 callback: r.callback,
@@ -193,10 +204,17 @@ fn install_log_hook_with_config(
     min_level: i32,
 ) {
     let _ = logging::ensure_logger();
-    *LOG_HOOK.lock() = Some(LogHookRegistration {
-        callback: cb as usize,
-        user_data: user_data as usize,
-    });
+    {
+        let mut guard = LOG_HOOK.lock();
+        *guard = Some(LogHookRegistration {
+            callback: cb as usize,
+            user_data: user_data as usize,
+        });
+        // Set the fast-path probe AFTER the slot is populated so a
+        // concurrent `log` call observing `installed=true` always sees
+        // a non-None slot under the lock.
+        LOG_HOOK_INSTALLED.store(true, Ordering::Release);
+    }
     let inner = CallbackLogSink;
     let async_sink = AsyncLogSink::new(
         inner,
@@ -315,10 +333,14 @@ pub unsafe extern "C" fn asherah_set_log_hook_sync(
         None => return -1,
     };
     let _ = logging::ensure_logger();
-    *LOG_HOOK.lock() = Some(LogHookRegistration {
-        callback: cb as usize,
-        user_data: user_data as usize,
-    });
+    {
+        let mut guard = LOG_HOOK.lock();
+        *guard = Some(LogHookRegistration {
+            callback: cb as usize,
+            user_data: user_data as usize,
+        });
+        LOG_HOOK_INSTALLED.store(true, Ordering::Release);
+    }
     let sink = SyncFilteredLogSink {
         min_level: map_log_level(min_level),
     };
@@ -338,7 +360,14 @@ pub extern "C" fn asherah_log_dropped_count() -> u64 {
 /// dispatched. Always returns 0.
 #[unsafe(no_mangle)]
 pub extern "C" fn asherah_clear_log_hook() -> c_int {
-    *LOG_HOOK.lock() = None;
+    {
+        let mut guard = LOG_HOOK.lock();
+        // Clear the fast-path probe BEFORE dropping the slot so a
+        // concurrent `log` call still observing `installed=true` racing
+        // with this clear sees Some under the lock — never a None.
+        LOG_HOOK_INSTALLED.store(false, Ordering::Release);
+        *guard = None;
+    }
     logging::set_sink("asherah-ffi-log", None);
     0
 }

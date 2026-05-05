@@ -45,15 +45,32 @@ impl MetricsSink for NoopSink {}
 static SINK: Lazy<RwLock<Box<dyn MetricsSink>>> = Lazy::new(|| RwLock::new(Box::new(NoopSink)));
 
 pub fn set_sink<T: MetricsSink>(sink: T) {
-    if let Ok(mut guard) = SINK.write() {
-        *guard = Box::new(sink);
-    }
+    // Recover from poison instead of silently dropping the call. A
+    // poisoned lock means a previous holder panicked, but that doesn't
+    // make the metrics state unsafe — we always overwrite the value.
+    // Failing silently here would make the metrics hook permanently
+    // un-installable for the rest of the process (T-finding "swallows
+    // lock poisoning permanently" in
+    // `docs/review-2026-05-05-findings.md`).
+    let mut guard = match SINK.write() {
+        Ok(g) => g,
+        Err(poisoned) => {
+            log::warn!("metrics SINK lock was poisoned; recovering");
+            poisoned.into_inner()
+        }
+    };
+    *guard = Box::new(sink);
 }
 
 pub fn clear_sink() {
-    if let Ok(mut guard) = SINK.write() {
-        *guard = Box::new(NoopSink);
-    }
+    let mut guard = match SINK.write() {
+        Ok(g) => g,
+        Err(poisoned) => {
+            log::warn!("metrics SINK lock was poisoned; recovering");
+            poisoned.into_inner()
+        }
+    };
+    *guard = Box::new(NoopSink);
 }
 
 pub fn set_enabled(enabled: bool) {
