@@ -8,14 +8,27 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_secretsmanager::{config::Region, Client};
+use zeroize::Zeroizing;
 
 use crate::traits::{KeyManagementService, AEAD};
 
-#[derive(Clone)]
 #[allow(missing_debug_implementations)]
 pub struct SecretsManagerKMS<A: AEAD + Send + Sync + 'static> {
     aead: Arc<A>,
-    master_key: Vec<u8>,
+    /// Master key fetched from Secrets Manager. `Zeroizing` volatile-wipes
+    /// the buffer when the last `Arc` clone is dropped, so the key bytes
+    /// don't linger in the freed allocator slab. T-finding "master_key
+    /// plaintext, never wiped" in `docs/review-2026-05-05-findings.md`.
+    master_key: Arc<Zeroizing<Vec<u8>>>,
+}
+
+impl<A: AEAD + Send + Sync + 'static> Clone for SecretsManagerKMS<A> {
+    fn clone(&self) -> Self {
+        Self {
+            aead: Arc::clone(&self.aead),
+            master_key: Arc::clone(&self.master_key),
+        }
+    }
 }
 
 impl<A: AEAD + Send + Sync + 'static> SecretsManagerKMS<A> {
@@ -57,7 +70,10 @@ impl<A: AEAD + Send + Sync + 'static> SecretsManagerKMS<A> {
              This is better than an environment variable but the key is still static — \
              there is no automatic rotation of the master key."
         );
-        Ok(Self { aead, master_key })
+        Ok(Self {
+            aead,
+            master_key: Arc::new(Zeroizing::new(master_key)),
+        })
     }
 
     /// Async constructor — fetches the secret on the caller's runtime.
@@ -74,7 +90,10 @@ impl<A: AEAD + Send + Sync + 'static> SecretsManagerKMS<A> {
              This is better than an environment variable but the key is still static — \
              there is no automatic rotation of the master key."
         );
-        Ok(Self { aead, master_key })
+        Ok(Self {
+            aead,
+            master_key: Arc::new(Zeroizing::new(master_key)),
+        })
     }
 }
 
@@ -150,18 +169,22 @@ async fn fetch_secret(
 #[async_trait]
 impl<A: AEAD + Send + Sync + 'static> KeyManagementService for SecretsManagerKMS<A> {
     fn encrypt_key(&self, _ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        self.aead.encrypt(key_bytes, &self.master_key).map_err(|e| {
-            log::error!("SecretsManagerKMS encrypt_key failed: {e:#}");
-            e
-        })
+        self.aead
+            .encrypt(key_bytes, self.master_key.as_slice())
+            .map_err(|e| {
+                log::error!("SecretsManagerKMS encrypt_key failed: {e:#}");
+                e
+            })
     }
     fn decrypt_key(&self, _ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        self.aead.decrypt(blob, &self.master_key).map_err(|e| {
-            log::error!(
-                "SecretsManagerKMS decrypt_key failed (blob_len={}): {e:#}",
-                blob.len()
-            );
-            e
-        })
+        self.aead
+            .decrypt(blob, self.master_key.as_slice())
+            .map_err(|e| {
+                log::error!(
+                    "SecretsManagerKMS decrypt_key failed (blob_len={}): {e:#}",
+                    blob.len()
+                );
+                e
+            })
     }
 }

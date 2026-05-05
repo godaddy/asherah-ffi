@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 use crate::traits::KeyManagementService;
 
@@ -16,14 +17,32 @@ use crate::traits::KeyManagementService;
 ///   (uses the pod's service account JWT at `/var/run/secrets/kubernetes.io/serviceaccount/token`)
 /// - **AppRole** (CI/automation): `VAULT_AUTH_METHOD=approle` + `VAULT_APPROLE_ROLE_ID` + `VAULT_APPROLE_SECRET_ID`
 /// - **TLS Certificate** (machine identity): `VAULT_AUTH_METHOD=cert` + `VAULT_CLIENT_CERT` + `VAULT_CLIENT_KEY`
-#[derive(Clone)]
 #[allow(missing_debug_implementations)]
 pub struct VaultTransitKms {
     sync_client: reqwest::blocking::Client,
     async_client: reqwest::Client,
     encrypt_url: String,
     decrypt_url: String,
-    token: String,
+    /// Vault client token. Wrapped in `Zeroizing` so the bytes are
+    /// volatile-wiped when the struct (and any clone) is dropped. T-finding
+    /// "token: String cached for process life with no zeroize" in
+    /// `docs/review-2026-05-05-findings.md`. The renewal/TTL gap is left
+    /// as a documented follow-up — Vault tokens with finite TTL still
+    /// fail at expiry; refresh logic requires plumbing through the auth
+    /// method (Kubernetes JWT path / AppRole secret_id / explicit token).
+    token: Arc<zeroize::Zeroizing<String>>,
+}
+
+impl Clone for VaultTransitKms {
+    fn clone(&self) -> Self {
+        Self {
+            sync_client: self.sync_client.clone(),
+            async_client: self.async_client.clone(),
+            encrypt_url: self.encrypt_url.clone(),
+            decrypt_url: self.decrypt_url.clone(),
+            token: Arc::clone(&self.token),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -62,6 +81,24 @@ struct AuthResponse {
 #[derive(Deserialize)]
 struct AuthData {
     client_token: String,
+}
+
+/// Truncate a body snippet for inclusion in error logs. Vault server
+/// errors can be small JSON or large HTML reverse-proxy pages; truncating
+/// keeps error messages within a reasonable size for log aggregators.
+fn truncate_for_log(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        // Don't slice in the middle of a UTF-8 codepoint.
+        let cut = s
+            .char_indices()
+            .map(|(i, _)| i)
+            .take_while(|&i| i <= max)
+            .last()
+            .unwrap_or(0);
+        format!("{}…", &s[..cut])
+    }
 }
 
 impl VaultTransitKms {
@@ -316,7 +353,7 @@ impl VaultTransitKms {
             async_client,
             encrypt_url,
             decrypt_url,
-            token,
+            token: Arc::new(zeroize::Zeroizing::new(token)),
         })
     }
 
@@ -336,7 +373,7 @@ impl VaultTransitKms {
             async_client,
             encrypt_url,
             decrypt_url,
-            token,
+            token: Arc::new(zeroize::Zeroizing::new(token)),
         })
     }
 
@@ -363,7 +400,7 @@ impl VaultTransitKms {
         let resp = self
             .sync_client
             .post(&self.encrypt_url)
-            .header("X-Vault-Token", &self.token)
+            .header("X-Vault-Token", self.token.as_str())
             .json(&body)
             .send()
             .map_err(|e| {
@@ -371,6 +408,11 @@ impl VaultTransitKms {
                 anyhow::anyhow!("Vault Transit encrypt request failed: {e}")
             })?;
         let status = resp.status();
+        if !status.is_success() {
+            let snippet = resp.text().unwrap_or_default();
+            let snippet = truncate_for_log(&snippet, 256);
+            anyhow::bail!("Vault Transit encrypt: HTTP {status} (body: {snippet})");
+        }
         let vault_resp: VaultResponse<EncryptData> = resp.json().map_err(|e| {
             anyhow::anyhow!(
                 "Vault Transit encrypt: failed to parse response (status {status}): {e}"
@@ -390,14 +432,24 @@ impl VaultTransitKms {
         let resp = self
             .sync_client
             .post(&self.decrypt_url)
-            .header("X-Vault-Token", &self.token)
+            .header("X-Vault-Token", self.token.as_str())
             .json(&body)
             .send()
             .map_err(|e| {
                 log::error!("VaultTransitKms decrypt HTTP error: {e:#}");
                 anyhow::anyhow!("Vault Transit decrypt request failed: {e}")
             })?;
+        // Check the HTTP status *before* parsing JSON. A 5xx with an HTML
+        // body (or a 401/403 reverse-proxy challenge page) would otherwise
+        // surface as an opaque "JSON parse failed" error and mask the real
+        // status. T-finding "never inspects resp.status() before .json()"
+        // in `docs/review-2026-05-05-findings.md`.
         let status = resp.status();
+        if !status.is_success() {
+            let snippet = resp.text().unwrap_or_default();
+            let snippet = truncate_for_log(&snippet, 256);
+            anyhow::bail!("Vault Transit decrypt: HTTP {status} (body: {snippet})");
+        }
         let vault_resp: VaultResponse<DecryptData> = resp.json().map_err(|e| {
             anyhow::anyhow!(
                 "Vault Transit decrypt: failed to parse response (status {status}): {e}"
@@ -422,7 +474,7 @@ impl VaultTransitKms {
         let resp = self
             .async_client
             .post(&self.encrypt_url)
-            .header("X-Vault-Token", &self.token)
+            .header("X-Vault-Token", self.token.as_str())
             .json(&body)
             .send()
             .await
@@ -431,6 +483,11 @@ impl VaultTransitKms {
                 anyhow::anyhow!("Vault Transit encrypt request failed: {e}")
             })?;
         let status = resp.status();
+        if !status.is_success() {
+            let snippet = resp.text().await.unwrap_or_default();
+            let snippet = truncate_for_log(&snippet, 256);
+            anyhow::bail!("Vault Transit encrypt: HTTP {status} (body: {snippet})");
+        }
         let vault_resp: VaultResponse<EncryptData> = resp.json().await.map_err(|e| {
             anyhow::anyhow!(
                 "Vault Transit encrypt: failed to parse response (status {status}): {e}"
@@ -450,7 +507,7 @@ impl VaultTransitKms {
         let resp = self
             .async_client
             .post(&self.decrypt_url)
-            .header("X-Vault-Token", &self.token)
+            .header("X-Vault-Token", self.token.as_str())
             .json(&body)
             .send()
             .await
@@ -459,6 +516,11 @@ impl VaultTransitKms {
                 anyhow::anyhow!("Vault Transit decrypt request failed: {e}")
             })?;
         let status = resp.status();
+        if !status.is_success() {
+            let snippet = resp.text().await.unwrap_or_default();
+            let snippet = truncate_for_log(&snippet, 256);
+            anyhow::bail!("Vault Transit decrypt: HTTP {status} (body: {snippet})");
+        }
         let vault_resp: VaultResponse<DecryptData> = resp.json().await.map_err(|e| {
             anyhow::anyhow!(
                 "Vault Transit decrypt: failed to parse response (status {status}): {e}"
