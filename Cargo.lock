@@ -245,6 +245,7 @@ dependencies = [
  "pyo3",
  "serde_json",
  "tokio",
+ "zeroize",
 ]
 
 [[package]]
