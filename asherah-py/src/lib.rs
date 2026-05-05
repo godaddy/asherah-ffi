@@ -118,17 +118,20 @@ fn setenv(env_obj: &Bound<'_, PyAny>) -> PyResult<()> {
 }
 
 #[pyfunction]
-fn encrypt_bytes(partition_id: &str, data: &[u8]) -> PyResult<String> {
+fn encrypt_bytes(py: Python<'_>, partition_id: &str, data: &[u8]) -> PyResult<String> {
     let session = with_manager(|mgr| Ok(mgr.get_or_create_session(partition_id)))?;
-    let drr = session.encrypt(data).map_err(anyhow_to_py)?;
+    // Release the GIL across the encrypt — encrypt may hit MySQL/Postgres
+    // and AWS KMS, both of which can block for tens of milliseconds. T5 in
+    // docs/review-2026-05-05-findings.md.
+    let drr = py.detach(|| session.encrypt(data)).map_err(anyhow_to_py)?;
     let json = serde_json::to_string(&drr)
         .map_err(|e| PyRuntimeError::new_err(format!("json error: {e}")))?;
     Ok(json)
 }
 
 #[pyfunction]
-fn encrypt_string(partition_id: &str, text: &str) -> PyResult<String> {
-    encrypt_bytes(partition_id, text.as_bytes())
+fn encrypt_string(py: Python<'_>, partition_id: &str, text: &str) -> PyResult<String> {
+    encrypt_bytes(py, partition_id, text.as_bytes())
 }
 
 #[pyfunction]
@@ -140,7 +143,7 @@ fn decrypt_bytes<'py>(
     let session = with_manager(|mgr| Ok(mgr.get_or_create_session(partition_id)))?;
     let drr: ael::types::DataRowRecord = serde_json::from_str(data_row_record)
         .map_err(|e| PyRuntimeError::new_err(format!("invalid DataRowRecord JSON: {e}")))?;
-    let bytes = session.decrypt(drr).map_err(anyhow_to_py)?;
+    let bytes = py.detach(|| session.decrypt(drr)).map_err(anyhow_to_py)?;
     Ok(PyBytes::new(py, &bytes))
 }
 
@@ -317,13 +320,18 @@ pub struct PySession {
 
 #[pymethods]
 impl PySession {
-    pub fn encrypt_bytes(&self, data: &[u8]) -> PyResult<String> {
-        let drr = self.inner.encrypt(data).map_err(anyhow_to_py)?;
+    pub fn encrypt_bytes(&self, py: Python<'_>, data: &[u8]) -> PyResult<String> {
+        // Release the GIL across the encrypt — the operation can hit
+        // MySQL/Postgres and AWS KMS, both blocking. T5 in
+        // docs/review-2026-05-05-findings.md.
+        let drr = py
+            .detach(|| self.inner.encrypt(data))
+            .map_err(anyhow_to_py)?;
         serde_json::to_string(&drr).map_err(|e| PyRuntimeError::new_err(format!("json error: {e}")))
     }
 
-    pub fn encrypt_text(&self, text: &str) -> PyResult<String> {
-        self.encrypt_bytes(text.as_bytes())
+    pub fn encrypt_text(&self, py: Python<'_>, text: &str) -> PyResult<String> {
+        self.encrypt_bytes(py, text.as_bytes())
     }
 
     pub fn decrypt_bytes<'py>(
@@ -331,12 +339,12 @@ impl PySession {
         py: Python<'py>,
         data_row_record: &str,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        let pt = self.decrypt_raw(data_row_record)?;
+        let pt = self.decrypt_raw(py, data_row_record)?;
         Ok(PyBytes::new(py, &pt))
     }
 
-    pub fn decrypt_text(&self, data_row_record: &str) -> PyResult<String> {
-        let bytes = self.decrypt_raw(data_row_record)?;
+    pub fn decrypt_text(&self, py: Python<'_>, data_row_record: &str) -> PyResult<String> {
+        let bytes = self.decrypt_raw(py, data_row_record)?;
         String::from_utf8(bytes).map_err(|e| PyRuntimeError::new_err(format!("utf8 error: {e}")))
     }
 
@@ -388,10 +396,10 @@ impl PySession {
         self.close()
     }
 
-    fn decrypt_raw(&self, data_row_record: &str) -> PyResult<Vec<u8>> {
+    fn decrypt_raw(&self, py: Python<'_>, data_row_record: &str) -> PyResult<Vec<u8>> {
         let drr: ael::types::DataRowRecord =
             serde_json::from_str(data_row_record).map_err(json_parse_err)?;
-        self.inner.decrypt(drr).map_err(anyhow_to_py)
+        py.detach(|| self.inner.decrypt(drr)).map_err(anyhow_to_py)
     }
 }
 
