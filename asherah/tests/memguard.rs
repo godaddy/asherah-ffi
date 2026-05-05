@@ -35,6 +35,21 @@ fn buffer_new_zero_returns_null_buffer_error() {
     assert!(matches!(err, memguard::Error::NullBuffer));
 }
 
+#[test]
+fn buffer_new_huge_size_rejected_without_overflow() {
+    // Pre-fix, `round_to_page_size(usize::MAX)` wrapped to 0 and
+    // `data_off = ps + inner_len - size` underflowed, producing a buffer
+    // with all-guard-page layout and OOB writes. With explicit overflow
+    // checks the layout calculation must surface an `Err` cleanly.
+    let result = memguard::Buffer::new(usize::MAX);
+    assert!(result.is_err(), "usize::MAX size must error, not panic");
+    let result = memguard::Buffer::new(usize::MAX - 1024);
+    assert!(
+        result.is_err(),
+        "size near usize::MAX must error, not panic"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Buffer freeze / melt
 // ---------------------------------------------------------------------------

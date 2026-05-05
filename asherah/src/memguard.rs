@@ -11,7 +11,7 @@ use rand::TryRngCore;
 // for nonces (NONCE_COUNTER), guaranteeing uniqueness without randomness.
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use subtle::ConstantTimeEq;
 
 static PAGE_SIZE: Lazy<usize> = Lazy::new(page_size);
@@ -33,7 +33,11 @@ fn page_size() -> usize {
 }
 fn round_to_page_size(len: usize) -> usize {
     let ps = *PAGE_SIZE;
-    (len + (ps - 1)) & !(ps - 1)
+    // Saturating add prevents `usize::MAX + (ps - 1)` from panicking under
+    // `overflow-checks = true`. The caller (`Buffer::new`) treats a
+    // round-up smaller than the input as an explicit error, so saturating
+    // to `usize::MAX` here is fine — the subsequent check rejects.
+    len.saturating_add(ps - 1) & !(ps - 1)
 }
 
 /// Overwrite `buf` with random bytes from OsRng.
@@ -130,14 +134,49 @@ impl Buffer {
             return Err(Error::NullBuffer);
         }
         let ps = *PAGE_SIZE;
+        // Reject sizes that would overflow during layout calculation.
+        // `round_to_page_size(size)` wraps to 0 for inputs near
+        // `usize::MAX - ps`; `total = 2*ps + inner_len` would then be
+        // 2*ps and we'd allocate two guard pages with no inner region.
+        // The data_off computation (`ps + inner_len - size`) would also
+        // underflow. Guard explicitly. T16/finding #1 in
+        // docs/review-2026-05-05-findings.md.
         let inner_len = round_to_page_size(size);
-        let total = 2 * ps + inner_len;
+        if inner_len < size {
+            return Err(Error::Mem(memcall::MemError::Sys(format!(
+                "Buffer::new: size {size} too large to round up to a page boundary"
+            ))));
+        }
+        let total = match (2_usize.checked_mul(ps)).and_then(|two_ps| two_ps.checked_add(inner_len))
+        {
+            Some(t) => t,
+            None => {
+                return Err(Error::Mem(memcall::MemError::Sys(format!(
+                    "Buffer::new: layout for size {size} (ps={ps}, inner_len={inner_len}) \
+                     overflows usize"
+                ))));
+            }
+        };
+        // Sanity: data_off = ps + inner_len - size must not underflow.
+        let data_off = match ps.checked_add(inner_len).and_then(|x| x.checked_sub(size)) {
+            Some(d) => d,
+            None => {
+                return Err(Error::Mem(memcall::MemError::Sys(format!(
+                    "Buffer::new: data offset for size {size} underflows (ps={ps}, \
+                     inner_len={inner_len})"
+                ))));
+            }
+        };
         let mut mem = memcall::MemBuf::alloc(total)?;
         let base = mem.as_mut_ptr();
         let pre = base;
+        // SAFETY: `mem` owns the contiguous `total = 2*ps + inner_len`
+        // bytes starting at `base`. `base.add(ps)` lands on byte `ps`
+        // (the inner region's start) and `inner.add(inner_len)` lands on
+        // byte `2*ps + inner_len - ps = ps + inner_len` (the post guard
+        // page's start) — both within the allocation.
         let inner = unsafe { base.add(ps) };
         let post = unsafe { inner.add(inner_len) };
-        let data_off = ps + inner_len - size;
         unsafe {
             memcall::lock_raw(inner, inner_len)?;
         }
@@ -173,15 +212,24 @@ impl Buffer {
         self.mem.as_ptr() as *mut u8
     }
     fn inner_ptr(&self) -> *mut u8 {
+        // SAFETY: `inner_off = ps` is set in `new()` and is always
+        // `<= total = 2*ps + inner_len`. The pointer offset stays within
+        // the allocation owned by `self.mem`.
         unsafe { self.base_ptr().add(self.inner_off) }
     }
     fn pre_ptr(&self) -> *mut u8 {
         self.base_ptr()
     }
     fn post_ptr(&self) -> *mut u8 {
+        // SAFETY: `inner_off + inner_len = ps + inner_len <= total`, so
+        // adding `inner_len` past `inner_ptr()` lands on the post-guard
+        // page's start, still within the allocation.
         unsafe { self.inner_ptr().add(self.inner_len) }
     }
     fn data_ptr(&self) -> *mut u8 {
+        // SAFETY: `data_off` is computed in `new()` as
+        // `ps + inner_len - size`, so `0 <= data_off < total` by the
+        // same overflow-checked layout invariants.
         unsafe { self.base_ptr().add(self.data_off) }
     }
     fn inner_raw(&self) -> (*mut u8, usize) {
@@ -191,12 +239,18 @@ impl Buffer {
         if !self.alive {
             return &mut [];
         }
+        // SAFETY: `data_ptr()..data_ptr()+data_len` is the user-visible
+        // window inside the locked inner region (`inner_off..inner_off+inner_len`)
+        // owned by `self.mem`. `&mut self` guarantees no aliasing
+        // reference exists for the duration of the returned slice.
         unsafe { std::slice::from_raw_parts_mut(self.data_ptr(), self.data_len) }
     }
     pub fn as_slice(&self) -> &[u8] {
         if !self.alive {
             return &[];
         }
+        // SAFETY: same window as `bytes()`. `&self` guarantees no
+        // mutating reference exists for the duration of the slice.
         unsafe { std::slice::from_raw_parts(self.data_ptr(), self.data_len) }
     }
     pub fn size(&self) -> usize {
@@ -1028,4 +1082,20 @@ pub fn catch_interrupt() {
 static INIT: Lazy<()> = Lazy::new(|| {
     let _result = memcall::disable_core_dumps();
 });
-pub static mut STREAM_CHUNK_SIZE: usize = 0;
+/// Streaming-mode chunk size, exposed for advanced callers that build
+/// streaming pipelines on top of `memguard` primitives. Stored as an
+/// `AtomicUsize` rather than a `pub static mut` so reads and writes are
+/// well-defined under concurrent access (T17/finding #3 in
+/// `docs/review-2026-05-05-findings.md`). Use `set_stream_chunk_size` /
+/// `stream_chunk_size` instead of dereferencing the static directly.
+pub static STREAM_CHUNK_SIZE: AtomicUsize = AtomicUsize::new(0);
+
+/// Read the configured streaming chunk size. Defaults to 0 when unset.
+pub fn stream_chunk_size() -> usize {
+    STREAM_CHUNK_SIZE.load(Ordering::Relaxed)
+}
+
+/// Configure the streaming chunk size. Pass 0 to clear.
+pub fn set_stream_chunk_size(value: usize) {
+    STREAM_CHUNK_SIZE.store(value, Ordering::Relaxed);
+}
