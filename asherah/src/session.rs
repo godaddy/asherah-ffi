@@ -295,14 +295,50 @@ impl<
                         created: sk.created(),
                     }),
                 };
-                self.f
+                // Match the modern `create_intermediate_key` race-loss
+                // recovery: if our store loses to another encrypter that
+                // created the IK first, reload the winner's IK rather
+                // than surfacing a misleading "store failed" error.
+                // T-finding "Legacy Session::encrypt doesn't reload
+                // load_latest on race-loss" in
+                // `docs/review-2026-05-05-findings.md`.
+                let stored = self
+                    .f
                     .metastore
                     .store(&ekr.id, ekr.created, &ekr)
-                    .context(format!(
-                        "encrypt: failed to store intermediate key id={}",
+                    .unwrap_or_else(|e| {
+                        log::warn!(
+                            "encrypt: IK store failed for id={} (will retry load): {e:#}",
+                            ekr.id
+                        );
+                        false
+                    });
+                if stored {
+                    ik
+                } else {
+                    log::debug!(
+                        "encrypt: IK store returned false, loading latest for id={}",
                         ekr.id
-                    ))?;
-                ik
+                    );
+                    let latest = self
+                        .f
+                        .metastore
+                        .load_latest(&ekr.id)
+                        .context("encrypt: race-loss fallback load_latest failed")?
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "encrypt: store returned false for id={} but load_latest \
+                                 returned None — metastore may be inconsistent",
+                                ekr.id
+                            )
+                        })?;
+                    let sk_meta = latest.parent_key_meta.clone().unwrap_or(KeyMeta {
+                        id: self.f.partition.system_key_id(),
+                        created: 0,
+                    });
+                    let sk2 = self.load_system_key(sk_meta)?;
+                    self.intermediate_key_from_ekr(&sk2, &latest)?
+                }
             }
         };
         // DRK and encrypt
