@@ -209,11 +209,15 @@ fn simple_cache_different_ids_call_loader_separately() {
 }
 
 // ---------------------------------------------------------------------------
-// SimpleKeyCache TTL=0 (always expired)
+// SimpleKeyCache TTL=0 (no TTL = never expire)
 // ---------------------------------------------------------------------------
 
 #[test]
-fn simple_cache_ttl_zero_always_calls_loader() {
+fn simple_cache_ttl_zero_never_expires() {
+    // ttl=0 means "no TTL" — entries do not expire on a clock and only
+    // metastore-level events invalidate them. Behavior changed in
+    // docs/review-2026-05-05-findings.md (the previous behavior was
+    // "always expired", which thrashed the cache on every access).
     let cache = SimpleKeyCache::new_with_ttl(0);
     let calls = AtomicUsize::new(0);
     let mut loader = || -> anyhow::Result<Arc<CryptoKey>> {
@@ -226,8 +230,9 @@ fn simple_cache_ttl_zero_always_calls_loader() {
     }
     assert_eq!(
         calls.load(Ordering::SeqCst),
-        5,
-        "every call should go through loader with ttl=0"
+        1,
+        "ttl=0 means no expiry; loader runs once and the cache serves \
+         subsequent calls"
     );
 }
 

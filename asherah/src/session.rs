@@ -380,14 +380,31 @@ impl<
         let mut drk = ik
             .with_key_func(|ikb| self.f.crypto.decrypt(&key.encrypted_key, ikb))
             .context("decrypt: failed to decrypt DRK with IK")??;
-        let pt = self
-            .f
-            .crypto
-            .decrypt(&drr.data, &drk)
-            .context("decrypt: failed to decrypt data with DRK")?;
-        // wipe DRK bytes after use; wipe_bytes uses zeroize for volatile
-        // writes plus a SeqCst compiler fence to prevent DSE.
-        crate::memguard::wipe_bytes(&mut drk);
+        // Use a guard so the DRK is wiped on every exit path — including
+        // the AEAD-decrypt error case below. The async/PublicSession
+        // paths use DrkGuard; the legacy path previously skipped the
+        // wipe on AEAD failure (T-finding "Legacy decrypt doesn't wipe
+        // drk when AEAD fails" in docs/review-2026-05-05-findings.md).
+        struct DrkWipe<'drk>(&'drk mut [u8]);
+        impl Drop for DrkWipe<'_> {
+            fn drop(&mut self) {
+                crate::memguard::wipe_bytes(self.0);
+            }
+        }
+        let drk_guard = DrkWipe(&mut drk[..]);
+        // SAFETY-equivalent: the guard borrows drk for the rest of this
+        // scope. The decrypt call only needs `&[u8]`, so we re-slice
+        // through the guard's owned reference.
+        let pt = {
+            let drk_slice: &[u8] = drk_guard.0;
+            self.f
+                .crypto
+                .decrypt(&drr.data, drk_slice)
+                .context("decrypt: failed to decrypt data with DRK")?
+        };
+        // Explicit drop documents the wipe order: drk is wiped before
+        // returning the plaintext.
+        drop(drk_guard);
         // pt is the decrypted plaintext; the FFI layers (asherah_buffer_free,
         // asherah-cobhan Decrypt/DecryptFromJson) are responsible for zeroing
         // it before deallocation.
@@ -603,8 +620,13 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         if let Some(c) = &self.session_cache {
             c.close();
         }
+        // Surface IK-cache close failures rather than silently dropping them
+        // — the caller has no other channel for noticing memguard/munlock
+        // errors. T-finding "PublicFactory::close swallows c.close() errors
+        // via drop(...)" in docs/review-2026-05-05-findings.md.
         if let Some(c) = &self.shared_ik_cache {
-            drop(c.close());
+            c.close()
+                .context("PublicFactory::close: failed to close shared IK cache")?;
         }
         Ok(())
     }
