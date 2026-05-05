@@ -312,7 +312,19 @@ async fn main() -> Result<()> {
     let server = Server::builder()
         .add_service(grpc_svc)
         .serve_with_incoming_shutdown(incoming, async move {
-            drop(shutdown_rx.changed().await);
+            // changed() returns Err(RecvError) only when shutdown_tx is
+            // dropped without sending — i.e. the spawned signal task
+            // panicked or exited unexpectedly. Treat that as an
+            // immediate-shutdown signal but log it so operators can tell
+            // it apart from a SIGTERM-driven shutdown. T-finding
+            // "drop(shutdown_rx.changed().await) discards the Result"
+            // in `docs/review-2026-05-05-findings.md`.
+            if let Err(e) = shutdown_rx.changed().await {
+                log::warn!(
+                    "shutdown signal channel closed unexpectedly ({e}); \
+                     server will drain immediately"
+                );
+            }
         });
 
     // Race graceful shutdown against a configurable hard drain timeout.
@@ -330,7 +342,15 @@ async fn main() -> Result<()> {
             result.context("server error")?;
         }
         _ = async {
-            drop(drain_rx.changed().await);
+            // Same Err(RecvError) handling as the shutdown future above —
+            // log unexpected channel closure so it doesn't look like a
+            // normal SIGTERM-driven drain.
+            if let Err(e) = drain_rx.changed().await {
+                log::warn!(
+                    "shutdown signal channel closed unexpectedly ({e}); \
+                     starting drain timer immediately"
+                );
+            }
             log::info!(
                 "received shutdown signal, draining connections (timeout {drain_timeout:?})..."
             );

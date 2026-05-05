@@ -548,32 +548,29 @@ pub unsafe extern "C" fn SetupJson(config_json: *const c_char) -> i32 {
 /// - Estimated buffer size in bytes
 #[unsafe(no_mangle)]
 pub extern "C" fn EstimateBuffer(data_len: i32, partition_len: i32) -> i32 {
-    match std::panic::catch_unwind(|| {
-        // Match Go formula:
-        // estimatedDataLen := ((int(dataLen) + EstimatedEncryptionOverhead + 2) / 3) * 4
-        // result := int32(BUFFER_HEADER_SIZE + EstimatedEnvelopeOverhead +
-        //           EstimatedIntermediateKeyOverhead + int(partitionLen) + estimatedDataLen)
-        let estimated_data_len =
-            ((data_len as i64 + ESTIMATED_ENCRYPTION_OVERHEAD as i64 + 2) / 3) * 4;
-        let intermediate_key_overhead =
-            ESTIMATED_INTERMEDIATE_KEY_OVERHEAD.load(Ordering::Relaxed) as i64;
+    // No catch_unwind: this function only does arithmetic on i32/i64
+    // values, an `AtomicI32::load`, and a clamp/cast. None of those
+    // panic — the catch_unwind wrapper was paying overhead with no
+    // benefit (T-finding "EstimateBuffer panic-catches a pure arithmetic
+    // operation" in `docs/review-2026-05-05-findings.md`).
+    //
+    // Match Go formula:
+    //   estimatedDataLen := ((int(dataLen) + EstimatedEncryptionOverhead + 2) / 3) * 4
+    //   result := int32(BUFFER_HEADER_SIZE + EstimatedEnvelopeOverhead +
+    //             EstimatedIntermediateKeyOverhead + int(partitionLen) + estimatedDataLen)
+    let estimated_data_len = ((data_len as i64 + ESTIMATED_ENCRYPTION_OVERHEAD as i64 + 2) / 3) * 4;
+    let intermediate_key_overhead =
+        ESTIMATED_INTERMEDIATE_KEY_OVERHEAD.load(Ordering::Relaxed) as i64;
 
-        let result = BUFFER_HEADER_SIZE as i64
-            + ESTIMATED_ENVELOPE_OVERHEAD as i64
-            + intermediate_key_overhead
-            + partition_len as i64
-            + estimated_data_len;
-        if result > i32::MAX as i64 {
-            i32::MAX // clamp to max representable; caller should check
-        } else {
-            result as i32
-        }
-    }) {
-        Ok(result) => result,
-        Err(_) => {
-            log::error!("internal panic in EstimateBuffer");
-            ERR_PANIC
-        }
+    let result = BUFFER_HEADER_SIZE as i64
+        + ESTIMATED_ENVELOPE_OVERHEAD as i64
+        + intermediate_key_overhead
+        + partition_len as i64
+        + estimated_data_len;
+    if result > i32::MAX as i64 {
+        i32::MAX // clamp to max representable; caller should check
+    } else {
+        result as i32
     }
 }
 
