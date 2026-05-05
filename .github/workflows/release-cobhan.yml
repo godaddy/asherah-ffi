@@ -3,6 +3,13 @@ name: Release Asherah Native Library
 permissions:
   contents: read
 
+# Serialize concurrent runs against the same release tag so a re-run
+# doesn't race with the in-progress upload of native artifacts to the
+# GitHub Release. Manual dispatches serialize per branch.
+concurrency:
+  group: release-cobhan-${{ github.event.release.tag_name || github.event.inputs.tag || github.ref }}
+  cancel-in-progress: false
+
 on:
   release:
     types: [published]

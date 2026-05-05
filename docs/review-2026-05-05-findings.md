@@ -236,11 +236,11 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 
 ## CI / build / release
 
-- [ ] **B — `.github/workflows/publish-server.yml`** No `concurrency:` group (CLAUDE.md hard rule).
-- [ ] **B — `.github/workflows/release-cobhan.yml`** No `concurrency:` group.
-- [ ] **B — `.github/workflows/publish-maven.yml`** Missing top-level `permissions: { contents: read }`.
-- [ ] **B — `.github/workflows/publish-nuget.yml`** Missing top-level `permissions: { contents: read }`.
-- [ ] **B — `publish-npm.yml:137-153` vs `ci.yml` dry-runs** Windows builds: publish omits `OPENSSL_STATIC=1`, dry-runs set it. CLAUDE.md says these MUST match exactly.
+- [x] **B — `.github/workflows/publish-server.yml`** No `concurrency:` group (CLAUDE.md hard rule). — *fixed in pending commit; group keyed by release tag (or branch for manual dispatch).*
+- [x] **B — `.github/workflows/release-cobhan.yml`** No `concurrency:` group. — *fixed in pending commit; group keyed by release tag.*
+- [x] **B — `.github/workflows/publish-maven.yml`** Missing top-level `permissions: { contents: read }`. — *fixed in pending commit.*
+- [x] **B — `.github/workflows/publish-nuget.yml`** Missing top-level `permissions: { contents: read }`. — *fixed in pending commit.*
+- [x] **B — `publish-npm.yml:137-153` vs `ci.yml` dry-runs** Windows builds: publish omits `OPENSSL_STATIC=1`, dry-runs set it. CLAUDE.md says these MUST match exactly. — *fixed in pending commit; both x86_64 and aarch64 Windows builds in `publish-npm.yml` now `export OPENSSL_STATIC=1` to match the `vcpkg static-md` triplet and the dry-run config.*
 - [ ] **S — `publish-server.yml`** Dockerfile uses `rust:1.88-bookworm` while toolchain is 1.91.1.
 - [ ] **S — `ci.yml:986-988`** pip install hardcodes `--break-system-packages`; use detection probe per CLAUDE.md.
 - [ ] **S — `publish-npm.yml`** No Linux GNU or macOS dry-run mirror; only musl/Windows mirrored.

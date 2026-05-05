@@ -1,5 +1,10 @@
 name: Publish to NuGet.org
 
+# Top-level read-only token; jobs that need broader scopes escalate
+# them explicitly. CLAUDE.md hard rule.
+permissions:
+  contents: read
+
 concurrency:
   group: publish-nuget
   cancel-in-progress: false
