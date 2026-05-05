@@ -97,6 +97,11 @@ pub enum Error {
     InvalidKeyLength,
     BufferTooSmall,
     DecryptionFailed,
+    /// `pool_acquire` / `coffer_view` timed out waiting for a slab slot
+    /// to be released. Indicates either (a) genuine slot pressure that
+    /// outstrips the slab capacity, or (b) a leaked `PoolSlot` that
+    /// never had `pool_release` called on it.
+    OutOfSlots,
     /// Input was not the required fixed size for this operation.
     InvalidSize {
         expected: usize,
@@ -304,6 +309,18 @@ impl Buffer {
         if !self.alive {
             return Ok(());
         }
+        // Allocate the swap-in placeholder FIRST. The previous order ran
+        // `protect`, `wipe`, the canary check, `unlock_raw`, and only
+        // then allocated the placeholder — so an alloc failure mid-
+        // destroy left the buffer half-destroyed with `alive=true`,
+        // and a retry would fail the canary check on already-wiped
+        // pages with `CanaryFailed`. With the alloc up front, an alloc
+        // failure surfaces while the buffer is still in its original
+        // state, so `destroy()` is genuinely retryable. T-finding
+        // "Buffer::destroy allocates inside the destroy path" in
+        // `docs/review-2026-05-05-findings.md`.
+        let placeholder = memcall::MemBuf::alloc(1)?;
+
         self.mem
             .protect(memcall::MemoryProtectionFlag::read_write())?;
         self.mutable = true;
@@ -326,7 +343,7 @@ impl Buffer {
         unsafe {
             memcall::unlock_raw(self.inner_ptr(), self.inner_len)?;
         }
-        let mem = std::mem::replace(&mut self.mem, memcall::MemBuf::alloc(1)?);
+        let mem = std::mem::replace(&mut self.mem, placeholder);
         mem.free()?;
         self.alive = false;
         self.mutable = false;
@@ -510,6 +527,13 @@ impl Enclave {
 // Transient slots are acquired briefly during crypto operations, then released.
 // When no free slots remain, the LRU cache entry is evicted to make room.
 pub const SLOT_SIZE: usize = 32; // AES-256 key size
+
+/// Maximum time `pool_acquire` / `coffer_view` will wait for a slab slot
+/// before returning `Error::OutOfSlots`. 30 seconds is generous enough
+/// that genuine traffic spikes don't trip it but short enough that a
+/// leaked `PoolSlot` (FFI caller forgot `pool_release`) shows up as a
+/// loud error rather than a hung process.
+const POOL_ACQUIRE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
 const COFFER_LEFT: usize = 0;
 const COFFER_RIGHT: usize = 1;
 const FIRST_SHARED_SLOT: usize = 2;
@@ -844,9 +868,27 @@ pub fn pool_acquire(size: usize) -> Result<PoolSlot, Error> {
             origin: SlotOrigin::Slab,
         });
     }
-    // All slots held transiently — wait for one to be released
+    // All slots are held transiently — wait for one to be released, with
+    // a hard deadline so a leaked PoolSlot (FFI caller forgot to release)
+    // can't deadlock the pool indefinitely. T-finding "SLAB_CV.wait holds
+    // MutexGuard indefinitely" in `docs/review-2026-05-05-findings.md`.
+    //
+    // The loop has two exit paths:
+    //   - a slot becomes free (notify_one wakes us); we acquire and return
+    //   - we exceed `POOL_ACQUIRE_DEADLINE`; bail with `OutOfSlots` so the
+    //     caller can fall back to a standalone allocation or surface the
+    //     error rather than block forever
+    let start = std::time::Instant::now();
     loop {
-        SLAB_CV.wait(&mut slab);
+        let remaining = POOL_ACQUIRE_DEADLINE.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            log::error!(
+                "pool_acquire: timed out after {POOL_ACQUIRE_DEADLINE:?} waiting for a \
+                 slab slot; suspected PoolSlot leak"
+            );
+            return Err(Error::OutOfSlots);
+        }
+        SLAB_CV.wait_for(&mut slab, remaining);
         if let Some(idx) = slab.acquire_transient_slot(None) {
             return Ok(PoolSlot {
                 ptr: slab.slot_ptr(idx),
@@ -874,11 +916,19 @@ pub fn pool_release(slot: PoolSlot) {
 /// Reconstruct the Coffer master key into a transient pool slot.
 pub fn coffer_view() -> Result<PoolSlot, Error> {
     let mut slab = SLAB.lock();
+    let start = std::time::Instant::now();
     loop {
         if let Some(slot) = slab.coffer_view() {
             return Ok(slot);
         }
-        SLAB_CV.wait(&mut slab);
+        let remaining = POOL_ACQUIRE_DEADLINE.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            log::error!(
+                "coffer_view: timed out after {POOL_ACQUIRE_DEADLINE:?} waiting for a slab slot"
+            );
+            return Err(Error::OutOfSlots);
+        }
+        SLAB_CV.wait_for(&mut slab, remaining);
     }
 }
 
