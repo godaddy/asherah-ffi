@@ -74,7 +74,18 @@ impl AppEncryption for AppEncryptionService {
             }
 
             if let Some(s) = session.take() {
-                if let Err(e) = s.close() {
+                // PublicSession::close walks IK and session caches, frees
+                // memguard-locked pages (munlock syscalls), and acquires
+                // parking_lot locks under the hood. Running it directly on
+                // a Tokio worker would block the executor for the duration
+                // of those syscalls — move it onto the blocking pool. T8 in
+                // docs/review-2026-05-05-findings.md.
+                let close_result = tokio::task::spawn_blocking(move || s.close())
+                    .await
+                    .unwrap_or_else(|join_err| {
+                        Err(anyhow::anyhow!("close task panicked: {join_err}"))
+                    });
+                if let Err(e) = close_result {
                     log::warn!("session close error: {e}");
                 }
             }

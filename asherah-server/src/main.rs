@@ -114,6 +114,20 @@ struct Cli {
     /// Enable verbose logging output
     #[arg(short = 'v', long, env = "ASHERAH_VERBOSE")]
     verbose: bool,
+
+    /// Maximum time (seconds) to wait for in-flight gRPC sessions to drain
+    /// after a shutdown signal. After the timeout the server future is
+    /// dropped and any still-running session tasks are abandoned. Accepts
+    /// Go-style suffixes via `parse_go_duration` (e.g. `30s`, `2m`). The
+    /// default preserves the previously-hard-coded value; raise it for
+    /// long-lived streaming sessions.
+    #[arg(
+        long,
+        value_parser = parse_go_duration,
+        default_value = "5s",
+        env = "ASHERAH_SHUTDOWN_DRAIN_TIMEOUT"
+    )]
+    shutdown_drain_timeout: i64,
 }
 
 /// Parse an octal file mode (e.g. `0660`, `660`, `0o660`) into a `u32` mode
@@ -212,9 +226,16 @@ async fn main() -> Result<()> {
     )
     .init();
 
+    // Build the factory on the blocking pool. Construction may do DNS,
+    // TLS handshakes, and KMS warm-up (synchronous AWS SDK init), all of
+    // which would otherwise hold the Tokio main thread (T8 in
+    // docs/review-2026-05-05-findings.md).
     let config = cli_to_config(&cli);
     let (factory, _applied) =
-        asherah_config::factory_from_config(&config).context("failed to initialize Asherah")?;
+        tokio::task::spawn_blocking(move || asherah_config::factory_from_config(&config))
+            .await
+            .context("factory init task panicked")?
+            .context("failed to initialize Asherah")?;
 
     let svc = asherah_server::service::AppEncryptionService::new(factory);
     let grpc_svc = proto::app_encryption_server::AppEncryptionServer::new(svc);
@@ -272,9 +293,18 @@ async fn main() -> Result<()> {
 
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
 
-    // Spawn a task that listens for SIGTERM/SIGINT and broadcasts shutdown
+    // Spawn a task that listens for SIGTERM/SIGINT and broadcasts shutdown.
+    // shutdown_signal returns a Result so signal-registration failures (a
+    // seccomp-restricted host or a runtime that already owns the signal
+    // disposition) surface to the operator instead of aborting the spawned
+    // task and silently losing shutdown handling.
     tokio::spawn(async move {
-        shutdown_signal().await;
+        match shutdown_signal().await {
+            Ok(()) => {}
+            Err(e) => {
+                log::error!("shutdown signal handler failed to register: {e:#}");
+            }
+        }
         let _ = shutdown_tx.send(true);
     });
 
@@ -285,17 +315,30 @@ async fn main() -> Result<()> {
             drop(shutdown_rx.changed().await);
         });
 
-    // Race graceful shutdown against a hard drain timeout
+    // Race graceful shutdown against a configurable hard drain timeout.
+    // When the timeout wins the server future is dropped — any in-flight
+    // session tasks are abandoned. The default is 30s (raised from the
+    // hard-coded 5s); operators can tune via --shutdown-drain-timeout or
+    // ASHERAH_SHUTDOWN_DRAIN_TIMEOUT.
+    let drain_timeout = if cli.shutdown_drain_timeout > 0 {
+        Duration::from_secs(cli.shutdown_drain_timeout as u64)
+    } else {
+        Duration::from_secs(30)
+    };
     tokio::select! {
         result = server => {
             result.context("server error")?;
         }
         _ = async {
             drop(drain_rx.changed().await);
-            log::info!("received shutdown signal, draining connections...");
-            tokio::time::sleep(Duration::from_secs(5)).await;
+            log::info!(
+                "received shutdown signal, draining connections (timeout {drain_timeout:?})..."
+            );
+            tokio::time::sleep(drain_timeout).await;
         } => {
-            log::warn!("graceful drain timed out after 5s, forcing shutdown");
+            log::warn!(
+                "graceful drain timed out after {drain_timeout:?}, forcing shutdown"
+            );
         }
     }
 
@@ -323,16 +366,17 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn shutdown_signal() {
+async fn shutdown_signal() -> std::io::Result<()> {
     use tokio::signal::unix::{signal, SignalKind};
 
-    let mut sigterm = signal(SignalKind::terminate()).expect("failed to register SIGTERM handler");
+    let mut sigterm = signal(SignalKind::terminate())?;
     let ctrl_c = tokio::signal::ctrl_c();
 
     tokio::select! {
-        _ = ctrl_c => {}
+        result = ctrl_c => result?,
         _ = sigterm.recv() => {}
     }
+    Ok(())
 }
 
 #[cfg(test)]
