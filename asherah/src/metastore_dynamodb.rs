@@ -359,8 +359,16 @@ impl DynamoDbMetastore {
                 Ok(true)
             }
             Err(e) => {
-                let msg = format!("{e:?}");
-                if msg.contains("ConditionalCheckFailed") {
+                // Match on the typed service error rather than the Debug
+                // string. Display formatting is locale- and SDK-version
+                // sensitive; an unrelated error whose Debug happened to
+                // contain the substring "ConditionalCheckFailed" would have
+                // been silently classified as a duplicate (T6 in
+                // docs/review-2026-05-05-findings.md).
+                let is_duplicate = e
+                    .as_service_error()
+                    .is_some_and(|svc| svc.is_conditional_check_failed_exception());
+                if is_duplicate {
                     log::debug!("dynamodb store: duplicate key id={id} created={created}");
                     Ok(false)
                 } else {
