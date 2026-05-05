@@ -76,6 +76,15 @@ pub struct MemBuf {
     ptr: NonNull<u8>,
     len: usize,
 }
+
+// SAFETY: `MemBuf` exclusively owns the `ptr`/`len` region — `alloc`
+// allocates and `Drop`/`free` deallocate. The struct exposes mutation only
+// through `&mut self`, so an `&MemBuf` cannot mutate the buffer. Sending
+// the buffer across threads transfers exclusive ownership of the bytes;
+// sharing it (`&MemBuf`) only allows reads via `as_ptr` / `as_slice`,
+// which never alias a concurrent write because there cannot be one
+// without `&mut self`. Underlying `mlock`/`munlock`/`mprotect` syscalls
+// are thread-safe by OS contract.
 unsafe impl Send for MemBuf {}
 unsafe impl Sync for MemBuf {}
 impl MemBuf {
@@ -113,8 +122,18 @@ impl MemBuf {
         os::os_protect(self.ptr.as_ptr(), self.len, mpf)
     }
     pub fn free(mut self) -> Result<(), MemError> {
-        let _ignored = self.protect(MemoryProtectionFlag::read_write());
-        wipe(self.as_mut_slice());
+        // protect() may legitimately fail (e.g. the page is currently
+        // PROT_NONE because of guard-page reuse). Skip the wipe in that
+        // case — writing to a PROT_NONE page would segfault. The os_free
+        // path itself reverts protections via munmap/VirtualFree. T17 in
+        // docs/review-2026-05-05-findings.md.
+        let protect_ok = self
+            .protect(MemoryProtectionFlag::read_write())
+            .inspect_err(|e| log::warn!("MemBuf::free: protect(rw) failed: {e}"))
+            .is_ok();
+        if protect_ok {
+            wipe(self.as_mut_slice());
+        }
         let result = os::os_free(self.ptr.as_ptr(), self.len);
         self.len = 0;
         result
@@ -125,12 +144,23 @@ impl Drop for MemBuf {
         if self.len == 0 {
             return;
         }
-        let _ignored = self.protect(MemoryProtectionFlag::read_write());
-        if self.len > 0 {
+        // Same protect-before-wipe ordering as `free()`: skip the wipe if
+        // the page can't be made writable, otherwise we'd segfault on a
+        // PROT_NONE region.
+        let protect_ok = self
+            .protect(MemoryProtectionFlag::read_write())
+            .inspect_err(|e| log::warn!("MemBuf::drop: protect(rw) failed: {e}"))
+            .is_ok();
+        if protect_ok {
             let s = unsafe { std::slice::from_raw_parts_mut(self.ptr.as_ptr(), self.len) };
             wipe(s);
         }
-        let _ignored = os::os_free(self.ptr.as_ptr(), self.len);
+        if let Err(e) = os::os_free(self.ptr.as_ptr(), self.len) {
+            // Log free failures: an `os_free` error means we leaked a
+            // mapping or VirtualFree'd a bogus address — silent loss
+            // would mask either real bugs or RLIMIT/AS exhaustion.
+            log::warn!("MemBuf::drop: os_free failed for {} bytes: {e}", self.len);
+        }
         self.len = 0;
     }
 }
@@ -275,14 +305,34 @@ mod os {
     }
     #[cfg(not(windows))]
     pub fn os_lock(ptr: *mut u8, len: usize) -> Result<(), MemError> {
+        // MADV_DONTDUMP / MADV_NOCORE excludes the region from core dumps.
+        // Failure is non-fatal — secrets stay mlock'd either way — but a
+        // silent ignore masks a tightened-seccomp deployment that *thinks*
+        // it's getting core-dump exclusion when it isn't. Log debug so
+        // operators with verbose logs can see it. T17 in
+        // docs/review-2026-05-05-findings.md.
         #[cfg(target_os = "linux")]
-        unsafe {
-            libc::madvise(ptr.cast::<c_void>(), len, libc::MADV_DONTDUMP)
-        };
+        {
+            let rc = unsafe { libc::madvise(ptr.cast::<c_void>(), len, libc::MADV_DONTDUMP) };
+            if rc != 0 {
+                let errno = std::io::Error::last_os_error();
+                log::debug!(
+                    "memcall: MADV_DONTDUMP failed on {ptr:p} len={len}: {errno}; \
+                     core dumps may include locked memory"
+                );
+            }
+        }
         #[cfg(target_os = "freebsd")]
-        unsafe {
-            libc::madvise(ptr.cast::<c_void>(), len, libc::MADV_NOCORE)
-        };
+        {
+            let rc = unsafe { libc::madvise(ptr.cast::<c_void>(), len, libc::MADV_NOCORE) };
+            if rc != 0 {
+                let errno = std::io::Error::last_os_error();
+                log::debug!(
+                    "memcall: MADV_NOCORE failed on {ptr:p} len={len}: {errno}; \
+                     core dumps may include locked memory"
+                );
+            }
+        }
         let rc = unsafe { libc::mlock(ptr as *const c_void, len) };
         if rc != 0 {
             #[cfg(target_os = "aix")]
