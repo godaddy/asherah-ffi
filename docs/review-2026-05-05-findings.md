@@ -27,6 +27,8 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 | Cobhan/FFI batch | `b90d1c4` | `fix(ffi/cobhan): SetEnv post-init reject, fn-ptr transmute via *const(), refuse poisoned locks, unify negative-length error` |
 | Metastore batch | `84b7585` | `fix(metastore): InMemory atomic latest, postgres pool guard, DynamoDB region+base64` |
 | KMS batch | `40d3ee2` | `fix(kms): zeroize cached master keys/tokens; check Vault HTTP status before json parse` |
+| Server S-tier | `2467d97` | `fix(server): partition_id validation, error sanitization, compound durations` |
+| Misc S-tier | `c855fb2` | `fix(misc): suggestion-tier cleanups across logging, session_cache, postgres, hooks` |
 
 ---
 
@@ -86,7 +88,7 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [ ] **S — `aead.rs:78-92`** `fast_random_bytes` doesn't retry init after transient OsRng failure.
 - [ ] **S — `aead.rs:11-13`** Comment claims 2^-32 collision after 2^32 messages — actual safe bound for AES-GCM is 2^32 messages per key total. With 90-day rotation and >540 enc/sec, this becomes non-negligible.
 - [ ] **S — `session.rs:438-444`** `now_s` returns 0 if `SystemTime::now < UNIX_EPOCH`.
-- [ ] **S — `session_cache.rs:83-84`** Non-atomic remove+insert race produces two distinct sessions for same id.
+- [x] **S — `session_cache.rs:83-84`** Non-atomic remove+insert race produces two distinct sessions for same id. — *fixed in `c855fb2`; replaced with atomic `upsert`.*
 - [ ] **S — `policy.rs:36-49`** Default `simple` IK cache + 90-day TTL + revocation gap = IK can stay cached past revocation.
 - [ ] **S — `partition.rs:31-40, 50-54`** SK id allocated via `format!` per encrypt; cache it like `cached_ik_id`.
 - [ ] **S — `builders.rs:707-722`** Hand-rolled hex decode; static master-key plaintext Vec not wiped.
@@ -102,7 +104,7 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [x] **B — `asherah-cobhan/src/lib.rs:254-267` vs `:714-724`** Negative length returns inconsistent error codes. — *fixed in `b90d1c4`; both borrow and to-bytes paths return `ERR_UNSUPPORTED_TEMP_FILE`.*
 - [x] **B — `asherah-cobhan/src/lib.rs:434-436, 575-576, 700-701, 803-804, 871-872`** Poisoned-lock recovery silently uses corrupted state. — *partial in `b90d1c4`; encrypt/decrypt paths now go through `factory_read_or_panic_err` and return `ERR_PANIC` on poisoning. SetupJson keeps `into_inner()` because it owns the write lock and overwrites state.*
 - [ ] **S — `asherah-ffi/src/lib.rs:524, 549`, `asherah-cobhan:599, 752`** `format!("{e:#}")` returns full anyhow chain to user callbacks; AWS SDK errors include ARNs/request IDs.
-- [ ] **S — `hooks.rs:159-172`** `map_log_level` treats unknown values as `Trace`; binding off-by-one becomes verbose-logging footgun.
+- [x] **S — `hooks.rs:159-172`** `map_log_level` treats unknown values as `Trace`. — *fixed in `c855fb2`; clamps unknown values to `Warn` and emits a warning.*
 - [ ] **S — `hooks.rs:87-93`** `CallbackLogSink` reads `LOG_HOOK` under mutex on every record; metrics path uses `AtomicUsize` fast-path probe.
 - [ ] **S — `asherah-cobhan/src/lib.rs:206-216, 642`** `cobhan_buffer_set_length` doesn't validate against capacity.
 - [ ] **S — `asherah-cobhan/src/lib.rs:500-528`** `EstimateBuffer` panic-catches pure i64 arithmetic.
@@ -120,7 +122,7 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [ ] **B — `metastore_postgres.rs:50-61`, `pool_mysql.rs:177,184,190`** `expect("PgPooledClient accessed after drop")` / `ManagedConn` panic-on-deref violates no-panic policy. — *deferred (the unwrap is genuinely unreachable in current code; needs a NonNull invariant restructure to remove the expect).*
 - [ ] **S — `metastore_sqlite.rs:23-29, 43, 94`** `created` stored as TEXT via `datetime(?,'unixepoch')`; differs from Go reference and other backends.
 - [ ] **S — `metastore_mysql.rs:21-44`** Hand-rolled civil-from-days routine in encryption hot path; replace with `chrono`.
-- [ ] **S — `metastore_postgres.rs:340-342`** Duplicate-id store path doesn't log; rotation collisions silent.
+- [x] **S — `metastore_postgres.rs:340-342`** Duplicate-id store path doesn't log. — *fixed in `c855fb2`; logs at `info` level on conflict.*
 - [ ] **S — `metastore_dynamodb.rs:219-225, 282-287`** Inline `kr.as_m()` at load sites returns `Ok(None)` for malformed records, hiding schema corruption.
 - [ ] **S — `metastore_region.rs:37-39`** `region_suffix(&self) -> Option<String>` clones per call. Return `Option<&str>`.
 - [ ] **S — `store.rs:32-38`** `InMemoryStore` key collision on `{Created, Len}` silently overwrites.
@@ -159,16 +161,16 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [ ] **B — `asherah-server/src/service.rs:55,57-81`** Spawned session task detached with no JoinHandle. — *deferred (needs JoinSet refactor — paired with the drain-timeout follow-up above).*
 - [ ] **B — `logging.rs:182`, `metrics.rs:210`** `.expect("spawn worker")` aborts cdylib-loaded process on EAGAIN. — *deferred (changing the constructor signature is a public API change; needs separate plan).*
 - [ ] **B — `metrics.rs:48,54`** `if let Ok(mut guard) = SINK.write()` swallows lock poisoning permanently. — *deferred (related to the metrics-sink redesign).*
-- [ ] **S — `asherah-server/src/service.rs:97`** No length/charset validation on client-supplied `partition_id`; flows into key IDs and SQL.
-- [ ] **S — `asherah-server/src/service.rs:113,129`** `e.to_string()` returns full anyhow chain over the wire; cross-trust-boundary detail leak.
+- [x] **S — `asherah-server/src/service.rs:97`** No length/charset validation on client-supplied `partition_id`. — *fixed in `2467d97`; 256-byte cap and control-character rejection.*
+- [x] **S — `asherah-server/src/service.rs:113,129`** `e.to_string()` returns full anyhow chain over the wire. — *fixed in `2467d97`; `sanitize_error` logs the full chain at warn level and ships only the top-level summary.*
 - [ ] **S — `asherah-server/src/main.rs:222`** `drop(shutdown_rx.changed().await)` discards `Result`; sender drop indistinguishable from signal.
 - [ ] **S — `logging.rs:78-80`** `log::max_level = Trace` whenever any subscriber registers; defeats subscribers wanting `Warn`.
-- [ ] **S — `logging.rs:48-56`** `ensure_logger` returns `Result` but cannot fail; misleading signature.
+- [x] **S — `logging.rs:48-56`** `ensure_logger` returns `Result` but cannot fail. — *fixed in `c855fb2`; doc comment now states the function is effectively infallible. Signature kept for source compatibility.*
 - [ ] **S — `logging.rs:159`, `metrics.rs:188`** Worker `JoinHandle` never joined in `Drop`; worker panics lost.
 - [ ] **S — `metrics.rs:45, 67-72`** Inconsistent `std::sync::RwLock` (metrics) vs `parking_lot::RwLock` (logging); user closure runs holding the read lock.
 - [ ] **S — `metrics.rs:75-97`** `Relaxed` ordering on `count` and `total_ns` allows reader to undercount average.
 - [ ] **S — `asherah-server/src/main.rs:31, 39, 89`** `value_parser` with string array; use typed enum.
-- [ ] **S — `asherah-server/src/lib.rs:19-34`** `parse_go_duration` rejects compound durations like `"1h30m"`; parity bug for interop sidecar.
+- [x] **S — `asherah-server/src/lib.rs:19-34`** `parse_go_duration` rejects compound durations. — *fixed in `2467d97`; full Go-style compound parsing (`1h30m`, `2h45m30s`) with overflow checks and unit tests.*
 - [ ] **S — `asherah-server/src/convert.rs:7, 20`** `proto_to_drr` populates `id: String::new()`/`revoked: None`; document this is deliberate parity with Go server.
 - [ ] **S — `asherah-server/src/main.rs:208`** `verbose` mode emits per-request partition ID logs; tenant identifier exposure.
 - [ ] **S — `api.rs:22-25`** `FactoryOption::SecretFactory` is a no-op; `#[doc(hidden)]` it or remove.
