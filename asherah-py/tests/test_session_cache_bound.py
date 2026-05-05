@@ -19,7 +19,7 @@ def _base_config(max_size=None):
         "ServiceName": "svc",
         "ProductID": "prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "EnableSessionCaching": True,
         "Verbose": False,
     }
