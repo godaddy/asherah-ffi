@@ -12,6 +12,44 @@ const DEFAULT_MAX_OPEN: usize = 0;
 /// Default max idle connections, matching Go's database/sql MaxIdleConns default.
 const DEFAULT_MAX_IDLE: usize = 2;
 
+/// Replica read consistency modes accepted by Aurora's `apg_write_forward.consistency_mode`.
+///
+/// Restricting the wire-level setting to a closed enum keeps user input out
+/// of the `SET` statement entirely — the SQL strings are compile-time
+/// constants picked by `as_set_statement` (T7 in
+/// `docs/review-2026-05-05-findings.md`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReplicaConsistency {
+    Eventual,
+    Global,
+    Session,
+}
+
+impl ReplicaConsistency {
+    /// Parse the case-sensitive wire value (`eventual`, `global`, `session`).
+    fn parse(value: &str) -> anyhow::Result<Self> {
+        match value {
+            "eventual" => Ok(Self::Eventual),
+            "global" => Ok(Self::Global),
+            "session" => Ok(Self::Session),
+            other => anyhow::bail!(
+                "invalid REPLICA_READ_CONSISTENCY value: '{other}' \
+                 (expected eventual, global, or session)"
+            ),
+        }
+    }
+
+    /// Returns the static `SET` statement for this mode. The value is a
+    /// `&'static str` literal, never a runtime-formatted string.
+    fn as_set_statement(self) -> &'static str {
+        match self {
+            Self::Eventual => "SET apg_write_forward.consistency_mode = 'eventual'",
+            Self::Global => "SET apg_write_forward.consistency_mode = 'global'",
+            Self::Session => "SET apg_write_forward.consistency_mode = 'session'",
+        }
+    }
+}
+
 struct PoolInner {
     conns: Vec<Client>,
     checked_out: usize,
@@ -19,7 +57,7 @@ struct PoolInner {
 
 struct PgPool {
     url: String,
-    replica_consistency: Option<String>,
+    replica_consistency: Option<ReplicaConsistency>,
     inner: Mutex<PoolInner>,
     max_idle: usize,
     max_open: usize,
@@ -138,17 +176,10 @@ impl PostgresMetastore {
         max_idle: Option<usize>,
         replica_consistency: Option<String>,
     ) -> anyhow::Result<Self> {
-        if let Some(ref c) = replica_consistency {
-            match c.as_str() {
-                "eventual" | "global" | "session" => {}
-                _ => {
-                    anyhow::bail!(
-                        "invalid REPLICA_READ_CONSISTENCY value: '{}' (expected eventual, global, or session)",
-                        c
-                    );
-                }
-            }
-        }
+        let replica_consistency = replica_consistency
+            .as_deref()
+            .map(ReplicaConsistency::parse)
+            .transpose()?;
         let max_open = max_open.unwrap_or(DEFAULT_MAX_OPEN);
         let max_idle = max_idle.unwrap_or(DEFAULT_MAX_IDLE);
         let max_idle = if max_open > 0 {
@@ -173,18 +204,7 @@ impl PostgresMetastore {
 
     /// Connect using env vars for pool config (legacy entry point).
     pub fn connect(url: &str) -> anyhow::Result<Self> {
-        let replica_consistency = match std::env::var("REPLICA_READ_CONSISTENCY") {
-            Ok(c) => match c.as_str() {
-                "eventual" | "global" | "session" => Some(c),
-                _ => {
-                    anyhow::bail!(
-                        "invalid REPLICA_READ_CONSISTENCY value: '{}' (expected eventual, global, or session)",
-                        c
-                    );
-                }
-            },
-            Err(_) => None,
-        };
+        let replica_consistency = std::env::var("REPLICA_READ_CONSISTENCY").ok();
 
         fn env_usize(key: &str) -> Option<usize> {
             std::env::var(key).ok().and_then(|v| v.parse().ok())
@@ -256,10 +276,8 @@ impl PostgresMetastore {
                 pool: Arc::clone(&self.pool),
                 client: Some(client),
             };
-            if let Some(ref consistency) = self.pool.replica_consistency {
-                if let Err(e) = pooled.batch_execute(&format!(
-                    "SET apg_write_forward.consistency_mode = '{consistency}'"
-                )) {
+            if let Some(consistency) = self.pool.replica_consistency {
+                if let Err(e) = pooled.batch_execute(consistency.as_set_statement()) {
                     // pooled will be dropped, which decrements checked_out
                     return Err(e.into());
                 }
@@ -384,7 +402,7 @@ impl Metastore for PostgresMetastore {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -467,5 +485,69 @@ mod tests {
     #[test]
     fn parse_sslmode_empty_string() {
         assert_eq!(parse_sslmode(""), None);
+    }
+
+    // ────────────── ReplicaConsistency (T7) ──────────────
+
+    #[test]
+    fn replica_consistency_parse_known_values() {
+        assert_eq!(
+            ReplicaConsistency::parse("eventual").unwrap(),
+            ReplicaConsistency::Eventual
+        );
+        assert_eq!(
+            ReplicaConsistency::parse("global").unwrap(),
+            ReplicaConsistency::Global
+        );
+        assert_eq!(
+            ReplicaConsistency::parse("session").unwrap(),
+            ReplicaConsistency::Session
+        );
+    }
+
+    #[test]
+    fn replica_consistency_parse_rejects_unknown_and_injection() {
+        // Reject unknown legitimate-looking values.
+        assert!(ReplicaConsistency::parse("strong").is_err());
+        assert!(ReplicaConsistency::parse("EVENTUAL").is_err()); // case-sensitive
+                                                                 // Reject SQL injection payloads — these would have been interpolated
+                                                                 // into the SET statement by the previous format!() implementation.
+        assert!(ReplicaConsistency::parse("eventual'; DROP TABLE keys;--").is_err());
+        assert!(ReplicaConsistency::parse("' OR '1'='1").is_err());
+        assert!(ReplicaConsistency::parse("").is_err());
+    }
+
+    #[test]
+    fn replica_consistency_set_statement_is_static() {
+        // The wire SQL must be a fixed string per variant — no interpolation,
+        // no user data ever reaches the SET statement.
+        assert_eq!(
+            ReplicaConsistency::Eventual.as_set_statement(),
+            "SET apg_write_forward.consistency_mode = 'eventual'"
+        );
+        assert_eq!(
+            ReplicaConsistency::Global.as_set_statement(),
+            "SET apg_write_forward.consistency_mode = 'global'"
+        );
+        assert_eq!(
+            ReplicaConsistency::Session.as_set_statement(),
+            "SET apg_write_forward.consistency_mode = 'session'"
+        );
+    }
+
+    #[test]
+    fn connect_with_rejects_invalid_consistency_value() {
+        let result = PostgresMetastore::connect_with(
+            "postgres://localhost/db",
+            None,
+            None,
+            Some("eventual'; DROP TABLE keys;--".to_string()),
+        );
+        let err = match result {
+            Ok(_) => panic!("invalid consistency must error"),
+            Err(e) => e,
+        };
+        let msg = format!("{err:#}");
+        assert!(msg.contains("REPLICA_READ_CONSISTENCY"), "{msg}");
     }
 }
