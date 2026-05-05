@@ -218,7 +218,7 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 
 - [ ] **B — Memguard tests** No test exercises `Buffer::destroy` returning `Error::CanaryFailed` (the canary-corruption branch).
 - [ ] **B — `fuzz/fuzz_targets/cobhan_buffer.rs:11-61`** Fuzz target reimplements parsing logic in safe Rust and tests *that*, not the unsafe FFI.
-- [ ] **B — `asherah-cobhan/tests/integration_tests.rs:1404`** No null-pointer FFI tests; `Encrypt`/`Decrypt`/`EncryptToJson`/`DecryptFromJson` not exercised with `null` inputs.
+- [x] **B — `asherah-cobhan/tests/integration_tests.rs:1404`** No null-pointer FFI tests; `Encrypt`/`Decrypt`/`EncryptToJson`/`DecryptFromJson` not exercised with `null` inputs. — *fixed in pending commit; new `test_null_pointer_inputs_impl` exercises every pointer position on `EncryptToJson`/`DecryptFromJson`/`Encrypt`, asserting `ERR_NULL_PTR`.*
 - [ ] **B — `asherah/tests/cross_fixtures.rs:11`** Cross-language ciphertext fixtures gated behind unset `FIXTURES_DIR`; no checked-in canonical Go DRR roundtrip.
 - [ ] **B — `asherah/tests/`** No test confirms plaintext zeroization on drop (sentinel + scan).
 - [ ] **B — `asherah/tests/cache_concurrent.rs:39-116`** Eviction tests don't assert `cache.by_meta.len() <= max`; happy-path roundtrip only.
