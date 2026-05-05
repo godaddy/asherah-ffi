@@ -229,12 +229,7 @@ impl DynamoDbMetastore {
             .send()
             .await
             .with_context(|| format!("DynamoDB Query failed for table={} id={id}", self.table))?;
-        if let Some(item) = out.items().first() {
-            if let Some(kr) = item.get("KeyRecord").and_then(|v| v.as_m().ok()) {
-                return Ok(Some(Self::decode_key_record(kr, id)?));
-            }
-        }
-        Ok(None)
+        Self::parse_item(out.items().first(), id)
     }
 
     async fn store_impl_sync(
@@ -292,12 +287,7 @@ impl DynamoDbMetastore {
             .send()
             .await
             .with_context(|| format!("DynamoDB Query failed for table={} id={id}", self.table))?;
-        if let Some(item) = out.items().first() {
-            if let Some(kr) = item.get("KeyRecord").and_then(|v| v.as_m().ok()) {
-                return Ok(Some(Self::decode_key_record(kr, id)?));
-            }
-        }
-        Ok(None)
+        Self::parse_item(out.items().first(), id)
     }
 
     async fn store_impl_async(
@@ -312,18 +302,39 @@ impl DynamoDbMetastore {
 
     // ── Shared helpers ──
 
+    /// Parse a DynamoDB Item into an EnvelopeKeyRecord.
+    ///
+    /// Distinguishes three cases:
+    ///
+    /// - `Ok(None)` — item was missing entirely (cache miss)
+    /// - `Ok(Some(_))` — item was present and decoded successfully
+    /// - `Err(_)` — item was present but malformed (`KeyRecord` field
+    ///   exists but isn't a Map, or sub-fields are missing/wrong type)
+    ///
+    /// The previous implementation collapsed malformed items into
+    /// `Ok(None)`, which made schema corruption look like a normal cache
+    /// miss — store would then PutItem on top of the corrupted row and
+    /// later return `ConditionalCheckFailed`. T-finding "Inline kr.as_m()
+    /// at load sites returns Ok(None) for malformed records" in
+    /// `docs/review-2026-05-05-findings.md`.
     fn parse_item(
         item: Option<&std::collections::HashMap<String, AttributeValue>>,
         id: &str,
     ) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
-        if let Some(item) = item {
-            if let Some(kr) = item.get("KeyRecord") {
-                if let Ok(m) = kr.as_m() {
-                    return Ok(Some(Self::decode_key_record(m, id)?));
-                }
-            }
-        }
-        Ok(None)
+        let Some(item) = item else {
+            return Ok(None);
+        };
+        let Some(kr) = item.get("KeyRecord") else {
+            anyhow::bail!(
+                "DynamoDB item for id={id} is missing the KeyRecord attribute (schema corruption)"
+            );
+        };
+        let m = kr.as_m().map_err(|_| {
+            anyhow::anyhow!(
+                "DynamoDB item for id={id} has KeyRecord that is not a Map (schema corruption)"
+            )
+        })?;
+        Ok(Some(Self::decode_key_record(m, id)?))
     }
 
     async fn do_store(
