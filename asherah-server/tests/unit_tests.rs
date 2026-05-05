@@ -79,10 +79,13 @@ fn duration_invalid_non_numeric() {
 }
 
 #[test]
-fn duration_invalid_mixed() {
-    // We don't support compound durations like Go's "1h30m"
-    assert!(parse_go_duration("1h30m").is_err());
-    assert!(parse_go_duration("1m30s").is_err());
+fn duration_compound_supported() {
+    // Compound durations now supported (parity with Go's
+    // time.ParseDuration). Was rejected pre-fix; see
+    // docs/review-2026-05-05-findings.md.
+    assert_eq!(parse_go_duration("1h30m").unwrap(), 5400);
+    assert_eq!(parse_go_duration("1m30s").unwrap(), 90);
+    assert_eq!(parse_go_duration("2h45m30s").unwrap(), 9930);
 }
 
 #[test]

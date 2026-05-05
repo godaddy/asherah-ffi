@@ -95,6 +95,36 @@ impl AppEncryption for AppEncryptionService {
     }
 }
 
+/// Maximum partition_id length accepted from clients. Partition IDs flow
+/// into key IDs, log messages, and SQL bind parameters — accepting an
+/// unbounded byte string lets a misbehaving client make the sidecar
+/// allocate megabyte-scale envelope records and emit verbose log lines.
+/// 256 bytes is generous; tighten if you control the call sites.
+const MAX_PARTITION_ID_LEN: usize = 256;
+
+fn validate_partition_id(id: &str) -> Result<(), &'static str> {
+    if id.is_empty() {
+        return Err("partition_id is empty");
+    }
+    if id.len() > MAX_PARTITION_ID_LEN {
+        return Err("partition_id exceeds 256 bytes");
+    }
+    if id.bytes().any(|b| b < 0x20 || b == 0x7f) {
+        return Err("partition_id contains a control character");
+    }
+    Ok(())
+}
+
+/// Build a client-facing error message that doesn't leak internal
+/// metastore/KMS chain details. Logs the full chain at warn level so the
+/// operator can debug; ships only the top-level summary over the wire.
+/// T-finding "e.to_string() returns full anyhow chain over the wire" in
+/// `docs/review-2026-05-05-findings.md`.
+fn sanitize_error(op: &str, err: &anyhow::Error) -> String {
+    log::warn!("{op} failed: {err:#}");
+    format!("{op} failed: {err}")
+}
+
 async fn process_request(
     factory: &Factory,
     session: &mut Option<Session>,
@@ -104,6 +134,9 @@ async fn process_request(
         Some(proto::session_request::Request::GetSession(get)) => {
             if session.is_some() {
                 return error_response("session has already been initialized");
+            }
+            if let Err(reason) = validate_partition_id(&get.partition_id) {
+                return error_response(reason);
             }
             *session = Some(factory.get_session(&get.partition_id));
             // GetSession success returns empty response (matching Go behavior)
@@ -121,7 +154,7 @@ async fn process_request(
                         },
                     )),
                 },
-                Err(e) => error_response(&e.to_string()),
+                Err(e) => error_response(&sanitize_error("encrypt", &e)),
             }
         }
         Some(proto::session_request::Request::Decrypt(dec)) => {
@@ -137,7 +170,7 @@ async fn process_request(
                                 proto::DecryptResponse { data },
                             )),
                         },
-                        Err(e) => error_response(&e.to_string()),
+                        Err(e) => error_response(&sanitize_error("decrypt", &e)),
                     }
                 }
                 None => error_response("decrypt request missing data_row_record"),
