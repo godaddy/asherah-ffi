@@ -52,8 +52,17 @@ pub mod session_cache;
 pub mod store;
 pub mod traits;
 pub mod types;
-// Embedded low-level libs
+// Embedded low-level libs.
+//
+// These modules expose unsafe primitives (raw mmap regions, mprotect-guarded
+// pages, unsynchronized SLAB pools) that callers can misuse to corrupt the
+// global memguard state. They remain `pub` so the integration tests can
+// exercise them, but they are excluded from rustdoc and **not** part of the
+// public API. Build on top of `LockedBuffer`, `wipe_bytes`, and the session
+// types instead.
+#[doc(hidden)]
 pub mod memcall;
+#[doc(hidden)]
 pub mod memguard;
 
 // Crate-private helpers (not re-exported)
