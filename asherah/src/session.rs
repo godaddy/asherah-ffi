@@ -19,11 +19,17 @@ pub struct SessionFactory<
     M: Metastore + Clone,
     P: Partition + Clone,
 > {
-    pub metastore: Arc<M>,
-    pub kms: Arc<K>,
-    pub policy: CryptoPolicy,
-    pub crypto: Arc<A>,
-    pub partition: Arc<P>,
+    // Crate-internal: external code interacts with `PublicFactory`
+    // (re-exported as `asherah::SessionFactory`) and constructs the
+    // inner factory via `SessionFactory::new` / `factory_from_config`.
+    // Mid-session mutation of these fields would invalidate cached
+    // keys and partition derivations, so direct external access is
+    // not part of the supported API surface.
+    pub(crate) metastore: Arc<M>,
+    pub(crate) kms: Arc<K>,
+    pub(crate) policy: CryptoPolicy,
+    pub(crate) crypto: Arc<A>,
+    pub(crate) partition: Arc<P>,
 }
 
 impl<

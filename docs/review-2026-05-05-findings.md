@@ -83,7 +83,7 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [ ] **B — `session.rs:1029,1009,991`** Async SK loaders use `std::thread::spawn` per call. — *deferred (replace with `tokio::task::spawn_blocking`; affects backpressure semantics and needs benchmarking).*
 - [x] **B — `session.rs:331-395`** Legacy `decrypt` doesn't wipe `drk` when AEAD fails; async path uses `DrkGuard`, legacy doesn't. — *fixed in `7dad394`; new `DrkWipe` drop-guard wipes on every exit path.*
 - [x] **B — `session.rs:602-610`** `PublicFactory::close` swallows `c.close()` errors via `drop(...)`. — *fixed in `7dad394`; replaced with `?`-propagation via `anyhow::Context`.*
-- [ ] **B — `session.rs:16-27`, `config.rs:4-9`, `types.rs:24-40`** Public fields on `SessionFactory`/`Config`/`EnvelopeKeyRecord.id` let callers mutate invariants mid-session. — *deferred (CLAUDE.md notes struct-layout sensitivity; needs benchmarking before changing field visibility).*
+- [x] **B — `session.rs:16-27`, `config.rs:4-9`, `types.rs:24-40`** Public fields on `SessionFactory`/`Config`/`EnvelopeKeyRecord.id` let callers mutate invariants mid-session. — *partial: `SessionFactory<A,K,M,P>`'s field visibility is now `pub(crate)` (visibility-only change has no struct-layout impact, so the CLAUDE.md perf concern doesn't apply — confirmed by passing benchmarks). External code interacts via `PublicFactory` re-exported as `asherah::SessionFactory`. `Config` fields stay `pub` because they're a builder users assemble field-by-field. `EnvelopeKeyRecord.id` stays `pub` because both `asherah-server/src/convert.rs` and `asherah-cobhan/src/lib.rs` construct the struct literally with `id: String::new()` (the metastore fills the id on load); a constructor swap would be a public-API break.*
 - [x] **B — `session.rs:283-296`** Legacy `Session::encrypt` doesn't reload `load_latest` on race-loss. — *fixed in `8d85a6b`; mirrors the `create_intermediate_key` recovery — on `Ok(false)` (or `Err`), `load_latest` for the IK id, decrypt with its parent SK, and use the winner's IK to continue the encrypt.*
 - [ ] **S — `cache.rs:183-197`** `random_jitter_ms` is sequential LCG; entries close in time get identical jitter, defeating thundering-herd protection.
 - [ ] **S — `cache.rs:62-72`** `CacheCheck` reinvents Result; `Hit | StaleOther` arms merged identically in consumer.
@@ -308,7 +308,8 @@ Items already addressed are crossed out; the remainder are still open.
 25. ~~Cache atomic ordering + memguard nonce prefix randomization.~~ — `69467ec`
 26. ~~Legacy `Session::encrypt` race-loss recovery.~~ — `8d85a6b`
 27. ~~Server graceful drain via JoinSet (no more abandoned in-flight `close()` calls).~~ — `0610f1d`
-28. ~~Python binding decrypt path: intermediate `Vec<u8>`s wrapped in `Zeroizing`.~~ — pending commit
+28. ~~Python binding decrypt path: intermediate `Vec<u8>`s wrapped in `Zeroizing`.~~ — `6f12e82`
+29. ~~SessionFactory fields tightened from `pub` to `pub(crate)`.~~ — pending commit
 
 ## Open follow-ups (not addressed in this branch)
 
@@ -316,7 +317,7 @@ These need design work, affect public API, or require benchmarking, and
 are deliberately deferred:
 
 **Memguard / core**
-- **session.rs:16-27/config.rs/types.rs** — public field encapsulation (struct-layout sensitivity)
+- ~~**session.rs:16-27/config.rs/types.rs** — public field encapsulation~~ — partial (see B-tier note above): `SessionFactory` fields are now `pub(crate)`; `Config` and `EnvelopeKeyRecord.id` stay `pub` for ABI/builder reasons.
 
 **KMS / metastore**
 - **kms_aws_envelope.rs:240-313** — multi-region decrypt integrity binding (envelope format change)
