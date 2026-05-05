@@ -431,8 +431,18 @@ impl AsyncContext {
     }
 
     /// Restore the callback function pointer and user data for invocation.
+    ///
+    /// The callback is stored as `usize` so the surrounding struct can be
+    /// `Send` across the tokio runtime; we round-trip through `*const ()`
+    /// before transmuting to a function pointer. The Rust reference does
+    /// not directly guarantee `usize → fn` transmutes, but
+    /// `*const () → fn` is implementation-defined and works on every
+    /// Tier-1 platform (T-finding "transmute<usize, fn> not guaranteed by
+    /// Rust reference" in docs/review-2026-05-05-findings.md).
     unsafe fn restore_callback(&self) -> (AsherahCompletionFn, usize) {
-        let callback: AsherahCompletionFn = std::mem::transmute(self.callback);
+        let cb_ptr = self.callback as *const ();
+        let callback: AsherahCompletionFn =
+            std::mem::transmute::<*const (), AsherahCompletionFn>(cb_ptr);
         (callback, self.user_data)
     }
 }

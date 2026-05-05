@@ -186,6 +186,24 @@ static FACTORY: RwLock<Option<Factory>> = RwLock::new(None);
 /// (len(ProductID) + len(ServiceName), matching Go behavior)
 static ESTIMATED_INTERMEDIATE_KEY_OVERHEAD: AtomicI32 = AtomicI32::new(0);
 
+/// Acquire a read guard on FACTORY, refusing the operation if the lock is
+/// poisoned. Encrypt/Decrypt paths must reject poisoned state because
+/// continuing past a previous panic could re-enter half-initialized FFI
+/// state. Setup paths may legitimately recover via `FACTORY.write()` +
+/// `into_inner()` because they overwrite state, so they don't go through
+/// this helper. T-finding "Poisoned-lock recovery silently uses corrupted
+/// state via into_inner()" in docs/review-2026-05-05-findings.md.
+fn factory_read_or_panic_err() -> Result<std::sync::RwLockReadGuard<'static, Option<Factory>>, i32>
+{
+    match FACTORY.read() {
+        Ok(g) => Ok(g),
+        Err(_) => {
+            log::error!("FACTORY lock is poisoned; refusing operation");
+            Err(ERR_PANIC)
+        }
+    }
+}
+
 // ============================================================================
 // Cobhan Buffer Format Implementation
 // ============================================================================
@@ -257,7 +275,13 @@ unsafe fn cobhan_buffer_borrow<'a>(buf: *const c_char) -> Result<&'a [u8], i32> 
     }
     let len = cobhan_buffer_get_length(buf);
     if len < 0 {
-        return Err(ERR_BUFFER_TOO_SMALL);
+        // Negative length is cobhan's temp-file reference protocol —
+        // we don't implement it. Return the same dedicated error code
+        // as `cobhan_buffer_to_bytes`; the previous `ERR_BUFFER_TOO_SMALL`
+        // misled callers into resizing their buffer (T-finding "Negative
+        // length returns inconsistent error codes" in
+        // docs/review-2026-05-05-findings.md).
+        return Err(ERR_UNSUPPORTED_TEMP_FILE);
     }
     if len == 0 {
         return Ok(&[]);
@@ -367,6 +391,13 @@ pub extern "C" fn Shutdown() {
 /// # Safety
 /// `env_json` must point to a valid Cobhan buffer with a properly initialized header.
 ///
+/// **Threading**: `set_var`/`remove_var` are racy on POSIX with concurrent
+/// `getenv` calls in other threads — the Rust standard library has marked
+/// them `unsafe` on nightly for this reason. Call `SetEnv` only during
+/// process startup, **before** any other Asherah entry point creates
+/// background threads (factory init, log/metrics dispatch workers, async
+/// runtimes). Calling it later races with everything in the process.
+///
 /// # Parameters
 /// - `env_json`: Cobhan buffer containing JSON object with string key-value pairs
 ///
@@ -385,6 +416,24 @@ pub unsafe extern "C" fn SetEnv(env_json: *const c_char) -> i32 {
             Ok(m) => m,
             Err(e) => return e,
         };
+
+        // Reject SetEnv after the factory has been initialized — at that
+        // point the process has spawned tokio workers, log/metrics
+        // dispatch threads, KMS clients, and DB pools, all of which may
+        // call `getenv`. Mutating the environ block from here would race.
+        // T-finding "SetEnv calls std::env::set_var after threads
+        // spawned" in docs/review-2026-05-05-findings.md.
+        let factory_initialized = match FACTORY.read() {
+            Ok(g) => g.is_some(),
+            Err(p) => p.into_inner().is_some(),
+        };
+        if factory_initialized {
+            log::error!(
+                "SetEnv refused: Asherah is already initialized; environment \
+                 mutation now would race with running threads"
+            );
+            return ERR_ALREADY_INITIALIZED;
+        }
 
         for (key, value) in env_map {
             match value {
@@ -571,9 +620,9 @@ pub unsafe extern "C" fn Encrypt(
         }
 
         // Get factory
-        let guard = match FACTORY.read() {
+        let guard = match factory_read_or_panic_err() {
             Ok(g) => g,
-            Err(poisoned) => poisoned.into_inner(),
+            Err(code) => return code,
         };
         let factory = match guard.as_ref() {
             Some(f) => f,
@@ -696,9 +745,9 @@ pub unsafe extern "C" fn Decrypt(
         }
 
         // Get factory
-        let guard = match FACTORY.read() {
+        let guard = match factory_read_or_panic_err() {
             Ok(g) => g,
-            Err(poisoned) => poisoned.into_inner(),
+            Err(code) => return code,
         };
         let factory = match guard.as_ref() {
             Some(f) => f,
@@ -797,9 +846,9 @@ pub unsafe extern "C" fn EncryptToJson(
         }
 
         // Get factory
-        let guard = match FACTORY.read() {
+        let guard = match factory_read_or_panic_err() {
             Ok(g) => g,
-            Err(poisoned) => poisoned.into_inner(),
+            Err(code) => return code,
         };
         let factory = match guard.as_ref() {
             Some(f) => f,
@@ -866,9 +915,9 @@ pub unsafe extern "C" fn DecryptFromJson(
         }
 
         // Get factory
-        let guard = match FACTORY.read() {
+        let guard = match factory_read_or_panic_err() {
             Ok(g) => g,
-            Err(poisoned) => poisoned.into_inner(),
+            Err(code) => return code,
         };
         let factory = match guard.as_ref() {
             Some(f) => f,

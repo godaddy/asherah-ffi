@@ -115,7 +115,13 @@ impl LogSink for CallbackLogSink {
         // catch_unwind so a foreign panic cannot unwind into Rust.
         drop(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
             || {
-                let cb: AsherahLogCallback = unsafe { std::mem::transmute(registration.callback) };
+                // usize → *const () → fn pointer. See the analogous note
+                // on `restore_callback` in lib.rs — pointer-to-fn-pointer
+                // transmute is well-defined where the platform supports
+                // it (every Tier-1 target), unlike usize-to-fn transmute.
+                let cb_ptr = registration.callback as *const ();
+                let cb: AsherahLogCallback =
+                    unsafe { std::mem::transmute::<*const (), AsherahLogCallback>(cb_ptr) };
                 unsafe {
                     cb(
                         registration.user_data as *mut c_void,
@@ -386,8 +392,11 @@ impl CallbackMetricsSink {
             .unwrap_or(std::ptr::null());
         drop(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
             || {
+                // Same usize → *const () → fn-ptr indirection used for
+                // log callbacks above.
+                let cb_ptr = registration.callback as *const ();
                 let cb: AsherahMetricsCallback =
-                    unsafe { std::mem::transmute(registration.callback) };
+                    unsafe { std::mem::transmute::<*const (), AsherahMetricsCallback>(cb_ptr) };
                 unsafe {
                     cb(
                         registration.user_data as *mut c_void,
