@@ -24,7 +24,7 @@ const cfg = {
   serviceName: 'hook-test-svc',
   productId: 'hook-test-prod',
   metastore: 'memory',
-  kms: 'static',
+  kms: 'test-debug-static',
   enableSessionCaching: true,
   verbose: true, // ensures the log hook actually receives events
 };

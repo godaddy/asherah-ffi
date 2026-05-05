@@ -12,7 +12,7 @@ Asherah.configure do |config|
   config.service_name = "bench-svc"
   config.product_id = "bench-prod"
   config.metastore = "memory"
-  config.kms = "static"
+  config.kms = "test-debug-static"
   config.enable_session_caching = true
 end
 

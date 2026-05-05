@@ -15,7 +15,7 @@ public class Sample {
                 .serviceName("sample-service")
                 .productId("sample-product")
                 .metastore("memory")
-                .kms("static")             // testing only — use "aws" in production
+                .kms("test-debug-static")             // testing only — use "aws" in production
                 .enableSessionCaching(Boolean.TRUE)
                 .build();
 

@@ -630,7 +630,7 @@ fn setup_test_factory() {
         "ServiceName": "interop-test-service",
         "ProductID": "interop-test-product",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "EnableSessionCaching": true
     }"#;
 

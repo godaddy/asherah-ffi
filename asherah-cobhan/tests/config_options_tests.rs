@@ -112,7 +112,7 @@ fn test_zero_copy_enabled_roundtrip() {
         "ServiceName": "zc-test",
         "ProductID": "zc-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "DisableZeroCopy": false,
         "EnableSessionCaching": false
     }"#;
@@ -139,7 +139,7 @@ fn test_zero_copy_disabled_roundtrip() {
         "ServiceName": "nozc-test",
         "ProductID": "nozc-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "DisableZeroCopy": true,
         "EnableSessionCaching": false
     }"#;
@@ -166,7 +166,7 @@ fn test_zero_copy_large_data() {
         "ServiceName": "zclarge-test",
         "ProductID": "zclarge-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "DisableZeroCopy": false,
         "EnableSessionCaching": false
     }"#;
@@ -185,7 +185,7 @@ fn test_null_data_check_normal_data() {
         "ServiceName": "ndc-test",
         "ProductID": "ndc-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "NullDataCheck": true,
         "EnableSessionCaching": false
     }"#;
@@ -212,7 +212,7 @@ fn test_null_data_check_with_null_input() {
         "ServiceName": "ndcnull-test",
         "ProductID": "ndcnull-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "NullDataCheck": true,
         "EnableSessionCaching": false
     }"#;
@@ -253,7 +253,7 @@ fn test_null_data_check_disabled() {
         "ServiceName": "ndcoff-test",
         "ProductID": "ndcoff-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "NullDataCheck": false,
         "EnableSessionCaching": false
     }"#;
@@ -274,7 +274,7 @@ fn test_null_data_check_short_buffer() {
         "ServiceName": "ndcshort-test",
         "ProductID": "ndcshort-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "NullDataCheck": true,
         "EnableSessionCaching": false
     }"#;
@@ -296,7 +296,7 @@ fn test_null_data_check_long_non_null_prefix() {
         "ServiceName": "ndclong-test",
         "ProductID": "ndclong-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "NullDataCheck": true,
         "EnableSessionCaching": false
     }"#;
@@ -317,7 +317,7 @@ fn test_verbose_enabled() {
         "ServiceName": "verbose-test",
         "ProductID": "verbose-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "Verbose": true,
         "EnableSessionCaching": false
     }"#;
@@ -338,7 +338,7 @@ fn test_all_options_enabled() {
         "ServiceName": "all-opts-test",
         "ProductID": "all-opts-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "DisableZeroCopy": true,
         "NullDataCheck": true,
         "Verbose": true,
@@ -368,7 +368,7 @@ fn test_options_toggle_between_cycles() {
         "ServiceName": "toggle-test",
         "ProductID": "toggle-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "DisableZeroCopy": false,
         "NullDataCheck": false,
         "EnableSessionCaching": false
@@ -386,7 +386,7 @@ fn test_options_toggle_between_cycles() {
         "ServiceName": "toggle-test",
         "ProductID": "toggle-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "DisableZeroCopy": true,
         "NullDataCheck": true,
         "EnableSessionCaching": false
@@ -409,7 +409,7 @@ fn test_canaries_enabled_json_roundtrip() {
         "ServiceName": "canary-test",
         "ProductID": "canary-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "EnableCanaries": true,
         "EnableSessionCaching": false
     }"#;
@@ -435,7 +435,7 @@ fn test_canaries_enabled_component_roundtrip() {
         "ServiceName": "canary-comp",
         "ProductID": "canary-comp-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "EnableCanaries": true,
         "EnableSessionCaching": false
     }"#;
@@ -456,7 +456,7 @@ fn test_canaries_enabled_large_data() {
         "ServiceName": "canary-large",
         "ProductID": "canary-large-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "EnableCanaries": true,
         "EnableSessionCaching": false
     }"#;
@@ -479,7 +479,7 @@ fn test_canaries_disabled_by_default() {
         "ServiceName": "no-canary",
         "ProductID": "no-canary-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "EnableSessionCaching": false
     }"#;
     assert_eq!(setup_with_config(config), ERR_NONE);

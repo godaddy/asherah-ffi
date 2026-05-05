@@ -36,7 +36,12 @@ struct Cli {
     conn: Option<String>,
 
     /// Configures the master key management service
-    #[arg(long, value_parser = ["aws", "static"], default_value = "aws", env = "ASHERAH_KMS_MODE")]
+    #[arg(
+        long,
+        value_parser = ["aws", "static", "test-debug-static"],
+        default_value = "aws",
+        env = "ASHERAH_KMS_MODE"
+    )]
     kms: String,
 
     /// A comma separated list of key-value pairs in the form of REGION1=ARN1[,REGION2=ARN2] (required if --kms=aws)

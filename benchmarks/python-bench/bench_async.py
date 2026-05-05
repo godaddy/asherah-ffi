@@ -66,7 +66,7 @@ async def main():
     config = {
         "ServiceName": "bench-async-svc",
         "ProductID": "bench-async-prod",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "EnableSessionCaching": True,
     }
     if mode == "hot":

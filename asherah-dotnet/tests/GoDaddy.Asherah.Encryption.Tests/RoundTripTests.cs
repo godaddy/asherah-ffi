@@ -35,7 +35,7 @@ public class RoundTripTests
             .WithServiceName("test-svc")
             .WithProductId("test-prod")
             .WithMetastore(MetastoreKind.Memory)
-            .WithKms(KmsKind.Static)
+            .WithKms(KmsKind.TestDebugStatic)
             .WithEnableSessionCaching(sessionCaching)
             .Build();
     }

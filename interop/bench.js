@@ -32,14 +32,14 @@ const cfgNew = {
   serviceName: 'svc',
   productId: 'prod',
   metastore: 'memory',
-  kms: 'static',
+  kms: 'test-debug-static',
   enableSessionCaching: false,
 };
 const cfgOld = {
   ServiceName: 'svc',
   ProductID: 'prod',
   Metastore: 'memory',
-  KMS: 'static',
+  KMS: 'test-debug-static',
   EnableSessionCaching: false,
 };
 

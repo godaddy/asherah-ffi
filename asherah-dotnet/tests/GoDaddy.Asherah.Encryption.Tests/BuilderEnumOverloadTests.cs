@@ -108,6 +108,7 @@ public class BuilderEnumOverloadTests
 
     [Theory]
     [InlineData(KmsKind.Static, "static")]
+    [InlineData(KmsKind.TestDebugStatic, "test-debug-static")]
     [InlineData(KmsKind.Aws, "aws")]
     [InlineData(KmsKind.SecretsManager, "secrets-manager")]
     [InlineData(KmsKind.Vault, "vault")]

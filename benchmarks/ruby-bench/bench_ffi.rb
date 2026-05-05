@@ -18,7 +18,7 @@ raise "BENCH_WARM_SESSION_CACHE_MAX must be >= 1" if warm_session_cache_max < 1
 config = {
   "ServiceName" => "bench-svc",
   "ProductID" => "bench-prod",
-  "KMS" => "static",
+  "KMS" => "test-debug-static",
   "EnableSessionCaching" => true
 }
 

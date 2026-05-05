@@ -38,7 +38,7 @@ fn spawn_server(sock: &Path) -> std::process::Child {
             "--product",
             "e2e-product",
             "--kms",
-            "static",
+            "test-debug-static",
             "--metastore",
             "memory",
             "-s",
@@ -54,7 +54,7 @@ fn spawn_server_with_env(sock: &Path) -> std::process::Child {
     Command::new(server_bin())
         .env("ASHERAH_SERVICE_NAME", "env-service")
         .env("ASHERAH_PRODUCT_NAME", "env-product")
-        .env("ASHERAH_KMS_MODE", "static")
+        .env("ASHERAH_KMS_MODE", "test-debug-static")
         .env("ASHERAH_METASTORE_MODE", "memory")
         .env("ASHERAH_SOCKET_FILE", sock.to_str().unwrap())
         .stdout(Stdio::null())

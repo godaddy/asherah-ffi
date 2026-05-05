@@ -655,7 +655,7 @@ mod tests {
                 "ServiceName": "test-service",
                 "ProductID": "test-product",
                 "Metastore": "memory",
-                "KMS": "static",
+                "KMS": "test-debug-static",
                 "EnableSessionCaching": false
             }"#,
         )

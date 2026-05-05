@@ -35,7 +35,7 @@ async fn start_server(sock: &std::path::Path) -> tokio::task::JoinHandle<()> {
         service_name: Some("test-service".to_string()),
         product_id: Some("test-product".to_string()),
         metastore: Some("memory".to_string()),
-        kms: Some("static".to_string()),
+        kms: Some("test-debug-static".to_string()),
         ..Default::default()
     };
 

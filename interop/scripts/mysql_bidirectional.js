@@ -72,7 +72,7 @@ function configForNew() {
     metastore: 'rdbms',
     connectionString: process.env.MYSQL_URL,
     sqlMetastoreDbType: 'mysql',
-    kms: 'static',
+    kms: 'test-debug-static',
     enableSessionCaching: false,
     verbose: false,
   };
@@ -84,7 +84,7 @@ function configForLegacy() {
     ProductID: process.env.PRODUCT_ID,
     Metastore: 'rdbms',
     ConnectionString: process.env.MYSQL_DSN,
-    KMS: 'static',
+    KMS: 'test-debug-static',
     EnableSessionCaching: false,
     Verbose: false,
   };

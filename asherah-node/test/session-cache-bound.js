@@ -42,7 +42,7 @@ function baseConfig(extra) {
     serviceName: 'svc',
     productId: 'prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
     enableSessionCaching: true,
     staticMasterKeyHex: '22'.repeat(32),
   }, extra || {});

@@ -49,7 +49,7 @@ class AsherahIntegrationTest {
             .serviceName("svc")
             .productId("prod")
             .metastore("memory")
-            .kms("static")
+            .kms("test-debug-static")
             .enableSessionCaching(Boolean.TRUE)
             .verbose(Boolean.FALSE)
             .build();
@@ -73,7 +73,7 @@ class AsherahIntegrationTest {
             .serviceName("ffi-test")
             .productId("prod")
             .metastore("memory")
-            .kms("static")
+            .kms("test-debug-static")
             .enableSessionCaching(Boolean.FALSE)
             .build();
     Asherah.setup(config);
@@ -194,7 +194,7 @@ class AsherahIntegrationTest {
         .serviceName("factory-test")
         .productId("prod")
         .metastore("memory")
-        .kms("static")
+        .kms("test-debug-static")
         .enableSessionCaching(Boolean.FALSE)
         .build();
   }
