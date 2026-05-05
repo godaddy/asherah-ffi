@@ -207,7 +207,12 @@ pub struct AsyncMetricsSink {
 
 impl AsyncMetricsSink {
     /// Construct an async dispatcher wrapping `inner`.
-    pub fn new<S: MetricsSink>(inner: S, config: AsyncMetricsConfig) -> Self {
+    ///
+    /// Returns `Err(io::Error)` when the OS rejects the worker thread
+    /// spawn (EAGAIN under thread quota, seccomp policy, etc.). The
+    /// previous `expect()` aborted the host process, which is
+    /// unacceptable in cdylib-loaded FFI contexts.
+    pub fn new<S: MetricsSink>(inner: S, config: AsyncMetricsConfig) -> std::io::Result<Self> {
         let (sender, receiver) = sync_channel::<OwnedMetricsEvent>(config.queue_capacity);
         let worker = ThreadBuilder::new()
             .name("asherah-metrics-dispatch".into())
@@ -223,12 +228,11 @@ impl AsyncMetricsSink {
                         OwnedMetricsEvent::CacheStale(name) => inner.cache_stale(&name),
                     }
                 }
-            })
-            .expect("spawn asherah-metrics-dispatch worker");
-        Self {
+            })?;
+        Ok(Self {
             sender,
             _worker: worker,
-        }
+        })
     }
 
     fn try_send(&self, event: OwnedMetricsEvent) {

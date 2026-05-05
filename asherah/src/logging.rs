@@ -168,7 +168,15 @@ pub struct AsyncLogSink {
 
 impl AsyncLogSink {
     /// Construct an async dispatcher wrapping `inner`.
-    pub fn new<S: LogSink>(inner: S, config: AsyncLogConfig) -> Self {
+    ///
+    /// Returns `Err(io::Error)` when the OS rejects the worker thread
+    /// spawn (EAGAIN under thread quota, seccomp policy, etc.). The
+    /// previous `expect()` aborted the host process — fine for a binary
+    /// but unacceptable in cdylib-loaded FFI contexts where the host
+    /// runtime can't recover. T-finding ".expect(\"spawn worker\")
+    /// aborts cdylib-loaded process on EAGAIN" in
+    /// `docs/review-2026-05-05-findings.md`.
+    pub fn new<S: LogSink>(inner: S, config: AsyncLogConfig) -> std::io::Result<Self> {
         let (sender, receiver) = sync_channel::<OwnedLogEvent>(config.queue_capacity);
         let worker = ThreadBuilder::new()
             .name("asherah-log-dispatch".into())
@@ -185,13 +193,12 @@ impl AsyncLogSink {
                             .build(),
                     );
                 }
-            })
-            .expect("spawn asherah-log-dispatch worker");
-        Self {
+            })?;
+        Ok(Self {
             sender,
             min_level: config.min_level,
             _worker: worker,
-        }
+        })
     }
 }
 

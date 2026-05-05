@@ -281,9 +281,27 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
         for k in &env.keks {
             map.insert(k.region.as_str(), k);
         }
-        let mut errors: Vec<String> = Vec::new();
-        // Try preferred first, then others
-        for (i, c) in self.clients.iter().enumerate() {
+
+        // Iterate configured regions in preferred-first order so the
+        // preferred region's KMS bills first when the envelope has a
+        // matching KEK. Per-region log entries are kept at debug level
+        // so they don't broadcast region/ARN identity at info+; the
+        // aggregated error string returned to the caller is also
+        // sanitized — no per-region details, just region names. The
+        // envelope's `arn` field is informational only; AEAD's tag
+        // provides the integrity binding for the actual data key, so
+        // an envelope with a mismatched `arn` cannot trick us into
+        // returning a forged data key (the AEAD decrypt fails for any
+        // wrong-key candidate). T-finding "Multi-region decrypt
+        // fallthrough is silently permissive" in
+        // `docs/review-2026-05-05-findings.md`.
+        let mut order: Vec<usize> = (0..self.clients.len()).collect();
+        if self.preferred < order.len() {
+            order.swap(0, self.preferred);
+        }
+        let mut failed_regions: Vec<String> = Vec::new();
+        for i in order {
+            let c = &self.clients[i];
             let reg_kek = match map.get(c.region.as_str()) {
                 Some(k) => *k,
                 None => {
@@ -304,46 +322,50 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
             let out = match out {
                 Ok(v) => v,
                 Err(e) => {
-                    log::warn!(
-                        "AwsKmsEnvelope decrypt_key: KMS Decrypt failed for region={} arn={}: {e:#}",
-                        c.region,
-                        c.key_arn
+                    log::debug!(
+                        "AwsKmsEnvelope decrypt_key: KMS Decrypt failed for region={}: {e:#}",
+                        c.region
                     );
-                    errors.push(format!("region {}: {e}", c.region));
-                    if i == self.preferred { /* try fallbacks */ }
+                    failed_regions.push(c.region.clone());
                     continue;
                 }
             };
             let dk = match out.plaintext() {
                 Some(p) => p.as_ref().to_vec(),
                 None => {
-                    log::warn!(
+                    log::debug!(
                         "AwsKmsEnvelope decrypt_key: KMS returned no plaintext for region={}",
                         c.region
                     );
-                    errors.push(format!("region {}: no plaintext returned", c.region));
+                    failed_regions.push(c.region.clone());
                     continue;
                 }
             };
             match self.aead.decrypt(&env.encrypted_key, &dk) {
                 Ok(key) => return Ok(key),
                 Err(e) => {
-                    log::warn!(
+                    // AEAD failure here means the regional KEK decrypted
+                    // to a value that doesn't match the data-key encryption.
+                    // Either the envelope is corrupt or the regional KEK
+                    // was rotated out of band. Don't leak the AEAD error
+                    // detail (which can include cipher state info) to the
+                    // aggregated user-facing string.
+                    log::debug!(
                         "AwsKmsEnvelope decrypt_key: AEAD decrypt failed for region={}: {e:#}",
                         c.region
                     );
-                    errors.push(format!("region {}: AEAD decrypt failed: {e}", c.region));
+                    failed_regions.push(c.region.clone());
                 }
             }
         }
-        let detail = if errors.is_empty() {
+        let detail = if failed_regions.is_empty() {
             "no matching regions found".to_string()
         } else {
-            errors.join("; ")
+            format!("tried regions: {}", failed_regions.join(", "))
         };
         log::error!("AwsKmsEnvelope decrypt_key: all backends failed: {detail}");
         Err(anyhow::anyhow!(
-            "all KMS backends failed to decrypt: {detail}"
+            "all KMS backends failed to decrypt ({detail})"
         ))
     }
 }
@@ -605,9 +627,8 @@ mod tests {
         let err = kms.decrypt_key(&(), &blob).unwrap_err();
         assert!(
             err.to_string()
-                .contains("all KMS backends failed to decrypt:"),
-            "expected 'all KMS backends failed to decrypt:', got: {}",
-            err
+                .contains("all KMS backends failed to decrypt"),
+            "expected 'all KMS backends failed to decrypt', got: {err}"
         );
     }
 }

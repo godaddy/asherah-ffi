@@ -216,7 +216,7 @@ fn install_log_hook_with_config(
         LOG_HOOK_INSTALLED.store(true, Ordering::Release);
     }
     let inner = CallbackLogSink;
-    let async_sink = AsyncLogSink::new(
+    let async_sink = match AsyncLogSink::new(
         inner,
         AsyncLogConfig {
             queue_capacity: if queue_capacity == 0 {
@@ -226,7 +226,25 @@ fn install_log_hook_with_config(
             },
             min_level: map_log_level(min_level),
         },
-    );
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!(
+                "asherah_set_log_hook: failed to spawn async dispatcher thread: {e}; \
+                 falling back to synchronous dispatch on the producer thread"
+            );
+            // Synchronous fallback: deliver records on the calling
+            // thread instead of dropping the hook entirely. Slower per
+            // record but functional under thread-quota pressure.
+            logging::set_sink(
+                "asherah-ffi-log",
+                Some(Arc::new(SyncFilteredLogSink {
+                    min_level: map_log_level(min_level),
+                })),
+            );
+            return;
+        }
+    };
     logging::set_sink("asherah-ffi-log", Some(Arc::new(async_sink)));
 }
 
@@ -484,7 +502,7 @@ fn install_metrics_hook_with_config(
         user_data: user_data as usize,
     });
     METRICS_HOOK_INSTALLED.store(1, Ordering::Release);
-    let async_sink = AsyncMetricsSink::new(
+    match AsyncMetricsSink::new(
         CallbackMetricsSink,
         AsyncMetricsConfig {
             queue_capacity: if queue_capacity == 0 {
@@ -493,8 +511,16 @@ fn install_metrics_hook_with_config(
                 queue_capacity
             },
         },
-    );
-    metrics::set_sink(async_sink);
+    ) {
+        Ok(s) => metrics::set_sink(s),
+        Err(e) => {
+            log::error!(
+                "asherah_set_metrics_hook: failed to spawn async dispatcher: {e}; \
+                 falling back to synchronous dispatch on the producer thread"
+            );
+            metrics::set_sink(CallbackMetricsSink);
+        }
+    }
     metrics::set_enabled(true);
 }
 
