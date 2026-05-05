@@ -61,7 +61,7 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [ ] **B — `memguard.rs:275-276`** `Buffer::destroy` allocates inside the destroy path; alloc failure leaves buffer half-destroyed. Reorder. — *deferred (needs design — destroy currently swaps in a 1-byte allocation; restructuring requires rethinking the half-destroyed retry semantics).*
 - [ ] **B — `memguard.rs:707, 739`** `SLAB_CV.wait(&mut slab)` holds `MutexGuard` indefinitely; FFI caller leak → DoS. — *deferred (needs timeout mechanism in pool_acquire/coffer_view; the underlying `parking_lot::Condvar::wait` doesn't have a "waiter died" detection).*
 - [x] **B — `memguard.rs:341-349`** `Enclave::Drop` takes `SLAB.lock()`. — *fixed in `96d8802`; `cache_evict` is wrapped in `catch_unwind` so a poisoned-mutex or in-unwind panic is logged instead of aborting the process and skipping every other Drop in the unwind path.*
-- [ ] **B — `memguard.rs:296`** AES-GCM nonce uses 4 zero bytes + counter. — *deferred. Currently safe: the Coffer key is regenerated on every process start so nonce reuse only matters if ciphertext is persisted across a `rekey_coffer`. Adding a per-rekey random prefix is a forward-compatible improvement for future persistence.*
+- [x] **B — `memguard.rs:296`** AES-GCM nonce uses 4 zero bytes + counter. — *fixed in `69467ec`; `NONCE_PREFIX` is a `OnceLock<[u8; 4]>` initialized via `scramble_bytes` (with a SystemTime-nanos fallback if OsRng fails). The 12-byte nonce is now `[random prefix || counter]`, so two process lifetimes that both restart `NONCE_COUNTER` from 0 cannot collide.*
 - [x] **B — `memcall.rs:79-80`** `unsafe impl Send/Sync for MemBuf` with no SAFETY note. — *fixed in `274976a`; SAFETY paragraph spells out exclusive ownership and OS-level thread safety.*
 - [x] **B — `memcall.rs:115-121`** Wipe runs after a silently-ignored `protect`; segfaults if protect failed because page is `PROT_NONE`. — *fixed in `274976a` for both `free()` and `Drop`; protect failure is logged and the wipe is skipped, so we don't fault writing to a still-PROT_NONE page.*
 - [x] **B — `memcall.rs:280-285`** `madvise` return value dropped (MADV_DONTDUMP failure invisible). — *fixed in `274976a`; both Linux/MADV_DONTDUMP and FreeBSD/MADV_NOCORE paths capture the rc and emit `log::debug!` on failure.*
@@ -79,12 +79,12 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [x] **B — `cache.rs:175-180`** `is_expired` returns `true` when `ttl_ms == 0`. — *fixed in `7dad394`; `ttl_ms == 0` now means "no TTL / never expire". Both `try_claim_reload_*` paths early-return false for the same configuration. Existing `cache_ttl_zero_always_reloads` test renamed to `cache_ttl_zero_never_expires` and inverted to assert the new semantics.*
 - [x] **B — `cache.rs:296-302`** `Simple` policy bypasses eviction entirely; `max=N` silently unbounded with this policy. — *fixed in `7dad394`; constructor now warns at runtime when `policy=Simple` is paired with `max > 0`.*
 - [ ] **B — `cache.rs:236-260`** `get_meta_if_fresh` returns revoked keys as fresh hits forever for non-`latest` lookups. — *not changed; on closer reading the override is intentional (revocation is monotonic, so once an entry is locally revoked there's nothing the metastore could change). Tracking as docs-only.*
-- [ ] **B — `cache.rs:455-475`** Mixed `Relaxed` reads + `AcqRel` CAS for `loaded_at_ms` allows freshness signal to be observed inverted across threads. — *deferred (needs careful audit of cross-bucket ordering invariants).*
+- [x] **B — `cache.rs:455-475`** Mixed `Relaxed` reads + `AcqRel` CAS for `loaded_at_ms` allows freshness signal to be observed inverted across threads. — *fixed in `69467ec`; the four read paths (`get_latest_if_fresh`, `get_meta_if_fresh`, `try_claim_reload_latest`, `try_claim_reload_meta`) now `Acquire`-load `loaded_at_ms`, and the CAS uses `(success: AcqRel, failure: Acquire)` so the post-CAS reader's freshness probe is fully synchronized with the claiming thread.*
 - [ ] **B — `session.rs:1029,1009,991`** Async SK loaders use `std::thread::spawn` per call. — *deferred (replace with `tokio::task::spawn_blocking`; affects backpressure semantics and needs benchmarking).*
 - [x] **B — `session.rs:331-395`** Legacy `decrypt` doesn't wipe `drk` when AEAD fails; async path uses `DrkGuard`, legacy doesn't. — *fixed in `7dad394`; new `DrkWipe` drop-guard wipes on every exit path.*
 - [x] **B — `session.rs:602-610`** `PublicFactory::close` swallows `c.close()` errors via `drop(...)`. — *fixed in `7dad394`; replaced with `?`-propagation via `anyhow::Context`.*
 - [ ] **B — `session.rs:16-27`, `config.rs:4-9`, `types.rs:24-40`** Public fields on `SessionFactory`/`Config`/`EnvelopeKeyRecord.id` let callers mutate invariants mid-session. — *deferred (CLAUDE.md notes struct-layout sensitivity; needs benchmarking before changing field visibility).*
-- [ ] **B — `session.rs:283-296`** Legacy `Session::encrypt` doesn't reload `load_latest` on race-loss. — *deferred (legacy path; the modern `PublicSession::encrypt` already handles this).*
+- [x] **B — `session.rs:283-296`** Legacy `Session::encrypt` doesn't reload `load_latest` on race-loss. — *fixed in `8d85a6b`; mirrors the `create_intermediate_key` recovery — on `Ok(false)` (or `Err`), `load_latest` for the IK id, decrypt with its parent SK, and use the winner's IK to continue the encrypt.*
 - [ ] **S — `cache.rs:183-197`** `random_jitter_ms` is sequential LCG; entries close in time get identical jitter, defeating thundering-herd protection.
 - [ ] **S — `cache.rs:62-72`** `CacheCheck` reinvents Result; `Hit | StaleOther` arms merged identically in consumer.
 - [ ] **S — `types.rs:374-388`** `json_escape_into` allocates via `format!` for control chars on hot path.
@@ -305,6 +305,8 @@ Items already addressed are crossed out; the remainder are still open.
 22. ~~Cobhan/server S-tier (EstimateBuffer, channel-close logging).~~ — `5c188d4`
 23. ~~Memguard/metrics/hooks S-tier (panic-safe Enclave drop, metrics poison recovery, log fast-path probe).~~ — `96d8802`
 24. ~~api.rs FactoryOption::SecretFactory doc-hidden.~~ — `2fc2464`
+25. ~~Cache atomic ordering + memguard nonce prefix randomization.~~ — `69467ec`
+26. ~~Legacy `Session::encrypt` race-loss recovery.~~ — `8d85a6b`
 
 ## Open follow-ups (not addressed in this branch)
 
@@ -312,15 +314,7 @@ These need design work, affect public API, or require benchmarking, and
 are deliberately deferred:
 
 **Memguard / core**
-- **memguard.rs:275-276** — `Buffer::destroy` allocating in destroy path
-- **memguard.rs:707, 739** — `SLAB_CV.wait` indefinite hold (needs timeout)
-- **memguard.rs:296** — AES-GCM nonce randomization (currently safe, forward-compat)
-- **session.rs:596** — `Arc::try_unwrap` cache-loss
-- **cache.rs:455-475** — atomic ordering audit
-- **session.rs:1029,1009,991** — async SK loaders use `std::thread::spawn`
 - **session.rs:16-27/config.rs/types.rs** — public field encapsulation (struct-layout sensitivity)
-- **session.rs:283-296** — legacy encrypt race-loss
-- **logging.rs:182, metrics.rs:210** — worker-spawn `expect` (constructor API change)
 
 **KMS / metastore**
 - **kms_aws_envelope.rs:240-313** — multi-region decrypt integrity binding (envelope format change)
