@@ -44,7 +44,8 @@ fn async_log_sink_delivers_events_off_thread() {
     let _guard = SERIAL.lock().expect("serial lock");
     logging::ensure_logger().expect("ensure_logger");
     let inner = Arc::new(CountingLogSink::default());
-    let sink = AsyncLogSink::new(SharedLogSink(Arc::clone(&inner)), AsyncLogConfig::default());
+    let sink = AsyncLogSink::new(SharedLogSink(Arc::clone(&inner)), AsyncLogConfig::default())
+        .expect("spawn log dispatcher in tests");
     logging::set_sink("async-test", Some(Arc::new(sink)));
 
     // `warn!` (not `info!`) because the default `AsyncLogConfig` filters
@@ -74,7 +75,8 @@ fn async_log_sink_min_level_filter_drops_below_threshold() {
             queue_capacity: 4096,
             min_level: log::LevelFilter::Warn,
         },
-    );
+    )
+    .expect("spawn log dispatcher");
     logging::set_sink("async-filter-test", Some(Arc::new(sink)));
 
     for _ in 0..50 {
@@ -124,7 +126,8 @@ fn async_log_sink_drops_when_queue_overflows() {
             queue_capacity: 4,
             min_level: log::LevelFilter::Trace,
         },
-    );
+    )
+    .expect("spawn log dispatcher");
     logging::set_sink("async-overflow-test", Some(Arc::new(sink)));
 
     // Push way more than the queue can hold while the consumer is sleeping.
@@ -174,7 +177,8 @@ impl MetricsSink for SharedMetricsSink {
 fn async_metrics_sink_delivers_events_off_thread() {
     let inner = Arc::new(CountingMetricsSink::default());
     let async_sink =
-        AsyncMetricsSink::new(Arc::clone(&inner).shared(), AsyncMetricsConfig::default());
+        AsyncMetricsSink::new(Arc::clone(&inner).shared(), AsyncMetricsConfig::default())
+            .expect("spawn metrics dispatcher in tests");
 
     for _ in 0..500 {
         async_sink.encrypt(Duration::from_nanos(100));
@@ -219,7 +223,8 @@ fn async_metrics_sink_drops_when_queue_overflows() {
             delay: Duration::from_millis(50),
         },
         AsyncMetricsConfig { queue_capacity: 4 },
-    );
+    )
+    .expect("spawn metrics dispatcher");
 
     for _ in 0..200 {
         async_sink.encrypt(Duration::from_nanos(1));
