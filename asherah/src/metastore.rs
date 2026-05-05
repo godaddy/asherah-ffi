@@ -64,15 +64,34 @@ impl Metastore for InMemoryMetastore {
     ) -> Result<bool, anyhow::Error> {
         let interned: Arc<str> = Arc::from(id);
         let key = (interned.clone(), created);
-        // Update the latest pointer BEFORE inserting into by_key. This ensures
-        // that when a concurrent insert returns Err (duplicate), the winning
-        // thread's latest pointer is already visible to load_latest.
-        let should_update = self
-            .latest
-            .read(&interned, |_, &existing| existing < created)
-            .unwrap_or(true);
-        if should_update {
-            let _ = self.latest.upsert(interned, created);
+        // Atomically advance the latest pointer for `id` to `created`,
+        // but only when it's an actual advance. The previous read+upsert
+        // pattern was racy: a slower writer with a smaller `created`
+        // could overwrite a faster writer's larger value (T-finding
+        // "InMemoryMetastore::store race on latest pointer" in
+        // docs/review-2026-05-05-findings.md).
+        //
+        // `scc::HashMap::update` runs the closure under the bucket lock,
+        // so the conditional advance is atomic. If the entry is missing
+        // we try `insert` (which fails if someone else just inserted)
+        // and retry the update path on collision. The loop terminates
+        // because either an `update` succeeds or an `insert` succeeds.
+        loop {
+            if self
+                .latest
+                .update(&interned, |_, existing| {
+                    if *existing < created {
+                        *existing = created;
+                    }
+                })
+                .is_some()
+            {
+                break;
+            }
+            if self.latest.insert(interned.clone(), created).is_ok() {
+                break;
+            }
+            // Another writer raced ahead of our insert; loop to update.
         }
         match self.by_key.insert(key, ekr.clone()) {
             Ok(_) => Ok(true),

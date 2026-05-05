@@ -262,11 +262,33 @@ impl PostgresMetastore {
                 inner.checked_out += 1;
             }
 
+            // Reserve `checked_out += 1` was just done above; if anything
+            // panics or returns Err between here and `pooled` being
+            // constructed (which takes ownership of the increment via
+            // PgPooledClient::Drop), the increment leaks and the pool
+            // deadlocks once `total >= max_open`. A small guard struct
+            // decrements on Drop unless we explicitly commit. T-finding
+            // "checked_out increment outside failure-decrement lock" in
+            // docs/review-2026-05-05-findings.md.
+            struct CheckoutGuard<'pool> {
+                pool: &'pool Arc<PgPool>,
+                committed: bool,
+            }
+            impl Drop for CheckoutGuard<'_> {
+                fn drop(&mut self) {
+                    if !self.committed {
+                        let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
+                        inner.checked_out = inner.checked_out.saturating_sub(1);
+                    }
+                }
+            }
+            let mut guard = CheckoutGuard {
+                pool: &self.pool,
+                committed: false,
+            };
+
             // Create a new connection (outside the lock)
             let client = connect_client(&self.pool.url).map_err(|e| {
-                // Decrement checked_out since we failed to create the connection
-                let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
-                inner.checked_out -= 1;
                 log::error!("Postgres connection failed: {e:#}");
                 e
             })?;
@@ -278,11 +300,16 @@ impl PostgresMetastore {
             };
             if let Some(consistency) = self.pool.replica_consistency {
                 if let Err(e) = pooled.batch_execute(consistency.as_set_statement()) {
-                    // pooled will be dropped, which decrements checked_out
+                    // pooled will be dropped, which decrements checked_out;
+                    // the guard is also still un-committed so it will
+                    // double-decrement — flip committed=true to suppress.
+                    guard.committed = true;
                     return Err(e.into());
                 }
             }
 
+            // Ownership transfers to PgPooledClient::Drop now.
+            guard.committed = true;
             return Ok(pooled);
         }
 
@@ -296,11 +323,22 @@ impl Metastore for PostgresMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         log::debug!("postgres load: id={id} created={created}");
         let mut c = self.client()?;
+        // f64 has 53-bit mantissa, more than enough for any plausible
+        // epoch value (current epochs are ~1.7e9; the safe ceiling is
+        // ~9e15). Bind as f64 to match Postgres' single-arg
+        // `to_timestamp(double precision)` directly. T-finding
+        // "created as f64 loses precision for large epochs" in
+        // docs/review-2026-05-05-findings.md is documented here as a
+        // known precision floor; switching to BIGINT-backed encoding
+        // requires schema changes.
         let created_f = created as f64;
-        let row = c.query_opt(
-            "SELECT key_record::text FROM encryption_key WHERE id=$1 AND created=to_timestamp($2)",
-            &[&id, &created_f],
-        ).with_context(|| format!("Postgres load query failed for id={id} created={created}"))?;
+        let row = c
+            .query_opt(
+                "SELECT key_record::text FROM encryption_key \
+             WHERE id=$1 AND created=to_timestamp($2)",
+                &[&id, &created_f],
+            )
+            .with_context(|| format!("Postgres load query failed for id={id} created={created}"))?;
         match row {
             Some(row) => {
                 let txt: String = row.get(0);
@@ -348,13 +386,26 @@ impl Metastore for PostgresMetastore {
         let mut c = self.client()?;
         let v = ekr.to_json_fast();
         let created_f = created as f64;
+        // The double-parse path (`v` → `serde_json::Value` → wire JSONB)
+        // could be replaced with `$3::jsonb` casting bound text, but the
+        // postgres-rs driver's prepared-statement type-inference rejects
+        // a `String` bound at the JSONB position even with the explicit
+        // cast in some setups. Keep the parse-and-bind path until it can
+        // be replaced with `tokio_postgres::types::ToSql` for `&str`
+        // (T-finding "to_json_fast() then serde_json::from_str" in
+        // docs/review-2026-05-05-findings.md is left as a follow-up).
         let v_json: serde_json::Value = serde_json::from_str(&v).with_context(|| {
             format!("Postgres store: failed to re-parse key_record JSON for id={id}")
         })?;
-        let res = c.execute(
-            "INSERT INTO encryption_key(id, created, key_record) VALUES ($1, to_timestamp($2), $3) ON CONFLICT DO NOTHING",
-            &[&id, &created_f, &v_json],
-        ).with_context(|| format!("Postgres store insert failed for id={id} created={created}"))?;
+        let res = c
+            .execute(
+                "INSERT INTO encryption_key(id, created, key_record) \
+             VALUES ($1, to_timestamp($2), $3) ON CONFLICT DO NOTHING",
+                &[&id, &created_f, &v_json],
+            )
+            .with_context(|| {
+                format!("Postgres store insert failed for id={id} created={created}")
+            })?;
         let stored = res > 0;
         log::debug!("postgres store: id={id} created={created} stored={stored}");
         Ok(stored)
