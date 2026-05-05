@@ -29,6 +29,11 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 | KMS batch | `40d3ee2` | `fix(kms): zeroize cached master keys/tokens; check Vault HTTP status before json parse` |
 | Server S-tier | `2467d97` | `fix(server): partition_id validation, error sanitization, compound durations` |
 | Misc S-tier | `c855fb2` | `fix(misc): suggestion-tier cleanups across logging, session_cache, postgres, hooks` |
+| KMS+pool S-tier | `2e9d2e5` | `fix(kms,pool_mysql): KMS S-tier batch + reaper notify-then-wait race` |
+| Metastore S-tier | `8f458a9` | `fix(metastore): parse_item enforces schema, InMemoryStore unique keys` |
+| Cobhan/server S-tier | `5c188d4` | `fix(cobhan,server): drop unnecessary panic-catch, log unexpected channel closures` |
+| Memguard/metrics/hooks S-tier | `96d8802` | `fix(memguard,metrics,hooks): panic-safe Enclave drop, metrics poison recovery, log fast-path probe` |
+| API doc | `2fc2464` | `docs(api): annotate FactoryOption::SecretFactory as Go-API parity stub` |
 
 ---
 
@@ -55,7 +60,7 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [x] **B — `memguard.rs:954`** `pub static mut STREAM_CHUNK_SIZE: usize = 0;`. — *fixed in `274976a`; replaced with `AtomicUsize` plus `stream_chunk_size`/`set_stream_chunk_size` accessors.*
 - [ ] **B — `memguard.rs:275-276`** `Buffer::destroy` allocates inside the destroy path; alloc failure leaves buffer half-destroyed. Reorder. — *deferred (needs design — destroy currently swaps in a 1-byte allocation; restructuring requires rethinking the half-destroyed retry semantics).*
 - [ ] **B — `memguard.rs:707, 739`** `SLAB_CV.wait(&mut slab)` holds `MutexGuard` indefinitely; FFI caller leak → DoS. — *deferred (needs timeout mechanism in pool_acquire/coffer_view; the underlying `parking_lot::Condvar::wait` doesn't have a "waiter died" detection).*
-- [ ] **B — `memguard.rs:341-349`** `Enclave::Drop` takes `SLAB.lock()`; reachable from a panic unwind, risks double-panic abort. — *deferred (needs panic-safe drop refactor — likely an `is_unwinding()` check + skip lock).*
+- [x] **B — `memguard.rs:341-349`** `Enclave::Drop` takes `SLAB.lock()`. — *fixed in `96d8802`; `cache_evict` is wrapped in `catch_unwind` so a poisoned-mutex or in-unwind panic is logged instead of aborting the process and skipping every other Drop in the unwind path.*
 - [ ] **B — `memguard.rs:296`** AES-GCM nonce uses 4 zero bytes + counter. — *deferred. Currently safe: the Coffer key is regenerated on every process start so nonce reuse only matters if ciphertext is persisted across a `rekey_coffer`. Adding a per-rekey random prefix is a forward-compatible improvement for future persistence.*
 - [x] **B — `memcall.rs:79-80`** `unsafe impl Send/Sync for MemBuf` with no SAFETY note. — *fixed in `274976a`; SAFETY paragraph spells out exclusive ownership and OS-level thread safety.*
 - [x] **B — `memcall.rs:115-121`** Wipe runs after a silently-ignored `protect`; segfaults if protect failed because page is `PROT_NONE`. — *fixed in `274976a` for both `free()` and `Drop`; protect failure is logged and the wipe is skipped, so we don't fault writing to a still-PROT_NONE page.*
@@ -105,9 +110,9 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [x] **B — `asherah-cobhan/src/lib.rs:434-436, 575-576, 700-701, 803-804, 871-872`** Poisoned-lock recovery silently uses corrupted state. — *partial in `b90d1c4`; encrypt/decrypt paths now go through `factory_read_or_panic_err` and return `ERR_PANIC` on poisoning. SetupJson keeps `into_inner()` because it owns the write lock and overwrites state.*
 - [ ] **S — `asherah-ffi/src/lib.rs:524, 549`, `asherah-cobhan:599, 752`** `format!("{e:#}")` returns full anyhow chain to user callbacks; AWS SDK errors include ARNs/request IDs.
 - [x] **S — `hooks.rs:159-172`** `map_log_level` treats unknown values as `Trace`. — *fixed in `c855fb2`; clamps unknown values to `Warn` and emits a warning.*
-- [ ] **S — `hooks.rs:87-93`** `CallbackLogSink` reads `LOG_HOOK` under mutex on every record; metrics path uses `AtomicUsize` fast-path probe.
+- [x] **S — `hooks.rs:87-93`** `CallbackLogSink` reads `LOG_HOOK` under mutex on every record. — *fixed in `96d8802`; new `LOG_HOOK_INSTALLED` AtomicBool gate matches the metrics-path fast-path probe. Set/clear sites update the gate while holding the slot mutex with acquire/release ordering.*
 - [ ] **S — `asherah-cobhan/src/lib.rs:206-216, 642`** `cobhan_buffer_set_length` doesn't validate against capacity.
-- [ ] **S — `asherah-cobhan/src/lib.rs:500-528`** `EstimateBuffer` panic-catches pure i64 arithmetic.
+- [x] **S — `asherah-cobhan/src/lib.rs:500-528`** `EstimateBuffer` panic-catches pure i64 arithmetic. — *fixed in `5c188d4`; catch_unwind removed.*
 - [ ] **S — `asherah-cobhan` tests** No isolated subprocess test verifies canary `verify_canaries` actually triggers.
 
 ## Metastores
@@ -123,9 +128,9 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [ ] **S — `metastore_sqlite.rs:23-29, 43, 94`** `created` stored as TEXT via `datetime(?,'unixepoch')`; differs from Go reference and other backends.
 - [ ] **S — `metastore_mysql.rs:21-44`** Hand-rolled civil-from-days routine in encryption hot path; replace with `chrono`.
 - [x] **S — `metastore_postgres.rs:340-342`** Duplicate-id store path doesn't log. — *fixed in `c855fb2`; logs at `info` level on conflict.*
-- [ ] **S — `metastore_dynamodb.rs:219-225, 282-287`** Inline `kr.as_m()` at load sites returns `Ok(None)` for malformed records, hiding schema corruption.
+- [x] **S — `metastore_dynamodb.rs:219-225, 282-287`** Inline `kr.as_m()` returns `Ok(None)` for malformed records. — *fixed in `8f458a9`; both load_latest_impl_sync and load_latest_impl_async now route through `parse_item`, which distinguishes missing/decoded/malformed and returns `Err` for malformed.*
 - [ ] **S — `metastore_region.rs:37-39`** `region_suffix(&self) -> Option<String>` clones per call. Return `Option<&str>`.
-- [ ] **S — `store.rs:32-38`** `InMemoryStore` key collision on `{Created, Len}` silently overwrites.
+- [x] **S — `store.rs:32-38`** `InMemoryStore` key collision on `{Created, Len}` silently overwrites. — *fixed in `8f458a9`; added internal `AtomicU64` counter so each `store()` call gets a unique `{Created, Len, Seq}` key.*
 - [ ] **S — `metastore_postgres.rs:239`** `std::thread::sleep` up to 320 ms on blocking pool worker; consider Condvar.
 - [ ] **S — `metastore_dynamodb.rs:112`** Owns a `tokio::runtime::Runtime` even on async-only path.
 - [ ] **S — All metastores** `log::debug!` only; no `tracing` spans for distributed traces.
@@ -140,15 +145,15 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [x] **B — `kms_vault_transit.rs:26`** `token: String` cached for process life; no zeroize. — *partial in `40d3ee2`; token wrapped in `Arc<Zeroizing<String>>` so drop wipes. TTL/renewal gap is left as a documented follow-up — refresh requires per-auth-method plumbing.*
 - [x] **B — `kms_vault_transit.rs:386-413, 446-474`** Never inspects `resp.status()` before `.json()`. — *fixed in `40d3ee2`; both encrypt and decrypt paths check `resp.status()` first and bail with a UTF-8-safe truncated body snippet.*
 - [ ] **B — `kms_vault_transit.rs:370-371,397-398,430-431,458-459`** `{e:#}` logs full reqwest chain; `error!` on decrypt failures. — *deferred (low-priority; the chain is informational and Vault errors don't leak ciphertext).*
-- [ ] **B — `kms_secrets_manager.rs:118-126`** Hex decode hand-loop; no `0x` strip, whitespace-only outer trim, error-path Vec not wiped. — *partial: master_key is now Zeroizing (`40d3ee2`); the hex-decode logic itself is unchanged.*
+- [x] **B — `kms_secrets_manager.rs:118-126`** Hex decode hand-loop. — *fixed in `2e9d2e5`; tolerates `0x`/`0X` prefix and arbitrary whitespace; intermediate decode buffer is `Zeroizing` so a partial decode error doesn't leave key bytes in the heap.*
 - [ ] **B — `kms_aws_envelope.rs:122,156`** `new_*_async` allocates Runtime even when sync path never used. — *deferred (low-impact optimization).*
 - [ ] **S — `aead.rs:141`** AEAD uses `Aad::empty()`; document intentional cross-language compatibility.
-- [ ] **S — `kms_vault_transit.rs:383,443`** No validation of `vault:v` prefix on round-trip.
-- [ ] **S — `kms_aws.rs:117,139`** `log::debug!` includes KMS key ARN (account number PII for some compliance frames).
-- [ ] **S — `kms_multi.rs:62-73`** Blindly retries every backend on any error; `AccessDenied` triggers N regional Decrypt calls.
+- [x] **S — `kms_vault_transit.rs:383,443`** No validation of `vault:v` prefix on round-trip. — *fixed in `2e9d2e5`; both sync and async decrypt reject ciphertexts that don't start with `vault:v` early.*
+- [x] **S — `kms_aws.rs:117,139`** `log::debug!` includes KMS key ARN. — *fixed in `2e9d2e5`; new `redact_arn` helper replaces the account-id segment with `***` for all log!/anyhow! sites.*
+- [x] **S — `kms_multi.rs:62-73`** Blindly retries every backend on any error. — *fixed in `2e9d2e5`; `is_terminal_kms_error` heuristic short-circuits on AccessDenied / NotAuthorized / DisabledException / InvalidCiphertextException.*
 - [ ] **S — `traits.rs:11-12`** `KeyManagementService` uses `&()` as context placeholder; consider real `KmsContext`.
-- [ ] **S — `kms_vault_transit.rs:92-94`** PEM body Vec not wiped; private key half should be `Zeroizing`.
-- [ ] **S — `kms_aws_envelope.rs:241-243`** `serde_json` errors with `{e}` include offending input snippet.
+- [x] **S — `kms_vault_transit.rs:92-94`** PEM body Vec not wiped. — *fixed in `2e9d2e5`; both the key-PEM bytes and the spliced cert+key buffer are wrapped in `Zeroizing`.*
+- [x] **S — `kms_aws_envelope.rs:241-243`** `serde_json` errors with `{e}` include offending input snippet. — *fixed in `2e9d2e5`; user-facing error is now generic, full chain still goes to operator logs.*
 - [ ] **S — `kms_builders.rs:71`** `MultiKms::new` builds 5 runtimes for 5 regions; share or use envelope.
 
 ## Server / logging / metrics
@@ -160,10 +165,10 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [ ] **B — `asherah-server/src/main.rs:181-202, 244-256`** `std::fs::symlink_metadata`/`remove_file` on Tokio runtime; should use `tokio::fs`. — *deferred (acceptable at startup/shutdown; mostly cosmetic).*
 - [ ] **B — `asherah-server/src/service.rs:55,57-81`** Spawned session task detached with no JoinHandle. — *deferred (needs JoinSet refactor — paired with the drain-timeout follow-up above).*
 - [ ] **B — `logging.rs:182`, `metrics.rs:210`** `.expect("spawn worker")` aborts cdylib-loaded process on EAGAIN. — *deferred (changing the constructor signature is a public API change; needs separate plan).*
-- [ ] **B — `metrics.rs:48,54`** `if let Ok(mut guard) = SINK.write()` swallows lock poisoning permanently. — *deferred (related to the metrics-sink redesign).*
+- [x] **B — `metrics.rs:48,54`** `if let Ok(mut guard) = SINK.write()` swallows lock poisoning permanently. — *fixed in `96d8802`; both `set_sink` and `clear_sink` recover via `poisoned.into_inner()` (safe because they always overwrite the value) and emit a warn log.*
 - [x] **S — `asherah-server/src/service.rs:97`** No length/charset validation on client-supplied `partition_id`. — *fixed in `2467d97`; 256-byte cap and control-character rejection.*
 - [x] **S — `asherah-server/src/service.rs:113,129`** `e.to_string()` returns full anyhow chain over the wire. — *fixed in `2467d97`; `sanitize_error` logs the full chain at warn level and ships only the top-level summary.*
-- [ ] **S — `asherah-server/src/main.rs:222`** `drop(shutdown_rx.changed().await)` discards `Result`; sender drop indistinguishable from signal.
+- [x] **S — `asherah-server/src/main.rs:222`** `drop(shutdown_rx.changed().await)` discards `Result`. — *fixed in `5c188d4`; both the serve_with_incoming_shutdown future and the drain branch now log `RecvError` at warn level so unexpected channel closure is visible.*
 - [ ] **S — `logging.rs:78-80`** `log::max_level = Trace` whenever any subscriber registers; defeats subscribers wanting `Warn`.
 - [x] **S — `logging.rs:48-56`** `ensure_logger` returns `Result` but cannot fail. — *fixed in `c855fb2`; doc comment now states the function is effectively infallible. Signature kept for source compatibility.*
 - [ ] **S — `logging.rs:159`, `metrics.rs:188`** Worker `JoinHandle` never joined in `Drop`; worker panics lost.
@@ -173,7 +178,7 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [x] **S — `asherah-server/src/lib.rs:19-34`** `parse_go_duration` rejects compound durations. — *fixed in `2467d97`; full Go-style compound parsing (`1h30m`, `2h45m30s`) with overflow checks and unit tests.*
 - [ ] **S — `asherah-server/src/convert.rs:7, 20`** `proto_to_drr` populates `id: String::new()`/`revoked: None`; document this is deliberate parity with Go server.
 - [ ] **S — `asherah-server/src/main.rs:208`** `verbose` mode emits per-request partition ID logs; tenant identifier exposure.
-- [ ] **S — `api.rs:22-25`** `FactoryOption::SecretFactory` is a no-op; `#[doc(hidden)]` it or remove.
+- [x] **S — `api.rs:22-25`** `FactoryOption::SecretFactory` is a no-op. — *fixed in `2fc2464`; variant marked `#[doc(hidden)]`, enum is now `#[non_exhaustive]`, and the doc comment explains both variants and the Go-API parity rationale.*
 
 ## Language bindings
 
@@ -293,14 +298,22 @@ Items already addressed are crossed out; the remainder are still open.
 15. ~~Cobhan/FFI batch (SetEnv, transmute, error codes, poisoned locks).~~ — `b90d1c4`
 16. ~~Metastore batch (InMemory race, postgres pool guard, DDB region+base64).~~ — `84b7585`
 17. ~~KMS batch (master-key zeroize, Vault token zeroize, Vault HTTP status check).~~ — `40d3ee2`
+18. ~~Server S-tier (partition_id validation, error sanitization, compound durations).~~ — `2467d97`
+19. ~~Misc S-tier (logging, session_cache, postgres, hooks).~~ — `c855fb2`
+20. ~~KMS+pool S-tier (ARN redact, prefix validation, terminal-error short-circuit, reaper notify-then-wait race).~~ — `2e9d2e5`
+21. ~~Metastore S-tier (parse_item enforcement, InMemoryStore unique keys).~~ — `8f458a9`
+22. ~~Cobhan/server S-tier (EstimateBuffer, channel-close logging).~~ — `5c188d4`
+23. ~~Memguard/metrics/hooks S-tier (panic-safe Enclave drop, metrics poison recovery, log fast-path probe).~~ — `96d8802`
+24. ~~api.rs FactoryOption::SecretFactory doc-hidden.~~ — `2fc2464`
 
 ## Open follow-ups (not addressed in this branch)
 
-These need design work or affect public API and are deliberately deferred:
+These need design work, affect public API, or require benchmarking, and
+are deliberately deferred:
 
+**Memguard / core**
 - **memguard.rs:275-276** — `Buffer::destroy` allocating in destroy path
 - **memguard.rs:707, 739** — `SLAB_CV.wait` indefinite hold (needs timeout)
-- **memguard.rs:341-349** — `Enclave::Drop` SLAB.lock() under panic (needs panic-safe drop)
 - **memguard.rs:296** — AES-GCM nonce randomization (currently safe, forward-compat)
 - **session.rs:596** — `Arc::try_unwrap` cache-loss
 - **cache.rs:455-475** — atomic ordering audit
@@ -308,16 +321,35 @@ These need design work or affect public API and are deliberately deferred:
 - **session.rs:16-27/config.rs/types.rs** — public field encapsulation (struct-layout sensitivity)
 - **session.rs:283-296** — legacy encrypt race-loss
 - **logging.rs:182, metrics.rs:210** — worker-spawn `expect` (constructor API change)
-- **metrics.rs:48,54** — lock-poisoning recovery in metrics sink
+
+**KMS / metastore**
 - **kms_aws_envelope.rs:240-313** — multi-region decrypt integrity binding (envelope format change)
 - **kms_aws.rs / kms_aws_envelope.rs** — `Blob::new(plaintext)` SDK exposure (unfixable from outside)
+- **kms_aws_envelope.rs new_*_async** — runtime allocation when sync path never used
+- **metastore_postgres.rs created-as-f64 / JSON double-parse** — broke driver compat in test
+- **metastore_postgres.rs** — `std::thread::sleep` exhaustion backoff (Condvar wakeup)
+- **metastore_dynamodb.rs** — private runtime allocation in async constructor
+- **metastore_region.rs** — `region_suffix` trait `Option<String>` → `Option<&str>`
+
+**Server**
 - **asherah-server/src/main.rs:226-237 + service.rs:55,57-81** — JoinSet refactor for graceful drain
+- **asherah-server/src/main.rs typed enums** — clap `value_parser = ["..."]` → typed enums
+
+**Bindings / FFI**
 - **asherah-py/src/lib.rs:135-144** — language-binding plaintext copies
 - **asherah-ruby/lib/asherah/session.rb:38-44** — thread-local AsherahBuffer reuse
 - **asherah-cobhan/src/lib.rs:355-363** — Setup→Shutdown→Setup test gap
 - **PyO3/napi-rs/JNI `catch_unwind` discipline**
-- **metastore_postgres.rs created-as-f64 / JSON double-parse** — broke driver compat in test
-- **kms_secrets_manager hex decode robustness**
-- **kms_aws_envelope new_*_async runtime allocation**
+- **kms_secrets_manager.rs:118-126 SDK plaintext leak** — partial; hex decode now Zeroizing but the SDK's secret_string copy still flows through unwiped Vec.
 
-Most of these need either a coordinated multi-binding change, an API-breaking signature update, a benchmark-and-validate cycle, or new integration tests. They're tracked here so the next pass can pick them up without re-deriving the analysis.
+**Tests / fuzz**
+- Memguard canary corruption regression test
+- Cross-language ciphertext fixtures vs. canonical Go
+- Cobhan-real-FFI fuzz target (the existing target re-implements parsing in safe Rust)
+- Wycheproof / NIST KAT vectors for AEAD
+- Plaintext-zeroization-on-drop sentinel scan
+
+Most of these need either a coordinated multi-binding change, an
+API-breaking signature update, a benchmark-and-validate cycle per
+CLAUDE.md's perf rules, or new integration tests. They're tracked here
+so the next pass can pick them up without re-deriving the analysis.
