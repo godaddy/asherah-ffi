@@ -541,8 +541,17 @@ fn spawn_decrypt_async(ctx: AsyncContext, input: Vec<u8>) {
             }
         };
         match ctx.session.inner.decrypt_async(drr).await {
-            Ok(pt) => {
+            Ok(mut pt) => {
+                // Hand the plaintext to the language binding, then wipe our
+                // copy. The callback runs synchronously here so the binding
+                // has already copied the bytes by the time `cb(...)` returns.
+                // Without the wipe, the freed Vec leaves plaintext in the
+                // heap allocator until the slot is reused (the sync path was
+                // fixed in PR #216; this is the async-path variant noted in
+                // docs/review-2026-05-05-findings.md).
                 unsafe { cb(ud as *mut c_void, pt.as_ptr(), pt.len(), std::ptr::null()) };
+                use zeroize::Zeroize;
+                pt.zeroize();
             }
             Err(e) => {
                 let msg =
