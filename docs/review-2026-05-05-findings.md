@@ -221,7 +221,7 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [x] **B — `asherah-cobhan/tests/integration_tests.rs:1404`** No null-pointer FFI tests; `Encrypt`/`Decrypt`/`EncryptToJson`/`DecryptFromJson` not exercised with `null` inputs. — *fixed in pending commit; new `test_null_pointer_inputs_impl` exercises every pointer position on `EncryptToJson`/`DecryptFromJson`/`Encrypt`, asserting `ERR_NULL_PTR`.*
 - [ ] **B — `asherah/tests/cross_fixtures.rs:11`** Cross-language ciphertext fixtures gated behind unset `FIXTURES_DIR`; no checked-in canonical Go DRR roundtrip.
 - [ ] **B — `asherah/tests/`** No test confirms plaintext zeroization on drop (sentinel + scan).
-- [ ] **B — `asherah/tests/cache_concurrent.rs:39-116`** Eviction tests don't assert `cache.by_meta.len() <= max`; happy-path roundtrip only.
+- [x] **B — `asherah/tests/cache_concurrent.rs:39-116`** Eviction tests don't assert `cache.by_meta.len() <= max`; happy-path roundtrip only. — *fixed in pending commit; new `shared_ik_cache_respects_max_size_under_load` exercises 50 partitions through a `shared_intermediate_key_cache` with `max=4` and asserts `factory.ik_cache_entry_count() <= 4` after the storm. The new accessor is exposed via the `KeyCacher` trait (`entry_count`, default `0`) and surfaced on `PublicFactory::ik_cache_entry_count`.*
 - [ ] **S — `asherah/tests/cache_ttl.rs:34`** `assert!(ik3 >= ik2)` is a no-op; monotonic clock cannot be less.
 - [ ] **S — `asherah/tests/revocation.rs`** Timing-sensitive `sleep(1100ms)` × 4 tests; inject a logical clock.
 - [ ] **S — `asherah-ffi/tests/hooks.rs:83-91`** `wait_for` silently passes on timeout.

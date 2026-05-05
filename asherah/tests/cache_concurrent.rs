@@ -19,6 +19,32 @@ fn make_factory(
         ael::metastore::InMemoryMetastore,
     >,
 > {
+    make_factory_shared_ik(
+        ik_policy,
+        ik_max,
+        sk_policy,
+        sk_max,
+        session_cache,
+        session_max,
+        false,
+    )
+}
+
+fn make_factory_shared_ik(
+    ik_policy: &str,
+    ik_max: usize,
+    sk_policy: &str,
+    sk_max: usize,
+    session_cache: bool,
+    session_max: usize,
+    shared_ik: bool,
+) -> Arc<
+    ael::SessionFactory<
+        ael::aead::AES256GCM,
+        ael::kms::StaticKMS<ael::aead::AES256GCM>,
+        ael::metastore::InMemoryMetastore,
+    >,
+> {
     let crypto = Arc::new(ael::aead::AES256GCM::new());
     let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![1_u8; 32]).unwrap());
     let store = Arc::new(ael::metastore::InMemoryMetastore::new());
@@ -26,6 +52,7 @@ fn make_factory(
     cfg.policy.cache_intermediate_keys = true;
     cfg.policy.intermediate_key_cache_max_size = ik_max;
     cfg.policy.intermediate_key_cache_eviction_policy = ik_policy.into();
+    cfg.policy.shared_intermediate_key_cache = shared_ik;
     cfg.policy.cache_system_keys = true;
     cfg.policy.system_key_cache_max_size = sk_max;
     cfg.policy.system_key_cache_eviction_policy = sk_policy.into();
@@ -113,6 +140,37 @@ fn concurrent_ik_cache_eviction_tinylfu() {
     for h in handles {
         h.join().unwrap();
     }
+}
+
+#[test]
+fn shared_ik_cache_respects_max_size_under_load() {
+    // 50 distinct partitions hammered through a shared IK cache with
+    // max=4 must not exceed that bound. Each partition derives a
+    // distinct intermediate-key id, so without a working eviction
+    // path we'd see 50 entries instead of <=4. The exact eviction
+    // policy doesn't matter here — we only assert the upper bound.
+    const IK_MAX: usize = 4;
+    let factory = make_factory_shared_ik("lru", IK_MAX, "lru", 8, false, 0, true);
+    let mut handles = vec![];
+    for i in 0..50 {
+        let f = factory.clone();
+        handles.push(thread::spawn(move || {
+            let partition = format!("part-bound-{i}");
+            let s = f.get_session(&partition);
+            let msg = format!("bound-msg-{i}");
+            let drr = s.encrypt(msg.as_bytes()).unwrap();
+            let pt = s.decrypt(drr).unwrap();
+            assert_eq!(pt, msg.as_bytes());
+        }));
+    }
+    for h in handles {
+        h.join().unwrap();
+    }
+    let live = factory.ik_cache_entry_count();
+    assert!(
+        live <= IK_MAX,
+        "shared IK cache held {live} entries, exceeds configured bound {IK_MAX}"
+    );
 }
 
 #[test]

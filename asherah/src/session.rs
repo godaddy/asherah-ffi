@@ -585,6 +585,19 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         self.metrics_enabled = enabled;
         self
     }
+
+    /// Approximate count of distinct intermediate-key entries currently
+    /// held in the shared IK cache. Returns `0` when the IK cache is
+    /// disabled or `shared_intermediate_key_cache` is `false` (per-
+    /// session caches aren't aggregated here). The value is racy under
+    /// concurrent encrypts; callers should use it for assertion-style
+    /// bounds checks only.
+    pub fn ik_cache_entry_count(&self) -> usize {
+        self.shared_ik_cache
+            .as_ref()
+            .map(|c| c.entry_count())
+            .unwrap_or(0)
+    }
     pub fn get_session(&self, id: &str) -> PublicSession<A, K, M> {
         let mut suffix = self.metastore.region_suffix();
         if suffix.as_deref().unwrap_or("").is_empty() {

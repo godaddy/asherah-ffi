@@ -99,6 +99,14 @@ pub trait KeyCacher: Send + Sync {
     /// Insert a key into the cache after an async load.
     fn insert_latest_key(&self, _id: &str, _key: Arc<CryptoKey>) {}
     fn insert_meta_key(&self, _meta: &KeyMeta, _key: Arc<CryptoKey>) {}
+
+    /// Approximate count of entries currently held. `0` for caches
+    /// that don't hold state. Used by tests to assert eviction-policy
+    /// bounds; the value is racy under concurrent insertions and is
+    /// not intended for production decision-making.
+    fn entry_count(&self) -> usize {
+        0
+    }
 }
 
 #[derive(Debug)]
@@ -667,5 +675,9 @@ impl KeyCacher for SimpleKeyCache {
 
     fn insert_meta_key(&self, meta: &KeyMeta, key: Arc<CryptoKey>) {
         self.insert_meta(meta, key);
+    }
+
+    fn entry_count(&self) -> usize {
+        self.by_meta.len()
     }
 }
