@@ -31,7 +31,7 @@ LEGACY_NODE_DIR = ROOT / "interop" / "legacy-node"
 BASE_ENV = {
     "SERVICE_NAME": "service",
     "PRODUCT_ID": "product",
-    "KMS": "static",
+    "KMS": "test-debug-static",
     "STATIC_MASTER_KEY_HEX": "22" * 32,
     "Metastore": "sqlite",
     "SESSION_CACHE": "0",

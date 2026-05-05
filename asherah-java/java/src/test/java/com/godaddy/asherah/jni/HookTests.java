@@ -60,7 +60,7 @@ class HookTests {
         .serviceName("hook-test")
         .productId("prod")
         .metastore("memory")
-        .kms("static")
+        .kms("test-debug-static")
         .enableSessionCaching(Boolean.FALSE)
         .build();
   }
@@ -306,7 +306,7 @@ class HookTests {
         .serviceName("hook-cache")
         .productId("prod")
         .metastore("memory")
-        .kms("static")
+        .kms("test-debug-static")
         .enableSessionCaching(Boolean.TRUE)
         .build();
     Set<String> cacheNames = java.util.Collections.synchronizedSet(new HashSet<>());

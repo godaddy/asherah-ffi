@@ -4,14 +4,14 @@ using GoDaddy.Asherah.Encryption;
 using Microsoft.Extensions.Logging;
 
 // Testing only — production must use AWS KMS.
-Environment.SetEnvironmentVariable("STATIC_MASTER_KEY_HEX",
-    "2222222222222222222222222222222222222222222222222222222222222222");
-
+// `KmsKind.TestDebugStatic` uses a publicly known fixed key — never deploy
+// to production. For a custom static key in tests, set `KMS=static` and
+// configure StaticMasterKeyHex through your config layer.
 var config = AsherahConfig.CreateBuilder()
     .WithServiceName("sample-service")
     .WithProductId("sample-product")
-    .WithMetastore(MetastoreKind.Memory)   // testing only — use MetastoreKind.Rdbms + connection string etc. in production
-    .WithKms(KmsKind.Static)               // testing only — use KmsKind.Aws with RegionMap in production
+    .WithMetastore(MetastoreKind.Memory)        // testing only — use MetastoreKind.Rdbms + connection string etc. in production
+    .WithKms(KmsKind.TestDebugStatic)            // testing only — use KmsKind.Aws with RegionMap in production
     .WithEnableSessionCaching(true)
     .Build();
 
@@ -57,7 +57,7 @@ static async Task RunAsyncExample()
         .WithServiceName("sample-service")
         .WithProductId("sample-product")
         .WithMetastore(MetastoreKind.Memory)
-        .WithKms(KmsKind.Static)
+        .WithKms(KmsKind.TestDebugStatic)
         .WithEnableSessionCaching(true)
         .Build();
 
@@ -98,7 +98,7 @@ var verboseConfig = AsherahConfig.CreateBuilder()
     .WithServiceName("sample-service")
     .WithProductId("sample-product")
     .WithMetastore(MetastoreKind.Memory)
-    .WithKms(KmsKind.Static)
+    .WithKms(KmsKind.TestDebugStatic)
     .WithVerbose(true)
     .Build();
 

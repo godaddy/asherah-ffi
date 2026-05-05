@@ -27,7 +27,7 @@ fn create_test_config() -> String {
         "ServiceName": "test-service",
         "ProductID": "test-product",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "Verbose": false,
         "EnableSessionCaching": true
     }"#

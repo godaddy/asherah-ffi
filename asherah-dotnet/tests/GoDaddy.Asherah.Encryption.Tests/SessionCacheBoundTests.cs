@@ -28,7 +28,7 @@ public class SessionCacheBoundTests
             .WithServiceName("test-svc")
             .WithProductId("test-prod")
             .WithMetastore(MetastoreKind.Memory)
-            .WithKms(KmsKind.Static)
+            .WithKms(KmsKind.TestDebugStatic)
             .WithEnableSessionCaching(true);
         if (maxSize is { } v)
         {
@@ -114,7 +114,7 @@ public class SessionCacheBoundTests
             .WithServiceName("test-svc")
             .WithProductId("test-prod")
             .WithMetastore(MetastoreKind.Memory)
-            .WithKms(KmsKind.Static)
+            .WithKms(KmsKind.TestDebugStatic)
             .WithEnableSessionCaching(false)
             .Build();
         AsherahApi.Setup(cfg);

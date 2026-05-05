@@ -42,7 +42,7 @@ public class DecryptEmptyInputTests : IDisposable
             .WithServiceName("decrypt-empty-test-svc")
             .WithProductId("decrypt-empty-test-prod")
             .WithMetastore(MetastoreKind.Memory)
-            .WithKms(KmsKind.Static)
+            .WithKms(KmsKind.TestDebugStatic)
             .Build();
         _factory = AsherahFactory.FromConfig(config);
         _session = _factory.GetSession("decrypt-empty-test-partition");

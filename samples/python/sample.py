@@ -9,7 +9,7 @@ config = {
     "ServiceName": "sample-service",
     "ProductID": "sample-product",
     "Metastore": "memory",  # testing only — use rdbms/dynamodb in production
-    "KMS": "static",        # testing only — use aws in production
+    "KMS": "test-debug-static",        # testing only — use aws in production
     "EnableSessionCaching": True,
     # "Verbose": True,      # uncomment to see info-level log events via the log hook
 }

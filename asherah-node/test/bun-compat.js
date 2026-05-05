@@ -48,7 +48,7 @@ async function testSyncRoundtrip() {
     serviceName: 'bun-sync',
     productId: 'bun-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
 
   const drr = asherah.encryptString('p1', 'bun-sync-test');
@@ -71,7 +71,7 @@ async function testAsyncRoundtrip() {
     serviceName: 'bun-async',
     productId: 'bun-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
 
   // String async
@@ -96,7 +96,7 @@ async function testBufferInterop() {
     serviceName: 'bun-buffer',
     productId: 'bun-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
 
   // All 256 byte values
@@ -139,7 +139,7 @@ async function testThreadsafeMetricsHook() {
     serviceName: 'bun-metrics',
     productId: 'bun-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
 
   const drr = asherah.encryptString('p1', 'metrics-test');
@@ -164,7 +164,7 @@ async function testThreadsafeLogHook() {
     serviceName: 'bun-log',
     productId: 'bun-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
     verbose: true,
   });
 
@@ -188,7 +188,7 @@ async function testConcurrentAsync() {
     serviceName: 'bun-concurrent',
     productId: 'bun-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
 
   // 20 concurrent encrypt/decrypt across different partitions
@@ -217,7 +217,7 @@ async function testHeavyConcurrentAsync() {
     serviceName: 'bun-heavy',
     productId: 'bun-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
     enableSessionCaching: true,
   });
 
@@ -246,7 +246,7 @@ async function testSetupShutdownCycles() {
       serviceName: `bun-cycle-${i}`,
       productId: 'bun-prod',
       metastore: 'memory',
-      kms: 'static',
+      kms: 'test-debug-static',
     });
 
     const enc = await asherah.encryptStringAsync('cycle', `cycle-${i}`);
@@ -264,7 +264,7 @@ async function testFactorySessionLifecycle() {
     serviceName: 'bun-factory',
     productId: 'bun-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
 
   // Multiple sessions
@@ -306,7 +306,7 @@ async function testSyncAsyncInterop() {
     serviceName: 'bun-interop',
     productId: 'bun-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
 
   // Encrypt sync, decrypt async
@@ -333,7 +333,7 @@ async function testLargePayloads() {
     serviceName: 'bun-large',
     productId: 'bun-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
 
   // 1MB payload — tests buffer handling at scale under Bun

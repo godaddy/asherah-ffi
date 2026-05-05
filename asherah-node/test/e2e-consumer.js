@@ -70,7 +70,7 @@ async function testPascalCaseWithNulls() {
     ServiceName: 'e2e-pascal',
     ProductID: 'e2e-prod',
     Metastore: 'memory',
-    KMS: 'static',
+    KMS: 'test-debug-static',
     ConnectionString: null,
     DynamoDBEndpoint: null,
     DynamoDBRegion: null,
@@ -101,7 +101,7 @@ async function testFullConfig() {
     serviceName: 'e2e-full',
     productId: 'e2e-full-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
     enableSessionCaching: true,
     sessionCacheMaxSize: 100,
     sessionCacheDuration: 3600,
@@ -124,7 +124,7 @@ async function testConcurrentAsync() {
     serviceName: 'e2e-concurrent',
     productId: 'e2e-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
 
   // 10 concurrent encrypt/decrypt across different partitions
@@ -162,7 +162,7 @@ function testErrorMessages() {
     serviceName: 'err-test',
     productId: 'err-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
   caught = false;
   try {
@@ -184,7 +184,7 @@ async function testSetupShutdownCycle() {
       serviceName: `cycle-${cycle}`,
       productId: 'cycle-prod',
       metastore: 'memory',
-      kms: 'static',
+      kms: 'test-debug-static',
     });
 
     const enc = await asherah.encryptStringAsync('cycle-p', `cycle-${cycle}`);
@@ -201,7 +201,7 @@ async function testSyncAsyncInterop() {
     serviceName: 'e2e-interop',
     productId: 'e2e-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
 
   // Encrypt sync, decrypt async
@@ -223,7 +223,7 @@ async function testHeavyConcurrentAsync() {
     serviceName: 'e2e-heavy',
     productId: 'e2e-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
 
   // 100 concurrent async operations across 20 partitions

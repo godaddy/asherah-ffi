@@ -703,6 +703,13 @@ async fn build_metastore_async(
     }
 }
 
+/// Hex of `b"thisIsAStaticMasterKeyForTesting"` (32 bytes). Public test value
+/// used only when the caller explicitly requests the `test-debug-static` KMS
+/// alias. Production KMS=static configurations require a non-empty
+/// `STATIC_MASTER_KEY_HEX` and must never reach this constant.
+pub const TEST_DEBUG_STATIC_MASTER_KEY_HEX: &str =
+    "746869734973415374617469634d61737465724b6579466f7254657374696e67";
+
 fn decode_static_key_hex(hex: &str) -> anyhow::Result<Vec<u8>> {
     if !hex.len().is_multiple_of(2) {
         anyhow::bail!(
@@ -730,16 +737,18 @@ fn build_kms(
 ) -> anyhow::Result<Arc<dyn crate::traits::KeyManagementService>> {
     match kms {
         KmsConfig::Static { key_hex } => {
+            if key_hex.is_empty() {
+                anyhow::bail!(
+                    "KMS=static requires STATIC_MASTER_KEY_HEX to be set to a 64-char hex \
+                     string (32-byte AES-256 key). For local testing, set KMS=test-debug-static \
+                     to use a publicly known fixed key."
+                );
+            }
             log::warn!(
                 "Using static master key. \
                  This is for testing only — do NOT use in production."
             );
-            let hex = if key_hex.is_empty() {
-                "746869734973415374617469634d61737465724b6579466f7254657374696e67"
-            } else {
-                key_hex.as_str()
-            };
-            let key = decode_static_key_hex(hex)?;
+            let key = decode_static_key_hex(key_hex)?;
             Ok(Arc::new(crate::kms::StaticKMS::new(crypto.clone(), key)?))
         }
         KmsConfig::Aws {
@@ -1064,8 +1073,17 @@ pub fn resolve_from_env() -> anyhow::Result<ResolvedConfig> {
         .unwrap_or_else(|_| "static".into())
         .to_lowercase();
     let kms = match kms_kind.as_str() {
-        "static" | "test-debug-static" => KmsConfig::Static {
-            key_hex: std::env::var("STATIC_MASTER_KEY_HEX").unwrap_or_default(),
+        "static" => KmsConfig::Static {
+            key_hex: std::env::var("STATIC_MASTER_KEY_HEX").map_err(|_| {
+                anyhow::anyhow!(
+                    "KMS=static requires STATIC_MASTER_KEY_HEX (64-char hex). For local \
+                     testing, set KMS=test-debug-static to use a publicly known fixed key."
+                )
+            })?,
+        },
+        "test-debug-static" => KmsConfig::Static {
+            key_hex: std::env::var("STATIC_MASTER_KEY_HEX")
+                .unwrap_or_else(|_| TEST_DEBUG_STATIC_MASTER_KEY_HEX.to_string()),
         },
         "aws" => {
             let region_map = std::env::var("REGION_MAP")

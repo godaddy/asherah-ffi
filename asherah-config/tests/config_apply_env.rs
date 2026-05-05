@@ -17,6 +17,9 @@ fn base_config() -> ConfigOptions {
         product_id: Some("test-prod".into()),
         metastore: Some("memory".into()),
         kms: Some("static".into()),
+        // KMS=static now requires StaticMasterKey — provide a fixed test key
+        // so unrelated test scenarios don't trip the new safety check.
+        static_master_key_hex: Some("00".repeat(32)),
         enable_session_caching: Some(false),
         ..Default::default()
     }
@@ -236,11 +239,19 @@ fn test_normalize_alias_test_debug_memory() {
     let cfg = ConfigOptions {
         metastore: Some("test-debug-memory".into()),
         kms: Some("test-debug-static".into()),
+        // Override the base test key to verify test-debug-static substitutes
+        // the well-known fallback when no key is supplied.
+        static_master_key_hex: None,
         ..base_config()
     };
     let resolved = resolve(&cfg);
     assert!(matches!(resolved.metastore, MetastoreConfig::Memory));
-    assert!(matches!(resolved.kms, KmsConfig::Static { .. }));
+    match resolved.kms {
+        KmsConfig::Static { key_hex } => {
+            assert_eq!(key_hex, asherah::builders::TEST_DEBUG_STATIC_MASTER_KEY_HEX)
+        }
+        other => panic!("expected Static, got {other:?}"),
+    }
 }
 
 fn test_normalize_alias_test_debug_sqlite() {
@@ -559,6 +570,28 @@ fn test_static_master_key_hex() {
     }
 }
 
+fn test_static_kms_without_key_is_rejected() {
+    // T1 regression: KMS=static must NOT silently fall back to a publicly
+    // known testing key when StaticMasterKey is omitted.
+    let cfg = ConfigOptions {
+        kms: Some("static".into()),
+        static_master_key_hex: None,
+        ..base_config()
+    };
+    let err = cfg
+        .resolve()
+        .expect_err("KMS=static without key must error");
+    let msg = format!("{err:#}");
+    assert!(
+        msg.contains("StaticMasterKeyHex") || msg.contains("static_master_key_hex"),
+        "error must reference the missing key field: {msg}"
+    );
+    assert!(
+        msg.contains("test-debug-static"),
+        "error must mention the test-debug-static escape hatch: {msg}"
+    );
+}
+
 fn test_no_env_side_effects() {
     // Set some env vars that apply_env used to write
     let sentinel = format!("sentinel-{}", std::process::id());
@@ -698,6 +731,10 @@ fn main() {
         test_pool_config_passed_through
     );
     run_test!("test_static_master_key_hex", test_static_master_key_hex);
+    run_test!(
+        "test_static_kms_without_key_is_rejected",
+        test_static_kms_without_key_is_rejected
+    );
     run_test!("test_no_env_side_effects", test_no_env_side_effects);
 
     println!("\ntest result: ok. {pass} passed; {fail} failed");

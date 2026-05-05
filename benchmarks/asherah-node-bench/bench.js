@@ -11,7 +11,7 @@ const config = {
   serviceName: process.env.BENCH_SERVICE ?? 'bench_svc',
   productId: process.env.BENCH_PRODUCT ?? 'bench_prod',
   metastore: 'memory',
-  kms: 'static',
+  kms: 'test-debug-static',
   enableSessionCaching: false,
 };
 

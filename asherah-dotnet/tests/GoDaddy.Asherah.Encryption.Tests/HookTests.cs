@@ -45,7 +45,7 @@ public class HookTests
             .WithServiceName("hook-test-svc")
             .WithProductId("hook-test-prod")
             .WithMetastore(MetastoreKind.Memory)
-            .WithKms(KmsKind.Static)
+            .WithKms(KmsKind.TestDebugStatic)
             .WithEnableSessionCaching(true)
             .WithVerbose(verbose)
             .Build();

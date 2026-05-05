@@ -13,7 +13,7 @@ Asherah.setup(
   "ServiceName" => "bench-svc",
   "ProductID" => "bench-prod",
   "Metastore" => "memory",
-  "KMS" => "static",
+  "KMS" => "test-debug-static",
   "EnableSessionCaching" => true
 )
 

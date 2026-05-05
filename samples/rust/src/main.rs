@@ -19,15 +19,18 @@ fn main() -> Result<()> {
     // };
 
     // -- Local dev config (static master key, in-memory metastore) --
-    std::env::set_var(
-        "STATIC_MASTER_KEY_HEX",
-        "2222222222222222222222222222222222222222222222222222222222222222",
-    );
+    // Production callers should source this from a secrets store, not a
+    // literal. `KMS=static` requires the key to be supplied; the
+    // `test-debug-static` alias is also available and uses a publicly known
+    // fixed key — never deploy that to production.
     let config = ConfigOptions {
         service_name: Some("sample-service".into()),
         product_id: Some("sample-product".into()),
         metastore: Some("memory".into()),
         kms: Some("static".into()),
+        static_master_key_hex: Some(
+            "2222222222222222222222222222222222222222222222222222222222222222".into(),
+        ),
         enable_session_caching: Some(true),
         ..Default::default()
     };

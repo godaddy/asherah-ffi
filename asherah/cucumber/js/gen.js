@@ -42,7 +42,7 @@ async function encrypt(service, product, partition, masterHex, payloadB64) {
     connection = `${user}:${pass}@tcp(${host}:${port})/${db}`;
   } else { console.error('Set POSTGRES_URL or MYSQL_URL for shared metastore'); process.exit(4); }
   const config = {
-    KMS: 'static',
+    KMS: 'test-debug-static',
     Metastore: 'rdbms',
     ServiceName: service,
     ProductID: product,
@@ -83,7 +83,7 @@ async function decrypt(service, product, partition, masterHex) {
     connection = `${user}:${pass}@tcp(${host}:${port})/${db}`;
   } else { console.error('Set POSTGRES_URL or MYSQL_URL'); process.exit(4); }
   const config = {
-    KMS: 'static',
+    KMS: 'test-debug-static',
     Metastore: 'rdbms',
     ServiceName: service,
     ProductID: product,

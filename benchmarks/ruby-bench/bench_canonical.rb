@@ -40,7 +40,7 @@ Asherah.configure do |config|
   else
     config.metastore = "memory"
   end
-  config.kms = "static"
+  config.kms = "test-debug-static"
   config.enable_session_caching = true unless mode == "cold"
 end
 mode_label = case mode

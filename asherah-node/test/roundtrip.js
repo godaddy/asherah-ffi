@@ -45,7 +45,7 @@ function main() {
     serviceName: 'svc',
     productId: 'prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
     enableSessionCaching: false,
   };
   addon.setup(cfg);
@@ -95,7 +95,7 @@ function main() {
     ServiceName: 'std-svc',
     ProductID: 'std-prod',
     Metastore: 'memory',
-    KMS: 'static',
+    KMS: 'test-debug-static',
     EnableSessionCaching: false,
     // Go-specific fields should be silently ignored
     DisableZeroCopy: true,
@@ -120,11 +120,13 @@ function main() {
 }
 
 function testNullConfig() {
-  // Minimal camelCase config — only required fields, everything else undefined
+  // Minimal camelCase config — `kms` is required since omitting it defaults
+  // to `static` which now demands an explicit master-key hex.
   addon.setup({
     serviceName: 'minimal-svc',
     productId: 'minimal-prod',
     metastore: 'memory',
+    kms: 'test-debug-static',
   });
   const drr = addon.encryptString('p1', 'minimal-config');
   assert.strictEqual(addon.decryptString('p1', drr), 'minimal-config');
@@ -136,19 +138,20 @@ function testNullConfig() {
     ServiceName: 'minimal-pascal',
     ProductID: 'minimal-prod',
     Metastore: 'memory',
-    KMS: 'static',
+    KMS: 'test-debug-static',
   });
   const drr2 = addon.encryptString('p1', 'pascal-minimal');
   assert.strictEqual(addon.decryptString('p1', drr2), 'pascal-minimal');
   addon.shutdown();
   console.log('asherah-node minimal PascalCase config OK');
 
-  // Config with explicit null values for all optional fields
+  // Config with explicit null values for all optional fields except KMS,
+  // which now requires either an explicit key or the test-debug alias.
   addon.setup({
     serviceName: 'null-svc',
     productId: 'null-prod',
     metastore: 'memory',
-    kms: null,
+    kms: 'test-debug-static',
     expireAfter: null,
     checkInterval: null,
     connectionString: null,
@@ -179,7 +182,7 @@ function testNullConfig() {
     ServiceName: 'null-pascal',
     ProductID: 'null-prod',
     Metastore: 'memory',
-    KMS: null,
+    KMS: 'test-debug-static',
     ExpireAfter: null,
     CheckInterval: null,
     ConnectionString: null,
@@ -223,7 +226,7 @@ function testFfiBoundary() {
     serviceName: 'ffi-test',
     productId: 'prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
     enableSessionCaching: false,
   };
   addon.setup(cfg);
@@ -342,7 +345,7 @@ function testFactorySessionApi() {
     serviceName: 'factory-svc',
     productId: 'factory-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
     enableSessionCaching: false,
   };
 
@@ -472,7 +475,7 @@ function testNullAndEmptyInputs() {
     serviceName: 'null-empty-svc',
     productId: 'null-empty-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
     enableSessionCaching: false,
   };
   addon.setup(cfg);
@@ -531,7 +534,7 @@ async function testNullAndEmptyAsync() {
     serviceName: 'null-empty-async-svc',
     productId: 'null-empty-async-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
     enableSessionCaching: false,
   };
   await addon.setupAsync(cfg);
@@ -598,7 +601,7 @@ async function testAsyncFromAsyncContext() {
     serviceName: 'async-ctx-svc',
     productId: 'async-ctx-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
     enableSessionCaching: false,
   });
 
@@ -621,7 +624,7 @@ async function testAsyncFromAsyncContext() {
     ServiceName: 'async-cycle',
     ProductID: 'async-prod',
     Metastore: 'memory',
-    KMS: 'static',
+    KMS: 'test-debug-static',
   });
   const drr2 = await addon.encryptAsync('cycle', Buffer.from('async-cycle-test'));
   const buf = await addon.decryptAsync('cycle', Buffer.from(drr2));
