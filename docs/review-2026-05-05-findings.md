@@ -307,7 +307,8 @@ Items already addressed are crossed out; the remainder are still open.
 24. ~~api.rs FactoryOption::SecretFactory doc-hidden.~~ — `2fc2464`
 25. ~~Cache atomic ordering + memguard nonce prefix randomization.~~ — `69467ec`
 26. ~~Legacy `Session::encrypt` race-loss recovery.~~ — `8d85a6b`
-27. ~~Server graceful drain via JoinSet (no more abandoned in-flight `close()` calls).~~ — pending commit
+27. ~~Server graceful drain via JoinSet (no more abandoned in-flight `close()` calls).~~ — `0610f1d`
+28. ~~Python binding decrypt path: intermediate `Vec<u8>`s wrapped in `Zeroizing`.~~ — pending commit
 
 ## Open follow-ups (not addressed in this branch)
 
@@ -330,8 +331,9 @@ are deliberately deferred:
 - **asherah-server/src/main.rs typed enums** — clap `value_parser = ["..."]` → typed enums
 
 **Bindings / FFI**
-- **asherah-py/src/lib.rs:135-144** — language-binding plaintext copies
-- **asherah-ruby/lib/asherah/session.rb:38-44** — thread-local AsherahBuffer reuse
+- ~~**asherah-py/src/lib.rs:135-144** — language-binding plaintext copies~~ — fixed in pending commit; intermediate `Vec<u8>`s are wrapped in `Zeroizing` so `PyBytes::new` copies into Python and the Rust-side buffer wipes on drop. Python `str` returned by `decrypt_text` is unwipable by design (Python heap).
+- **asherah-ruby/lib/asherah/session.rb:38-44** — thread-local AsherahBuffer reuse: the FFI buffer's metadata is reused per thread but `asherah_buffer_free` zeroizes the data Vec via `zeroize::Zeroize` before freeing, so plaintext bytes are wiped at the Rust boundary. The Ruby `String` produced by `read_bytes` lives in Ruby's heap and is not wipable.
+- **Java / .NET bindings** — once plaintext lands in a managed `byte[]`/`byte[]` the GC owns it; deterministic wipe is not possible without unsafe pointer access. The Rust-side FFI buffer is wiped on free.
 - **asherah-cobhan/src/lib.rs:355-363** — Setup→Shutdown→Setup test gap
 - **PyO3/napi-rs/JNI `catch_unwind` discipline**
 - **kms_secrets_manager.rs:118-126 SDK plaintext leak** — partial; hex decode now Zeroizing but the SDK's secret_string copy still flows through unwiped Vec.
