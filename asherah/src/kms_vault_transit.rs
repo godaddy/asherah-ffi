@@ -123,10 +123,14 @@ impl VaultTransitKms {
             let cert_pem = std::fs::read(&cert_path).map_err(|e| {
                 anyhow::anyhow!("failed to read VAULT_CLIENT_CERT at {cert_path}: {e}")
             })?;
-            let key_pem = std::fs::read(&key_path).map_err(|e| {
+            // Wrap the private-key bytes in `Zeroizing` so the raw PEM
+            // doesn't linger in the freed allocator slab. T-finding
+            // "PEM body Vec not wiped; private key half should be
+            // Zeroizing" in `docs/review-2026-05-05-findings.md`.
+            let key_pem = zeroize::Zeroizing::new(std::fs::read(&key_path).map_err(|e| {
                 anyhow::anyhow!("failed to read VAULT_CLIENT_KEY at {key_path}: {e}")
-            })?;
-            let mut combined = cert_pem.clone();
+            })?);
+            let mut combined = zeroize::Zeroizing::new(cert_pem.clone());
             combined.extend_from_slice(&key_pem);
             let identity = reqwest::Identity::from_pem(&combined)
                 .map_err(|e| anyhow::anyhow!("invalid TLS client cert/key: {e}"))?;
@@ -428,6 +432,18 @@ impl VaultTransitKms {
     fn decrypt_key_sync(&self, blob: &[u8]) -> anyhow::Result<Vec<u8>> {
         let ciphertext = std::str::from_utf8(blob)
             .map_err(|e| anyhow::anyhow!("Vault Transit decrypt: blob is not valid UTF-8: {e}"))?;
+        // Vault transit ciphertexts are versioned with a `vault:v<n>:` prefix.
+        // Reject anything else early — a corrupted or truncated metastore
+        // value otherwise round-trips into Vault and produces a confusing
+        // server-side error. T-finding "no validation of `vault:v` prefix"
+        // in `docs/review-2026-05-05-findings.md`.
+        if !ciphertext.starts_with("vault:v") {
+            anyhow::bail!(
+                "Vault Transit decrypt: ciphertext does not start with the expected \
+                 `vault:v<n>:` version prefix (got {} bytes)",
+                ciphertext.len()
+            );
+        }
         let body = DecryptRequest { ciphertext };
         let resp = self
             .sync_client
@@ -503,6 +519,13 @@ impl VaultTransitKms {
     async fn decrypt_key_impl(&self, blob: &[u8]) -> anyhow::Result<Vec<u8>> {
         let ciphertext = std::str::from_utf8(blob)
             .map_err(|e| anyhow::anyhow!("Vault Transit decrypt: blob is not valid UTF-8: {e}"))?;
+        if !ciphertext.starts_with("vault:v") {
+            anyhow::bail!(
+                "Vault Transit decrypt: ciphertext does not start with the expected \
+                 `vault:v<n>:` version prefix (got {} bytes)",
+                ciphertext.len()
+            );
+        }
         let body = DecryptRequest { ciphertext };
         let resp = self
             .async_client

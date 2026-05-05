@@ -56,6 +56,16 @@ impl KeyManagementService for MultiKms {
                     "MultiKms decrypt_key: preferred backend {} failed: {e:#}",
                     self.preferred
                 );
+                if is_terminal_kms_error(&e) {
+                    log::error!(
+                        "MultiKms decrypt_key: preferred backend returned a terminal \
+                         error ({e:#}); aborting fallback to avoid spurious cross-region \
+                         KMS calls"
+                    );
+                    return Err(anyhow::anyhow!(
+                        "preferred KMS backend failed terminally: {e}"
+                    ));
+                }
                 errors.push(format!("backend[{}]: {e}", self.preferred));
             }
         }
@@ -66,7 +76,14 @@ impl KeyManagementService for MultiKms {
             match kms.decrypt_key(ctx, blob) {
                 Ok(pt) => return Ok(pt),
                 Err(e) => {
-                    log::warn!("MultiKms decrypt_key: backend {} failed: {e:#}", i);
+                    log::warn!("MultiKms decrypt_key: backend {i} failed: {e:#}");
+                    if is_terminal_kms_error(&e) {
+                        log::error!(
+                            "MultiKms decrypt_key: backend {i} returned a terminal \
+                             error ({e:#}); aborting fallback"
+                        );
+                        return Err(anyhow::anyhow!("KMS backend {i} failed terminally: {e}"));
+                    }
                     errors.push(format!("backend[{i}]: {e}"));
                 }
             }
@@ -77,6 +94,30 @@ impl KeyManagementService for MultiKms {
             "all KMS backends failed to decrypt: {detail}"
         ))
     }
+}
+
+/// Heuristic: distinguish errors where retrying another region/backend
+/// is pointless (AccessDenied, InvalidKey, NotAuthorized — the caller's
+/// identity won't suddenly gain permission in a different region) from
+/// errors that warrant a fallback (Throttling, ServerError, network).
+///
+/// We can't pattern-match on AWS SDK typed variants because `MultiKms`
+/// is generic over `dyn KeyManagementService`. Falls back to substring
+/// matching on the error chain — best-effort, errs on the side of
+/// continuing the fallback when uncertain (T-finding "blindly retries
+/// every backend on any error" in `docs/review-2026-05-05-findings.md`).
+fn is_terminal_kms_error(err: &anyhow::Error) -> bool {
+    let chain = format!("{err:#}");
+    let needles: &[&str] = &[
+        "AccessDenied",
+        "AccessDeniedException",
+        "NotAuthorized",
+        "InvalidKey",
+        "DisabledException",
+        "InvalidCiphertextException",
+        "KMSInvalidKeyUsageException",
+    ];
+    needles.iter().any(|n| chain.contains(n))
 }
 
 #[cfg(test)]

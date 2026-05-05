@@ -286,16 +286,23 @@ impl ManagedPool {
                 .name("mysql-pool-reaper".into())
                 .spawn(move || {
                     loop {
-                        // Wait for `interval` OR until close() wakes us up.
                         let pool = match weak.upgrade() {
                             Some(p) => p,
                             None => break, // Pool dropped
                         };
+                        // Acquire `reaper_lock` BEFORE checking `closed`. close()
+                        // sets `closed = true` while holding `reaper_lock` and
+                        // then notifies on `reaper_cv`, so this ordering means we
+                        // either (a) see closed=true here and break, or (b) enter
+                        // wait_timeout and the notify wakes us. Without holding
+                        // the lock around the closed check, a notify between the
+                        // check and the wait would be lost and we'd sleep the
+                        // full interval.
+                        let guard = pool.reaper_lock.lock().unwrap_or_else(|e| e.into_inner());
                         if pool.closed.load(Ordering::Relaxed) {
                             break;
                         }
-                        let guard = pool.reaper_lock.lock().unwrap_or_else(|e| e.into_inner());
-                        let _unused = pool
+                        let (_g, _to) = pool
                             .reaper_cv
                             .wait_timeout(guard, interval)
                             .unwrap_or_else(|e| e.into_inner());
@@ -457,7 +464,18 @@ impl ManagedPool {
     /// returned to the idle list — when their `ManagedConn` drops, keeping
     /// `open_count` accurate.
     pub fn close(&self) {
-        self.closed.store(true, Ordering::Relaxed);
+        // Set `closed` while holding `reaper_lock` so the reaper either
+        // observes `closed=true` before entering `wait_timeout` (and
+        // breaks immediately) or is parked inside `wait_timeout` and
+        // gets woken by the subsequent `notify_all`. Without this lock
+        // ordering, a notify between the reaper's check and its wait
+        // would be lost and the reaper would sleep the full interval.
+        {
+            let guard = self.reaper_lock.lock().unwrap_or_else(|e| e.into_inner());
+            self.closed.store(true, Ordering::Relaxed);
+            self.reaper_cv.notify_all();
+            drop(guard);
+        }
         // Wake any get_conn() callers waiting for capacity so they observe
         // the closed flag and return promptly.
         self.condvar.notify_all();
@@ -468,8 +486,6 @@ impl ManagedPool {
         drop(inner);
         self.open_count.fetch_sub(count, Ordering::Relaxed);
 
-        // Wake the reaper so it can observe `closed = true` and exit.
-        self.reaper_cv.notify_all();
         if let Some(handle) = self
             .reaper_handle
             .lock()

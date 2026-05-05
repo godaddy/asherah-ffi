@@ -127,16 +127,28 @@ async fn fetch_secret(
 
     // Prefer SecretString (hex-encoded) over SecretBinary
     if let Some(hex) = resp.secret_string() {
-        let hex = hex.trim();
-        if hex.len() % 2 != 0 {
+        // Tolerate whitespace anywhere (some operators paste keys with
+        // CR/LF) and an optional `0x` prefix. The error path zeroizes the
+        // intermediate buffer so a half-decoded key doesn't linger in
+        // heap. T-finding "Hex decode hand-loop; no `0x` strip,
+        // whitespace-only outer trim" in
+        // `docs/review-2026-05-05-findings.md`.
+        let cleaned: String = hex
+            .trim()
+            .trim_start_matches("0x")
+            .trim_start_matches("0X")
+            .chars()
+            .filter(|ch| !ch.is_whitespace())
+            .collect();
+        if !cleaned.len().is_multiple_of(2) {
             anyhow::bail!(
-                "Secrets Manager secret has odd-length hex string ({} chars)",
-                hex.len()
+                "Secrets Manager secret has odd-length hex string ({} chars after trim)",
+                cleaned.len()
             );
         }
-        let mut key = vec![0_u8; hex.len() / 2];
+        let mut key = Zeroizing::new(vec![0_u8; cleaned.len() / 2]);
         for i in 0..key.len() {
-            key[i] = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).map_err(|_| {
+            key[i] = u8::from_str_radix(&cleaned[2 * i..2 * i + 2], 16).map_err(|_| {
                 anyhow::anyhow!(
                     "Secrets Manager secret contains invalid hex at position {}",
                     2 * i
@@ -149,7 +161,12 @@ async fn fetch_secret(
                 key.len()
             );
         }
-        return Ok(key);
+        // Move the bytes out of the Zeroizing wrapper into the returned
+        // Vec — the wrapper goes out of scope here, but we want the
+        // *caller* to receive an unwiped Vec so they can store it in
+        // their Zeroizing wrapper. The only Zeroizing benefit was
+        // covering the error paths above.
+        return Ok(std::mem::take(&mut *key));
     }
 
     if let Some(blob) = resp.secret_binary() {

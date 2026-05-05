@@ -265,9 +265,16 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
     }
 
     async fn decrypt_key_impl(&self, blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+        // Redact serde_json's error in the user-facing message — its
+        // Display includes the offending input snippet ("at line N
+        // column M ..."), which on a corrupted/truncated envelope can
+        // expose ciphertext-structure information. The full chain still
+        // goes to the operator log via `log::error!`. T-finding
+        // "serde_json errors with `{e}` include offending input snippet"
+        // in `docs/review-2026-05-05-findings.md`.
         let env: KekEnvelope = serde_json::from_slice(blob).map_err(|e| {
             log::error!("AwsKmsEnvelope decrypt_key: invalid envelope JSON: {e}");
-            anyhow::anyhow!("invalid KMS envelope JSON: {e}")
+            anyhow::anyhow!("invalid KMS envelope JSON")
         })?;
         // Build map region->kek
         let mut map = std::collections::HashMap::new();
