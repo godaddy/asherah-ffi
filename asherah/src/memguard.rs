@@ -10,7 +10,7 @@ use rand::TryRngCore;
 // LessSafeKey: safe here — enclave sealing uses a monotonic atomic counter
 // for nonces (NONCE_COUNTER), guaranteeing uniqueness without randomness.
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 use subtle::ConstantTimeEq;
 
@@ -443,16 +443,31 @@ struct SecureSlab {
     base: *mut u8,
     slot_count: usize,
 
-    // Free list of shared slot indices (LIFO for cache locality)
+    // Free list of shared slot indices (LIFO for cache locality).
     free: Vec<usize>,
 
-    // Hot key cache: maps enclave_id → slot index
+    // Slots currently checked out as transient PoolSlot handles. A slot is
+    // in exactly one of three states at any moment: on the `free` list, in
+    // `cache_lru`/`cache_map`, or in `transient`. The set lets us assert
+    // single-release and gives explicit positive tracking that
+    // `acquire_slot` will not re-issue or evict an outstanding slot. See
+    // T2 in `docs/review-2026-05-05-findings.md`.
+    transient: HashSet<usize>,
+
+    // Hot key cache: maps enclave_id → slot index.
     cache_map: HashMap<u64, usize>,
     cache_slot_to_id: Vec<u64>, // slot_idx → enclave_id (0 = not cached)
     cache_lru: VecDeque<usize>, // front = least recently used
 }
 
-// SAFETY: base points into mlock'd mmap memory owned by _page.
+// SAFETY: `base` is a `*mut u8` derived from the `mmap`'d, `mlock`'d page
+// owned by `_page`. The page lives for the lifetime of `SecureSlab` (we
+// never replace `_page`), and access through `base` only happens via the
+// `Mutex<SecureSlab>` wrapper around the static `SLAB`. Sending the slab
+// across threads is therefore equivalent to sending the owned buffer plus
+// the index/cache state, which contains no thread-local invariants.
+// `SecureSlab` is intentionally NOT `Sync` — concurrent shared access
+// would race on `free`, `transient`, `cache_lru`, and `cache_map`.
 unsafe impl Send for SecureSlab {}
 
 impl SecureSlab {
@@ -490,6 +505,7 @@ impl SecureSlab {
             base,
             slot_count,
             free,
+            transient: HashSet::with_capacity(shared_count),
             cache_map: HashMap::with_capacity(shared_count),
             cache_slot_to_id: vec![0_u64; slot_count],
             cache_lru: VecDeque::with_capacity(shared_count),
@@ -511,8 +527,17 @@ impl SecureSlab {
     }
 
     /// Acquire a shared slot. Tries free list first, then evicts from cache.
-    /// `exclude` prevents evicting a specific cache slot (used when the caller
-    /// holds a reference to that slot).
+    /// `exclude` prevents evicting a specific cache slot (used when the
+    /// caller holds a reference to that slot).
+    ///
+    /// The returned index is OFF the free list and OFF `cache_lru`. The
+    /// caller is responsible for placing it into exactly one of:
+    ///
+    /// - `self.transient` (via `acquire_transient_slot`) — for handles
+    ///   returned to user code as `PoolSlot`.
+    /// - `cache_lru` + `cache_map` — for `cache_insert`.
+    ///
+    /// Failing to do this is a leak; doing it twice is a soundness bug.
     fn acquire_slot(&mut self, exclude: Option<usize>) -> Option<usize> {
         // Try free list (O(1))
         if let Some(idx) = self.free.pop() {
@@ -534,9 +559,23 @@ impl SecureSlab {
         None
     }
 
+    /// Like `acquire_slot` but records the slot in `transient` so a
+    /// concurrent `release_slot` for the same idx can be detected, and so
+    /// the slot is observably "checked out" rather than just absent.
+    fn acquire_transient_slot(&mut self, exclude: Option<usize>) -> Option<usize> {
+        let idx = self.acquire_slot(exclude)?;
+        debug_assert!(
+            !self.transient.contains(&idx),
+            "acquire_transient_slot: slot {idx} was already transient — \
+             slab invariant violation",
+        );
+        self.transient.insert(idx);
+        Some(idx)
+    }
+
     /// Reconstruct the Coffer master key into a transient slot.
     fn coffer_view(&mut self) -> Option<PoolSlot> {
-        let out_idx = self.acquire_slot(None)?;
+        let out_idx = self.acquire_transient_slot(None)?;
         // Use raw pointers to avoid borrow conflicts on non-overlapping slots
         let right_ptr = self.slot_ptr(COFFER_RIGHT);
         let right = unsafe { std::slice::from_raw_parts(right_ptr, SLOT_SIZE) };
@@ -588,7 +627,7 @@ impl SecureSlab {
         }
         self.cache_lru.push_back(src_idx);
         // Acquire a transient slot (don't evict the one we just found)
-        let out_idx = self.acquire_slot(Some(src_idx))?;
+        let out_idx = self.acquire_transient_slot(Some(src_idx))?;
         // Use raw pointers to avoid borrow conflicts on non-overlapping slots
         let src_ptr = self.slot_ptr(src_idx);
         let dst_ptr = self.slot_ptr(out_idx);
@@ -641,9 +680,21 @@ impl SecureSlab {
         self.cache_lru.clear();
     }
 
-    /// Release a slot back to the free list.
+    /// Release a transient slot back to the free list. Asserts the slot
+    /// was actually checked out as transient — a release without a prior
+    /// `acquire_transient_slot` (or a double release) indicates a leaked
+    /// or duplicated PoolSlot.
     fn release_slot(&mut self, idx: usize) {
         debug_assert!(idx >= FIRST_SHARED_SLOT && idx < self.slot_count);
+        debug_assert!(
+            self.transient.remove(&idx),
+            "release_slot: slot {idx} was not in transient set — double \
+             release or release without acquire",
+        );
+        debug_assert!(
+            !self.free.contains(&idx),
+            "release_slot: slot {idx} already on free list",
+        );
         wipe_bytes(self.slot_slice_mut(idx));
         self.free.push(idx);
     }
@@ -666,8 +717,22 @@ enum SlotOrigin {
     Standalone(Buffer),
 }
 
-// SAFETY: Slab-backed slots point into the mlock'd slab page which outlives
-// the slot. Standalone slots own their Buffer. Neither is aliased.
+// SAFETY for `Send`:
+//   - SlotOrigin::Slab: `ptr` references a slot inside the static `SLAB`'s
+//     `mmap`'d page. The page outlives any individual `PoolSlot`. While a
+//     `PoolSlot` exists, the slot index it references is recorded in
+//     `SecureSlab::transient`; `acquire_slot` never returns a transient idx
+//     and `release_slot` debug-asserts the idx is in `transient` before
+//     reusing it. Crossing a thread boundary therefore transfers exclusive
+//     ownership of those bytes — there is no concurrent access via the
+//     slab data structures.
+//   - SlotOrigin::Standalone: the wrapped `Buffer` exclusively owns its
+//     `mmap`/`mlock`'d region; sending it is equivalent to sending an
+//     owned `Box<[u8]>`.
+// `PoolSlot` deliberately does NOT implement `Sync`. The `bytes()` and
+// `as_slice()` methods hand out exclusive references to the underlying
+// region, and concurrent `&PoolSlot` access from two threads would alias
+// these references.
 unsafe impl Send for PoolSlot {}
 
 impl PoolSlot {
@@ -695,7 +760,7 @@ pub fn pool_acquire(size: usize) -> Result<PoolSlot, Error> {
         });
     }
     let mut slab = SLAB.lock();
-    if let Some(idx) = slab.acquire_slot(None) {
+    if let Some(idx) = slab.acquire_transient_slot(None) {
         return Ok(PoolSlot {
             ptr: slab.slot_ptr(idx),
             len: SLOT_SIZE,
@@ -705,7 +770,7 @@ pub fn pool_acquire(size: usize) -> Result<PoolSlot, Error> {
     // All slots held transiently — wait for one to be released
     loop {
         SLAB_CV.wait(&mut slab);
-        if let Some(idx) = slab.acquire_slot(None) {
+        if let Some(idx) = slab.acquire_transient_slot(None) {
             return Ok(PoolSlot {
                 ptr: slab.slot_ptr(idx),
                 len: SLOT_SIZE,

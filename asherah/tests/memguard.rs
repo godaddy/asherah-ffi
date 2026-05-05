@@ -804,3 +804,64 @@ fn pool_concurrent_acquire_release() {
         h.join().unwrap();
     }
 }
+
+#[test]
+fn pool_slot_survives_send_across_threads() {
+    // T2 regression: PoolSlot is `Send`. Acquiring a slot on thread A,
+    // sending it to thread B, mutating it on B, then releasing on B must
+    // not corrupt the slab — concurrent acquires from other threads must
+    // observe the slot as out-of-circulation and not re-issue or evict it.
+    use std::sync::Arc;
+    use std::sync::Barrier;
+    use std::thread;
+
+    let _guard = GLOBAL_KEY_LOCK.lock().unwrap();
+
+    let mut held = Vec::new();
+    for i in 0..16_u8 {
+        let mut slot = memguard::pool_acquire(32).unwrap();
+        slot.bytes().copy_from_slice(&[i; 32]);
+        held.push(slot);
+    }
+
+    let barrier = Arc::new(Barrier::new(held.len() + 1));
+    let handles: Vec<_> = held
+        .into_iter()
+        .enumerate()
+        .map(|(i, slot)| {
+            let b = barrier.clone();
+            thread::spawn(move || {
+                b.wait();
+                // The bytes set on the originating thread must survive the
+                // Send. If a concurrent acquire had re-issued or evicted
+                // this slot, the contents would have been wiped.
+                assert_eq!(
+                    slot.as_slice(),
+                    &[i as u8; 32],
+                    "slot {i} bytes corrupted across Send"
+                );
+                memguard::pool_release(slot);
+            })
+        })
+        .collect();
+
+    // Hammer the slab from another thread to maximize the chance of
+    // exposing a re-issue/eviction race against the held slots.
+    let acquirer_b = barrier.clone();
+    let acquirer = thread::spawn(move || {
+        acquirer_b.wait();
+        for _ in 0..200 {
+            let mut s = match memguard::pool_acquire(32) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            s.bytes().fill(0xAA);
+            memguard::pool_release(s);
+        }
+    });
+
+    for h in handles {
+        h.join().unwrap();
+    }
+    acquirer.join().unwrap();
+}
