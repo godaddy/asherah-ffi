@@ -1,10 +1,28 @@
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use async_trait::async_trait;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_kms::{config::Region, primitives::Blob, Client};
 
 use crate::traits::{KeyManagementService, AEAD};
+
+/// Process-wide fallback runtime. Built lazily the first time a sync KMS
+/// call lands without an existing Tokio Handle and without a per-instance
+/// runtime — replacing the per-call `tokio::runtime::Runtime::new().expect(...)`
+/// the review flagged in T4 (`docs/review-2026-05-05-findings.md`).
+fn fallback_runtime() -> Result<&'static tokio::runtime::Runtime, std::io::Error> {
+    static FALLBACK: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    if let Some(rt) = FALLBACK.get() {
+        return Ok(rt);
+    }
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .thread_name("asherah-kms-fallback")
+        .enable_all()
+        .build()?;
+    Ok(FALLBACK.get_or_init(|| rt))
+}
 
 // AWS KMS adapter using AWS SDK for Rust (async under the hood, blocked on a Runtime)
 #[derive(Clone)]
@@ -45,6 +63,11 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
             }
             b.build()
         };
+        // The (None, None) arm — no per-instance runtime AND no current
+        // handle — is rare but not unreachable: between the
+        // `Handle::try_current().ok()` snapshot above and this match, the
+        // outer runtime can be torn down. Use the process-wide fallback
+        // rather than panicking with `unreachable!()`.
         let conf = match (&rt, handle) {
             (Some(rt), _) => {
                 if tokio::runtime::Handle::try_current().is_ok() {
@@ -54,7 +77,14 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
                 }
             }
             (None, Some(h)) => tokio::task::block_in_place(|| h.block_on(conf_fut)),
-            (None, None) => unreachable!("tokio runtime unavailable"),
+            (None, None) => {
+                let fb = fallback_runtime().map_err(|e| {
+                    anyhow::anyhow!(
+                        "AwsKms::new: tokio runtime unavailable and fallback build failed: {e}"
+                    )
+                })?;
+                fb.block_on(conf_fut)
+            }
         };
         let client = Client::from_conf(conf);
         Ok(Self {
@@ -95,22 +125,32 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
         })
     }
 
-    fn block_on_maybe<F: std::future::Future>(&self, f: F) -> F::Output {
-        match &self.rt {
-            Some(rt) => {
-                if tokio::runtime::Handle::try_current().is_ok() {
-                    tokio::task::block_in_place(|| rt.block_on(f))
-                } else {
-                    rt.block_on(f)
-                }
-            }
-            None => match tokio::runtime::Handle::try_current() {
-                Ok(h) => tokio::task::block_in_place(|| h.block_on(f)),
-                Err(_) => tokio::runtime::Runtime::new()
-                    .expect("failed to create temporary tokio runtime")
-                    .block_on(f),
-            },
+    /// Run a fallible future to completion from a sync caller.
+    ///
+    /// Prefers, in order: (1) the per-instance runtime built by `new()`,
+    /// (2) the caller's current Tokio Handle, (3) a process-wide fallback
+    /// runtime built once via `OnceLock`. Failures to build the fallback
+    /// surface as an `anyhow::Error` rather than panicking the host
+    /// process — the previous `Runtime::new().expect(...)` was the panic
+    /// path called out in T4 of the review findings.
+    fn block_on_result<T, F>(&self, f: F) -> anyhow::Result<T>
+    where
+        F: std::future::Future<Output = anyhow::Result<T>>,
+    {
+        if let Some(rt) = &self.rt {
+            return if tokio::runtime::Handle::try_current().is_ok() {
+                tokio::task::block_in_place(|| rt.block_on(f))
+            } else {
+                rt.block_on(f)
+            };
         }
+        if let Ok(h) = tokio::runtime::Handle::try_current() {
+            return tokio::task::block_in_place(|| h.block_on(f));
+        }
+        let rt = fallback_runtime().map_err(|e| {
+            anyhow::anyhow!("AwsKms: failed to build fallback tokio runtime for sync KMS call: {e}")
+        })?;
+        rt.block_on(f)
     }
 
     async fn encrypt_key_impl(&self, key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
@@ -165,11 +205,11 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
 #[async_trait]
 impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKms<A> {
     fn encrypt_key(&self, _ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        self.block_on_maybe(self.encrypt_key_impl(key_bytes))
+        self.block_on_result(self.encrypt_key_impl(key_bytes))
     }
 
     fn decrypt_key(&self, _ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        self.block_on_maybe(self.decrypt_key_impl(blob))
+        self.block_on_result(self.decrypt_key_impl(blob))
     }
 
     async fn encrypt_key_async(

@@ -53,7 +53,7 @@ def test_module_level_setup_flow():
         "ServiceName": "svc",
         "ProductID": "prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "EnableSessionCaching": True,
         "Verbose": False,
     }
@@ -86,7 +86,7 @@ def test_module_level_setup_can_repeat():
         "ServiceName": "svc",
         "ProductID": "prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
     }
 
     asherah.setup(config)
@@ -127,7 +127,7 @@ def _setup_module_api():
         "ServiceName": "ffi-test",
         "ProductID": "prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "EnableSessionCaching": False,
     }
     asherah.setup(config)
@@ -394,7 +394,7 @@ async def test_module_async_empty_string_round_trip():
         "ServiceName": "svc",
         "ProductID": "prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
     }
     asherah.setup(config)
     try:
@@ -516,7 +516,7 @@ def test_config_missing_required_fields():
         # ServiceName intentionally omitted
         "ProductID": "prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
     }
     with pytest.raises(Exception):
         asherah.setup(config)

@@ -33,7 +33,7 @@ def _config(verbose: bool = False):
         "ServiceName": "hook-test-svc",
         "ProductID": "hook-test-prod",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "EnableSessionCaching": True,
         "Verbose": verbose,
     }

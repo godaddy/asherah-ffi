@@ -925,7 +925,19 @@ pub fn catch_signal<F: Fn(std::io::Result<libc::c_int>) + Send + Sync + 'static>
     use signal_hook::iterator::Signals;
     let signals_vec = signals.to_vec();
     std::thread::spawn(move || {
-        let mut sigs = Signals::new(&signals_vec).expect("signals");
+        // The previous `Signals::new(...).expect("signals")` aborted the
+        // spawned thread on EAGAIN/seccomp-restricted hosts and left the
+        // user with no signal handling at all (T4 in
+        // `docs/review-2026-05-05-findings.md`). Surface the failure to the
+        // user-supplied handler instead — they can log, retry, or exit.
+        let mut sigs = match Signals::new(&signals_vec) {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("catch_signal: signal_hook init failed: {e}");
+                handler(Err(e));
+                return;
+            }
+        };
         if let Some(sig) = (&mut sigs).into_iter().next() {
             handler(Ok(sig));
             safe_exit(1);
