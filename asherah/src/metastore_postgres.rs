@@ -408,6 +408,15 @@ impl Metastore for PostgresMetastore {
             })?;
         let stored = res > 0;
         log::debug!("postgres store: id={id} created={created} stored={stored}");
+        if !stored {
+            // Surface duplicate-id conflicts at info level so rotation
+            // collisions are observable in metrics/logs (T-finding
+            // "Postgres store does not log the id on conflict-no-op" in
+            // docs/review-2026-05-05-findings.md).
+            log::info!(
+                "postgres store: duplicate id={id} created={created} (ON CONFLICT DO NOTHING)"
+            );
+        }
         Ok(stored)
     }
 

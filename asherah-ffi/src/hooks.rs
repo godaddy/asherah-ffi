@@ -163,17 +163,26 @@ impl LogSink for SyncFilteredLogSink {
 }
 
 fn map_log_level(value: i32) -> log::LevelFilter {
-    // Anything outside the documented range is treated as "deliver everything"
-    // (the caller likely passed 0 / -1 / a sentinel value, and over-delivering
-    // is preferable to silently dropping). `ASHERAH_LOG_OFF` is the explicit
-    // "deliver nothing" sentinel.
+    // Map known levels precisely. Unknown values now clamp to `Warn` so
+    // a binding off-by-one (passing 99 instead of an `ASHERAH_LOG_*`
+    // constant) doesn't silently flip the hook into Trace mode and start
+    // shipping debug-level messages — which can include partition IDs
+    // and KMS key IDs (T-finding "map_log_level treats unknown as
+    // Trace" in docs/review-2026-05-05-findings.md).
     match value {
+        ASHERAH_LOG_TRACE => log::LevelFilter::Trace,
         ASHERAH_LOG_DEBUG => log::LevelFilter::Debug,
         ASHERAH_LOG_INFO => log::LevelFilter::Info,
         ASHERAH_LOG_WARN => log::LevelFilter::Warn,
         ASHERAH_LOG_ERROR => log::LevelFilter::Error,
         ASHERAH_LOG_OFF => log::LevelFilter::Off,
-        _ => log::LevelFilter::Trace,
+        other => {
+            log::warn!(
+                "map_log_level: unknown level value {other}; clamping to Warn. \
+                 Known values: TRACE=0 DEBUG=1 INFO=2 WARN=3 ERROR=4 OFF=5"
+            );
+            log::LevelFilter::Warn
+        }
     }
 }
 

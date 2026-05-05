@@ -80,8 +80,13 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> Ses
             freq: AtomicU64::new(1),
             segment: AtomicU8::new(SEG_PROBATIONARY),
         };
-        drop(self.map.remove(id));
-        drop(self.map.insert(id.to_string(), entry));
+        // `upsert` is atomic; the previous remove+insert pattern was
+        // racy across two concurrent `get_or_create` calls for the same
+        // id and could produce two distinct PublicSession instances with
+        // only the second cached (T-finding "Non-atomic remove+insert
+        // race produces two distinct sessions for same id" in
+        // docs/review-2026-05-05-findings.md).
+        drop(self.map.upsert(id.to_string(), entry));
         self.evict_if_needed();
         s
     }

@@ -45,6 +45,13 @@ pub trait LogSink: Send + Sync + 'static {
 /// the encrypt/decrypt hot path short-circuit at the macro level when no hook
 /// is installed, instead of running through `MultiplexLogger::log` for an
 /// empty subscriber map.
+///
+/// This function cannot fail observably — `log::set_logger` returns `Err`
+/// only if a different logger is already installed, in which case we
+/// leave it alone (this is the documented "live and let live" behavior).
+/// The signature returns `Result<(), SetLoggerError>` purely for source
+/// compatibility with previous releases; new code should treat it as
+/// infallible.
 pub fn ensure_logger() -> Result<(), log::SetLoggerError> {
     LOGGER_ONCE.call_once(|| {
         if log::set_logger(&LOGGER).is_ok() {
