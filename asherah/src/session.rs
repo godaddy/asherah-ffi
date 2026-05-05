@@ -609,8 +609,16 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         };
         if let Some(cache) = &self.session_cache {
             let arc = cache.get_or_create(id, construct);
-            // clone out the Arc contents by cloning fields (PublicSession is not Clone). Here, just deref copy
-            Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone_for_return())
+            // Always go through `clone_for_return` (a manual deref-clone)
+            // so the cache keeps its entry. The previous
+            // `Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone_for_return())`
+            // dropped the cache's entry whenever this thread happened to
+            // be the only Arc holder — undermining the bounded
+            // session-cache LRU semantics on every contended call.
+            // T-finding "Arc::try_unwrap causes the cache to lose the
+            // entry on every contended call" in
+            // `docs/review-2026-05-05-findings.md`.
+            (*arc).clone_for_return()
         } else {
             construct()
         }
@@ -999,23 +1007,28 @@ impl<
 {
     async fn get_or_load_system_key_async(&self, meta: KeyMeta) -> anyhow::Result<Arc<CryptoKey>> {
         // SK load/create calls sync metastore methods which may internally call
-        // block_on (e.g. the Postgres crate). Use cache check + plain thread for
-        // the loader to avoid panicking from a tokio runtime context.
+        // block_on (e.g. the Postgres crate). Use cache check + the tokio
+        // blocking pool for the loader to avoid panicking from a tokio
+        // runtime context. The previous implementation spawned a fresh
+        // OS thread per call (`std::thread::spawn`) which is unbounded and
+        // can exhaust the process's thread quota under load —
+        // `tokio::task::spawn_blocking` uses a bounded pool (default 512)
+        // and applies backpressure via the JoinHandle. T-finding "Async
+        // SK loaders use std::thread::spawn per call" in
+        // `docs/review-2026-05-05-findings.md`.
         if meta.created == 0 {
             let id = self.inner.f.partition.system_key_id();
             match self.sk_cache.check_latest(&id) {
                 CacheCheck::Hit(v) | CacheCheck::StaleOther(v) => Ok(v),
                 CacheCheck::StaleReload(stale) => {
                     let inner = self.inner.f.clone();
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-                    std::thread::spawn(move || {
+                    let result = tokio::task::spawn_blocking(move || {
                         let session = Session { f: inner };
-                        drop(tx.send(session.load_latest_or_create_system_key().map(Arc::new)));
-                    });
-                    match rx
-                        .await
-                        .map_err(|_| anyhow::anyhow!("SK load thread panicked"))?
-                    {
+                        session.load_latest_or_create_system_key().map(Arc::new)
+                    })
+                    .await
+                    .map_err(|e| anyhow::anyhow!("SK load task failed: {e}"))?;
+                    match result {
                         Ok(key) => {
                             self.sk_cache.insert_latest_key(&id, key.clone());
                             Ok(key)
@@ -1025,14 +1038,12 @@ impl<
                 }
                 CacheCheck::Miss => {
                     let inner = self.inner.f.clone();
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-                    std::thread::spawn(move || {
+                    let key = tokio::task::spawn_blocking(move || {
                         let session = Session { f: inner };
-                        drop(tx.send(session.load_latest_or_create_system_key().map(Arc::new)));
-                    });
-                    let key = rx
-                        .await
-                        .map_err(|_| anyhow::anyhow!("SK load thread panicked"))??;
+                        session.load_latest_or_create_system_key().map(Arc::new)
+                    })
+                    .await
+                    .map_err(|e| anyhow::anyhow!("SK load task failed: {e}"))??;
                     self.sk_cache.insert_latest_key(&id, key.clone());
                     Ok(key)
                 }
@@ -1045,14 +1056,12 @@ impl<
                 CacheCheck::Miss => {
                     let inner = self.inner.f.clone();
                     let meta_clone = meta.clone();
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-                    std::thread::spawn(move || {
+                    let key = tokio::task::spawn_blocking(move || {
                         let session = Session { f: inner };
-                        drop(tx.send(session.load_system_key(meta_clone).map(Arc::new)));
-                    });
-                    let key = rx
-                        .await
-                        .map_err(|_| anyhow::anyhow!("SK load thread panicked"))??;
+                        session.load_system_key(meta_clone).map(Arc::new)
+                    })
+                    .await
+                    .map_err(|e| anyhow::anyhow!("SK load task failed: {e}"))??;
                     self.sk_cache.insert_meta_key(&meta, key.clone());
                     Ok(key)
                 }
