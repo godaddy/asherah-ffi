@@ -3,18 +3,28 @@ use rand::RngCore;
 use rand_chacha::ChaCha20Rng;
 // ring's `LessSafeKey` is named "less safe" only because it does not enforce
 // nonce uniqueness at the type level — the caller is responsible for never
-// reusing a nonce with the same key. Our usage is safe:
+// reusing a nonce with the same key. Our usage is safe within Asherah's
+// rotation policy, but the math deserves a careful note:
 //
 // - Data encryption (encrypt_with_lsk): generates a fresh 12-byte random nonce
-//   from a ChaCha20-based CSPRNG seeded from OS entropy. With 96-bit random
-//   nonces, the birthday-bound collision probability is negligible (~2^-32
-//   after 2^32 encryptions under the same key).
+//   from a ChaCha20-based CSPRNG seeded from OS entropy. The birthday bound
+//   for 96-bit random nonces is `2^-32` collision probability after **2^32
+//   encryptions under the same key**, NOT after 2^32 messages globally.
+//   Asherah rotates intermediate keys per-partition on the policy's
+//   `ExpireAfter` cadence (default 90 days), so the per-key counter sees the
+//   traffic from one partition for one rotation window only. Operators who
+//   exceed ~2^32 encrypts (~4.3e9) under the same IK should tighten the
+//   rotation interval — at >540 enc/sec sustained for 90 days the bound
+//   becomes non-negligible.
 //
-// - Enclave sealing (memguard.rs): uses a monotonic atomic counter, which
-//   guarantees uniqueness without randomness.
+// - Enclave sealing (memguard.rs): uses a monotonic atomic counter prefixed
+//   with a random 4-byte per-process value, which guarantees uniqueness
+//   within a process and across rekey-coffer cycles even if the counter
+//   restarts at 0.
 //
 // ring's alternative (`SealingKey` with `NonceSequence`) would add overhead
-// for nonce tracking that we don't need — our nonce strategy is already sound.
+// for nonce tracking that we don't need — our nonce strategy is already sound
+// within the rotation policy.
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
 use std::cell::RefCell;
 
@@ -76,6 +86,15 @@ pub fn fast_random_bytes(buf: &mut [u8]) -> anyhow::Result<()> {
     use rand::TryRngCore;
     FAST_RNG.with(|cell| {
         let mut opt = cell.borrow_mut();
+        // Retry init on every miss, not just the first one. The
+        // previous implementation only ran `try_init_rng` while the
+        // cell was `None`; once `Some(rng)` populated, a transient
+        // OsRng failure returned by the rng itself fell through to
+        // the bottom branch but never re-initialized. Calling
+        // `try_init_rng` whenever the cell is empty (drop the bad
+        // rng below) keeps this resilient. T-finding "fast_random_bytes
+        // doesn't retry init after transient OsRng failure" in
+        // `docs/review-2026-05-05-findings.md`.
         if opt.is_none() {
             *opt = try_init_rng();
         }
@@ -84,9 +103,16 @@ pub fn fast_random_bytes(buf: &mut [u8]) -> anyhow::Result<()> {
                 rng.fill_bytes(buf);
                 Ok(())
             }
-            None => rand::rngs::OsRng
-                .try_fill_bytes(buf)
-                .map_err(|e| anyhow::anyhow!("OsRng failed: {e}")),
+            None => match rand::rngs::OsRng.try_fill_bytes(buf) {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    // Drop the cached rng so the next call retries
+                    // initialization rather than falling through to
+                    // OsRng forever.
+                    *opt = None;
+                    Err(anyhow::anyhow!("OsRng failed: {e}"))
+                }
+            },
         }
     })
 }

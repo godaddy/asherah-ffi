@@ -173,13 +173,20 @@ impl EnvelopeKeyRecord {
                 "Key" => key_b64 = Some(parse_string!()),
                 "Revoked" => {
                     skip_ws!();
+                    // Verify the literal before advancing; the previous
+                    // implementation advanced `i += 4` on the `null`
+                    // branch after only checking the `n` byte, so
+                    // mangled inputs like `"Revoked":nope` parsed as
+                    // null. T-finding "from_json_fast advances i += 4
+                    // for null/true without verifying the literal" in
+                    // `docs/review-2026-05-05-findings.md`.
                     if i + 4 <= len && &s[i..i + 4] == "true" {
                         revoked = Some(true);
                         i += 4;
                     } else if i + 5 <= len && &s[i..i + 5] == "false" {
                         revoked = Some(false);
                         i += 5;
-                    } else if i < len && bytes[i] == b'n' {
+                    } else if i + 4 <= len && &s[i..i + 4] == "null" {
                         i += 4;
                     } else {
                         anyhow::bail!("invalid Revoked value at {i}");
@@ -266,7 +273,14 @@ impl EnvelopeKeyRecord {
         out.push('"');
         if let Some(ref pm) = self.parent_key_meta {
             out.push_str(",\"ParentKeyMeta\":{\"KeyId\":\"");
-            out.push_str(&pm.id);
+            // `json_escape_into` rather than raw push: if a key id
+            // ever contains a quote, backslash, or control byte the
+            // raw push would emit malformed JSON. The hot-path call
+            // is paired with a matching escape on the canonical
+            // `EnvelopeKeyRecord::to_json_fast` site at line 361.
+            // T-finding "to_json_fast writes pm.id raw without escape"
+            // in `docs/review-2026-05-05-findings.md`.
+            json_escape_into(&pm.id, &mut out);
             out.push_str("\",\"Created\":");
             out.push_str(itoa::Buffer::new().format(pm.created));
             out.push('}');
@@ -380,7 +394,18 @@ fn json_escape_into(s: &str, out: &mut String) {
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
             c if c < '\x20' => {
-                out.push_str(&format!("\\u{:04x}", c as u32));
+                // Hand-format the `\u00XX` escape into the output
+                // buffer rather than allocating an intermediate
+                // `String` via `format!`. Control bytes are < 0x20 so
+                // the high nibble is always 0; we only need 2 hex
+                // digits. T-finding "json_escape_into allocates via
+                // format! for control chars on hot path" in
+                // `docs/review-2026-05-05-findings.md`.
+                const HEX: &[u8; 16] = b"0123456789abcdef";
+                let v = c as u32;
+                out.push_str("\\u00");
+                out.push(HEX[((v >> 4) & 0xf) as usize] as char);
+                out.push(HEX[(v & 0xf) as usize] as char);
             }
             c => out.push(c),
         }

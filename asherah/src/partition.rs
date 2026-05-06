@@ -1,67 +1,79 @@
 use crate::traits::Partition;
 
+/// Partition with cached SK/IK key id strings.
+///
+/// `system_key_id`/`intermediate_key_id` are called on every encrypt
+/// and decrypt to look up keys in the metastore and SK/IK caches. The
+/// previous implementation rebuilt the strings via `format!` per call,
+/// which allocates. Cache them at construction since neither id can
+/// change for the lifetime of the partition. T-finding "SK id
+/// allocated via format! per encrypt" in
+/// `docs/review-2026-05-05-findings.md`.
 #[derive(Clone, Debug)]
 pub struct DefaultPartition {
+    // The original (id, service, product, suffix) inputs are kept so
+    // `Debug` formatting and any future accessors can recover them
+    // without re-parsing the cached SK/IK strings.
+    #[allow(dead_code)]
     id: String,
+    #[allow(dead_code)]
     service: String,
+    #[allow(dead_code)]
     product: String,
+    #[allow(dead_code)]
     suffix: Option<String>,
+    cached_sk_id: String,
+    cached_ik_id: String,
+    cached_ik_validation_prefix: Option<String>,
 }
 
 impl DefaultPartition {
     pub fn new(id: String, service: String, product: String) -> Self {
+        let cached_sk_id = format!("_SK_{}_{}", service, product);
+        let cached_ik_id = format!("_IK_{}_{}_{}", id, service, product);
         Self {
             id,
             service,
             product,
             suffix: None,
+            cached_sk_id,
+            cached_ik_id,
+            cached_ik_validation_prefix: None,
         }
     }
     pub fn new_suffixed(id: String, service: String, product: String, suffix: String) -> Self {
+        let cached_sk_id = format!("_SK_{}_{}_{}", service, product, suffix);
+        let cached_ik_id = format!("_IK_{}_{}_{}_{}", id, service, product, suffix);
+        let cached_ik_validation_prefix = Some(format!("_IK_{}_{}_{}_", id, service, product));
         Self {
             id,
             service,
             product,
             suffix: Some(suffix),
+            cached_sk_id,
+            cached_ik_id,
+            cached_ik_validation_prefix,
         }
     }
 
     /// Returns the prefix used to validate IK ids when the partition has a suffix.
     /// Returns `None` when there is no suffix (exact match only).
     pub fn ik_validation_prefix(&self) -> Option<String> {
-        if self.suffix.is_some() {
-            Some(format!(
-                "_IK_{}_{}_{}_",
-                self.id, self.service, self.product
-            ))
-        } else {
-            None
-        }
+        self.cached_ik_validation_prefix.clone()
     }
 }
 
 impl Partition for DefaultPartition {
     fn system_key_id(&self) -> String {
-        match &self.suffix {
-            Some(s) => format!("_SK_{}_{}_{}", self.service, self.product, s),
-            None => format!("_SK_{}_{}", self.service, self.product),
-        }
+        self.cached_sk_id.clone()
     }
     fn intermediate_key_id(&self) -> String {
-        match &self.suffix {
-            Some(s) => format!("_IK_{}_{}_{}_{}", self.id, self.service, self.product, s),
-            None => format!("_IK_{}_{}_{}", self.id, self.service, self.product),
-        }
+        self.cached_ik_id.clone()
     }
     fn is_valid_intermediate_key_id(&self, id: &str) -> bool {
-        if self.suffix.is_some() {
-            id == self.intermediate_key_id()
-                || id.starts_with(&format!(
-                    "_IK_{}_{}_{}_",
-                    self.id, self.service, self.product
-                ))
-        } else {
-            id == self.intermediate_key_id()
+        match &self.cached_ik_validation_prefix {
+            Some(prefix) => id == self.cached_ik_id || id.starts_with(prefix.as_str()),
+            None => id == self.cached_ik_id,
         }
     }
 }

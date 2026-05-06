@@ -64,16 +64,21 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     SessionFactory<A, K, M, DefaultPartition>
 {
     pub fn from_config(cfg: Config, metastore: Arc<M>, kms: Arc<K>, crypto: Arc<A>) -> Self {
-        let part = match cfg.region_suffix.clone() {
-            Some(s) => DefaultPartition::new_suffixed(
-                String::new(),
-                cfg.service.clone(),
-                cfg.product.clone(),
-                s,
-            ),
-            None => DefaultPartition::new(String::new(), cfg.service.clone(), cfg.product.clone()),
+        // We own `cfg` by value — destructure to move every field out
+        // exactly once, no per-field `.clone()`. T-finding "from_config
+        // clones every field" in
+        // `docs/review-2026-05-05-findings.md`.
+        let Config {
+            service,
+            product,
+            policy,
+            region_suffix,
+        } = cfg;
+        let part = match region_suffix {
+            Some(s) => DefaultPartition::new_suffixed(String::new(), service, product, s),
+            None => DefaultPartition::new(String::new(), service, product),
         };
-        SessionFactory::new(metastore, kms, cfg.policy.clone(), crypto, Arc::new(part))
+        SessionFactory::new(metastore, kms, policy, crypto, Arc::new(part))
     }
 }
 
@@ -496,9 +501,19 @@ impl<
 #[inline(always)]
 pub(crate) fn now_s() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
+    // `duration_since` returns `Err` when the system clock is set
+    // before 1970 — only realistic on a freshly-imaged machine where
+    // NTP hasn't run yet. The previous implementation collapsed that
+    // error to `0`, which silently mapped the entire pre-epoch window
+    // onto epoch 0 and would make every "is_expired" check decide
+    // against the current time of `0`. Use the absolute-value form
+    // (`UNIX_EPOCH - now`) and negate, so the returned timestamp at
+    // least preserves the relative ordering across negative values.
+    // T-finding "now_s returns 0 if SystemTime::now < UNIX_EPOCH" in
+    // `docs/review-2026-05-05-findings.md`.
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_secs() as i64,
-        Err(_) => 0,
+        Err(e) => -(e.duration().as_secs() as i64),
     }
 }
 

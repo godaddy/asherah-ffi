@@ -138,6 +138,10 @@ pub struct SimpleKeyCache {
     expire_after_s: i64,
     access_ctr: AtomicU64,
     decay_ctr: AtomicU64,
+    /// Strictly-increasing per-insert seed mixer used by
+    /// `random_jitter_ms`. Decoupled from `access_ctr` so two inserts
+    /// without intervening reads still see distinct seeds.
+    jitter_ctr: AtomicU64,
 }
 
 impl std::fmt::Debug for SimpleKeyCache {
@@ -182,6 +186,7 @@ impl SimpleKeyCache {
             expire_after_s,
             access_ctr: AtomicU64::new(0),
             decay_ctr: AtomicU64::new(0),
+            jitter_ctr: AtomicU64::new(0),
         }
     }
     pub fn new() -> Self {
@@ -206,7 +211,7 @@ impl SimpleKeyCache {
     }
 
     /// Generate a random jitter in milliseconds, up to TTL_JITTER_FRACTION of the TTL.
-    fn random_jitter_ms(&self) -> u64 {
+    fn random_jitter_ms(&self, seed: u64) -> u64 {
         if self.ttl_ms == 0 {
             return 0;
         }
@@ -214,12 +219,22 @@ impl SimpleKeyCache {
         if max_jitter_ms == 0 {
             return 0;
         }
-        // Use the access counter as a cheap pseudo-random seed (no syscall)
-        let pseudo_rand = self.access_ctr.load(Ordering::Relaxed);
-        pseudo_rand
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1)
-            % max_jitter_ms
+        // Mix the per-entry `seed` (a hash of `(id, created)`) with a
+        // strictly-increasing `jitter_ctr` so two inserts at the same
+        // wall-clock value still get distinct jitter. The previous
+        // implementation read `access_ctr` non-atomically, which gave
+        // identical jitter to entries inserted between accesses and
+        // defeated the thundering-herd protection. T-finding
+        // "random_jitter_ms is sequential LCG" in
+        // `docs/review-2026-05-05-findings.md`.
+        let bump = self.jitter_ctr.fetch_add(1, Ordering::Relaxed);
+        // SplitMix64-style mixer — full avalanche from a small input
+        // delta, no allocation, no syscall.
+        let mut z = seed.wrapping_add(bump.wrapping_mul(0x9E3779B97F4A7C15));
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+        z ^= z >> 31;
+        z % max_jitter_ms
     }
 
     fn is_invalid(&self, key: &CryptoKey) -> bool {
@@ -303,10 +318,19 @@ impl SimpleKeyCache {
     fn insert_meta(&self, meta: &KeyMeta, key: Arc<CryptoKey>) {
         let interned_id: Arc<str> = Arc::from(meta.id.as_str());
         let cache_key = (interned_id.clone(), meta.created);
+        // Per-entry seed: hash of `(id, created)` so each cache key
+        // contributes distinct entropy to the jitter calculation. Two
+        // entries inserted at the same wall-clock value but with
+        // different ids will get different jitter values.
+        use std::hash::{BuildHasher, Hasher};
+        let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+        hasher.write(meta.id.as_bytes());
+        hasher.write_i64(meta.created);
+        let entry_seed = hasher.finish();
         let entry = CacheEntry {
             key,
             loaded_at_ms: AtomicU64::new(now_ms()),
-            ttl_jitter_ms: self.random_jitter_ms(),
+            ttl_jitter_ms: self.random_jitter_ms(entry_seed),
             last_access: AtomicU64::new(self.next_access()),
             freq: AtomicU64::new(1),
             segment: AtomicU8::new(SEG_PROBATIONARY),

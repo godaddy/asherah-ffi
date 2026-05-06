@@ -1031,6 +1031,23 @@ impl LockedBuffer {
             ct_move(g.bytes(), &mut bytes);
             g.freeze()?;
         }
+        // `ct_move` wipes the live range `[0..len]` of the source Vec,
+        // but the spare capacity `[len..capacity]` may still hold data
+        // from earlier writes the caller made before truncating the
+        // Vec. Wipe the full allocation before drop so any residual
+        // plaintext goes to zeros instead of the allocator's free list.
+        // T-finding "LockedBuffer::from_bytes doesn't wipe Vec spare
+        // capacity" in `docs/review-2026-05-05-findings.md`.
+        let cap = bytes.capacity();
+        if cap > 0 {
+            // SAFETY: `bytes.as_mut_ptr()` is non-null and valid for
+            // `cap` writes because `Vec` invariants guarantee the
+            // allocation. We don't observe the bytes after wiping.
+            unsafe {
+                let full = std::slice::from_raw_parts_mut(bytes.as_mut_ptr(), cap);
+                wipe_bytes(full);
+            }
+        }
         Ok(b)
     }
     fn from_buffer_owned(buf: Buffer) -> Self {
@@ -1059,8 +1076,29 @@ impl LockedBuffer {
     pub fn is_mutable(&self) -> bool {
         self.0.lock().mutable()
     }
+    /// Return a heap copy of the locked plaintext as a plain `Vec<u8>`.
+    ///
+    /// **The returned `Vec` is not wiped on drop**: when it goes out of
+    /// scope the allocator reclaims the bytes without zeroing them, and
+    /// any subsequent allocation on the same arena may observe stale
+    /// plaintext. Production code that needs a plaintext copy should
+    /// prefer [`bytes_zeroizing`](Self::bytes_zeroizing), which returns
+    /// the same data wrapped in `Zeroizing<Vec<u8>>` so the buffer is
+    /// volatile-zeroed when dropped.
+    ///
+    /// This method exists for tests, debug printing, and for callers
+    /// that need direct equality with another `Vec<u8>` — `Zeroizing`'s
+    /// `PartialEq` does not auto-coerce against unwrapped vecs.
     pub fn bytes(&self) -> Vec<u8> {
         self.0.lock().as_slice().to_vec()
+    }
+
+    /// Same as [`bytes`](Self::bytes) but wraps the cloned plaintext in
+    /// `Zeroizing<Vec<u8>>` so it's volatile-zeroed on drop. Prefer this
+    /// when the caller is going to drop the buffer rather than ship it
+    /// onward.
+    pub fn bytes_zeroizing(&self) -> zeroize::Zeroizing<Vec<u8>> {
+        zeroize::Zeroizing::new(self.0.lock().as_slice().to_vec())
     }
     pub fn copy(&self, src: &[u8]) {
         self.copy_at(0, src);
@@ -1104,7 +1142,14 @@ pub fn purge() -> Result<(), Error> {
         slab.rekey_coffer()?;
     }
     let snapshot = registry_flush();
-    let mut op_err: Option<String> = None;
+    // Collect per-buffer errors with structured `(was_wiped, error)`
+    // tuples so callers can tell partial-failure (some buffers wiped,
+    // some not) from total failure. The previous implementation
+    // joined `format!`'d strings with `;` separators, which gave the
+    // operator a single opaque string. T-finding "purge joins errors
+    // into one String; loses structure" in
+    // `docs/review-2026-05-05-findings.md`.
+    let mut failures: Vec<(bool, Error)> = Vec::new();
     for arc in snapshot {
         let mut b = arc.lock();
         if let Err(e) = b.destroy() {
@@ -1113,22 +1158,43 @@ pub fn purge() -> Result<(), Error> {
                 wipe_bytes(b.bytes());
                 wiped = true;
             }
-            let msg = if wiped {
-                format!("{:?} (wiped)", e)
-            } else {
-                format!("{:?}", e)
-            };
-            op_err = Some(match op_err {
-                None => msg,
-                Some(prev) => format!("{}; {}", prev, msg),
-            });
+            failures.push((wiped, e));
         }
     }
-    if let Some(m) = op_err {
-        return Err(Error::Mem(memcall::MemError::Sys(m)));
+    if failures.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    // Surface the summary in a single Error::Mem(...) but emit each
+    // structured failure to the operator log so they can be parsed
+    // individually if the caller only sees the aggregate.
+    let mut summary = String::with_capacity(64 * failures.len());
+    for (i, (wiped, err)) in failures.iter().enumerate() {
+        let suffix = if *wiped { " (wiped)" } else { "" };
+        log::warn!("memguard::purge: buffer {i} destroy failed{suffix}: {err:?}");
+        if i > 0 {
+            summary.push_str("; ");
+        }
+        let _ =
+            std::fmt::Write::write_fmt(&mut summary, format_args!("buffer {i}: {err:?}{suffix}"));
+    }
+    Err(Error::Mem(memcall::MemError::Sys(summary)))
 }
+/// Wipe all registered `Buffer`s and exit the process.
+///
+/// **Important caveats:**
+/// * `process::exit` skips Drop handlers for stack-resident locals, so
+///   any plaintext held in a `Buffer` that's *not* wrapped in an
+///   `Arc<Mutex<Buffer>>` and registered with `registry_add` (i.e.,
+///   the standalone `Buffer` type rather than `LockedBuffer`) will be
+///   leaked unwiped to the OS reclaim path. Callers that hold raw
+///   `Buffer`s should `destroy()` them explicitly before invoking
+///   `safe_exit`, or use `LockedBuffer` so the registry-driven wipe
+///   here covers them.
+/// * The slab's coffer key is wiped before the per-buffer pass, so
+///   any `Enclave` cached encryption can't be reversed even if a
+///   `Buffer`'s plaintext somehow survives.
+///
+/// This function does NOT return.
 #[allow(clippy::exit)]
 pub fn safe_exit(code: i32) -> ! {
     {
@@ -1139,7 +1205,13 @@ pub fn safe_exit(code: i32) -> ! {
     let snapshot = registry_copy();
     for arc in snapshot {
         let mut b = arc.lock();
-        let _destroyed = b.destroy();
+        // Errors here are unrecoverable — we're about to exit. Log
+        // them for forensic purposes but don't try to fall back to a
+        // partial wipe; the slab coffer is already wiped above so
+        // any leftover ciphertext-in-cache can't be decrypted.
+        if let Err(e) = b.destroy() {
+            log::warn!("memguard::safe_exit: buffer destroy failed: {e:?}");
+        }
     }
     std::process::exit(code)
 }

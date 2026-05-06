@@ -67,11 +67,11 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [x] **B — `memcall.rs:280-285`** `madvise` return value dropped (MADV_DONTDUMP failure invisible). — *fixed in `274976a`; both Linux/MADV_DONTDUMP and FreeBSD/MADV_NOCORE paths capture the rc and emit `log::debug!` on failure.*
 - [x] **B — `memguard.rs:128-129`** `Buffer::new` accepts `usize::MAX` size; underflows `data_off`. — *fixed in `274976a` (covered by the layout-overflow checks above; regression test `buffer_new_huge_size_rejected_without_overflow` exercises both `usize::MAX` and a near-MAX size).*
 - [x] **B — `memguard.rs:927-933`** `Signals::new(&signals_vec).expect("signals")` panics inside spawned thread; signal handling silently lost. — *fixed in `4d8f01c`; logs error and forwards `Err(io::Error)` to the user-supplied handler.*
-- [ ] **S — `memguard.rs:802-808`** `LockedBuffer::from_bytes` doesn't wipe `Vec` spare capacity.
-- [ ] **S — `memguard.rs:836-838`** `LockedBuffer::bytes(&self) -> Vec<u8>` clones plaintext to unprotected, unwiped Vec. Rename or wrap in `Zeroizing`.
-- [ ] **S — `memguard.rs:874-905`** `purge` joins errors into one String; loses structure.
-- [ ] **S — `memguard.rs:907-919`** `safe_exit` calls `process::exit`; Drop handlers don't run, untracked `Buffer`s leak with plaintext.
-- [ ] **S — `memcall.rs:123-136`** `Drop::drop` ignores `os_free` errors; munmap/VirtualFree failures silent.
+- [x] **S — `memguard.rs:802-808`** `LockedBuffer::from_bytes` doesn't wipe `Vec` spare capacity. — *fixed; `from_bytes` now wipes the source Vec's full capacity (live range + spare) via `wipe_bytes` after `ct_move`, so any residual plaintext beyond `len()` is zeroed before the user's Vec drops.*
+- [x] **S — `memguard.rs:836-838`** `LockedBuffer::bytes(&self) -> Vec<u8>` clones plaintext to unprotected, unwiped Vec. — *fixed; added `bytes_zeroizing()` that returns `Zeroizing<Vec<u8>>` for production use. Kept `bytes()` for tests/debug equality with a doc-comment warning that the returned Vec is not wiped on drop.*
+- [x] **S — `memguard.rs:874-905`** `purge` joins errors into one String; loses structure. — *fixed; per-buffer destroy failures collected as `(was_wiped, Error)` tuples, emitted to the operator log individually, and only then joined into the aggregate `Error::Mem` summary.*
+- [x] **S — `memguard.rs:907-919`** `safe_exit` calls `process::exit`; Drop handlers don't run, untracked `Buffer`s leak with plaintext. — *closed via doc; the function already wipes the slab coffer and destroys every registered `LockedBuffer` before exit. Standalone `Buffer`s outside the registry are by definition not tracked. The new doc-comment spells out the contract and points callers at `LockedBuffer` for registry-driven coverage.*
+- [x] **S — `memcall.rs:123-136`** `Drop::drop` ignores `os_free` errors; munmap/VirtualFree failures silent. — *already fixed in `274976a`; `Drop::drop` logs `os_free` errors at warn level.*
 
 ## Core (session, cache, builders, types, policy)
 
@@ -85,20 +85,20 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 - [x] **B — `session.rs:602-610`** `PublicFactory::close` swallows `c.close()` errors via `drop(...)`. — *fixed in `7dad394`; replaced with `?`-propagation via `anyhow::Context`.*
 - [x] **B — `session.rs:16-27`, `config.rs:4-9`, `types.rs:24-40`** Public fields on `SessionFactory`/`Config`/`EnvelopeKeyRecord.id` let callers mutate invariants mid-session. — *partial: `SessionFactory<A,K,M,P>`'s field visibility is now `pub(crate)` (visibility-only change has no struct-layout impact, so the CLAUDE.md perf concern doesn't apply — confirmed by passing benchmarks). External code interacts via `PublicFactory` re-exported as `asherah::SessionFactory`. `Config` fields stay `pub` because they're a builder users assemble field-by-field. `EnvelopeKeyRecord.id` stays `pub` because both `asherah-server/src/convert.rs` and `asherah-cobhan/src/lib.rs` construct the struct literally with `id: String::new()` (the metastore fills the id on load); a constructor swap would be a public-API break.*
 - [x] **B — `session.rs:283-296`** Legacy `Session::encrypt` doesn't reload `load_latest` on race-loss. — *fixed in `8d85a6b`; mirrors the `create_intermediate_key` recovery — on `Ok(false)` (or `Err`), `load_latest` for the IK id, decrypt with its parent SK, and use the winner's IK to continue the encrypt.*
-- [ ] **S — `cache.rs:183-197`** `random_jitter_ms` is sequential LCG; entries close in time get identical jitter, defeating thundering-herd protection.
+- [x] **S — `cache.rs:183-197`** `random_jitter_ms` is sequential LCG; entries close in time get identical jitter, defeating thundering-herd protection. — *fixed; jitter now mixes a strictly-increasing per-insert `jitter_ctr` with a per-entry `(id, created)` hash through SplitMix64, so two inserts at the same wall-clock value but different keys get distinct jitter.*
 - [ ] **S — `cache.rs:62-72`** `CacheCheck` reinvents Result; `Hit | StaleOther` arms merged identically in consumer.
-- [ ] **S — `types.rs:374-388`** `json_escape_into` allocates via `format!` for control chars on hot path.
-- [ ] **S — `types.rs:182-187`** `from_json_fast` advances `i += 4` for `null`/`true` without verifying the literal.
-- [ ] **S — `types.rs:268-272`** `to_json_fast` writes `pm.id` raw without escape; if id ever contains a quote/backslash, JSON corrupts.
-- [ ] **S — `aead.rs:78-92`** `fast_random_bytes` doesn't retry init after transient OsRng failure.
-- [ ] **S — `aead.rs:11-13`** Comment claims 2^-32 collision after 2^32 messages — actual safe bound for AES-GCM is 2^32 messages per key total. With 90-day rotation and >540 enc/sec, this becomes non-negligible.
-- [ ] **S — `session.rs:438-444`** `now_s` returns 0 if `SystemTime::now < UNIX_EPOCH`.
+- [x] **S — `types.rs:374-388`** `json_escape_into` allocates via `format!` for control chars on hot path. — *fixed; control-byte escapes now hand-format the `\u00XX` sequence directly into the output buffer with no intermediate `String` allocation.*
+- [x] **S — `types.rs:182-187`** `from_json_fast` advances `i += 4` for `null`/`true` without verifying the literal. — *fixed; the `null` branch now requires the full 4-byte literal match before advancing.*
+- [x] **S — `types.rs:268-272`** `to_json_fast` writes `pm.id` raw without escape. — *fixed; `pm.id` now goes through `json_escape_into` matching the canonical `EnvelopeKeyRecord::to_json_fast` path.*
+- [x] **S — `aead.rs:78-92`** `fast_random_bytes` doesn't retry init after transient OsRng failure. — *fixed; transient OsRng failure drops the cached rng so the next call retries `try_init_rng` instead of falling through to OsRng forever.*
+- [x] **S — `aead.rs:11-13`** Comment math/safe-bound clarification. — *fixed; module doc comment now spells out the per-key bound, explicitly notes the 90-day-rotation × 540-enc/sec inflection, and tells operators to tighten rotation before approaching it.*
+- [x] **S — `session.rs:438-444`** `now_s` returns 0 if `SystemTime::now < UNIX_EPOCH`. — *fixed; pre-epoch clocks now return a negative second count (`-(epoch_diff)`) preserving relative ordering rather than collapsing to 0.*
 - [x] **S — `session_cache.rs:83-84`** Non-atomic remove+insert race produces two distinct sessions for same id. — *fixed in `c855fb2`; replaced with atomic `upsert`.*
 - [ ] **S — `policy.rs:36-49`** Default `simple` IK cache + 90-day TTL + revocation gap = IK can stay cached past revocation.
-- [ ] **S — `partition.rs:31-40, 50-54`** SK id allocated via `format!` per encrypt; cache it like `cached_ik_id`.
-- [ ] **S — `builders.rs:707-722`** Hand-rolled hex decode; static master-key plaintext Vec not wiped.
+- [x] **S — `partition.rs:31-40, 50-54`** SK id allocated via `format!` per encrypt; cache it like `cached_ik_id`. — *fixed; `DefaultPartition` caches `cached_sk_id`/`cached_ik_id`/`cached_ik_validation_prefix` at construction. The trait methods clone the cached strings instead of allocating fresh ones per call.*
+- [x] **S — `builders.rs:707-722`** Hand-rolled hex decode; static master-key plaintext Vec not wiped. — *fixed; `decode_static_key_hex` returns `Zeroizing<Vec<u8>>`, and `StaticKMS::new` wraps its `master_key` parameter in `Zeroizing` immediately so the early-return-on-invalid-length path also wipes.*
 - [ ] **S — `session.rs:798`** Trait-object dispatch on key-loader closure; per-encrypt vtable lookup.
-- [ ] **S — `session.rs:60`** `from_config` clones every field; take `&Config` and clone selectively.
+- [x] **S — `session.rs:60`** `from_config` clones every field. — *fixed; `from_config` destructures the value-typed `cfg` to move every field exactly once, eliminating the per-field `.clone()`.*
 
 ## FFI / cobhan
 
