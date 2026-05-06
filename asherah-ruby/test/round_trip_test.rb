@@ -432,7 +432,11 @@ class CanonicalCompatTest < Minitest::Test
     h = config.to_h
     assert_equal "svc", h[:ServiceName]
     assert_equal "prod", h[:ProductID]
-    assert_equal "static", h[:KMS]
+    # `to_h` does not normalize KMS aliases — the value passes through
+    # to the Rust core verbatim, which has a dedicated
+    # `test-debug-static` KMS kind. Aliasing it to "static" here would
+    # trip the empty-`STATIC_MASTER_KEY_HEX` rejection from 9049fa4.
+    assert_equal "test-debug-static", h[:KMS]
     assert_equal "memory", h[:Metastore]
     assert_equal true, h[:Verbose]
     refute h.key?(:ConnectionString) # nil values excluded
