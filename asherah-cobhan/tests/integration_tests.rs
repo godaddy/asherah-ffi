@@ -74,6 +74,9 @@ fn test_full_encryption_workflow() {
     test_combining_characters();
     test_json_special_chars_in_data();
 
+    // SetEnv post-init rejection — must run while the factory is up
+    test_set_env_rejected_after_setup_impl();
+
     // Shutdown and re-initialize lifecycle test
     test_shutdown_and_reinitialize_impl();
 }
@@ -1273,6 +1276,38 @@ fn test_set_env_integration() {
     // Cleanup
     std::env::remove_var(&key1);
     std::env::remove_var(&key2);
+}
+
+// ============================================================================
+// SetEnv Post-Init Rejection
+// ============================================================================
+
+/// Regression for the post-init SetEnv reject path (commit 09db712).
+/// Once the factory has been constructed, the process has spawned
+/// tokio workers, log/metrics dispatch threads, KMS clients, and DB
+/// pools — all of which may call `getenv`. Mutating the environ block
+/// from `SetEnv` here would race. The cobhan FFI must reject with
+/// `ERR_ALREADY_INITIALIZED` and leave the environment untouched.
+fn test_set_env_rejected_after_setup_impl() {
+    let pid = std::process::id();
+    let key = format!("ASHERAH_REJECT_TEST_{pid}");
+    // Make sure the env var doesn't exist before we run.
+    std::env::remove_var(&key);
+
+    let json = format!(r#"{{"{key}": "must_not_be_set"}}"#);
+    let buf = create_string_buffer(&json);
+
+    let result = unsafe { SetEnv(buf.as_ptr().cast::<c_char>()) };
+    assert_eq!(
+        result, ERR_ALREADY_INITIALIZED,
+        "SetEnv after Setup must return ERR_ALREADY_INITIALIZED, got {result}"
+    );
+    assert!(
+        std::env::var(&key).is_err(),
+        "SetEnv must not mutate the environ block after Setup; \
+         {key} should remain unset but was: {:?}",
+        std::env::var(&key)
+    );
 }
 
 // ============================================================================
