@@ -71,7 +71,7 @@ func hooksConfig() Config {
 		ServiceName:          "hooks-svc",
 		ProductID:            "hooks-prod",
 		Metastore:            "memory",
-		KMS:                  "static",
+		KMS:                  "test-debug-static",
 		EnableSessionCaching: &caching,
 	}
 }
@@ -331,7 +331,7 @@ func TestMetricsHookFiresEncryptAndDecrypt(t *testing.T) {
 	defer resetHooks(t)
 
 	var (
-		mu sync.Mutex
+		mu        sync.Mutex
 		seenTypes = map[MetricsEventType]int{}
 	)
 	if err := SetMetricsHook(func(e MetricsEvent) {
