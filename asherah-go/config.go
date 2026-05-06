@@ -18,6 +18,7 @@ type Config struct {
 	SessionCacheMaxSize    *int              `json:"SessionCacheMaxSize,omitempty"`
 	SessionCacheDuration   *int64            `json:"SessionCacheDuration,omitempty"`
 	KMS                    string            `json:"KMS,omitempty"`
+	StaticMasterKeyHex     *string           `json:"StaticMasterKeyHex,omitempty"`
 	RegionMap              map[string]string `json:"RegionMap,omitempty"`
 	PreferredRegion        *string           `json:"PreferredRegion,omitempty"`
 	AwsProfileName         *string           `json:"AwsProfileName,omitempty"`
