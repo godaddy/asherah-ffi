@@ -82,8 +82,20 @@ module Asherah
       raise
     end
 
+    # Run setup in a background Thread. Yields the result to +block+ on
+    # success. Exceptions raised by setup propagate via the Thread's
+    # joined error — the previous implementation called the block with
+    # the result on success but silently dropped the Thread's error
+    # state on failure, leaving callers unable to distinguish completion
+    # from an unsetup factory. The Thread aborts on exception
+    # (`Thread.report_on_exception = true`), so a stack trace lands on
+    # stderr; callers that need programmatic access should
+    # `thread.join` to re-raise. T-finding "setup_async/shutdown_async/
+    # encrypt_async/decrypt_async swallow Thread exceptions" in
+    # `docs/review-2026-05-05-findings.md`.
     def setup_async(config, &block)
       Thread.new do
+        Thread.current.report_on_exception = true
         result = setup(config)
         block&.call(result)
         result
@@ -114,8 +126,11 @@ module Asherah
       nil
     end
 
+    # Run shutdown in a background Thread; see `setup_async` for the
+    # exception-propagation contract.
     def shutdown_async(&block)
       Thread.new do
+        Thread.current.report_on_exception = true
         result = shutdown
         block&.call(result)
         result
@@ -169,16 +184,22 @@ module Asherah
       decrypt(partition_id, data_row_record).force_encoding(Encoding::UTF_8)
     end
 
+    # Run encrypt in a background Thread; see `setup_async` for the
+    # exception-propagation contract.
     def encrypt_async(partition_id, payload, &block)
       Thread.new do
+        Thread.current.report_on_exception = true
         result = encrypt(partition_id, payload)
         block&.call(result)
         result
       end
     end
 
+    # Run decrypt in a background Thread; see `setup_async` for the
+    # exception-propagation contract.
     def decrypt_async(partition_id, data_row_record, &block)
       Thread.new do
+        Thread.current.report_on_exception = true
         result = decrypt(partition_id, data_row_record)
         block&.call(result)
         result
