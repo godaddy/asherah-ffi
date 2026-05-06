@@ -1,10 +1,25 @@
 use once_cell::sync::Lazy;
+use parking_lot::RwLock;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
-use std::sync::RwLock;
 use std::thread::{Builder as ThreadBuilder, JoinHandle};
 use std::time::Duration;
 
+/// Cumulative encrypt/decrypt timing counters exposed for ad-hoc
+/// observability. The recording side increments `total_ns` before
+/// `count` with `Release` ordering, so readers should:
+///
+/// ```ignore
+/// use std::sync::atomic::Ordering;
+/// let count = ENCRYPT_TIMER.count.load(Ordering::Acquire);
+/// let total_ns = ENCRYPT_TIMER.total_ns.load(Ordering::Acquire);
+/// let avg_ns = if count > 0 { total_ns / count } else { 0 };
+/// ```
+///
+/// With this pattern the reader's `total_ns` always covers at least
+/// every operation included in `count`, biasing any per-call average
+/// toward overcounting (false-alarm latency) rather than
+/// undercounting (silently masking a regression).
 #[derive(Debug)]
 pub struct Timers {
     pub count: AtomicU64,
@@ -45,32 +60,17 @@ impl MetricsSink for NoopSink {}
 static SINK: Lazy<RwLock<Box<dyn MetricsSink>>> = Lazy::new(|| RwLock::new(Box::new(NoopSink)));
 
 pub fn set_sink<T: MetricsSink>(sink: T) {
-    // Recover from poison instead of silently dropping the call. A
-    // poisoned lock means a previous holder panicked, but that doesn't
-    // make the metrics state unsafe — we always overwrite the value.
-    // Failing silently here would make the metrics hook permanently
-    // un-installable for the rest of the process (T-finding "swallows
-    // lock poisoning permanently" in
-    // `docs/review-2026-05-05-findings.md`).
-    let mut guard = match SINK.write() {
-        Ok(g) => g,
-        Err(poisoned) => {
-            log::warn!("metrics SINK lock was poisoned; recovering");
-            poisoned.into_inner()
-        }
-    };
-    *guard = Box::new(sink);
+    // `parking_lot::RwLock` doesn't poison on panic so we don't have
+    // to thread the recovery branch the way `std::sync::RwLock`
+    // required. Switched from std for consistency with `logging.rs`,
+    // which already used `parking_lot::RwLock`. T-finding
+    // "Inconsistent std::sync::RwLock vs parking_lot::RwLock" in
+    // `docs/review-2026-05-05-findings.md`.
+    *SINK.write() = Box::new(sink);
 }
 
 pub fn clear_sink() {
-    let mut guard = match SINK.write() {
-        Ok(g) => g,
-        Err(poisoned) => {
-            log::warn!("metrics SINK lock was poisoned; recovering");
-            poisoned.into_inner()
-        }
-    };
-    *guard = Box::new(NoopSink);
+    *SINK.write() = Box::new(NoopSink);
 }
 
 pub fn set_enabled(enabled: bool) {
@@ -82,10 +82,8 @@ pub fn is_enabled() -> bool {
     ENABLED.load(Ordering::Relaxed)
 }
 fn with_sink<R>(f: impl FnOnce(&dyn MetricsSink) -> R) -> R {
-    match SINK.read() {
-        Ok(guard) => f(&**guard),
-        Err(_) => f(&NoopSink),
-    }
+    let guard = SINK.read();
+    f(&**guard)
 }
 
 #[inline(always)]
@@ -93,11 +91,19 @@ pub fn record_encrypt(start: std::time::Instant) {
     if !is_enabled() {
         return;
     }
-    ENCRYPT_TIMER.count.fetch_add(1, Ordering::Relaxed);
     let d = start.elapsed();
+    // Increment `total_ns` BEFORE `count` so any reader using
+    // `Acquire` on `count` followed by `Acquire` on `total_ns` sees
+    // a `total_ns` that includes at least every operation `count`
+    // observed. A reader's average will therefore err on the high
+    // side (false-alarm latency report) rather than the low side
+    // (silently masking a regression). T-finding "Relaxed ordering
+    // on count and total_ns allows reader to undercount average" in
+    // `docs/review-2026-05-05-findings.md`.
     ENCRYPT_TIMER
         .total_ns
-        .fetch_add(d.as_nanos() as u64, Ordering::Relaxed);
+        .fetch_add(d.as_nanos() as u64, Ordering::Release);
+    ENCRYPT_TIMER.count.fetch_add(1, Ordering::Release);
     with_sink(|sink| sink.encrypt(d));
 }
 #[inline(always)]
@@ -105,11 +111,12 @@ pub fn record_decrypt(start: std::time::Instant) {
     if !is_enabled() {
         return;
     }
-    DECRYPT_TIMER.count.fetch_add(1, Ordering::Relaxed);
     let d = start.elapsed();
+    // Same total_ns-before-count ordering as record_encrypt.
     DECRYPT_TIMER
         .total_ns
-        .fetch_add(d.as_nanos() as u64, Ordering::Relaxed);
+        .fetch_add(d.as_nanos() as u64, Ordering::Release);
+    DECRYPT_TIMER.count.fetch_add(1, Ordering::Release);
     with_sink(|sink| sink.decrypt(d));
 }
 
@@ -201,8 +208,8 @@ enum OwnedMetricsEvent {
 /// channel send; the user's callback runs on a dedicated worker thread.
 #[allow(missing_debug_implementations)]
 pub struct AsyncMetricsSink {
-    sender: SyncSender<OwnedMetricsEvent>,
-    _worker: JoinHandle<()>,
+    sender: Option<SyncSender<OwnedMetricsEvent>>,
+    worker: Option<JoinHandle<()>>,
 }
 
 impl AsyncMetricsSink {
@@ -230,16 +237,43 @@ impl AsyncMetricsSink {
                 }
             })?;
         Ok(Self {
-            sender,
-            _worker: worker,
+            sender: Some(sender),
+            worker: Some(worker),
         })
     }
 
     fn try_send(&self, event: OwnedMetricsEvent) {
-        match self.sender.try_send(event) {
+        let Some(sender) = self.sender.as_ref() else {
+            METRICS_DROPPED.fetch_add(1, Ordering::Relaxed);
+            return;
+        };
+        match sender.try_send(event) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
                 METRICS_DROPPED.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+impl Drop for AsyncMetricsSink {
+    fn drop(&mut self) {
+        // Drop the sender so the worker's `recv()` returns Err and
+        // the loop exits cleanly. Then join the worker so a panic
+        // inside the user's `MetricsSink` callback surfaces here
+        // (logged) rather than silently disappearing into a detached
+        // thread. T-finding "Worker JoinHandle never joined in Drop;
+        // worker panics lost" in
+        // `docs/review-2026-05-05-findings.md`.
+        drop(self.sender.take());
+        if let Some(worker) = self.worker.take() {
+            if let Err(panic_payload) = worker.join() {
+                let msg = panic_payload
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic_payload.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("(non-string panic payload)");
+                log::error!("AsyncMetricsSink dispatcher worker panicked: {msg}");
             }
         }
     }
