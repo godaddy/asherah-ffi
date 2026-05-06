@@ -30,6 +30,8 @@ env:
 
 jobs:
   verify-ci:
+    permissions:
+      contents: read
     if: ${{ github.event_name == 'release' }}
     runs-on: ubuntu-latest
     steps:
@@ -74,6 +76,8 @@ jobs:
           exit 1
 
   build:
+    permissions:
+      contents: read
     needs: [verify-ci]
     if: ${{ always() && (needs.verify-ci.result == 'success' || needs.verify-ci.result == 'skipped') }}
     strategy:
@@ -348,6 +352,8 @@ jobs:
 
   # Create a combined artifact with all platforms
   package:
+    permissions:
+      contents: read
     needs: build
     # Without `if: always()`, this job is skipped whenever any transitive
     # `needs:` ancestor was skipped — including `verify-ci`, which only runs
@@ -444,6 +450,8 @@ jobs:
 
   # Output download URLs (for documentation)
   show-urls:
+    permissions:
+      contents: read
     needs: upload-release
     if: ${{ always() && needs.upload-release.result == 'success' }}
     runs-on: ubuntu-latest

@@ -24,6 +24,8 @@ on:
 
 jobs:
   verify-ci:
+    permissions:
+      contents: read
     if: ${{ github.event_name == 'release' }}
     runs-on: ubuntu-latest
     steps:
@@ -68,6 +70,8 @@ jobs:
           exit 1
 
   build-bindings:
+    permissions:
+      contents: read
     needs: [verify-ci]
     if: ${{ always() && (needs.verify-ci.result == 'success' || needs.verify-ci.result == 'skipped') }}
     strategy:

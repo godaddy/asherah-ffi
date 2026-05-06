@@ -8,6 +8,8 @@ on:
 
 jobs:
   benchmark:
+    permissions:
+      contents: read
     uses: ./.github/workflows/benchmark-setup.yml
     with:
       bench_mode: memory
