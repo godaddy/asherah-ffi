@@ -58,6 +58,18 @@ struct CacheEntry {
 type CacheKey = (Arc<str>, i64);
 
 /// Result of a cache check (no loader call).
+///
+/// The four variants encode three orthogonal pieces of information:
+/// freshness, who owns the reload claim, and whether we have any key
+/// at all. `Hit` and `StaleOther` happen to be handled identically by
+/// the current encrypt-side consumer (both return the cached key), but
+/// the distinction matters for metrics — `StaleOther` records a
+/// `cache_stale` event while `Hit` records `cache_hit`. Collapsing the
+/// two would lose that observability. Likewise `StaleReload` and
+/// `Miss` are both "go to the metastore" but the former carries a
+/// fallback key for the loader-failure path. T-finding "CacheCheck
+/// reinvents Result; Hit | StaleOther arms merged identically" in
+/// `docs/review-2026-05-05-findings.md`.
 #[derive(Debug)]
 pub enum CacheCheck {
     /// Fresh hit — use this key directly.
@@ -99,6 +111,14 @@ pub trait KeyCacher: Send + Sync {
     /// Insert a key into the cache after an async load.
     fn insert_latest_key(&self, _id: &str, _key: Arc<CryptoKey>) {}
     fn insert_meta_key(&self, _meta: &KeyMeta, _key: Arc<CryptoKey>) {}
+
+    /// Approximate count of entries currently held. `0` for caches
+    /// that don't hold state. Used by tests to assert eviction-policy
+    /// bounds; the value is racy under concurrent insertions and is
+    /// not intended for production decision-making.
+    fn entry_count(&self) -> usize {
+        0
+    }
 }
 
 #[derive(Debug)]
@@ -130,6 +150,10 @@ pub struct SimpleKeyCache {
     expire_after_s: i64,
     access_ctr: AtomicU64,
     decay_ctr: AtomicU64,
+    /// Strictly-increasing per-insert seed mixer used by
+    /// `random_jitter_ms`. Decoupled from `access_ctr` so two inserts
+    /// without intervening reads still see distinct seeds.
+    jitter_ctr: AtomicU64,
 }
 
 impl std::fmt::Debug for SimpleKeyCache {
@@ -174,6 +198,7 @@ impl SimpleKeyCache {
             expire_after_s,
             access_ctr: AtomicU64::new(0),
             decay_ctr: AtomicU64::new(0),
+            jitter_ctr: AtomicU64::new(0),
         }
     }
     pub fn new() -> Self {
@@ -198,7 +223,7 @@ impl SimpleKeyCache {
     }
 
     /// Generate a random jitter in milliseconds, up to TTL_JITTER_FRACTION of the TTL.
-    fn random_jitter_ms(&self) -> u64 {
+    fn random_jitter_ms(&self, seed: u64) -> u64 {
         if self.ttl_ms == 0 {
             return 0;
         }
@@ -206,12 +231,22 @@ impl SimpleKeyCache {
         if max_jitter_ms == 0 {
             return 0;
         }
-        // Use the access counter as a cheap pseudo-random seed (no syscall)
-        let pseudo_rand = self.access_ctr.load(Ordering::Relaxed);
-        pseudo_rand
-            .wrapping_mul(6364136223846793005)
-            .wrapping_add(1)
-            % max_jitter_ms
+        // Mix the per-entry `seed` (a hash of `(id, created)`) with a
+        // strictly-increasing `jitter_ctr` so two inserts at the same
+        // wall-clock value still get distinct jitter. The previous
+        // implementation read `access_ctr` non-atomically, which gave
+        // identical jitter to entries inserted between accesses and
+        // defeated the thundering-herd protection. T-finding
+        // "random_jitter_ms is sequential LCG" in
+        // `docs/review-2026-05-05-findings.md`.
+        let bump = self.jitter_ctr.fetch_add(1, Ordering::Relaxed);
+        // SplitMix64-style mixer — full avalanche from a small input
+        // delta, no allocation, no syscall.
+        let mut z = seed.wrapping_add(bump.wrapping_mul(0x9E3779B97F4A7C15));
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+        z ^= z >> 31;
+        z % max_jitter_ms
     }
 
     fn is_invalid(&self, key: &CryptoKey) -> bool {
@@ -230,7 +265,13 @@ impl SimpleKeyCache {
         let (interned_id, created) = self.latest.read(id, |k, &v| (k.clone(), v))?;
 
         let result = self.by_meta.read(&(interned_id, created), |_, entry| {
-            let loaded = entry.loaded_at_ms.load(Ordering::Relaxed);
+            // Acquire to synchronize with `try_claim_reload_*`'s
+            // Release-side CAS — without an Acquire load here a thread
+            // can observe the bumped `loaded_at_ms` from another thread's
+            // claim without seeing any subsequent metadata writes that
+            // claim might have published. T-finding "Mixed Relaxed reads
+            // + AcqRel CAS" in `docs/review-2026-05-05-findings.md`.
+            let loaded = entry.loaded_at_ms.load(Ordering::Acquire);
             let expired = self.is_expired(loaded, entry.ttl_jitter_ms);
             let invalid = self.is_invalid(&entry.key);
             entry
@@ -254,7 +295,8 @@ impl SimpleKeyCache {
     fn get_meta_if_fresh(&self, meta: &KeyMeta) -> Option<(Arc<CryptoKey>, bool)> {
         let cache_key = (Arc::<str>::from(meta.id.as_str()), meta.created);
         let result = self.by_meta.read(&cache_key, |_, entry| {
-            let loaded = entry.loaded_at_ms.load(Ordering::Relaxed);
+            // Acquire — see the matching note in `get_latest_if_fresh`.
+            let loaded = entry.loaded_at_ms.load(Ordering::Acquire);
             let mut expired = self.is_expired(loaded, entry.ttl_jitter_ms);
             if entry.key.revoked() {
                 expired = false;
@@ -288,10 +330,19 @@ impl SimpleKeyCache {
     fn insert_meta(&self, meta: &KeyMeta, key: Arc<CryptoKey>) {
         let interned_id: Arc<str> = Arc::from(meta.id.as_str());
         let cache_key = (interned_id.clone(), meta.created);
+        // Per-entry seed: hash of `(id, created)` so each cache key
+        // contributes distinct entropy to the jitter calculation. Two
+        // entries inserted at the same wall-clock value but with
+        // different ids will get different jitter values.
+        use std::hash::{BuildHasher, Hasher};
+        let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
+        hasher.write(meta.id.as_bytes());
+        hasher.write_i64(meta.created);
+        let entry_seed = hasher.finish();
         let entry = CacheEntry {
             key,
             loaded_at_ms: AtomicU64::new(now_ms()),
-            ttl_jitter_ms: self.random_jitter_ms(),
+            ttl_jitter_ms: self.random_jitter_ms(entry_seed),
             last_access: AtomicU64::new(self.next_access()),
             freq: AtomicU64::new(1),
             segment: AtomicU8::new(SEG_PROBATIONARY),
@@ -474,11 +525,15 @@ impl SimpleKeyCache {
         let fresh = now_ms();
         let mut claimed = false;
         self.by_meta.read(&(interned_id, created), |_, entry| {
-            let old = entry.loaded_at_ms.load(Ordering::Relaxed);
+            // Acquire load + AcqRel-success / Acquire-failure CAS so the
+            // post-CAS reader's freshness signal is fully synchronized
+            // with this thread's claim. T-finding "Mixed Relaxed reads +
+            // AcqRel CAS" in `docs/review-2026-05-05-findings.md`.
+            let old = entry.loaded_at_ms.load(Ordering::Acquire);
             if fresh.saturating_sub(old) >= self.ttl_ms + entry.ttl_jitter_ms {
                 claimed = entry
                     .loaded_at_ms
-                    .compare_exchange(old, fresh, Ordering::AcqRel, Ordering::Relaxed)
+                    .compare_exchange(old, fresh, Ordering::AcqRel, Ordering::Acquire)
                     .is_ok();
             }
         });
@@ -494,11 +549,15 @@ impl SimpleKeyCache {
         let fresh = now_ms();
         let mut claimed = false;
         self.by_meta.read(&cache_key, |_, entry| {
-            let old = entry.loaded_at_ms.load(Ordering::Relaxed);
+            // Acquire load + AcqRel-success / Acquire-failure CAS so the
+            // post-CAS reader's freshness signal is fully synchronized
+            // with this thread's claim. T-finding "Mixed Relaxed reads +
+            // AcqRel CAS" in `docs/review-2026-05-05-findings.md`.
+            let old = entry.loaded_at_ms.load(Ordering::Acquire);
             if fresh.saturating_sub(old) >= self.ttl_ms + entry.ttl_jitter_ms {
                 claimed = entry
                     .loaded_at_ms
-                    .compare_exchange(old, fresh, Ordering::AcqRel, Ordering::Relaxed)
+                    .compare_exchange(old, fresh, Ordering::AcqRel, Ordering::Acquire)
                     .is_ok();
             }
         });
@@ -652,5 +711,9 @@ impl KeyCacher for SimpleKeyCache {
 
     fn insert_meta_key(&self, meta: &KeyMeta, key: Arc<CryptoKey>) {
         self.insert_meta(meta, key);
+    }
+
+    fn entry_count(&self) -> usize {
+        self.by_meta.len()
     }
 }

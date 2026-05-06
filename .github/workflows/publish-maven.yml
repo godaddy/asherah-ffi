@@ -1,5 +1,12 @@
 name: Publish to GitHub Packages (Maven)
 
+# Top-level read-only token; jobs that need to push packages escalate
+# the relevant scopes (`packages: write`, etc.) explicitly. Without
+# this, a misconfigured or compromised step would inherit the
+# repository-level default, which can be broader than necessary.
+permissions:
+  contents: read
+
 concurrency:
   group: publish-maven
   cancel-in-progress: false

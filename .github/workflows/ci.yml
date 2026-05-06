@@ -16,6 +16,8 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       # Same memory-pressure profile as rust-tests: clippy --workspace
       # --all-targets compiles every test binary, each statically linking
@@ -49,6 +51,8 @@ jobs:
 
   rust-tests:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
@@ -90,6 +94,8 @@ jobs:
 
   integration-tests:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       # Same memory-pressure profile as rust-tests; integration tests
       # link the same fat test binaries.
@@ -116,6 +122,8 @@ jobs:
         run: scripts/test.sh --integration
 
   build-rlib-x86_64:
+    permissions:
+      contents: read
     runs-on: ubuntu-22.04
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
@@ -165,6 +173,8 @@ jobs:
           path: /tmp/x86_64-rlib.tar.gz
 
   build-node-x86_64:
+    permissions:
+      contents: read
     runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     env:
@@ -215,6 +225,8 @@ jobs:
           path: artifacts/x86_64
 
   build-python-x86_64:
+    permissions:
+      contents: read
     runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     container: quay.io/pypa/manylinux_2_28_x86_64
@@ -267,6 +279,8 @@ jobs:
           path: artifacts/x86_64
 
   build-java-x86_64:
+    permissions:
+      contents: read
     runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     env:
@@ -313,6 +327,8 @@ jobs:
           path: artifacts/x86_64
 
   build-dotnet-x86_64:
+    permissions:
+      contents: read
     runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     env:
@@ -366,6 +382,8 @@ jobs:
   publish-dry-run-nuget:
     runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
@@ -429,6 +447,8 @@ jobs:
           echo "NuGet dry-run passed ($(ls dist/*.nupkg | wc -l) packages)"
 
   build-ffi-x86_64:
+    permissions:
+      contents: read
     runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     steps:
@@ -453,6 +473,8 @@ jobs:
           path: artifacts/x86_64
 
   build-cobhan-x86_64:
+    permissions:
+      contents: read
     runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     env:
@@ -552,6 +574,8 @@ jobs:
             target/x86_64-pc-windows-msvc/release/asherah_java.dll
 
   package-x86_64:
+    permissions:
+      contents: read
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [build-ffi-x86_64, build-cobhan-x86_64, build-node-x86_64, build-python-x86_64, build-dotnet-x86_64, build-java-x86_64]
@@ -574,6 +598,8 @@ jobs:
           path: artifacts/x86_64
 
   arm64-test-image:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     env:
       CACHE_MAX_AGE_DAYS: 7
@@ -636,6 +662,8 @@ jobs:
           path: /tmp/asherah-tests-arm64.tar
 
   binding-tests-x86_64:
+    permissions:
+      contents: read
     runs-on: ubuntu-22.04
     needs:
       - build-ffi-x86_64
@@ -686,6 +714,8 @@ jobs:
   interop-tests:
     runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
+    permissions:
+      contents: read
     env:
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
@@ -740,6 +770,8 @@ jobs:
         run: scripts/test.sh --interop
 
   tests-arm64:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     needs:
       - build-ffi-arm64
@@ -797,6 +829,8 @@ jobs:
   sanitizers:
     runs-on: ubuntu-latest
     needs: build-rlib-x86_64
+    permissions:
+      contents: read
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'schedule' || contains(github.event.head_commit.message, '[sanitize]')
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -820,6 +854,8 @@ jobs:
         run: scripts/test.sh --sanitizers --platform=x64
 
   build-rlib-arm64:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     container: rust:1.91-bookworm
     env:
@@ -886,6 +922,8 @@ jobs:
           path: /tmp/arm64-rlib.tar.gz
 
   build-node-arm64:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
     container: rust:1.91-bookworm
@@ -948,6 +986,8 @@ jobs:
           path: artifacts/aarch64
 
   build-python-arm64:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
     container: rust:1.91-bookworm
@@ -984,8 +1024,19 @@ jobs:
         run: |
           echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries
           apt-get update
-          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu python3 python3-pip python3-venv curl libssl-dev pkg-config
-          pip3 install --break-system-packages maturin==1.9.4
+          # Note: NO `libssl-dev` here — for cross-compile to glibc
+          # aarch64 we let `openssl-sys` vendor OpenSSL from source.
+          # Per CLAUDE.md ("Cross-compile glibc: let openssl-sys vendor
+          # from source"), installing the host's `libssl-dev` and
+          # relying on `PKG_CONFIG_ALLOW_CROSS=1` would link against
+          # x86_64 headers/libs which don't match the aarch64 target.
+          apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu python3 python3-pip python3-venv curl pkg-config
+          # Probe for `--break-system-packages` support (Bookworm and
+          # later) instead of hardcoding it; older python3-pip versions
+          # don't accept the flag and would fail. CLAUDE.md hard rule.
+          PIP_BSP=""
+          python3 -m pip install --break-system-packages --help &>/dev/null && PIP_BSP="--break-system-packages"
+          pip3 install $PIP_BSP maturin==1.9.4
           bash "${GITHUB_WORKSPACE:-$(pwd)}/scripts/install-sccache.sh"
       - name: Build Python binding (arm64)
         env:
@@ -1013,6 +1064,8 @@ jobs:
           path: artifacts/aarch64
 
   build-java-arm64:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
     container: rust:1.91-bookworm
@@ -1071,6 +1124,8 @@ jobs:
           path: artifacts/aarch64
 
   build-dotnet-arm64:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
     container: rust:1.91-bookworm
@@ -1134,6 +1189,8 @@ jobs:
           path: artifacts/aarch64
 
   build-ffi-arm64:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
     steps:
@@ -1158,6 +1215,8 @@ jobs:
           path: artifacts/aarch64
 
   build-cobhan-arm64:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
     container: rust:1.91-bookworm
@@ -1216,6 +1275,8 @@ jobs:
           path: artifacts/aarch64
 
   package-arm64:
+    permissions:
+      contents: read
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: [build-ffi-arm64, build-cobhan-arm64, build-node-arm64, build-python-arm64, build-dotnet-arm64, build-java-arm64]

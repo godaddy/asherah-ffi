@@ -4,7 +4,7 @@
 //! lib's unit tests (which call `metrics::record_*` indirectly via the
 //! encrypt/decrypt path and would fire any installed metrics hook).
 
-#![allow(unsafe_code, clippy::unwrap_used, clippy::expect_used)]
+#![allow(unsafe_code, clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::os::raw::{c_char, c_void};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering as AtomOrd};
@@ -80,6 +80,15 @@ impl Drop for HookTest {
 /// The C ABI hooks dispatch events asynchronously on a worker thread so a
 /// slow user callback can't slow down the encrypt/decrypt hot path. Tests
 /// that assert on a counter need to give the worker a moment to drain.
+///
+/// The previous version returned silently on timeout, so a regression that
+/// silently failed to dispatch any event would let downstream `assert_eq!`
+/// fire on a counter that never moved — a hard-to-debug "0 == 0" pass for
+/// the wait, then a confusing "expected 1, got 0" further down. Panic
+/// here so the failing wait_for is the obvious test failure surface.
+/// T-finding "wait_for silently passes on timeout" in
+/// `docs/review-2026-05-05-findings.md`.
+#[track_caller]
 fn wait_for<F: FnMut() -> bool>(mut cond: F) {
     let deadline = std::time::Instant::now() + Duration::from_secs(2);
     while std::time::Instant::now() < deadline {
@@ -88,6 +97,10 @@ fn wait_for<F: FnMut() -> bool>(mut cond: F) {
         }
         std::thread::sleep(Duration::from_millis(2));
     }
+    panic!(
+        "wait_for: condition never became true within 2s — async dispatch is \
+         either not firing or the test's expected counter never moved"
+    );
 }
 
 #[test]

@@ -24,6 +24,8 @@ on:
 
 jobs:
   verify-ci:
+    permissions:
+      contents: read
     if: ${{ github.event_name == 'release' }}
     runs-on: ubuntu-latest
     steps:
@@ -68,6 +70,8 @@ jobs:
           exit 1
 
   build-bindings:
+    permissions:
+      contents: read
     needs: [verify-ci]
     if: ${{ always() && (needs.verify-ci.result == 'success' || needs.verify-ci.result == 'skipped') }}
     strategy:
@@ -139,6 +143,11 @@ jobs:
             build: |
               bash "$GITHUB_WORKSPACE/scripts/vcpkg-install-with-retry.sh" openssl:x64-windows-static-md
               export OPENSSL_DIR="C:/vcpkg/installed/x64-windows-static-md"
+              # `OPENSSL_STATIC=1` matches the `static-md` triplet and the
+              # ci.yml dry-run; without it the `openssl-sys` build script
+              # picks up the import-library form and produces a binary
+              # that needs `libcrypto-3-x64.dll` at runtime.
+              export OPENSSL_STATIC=1
               export OPENSSL_NO_VENDOR=1
               npm ci
               npm run build -- --target x86_64-pc-windows-msvc
@@ -147,6 +156,8 @@ jobs:
             build: |
               bash "$GITHUB_WORKSPACE/scripts/vcpkg-install-with-retry.sh" openssl:arm64-windows-static-md
               export OPENSSL_DIR="C:/vcpkg/installed/arm64-windows-static-md"
+              # See the x86_64 entry above — same parity rule.
+              export OPENSSL_STATIC=1
               export OPENSSL_NO_VENDOR=1
               rustup target add aarch64-pc-windows-msvc
               npm ci

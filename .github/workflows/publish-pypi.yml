@@ -24,6 +24,8 @@ on:
 
 jobs:
   verify-ci:
+    permissions:
+      contents: read
     if: ${{ github.event_name == 'release' }}
     runs-on: ubuntu-latest
     steps:
@@ -68,6 +70,8 @@ jobs:
           exit 1
 
   resolve-version:
+    permissions:
+      contents: read
     needs: [verify-ci]
     if: ${{ always() && (needs.verify-ci.result == 'success' || needs.verify-ci.result == 'skipped') }}
     runs-on: ubuntu-latest
@@ -107,6 +111,8 @@ jobs:
           echo "stable=${IS_STABLE}" >> "$GITHUB_OUTPUT"
 
   build-wheels:
+    permissions:
+      contents: read
     needs: resolve-version
     # `resolve-version` uses `if: always()` to survive verify-ci being
     # skipped under workflow_dispatch; without an explicit always() here
@@ -215,6 +221,8 @@ jobs:
           retention-days: 1
 
   build-sdist:
+    permissions:
+      contents: read
     needs: resolve-version
     if: ${{ always() && needs.resolve-version.result == 'success' }}
     runs-on: ubuntu-latest

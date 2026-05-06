@@ -282,7 +282,31 @@ public sealed class AsherahSession : IAsherahSession
     }
 
     /// <summary>
-    /// Releases the native session. Waits for in-flight async operations to finish.
+    /// Maximum wall-time <see cref="Dispose"/> will wait for in-flight async
+    /// operations to drain before forcibly releasing the native handle. The
+    /// previous implementation spun forever, which would pin a calling thread
+    /// to 100% CPU until process exit if a callback ever wedged. Override via
+    /// <c>ASHERAH_DOTNET_DISPOSE_TIMEOUT_MS</c> (milliseconds).
+    /// </summary>
+    private const int DefaultDisposeTimeoutMs = 5000;
+
+    private static int ResolveDisposeTimeoutMs()
+    {
+        var raw = Environment.GetEnvironmentVariable("ASHERAH_DOTNET_DISPOSE_TIMEOUT_MS");
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return DefaultDisposeTimeoutMs;
+        }
+        return int.TryParse(raw, out var parsed) && parsed > 0 ? parsed : DefaultDisposeTimeoutMs;
+    }
+
+    /// <summary>
+    /// Releases the native session. Waits up to a bounded deadline (default
+    /// 5 seconds, overridable via <c>ASHERAH_DOTNET_DISPOSE_TIMEOUT_MS</c>)
+    /// for in-flight async operations to finish before forcibly releasing
+    /// the handle. The previous implementation spun without a deadline and
+    /// could pin a thread to 100% CPU until process exit if a callback got
+    /// wedged.
     /// </summary>
     public void Dispose()
     {
@@ -290,10 +314,23 @@ public sealed class AsherahSession : IAsherahSession
         {
             return;
         }
-        // Wait for in-flight async operations before releasing the handle.
+        var timeoutMs = ResolveDisposeTimeoutMs();
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var spin = new SpinWait();
         while (Volatile.Read(ref _pendingOps) > 0)
         {
+            if (stopwatch.ElapsedMilliseconds >= timeoutMs)
+            {
+                // Drain budget exceeded — proceed with native cleanup
+                // anyway. Late callbacks decrement `_pendingOps` via their
+                // existing finally blocks; their write into the
+                // already-freed handle is bounded because the FFI side
+                // takes a refcount on the underlying SharedSession.
+                System.Diagnostics.Debug.WriteLine(
+                    $"AsherahSession.Dispose: drain timed out after {timeoutMs}ms with " +
+                    $"{Volatile.Read(ref _pendingOps)} async op(s) still in flight");
+                break;
+            }
             spin.SpinOnce();
         }
         _handle.Dispose();

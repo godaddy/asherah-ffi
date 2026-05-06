@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Pin builder to the build host platform so we never compile under QEMU.
 # Cross-compilation is handled by Rust/GCC toolchains instead.
-FROM --platform=$BUILDPLATFORM rust:1.88-bookworm AS builder
+FROM --platform=$BUILDPLATFORM rust:1.91-bookworm AS builder
 
 ARG TARGETARCH
 

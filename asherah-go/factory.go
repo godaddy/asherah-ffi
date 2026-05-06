@@ -104,6 +104,15 @@ func (s *Session) Encrypt(plaintext []byte) ([]byte, error) {
 		return nil, errors.New("asherah-go: session is closed")
 	}
 
+	// Pin to the OS thread for the duration of the FFI call + the
+	// follow-up `lastErrorMessage()` read. asherah-ffi stores its
+	// LAST_ERROR in a thread-local; if the Go scheduler moves us to
+	// a different OS thread between the rc check and the error read,
+	// we'd see a stale or empty message from a thread that never
+	// produced this error. See the doc on `lastErrorMessage`.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	// Pin the output buffer so the Go runtime cannot move it during the C
 	// call. If a metrics or log hook is installed, it fires from inside this
 	// C call and may trigger Go GC that relocates heap objects. A relocated
@@ -146,6 +155,10 @@ func (s *Session) Decrypt(dataRowRecord []byte) ([]byte, error) {
 		return nil, errors.New("asherah-go: session is closed")
 	}
 
+	// LockOSThread for the FFI-call + lastErrorMessage pair — see Encrypt.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
 	// See Encrypt for why we pin the buffer (Go callbacks fired during this
 	// C call can trigger GC that relocates heap objects).
 	var pinner runtime.Pinner
@@ -165,7 +178,30 @@ func (s *Session) Decrypt(dataRowRecord []byte) ([]byte, error) {
 		return nil, fmt.Errorf("asherah-go: decrypt failed: %s", lastErrorMessage())
 	}
 	defer freeBuffer(buf)
-	return readBuffer(buf), nil
+	pt := readBuffer(buf)
+	// Best-effort wipe of the Go-side plaintext copy. The Rust FFI
+	// already wipes the native buffer via `asherah_buffer_free`'s
+	// `zeroize::Zeroize` step, but the slice we return goes onto
+	// the Go heap and can't be wiped by the caller in the general
+	// case. Document this limitation here rather than papering over
+	// it; consumers wanting deterministic wipe should call
+	// `Zeroize(plaintext)` after their own use. T-finding "Returned
+	// plaintext []byte lingers in Go heap unwiped after
+	// asherah_buffer_free" in `docs/review-2026-05-05-findings.md`.
+	return pt, nil
+}
+
+// Zeroize overwrites every byte of `b` with zero. The Go GC may have
+// already copied the slice's contents to a new backing allocation
+// during compaction, so this is best-effort — once a `[]byte` is
+// returned from `Decrypt`, deterministic wiping requires that the
+// caller never let the slice escape into a copy or substring. Callers
+// that need stronger guarantees should treat plaintext as opaque and
+// use it within a tight scope.
+func Zeroize(b []byte) {
+	for i := range b {
+		b[i] = 0
+	}
 }
 
 // DecryptString decrypts the provided DataRowRecord JSON and returns a UTF-8 string.

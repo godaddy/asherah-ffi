@@ -37,6 +37,19 @@ impl log::Log for MultiplexLogger {
 
 pub trait LogSink: Send + Sync + 'static {
     fn log(&self, record: &log::Record<'_>);
+    /// Most-permissive level the sink wants to receive. The
+    /// multiplex logger uses the *max* of every registered sink's
+    /// level to set `log::max_level`, so a sink that only wants
+    /// `Warn` doesn't pay materialization cost for trace/debug/info
+    /// records (the producer-side `log!` macro short-circuits before
+    /// formatting). Default `Trace` preserves the previous "give me
+    /// everything" semantics for sinks that don't override.
+    /// T-finding "log::max_level = Trace whenever any subscriber
+    /// registers; defeats subscribers wanting Warn" in
+    /// `docs/review-2026-05-05-findings.md`.
+    fn min_level(&self) -> log::LevelFilter {
+        log::LevelFilter::Trace
+    }
 }
 
 /// Install our multiplex logger as the global `log` logger if nothing else
@@ -45,6 +58,13 @@ pub trait LogSink: Send + Sync + 'static {
 /// the encrypt/decrypt hot path short-circuit at the macro level when no hook
 /// is installed, instead of running through `MultiplexLogger::log` for an
 /// empty subscriber map.
+///
+/// This function cannot fail observably — `log::set_logger` returns `Err`
+/// only if a different logger is already installed, in which case we
+/// leave it alone (this is the documented "live and let live" behavior).
+/// The signature returns `Result<(), SetLoggerError>` purely for source
+/// compatibility with previous releases; new code should treat it as
+/// infallible.
 pub fn ensure_logger() -> Result<(), log::SetLoggerError> {
     LOGGER_ONCE.call_once(|| {
         if log::set_logger(&LOGGER).is_ok() {
@@ -57,7 +77,6 @@ pub fn ensure_logger() -> Result<(), log::SetLoggerError> {
 
 pub fn set_sink(name: &'static str, sink: Option<Arc<dyn LogSink>>) {
     let mut guard = SUBSCRIBERS.write();
-    let was_empty = guard.is_empty();
     // Capture the displaced sink under the lock so we can drop it
     // AFTER releasing the guard. If the old sink's Drop ever calls
     // back into a `log::*` macro (a histogram-flush, a panic-on-drop
@@ -67,7 +86,15 @@ pub fn set_sink(name: &'static str, sink: Option<Arc<dyn LogSink>>) {
         Some(s) => guard.insert(name, s),
         None => guard.remove(name),
     };
-    let is_empty_now = guard.is_empty();
+    // Compute the effective max level: the max of every registered
+    // sink's `min_level()` (defaults to `Trace` for unimplemented
+    // hooks). Empty map → `Off` so log macros short-circuit when no
+    // subscriber is listening.
+    let new_level = guard
+        .values()
+        .map(|s| s.min_level())
+        .max()
+        .unwrap_or(log::LevelFilter::Off);
     drop(guard);
     drop(old_sink);
 
@@ -76,11 +103,7 @@ pub fn set_sink(name: &'static str, sink: Option<Arc<dyn LogSink>>) {
     if !LOGGER_INSTALLED.load(Ordering::Acquire) {
         return;
     }
-    match (was_empty, is_empty_now) {
-        (true, false) => log::set_max_level(log::LevelFilter::Trace),
-        (false, true) => log::set_max_level(log::LevelFilter::Off),
-        _ => {}
-    }
+    log::set_max_level(new_level);
 }
 
 // ─── async dispatch wrapper ──────────────────────────────────────────────
@@ -153,12 +176,15 @@ struct OwnedLogEvent {
 /// dedicated worker thread.
 #[allow(missing_debug_implementations)]
 pub struct AsyncLogSink {
-    sender: SyncSender<OwnedLogEvent>,
+    sender: Option<SyncSender<OwnedLogEvent>>,
     min_level: log::LevelFilter,
-    // Worker handle is held so the thread lives as long as the sink. On
-    // Drop, `sender` is dropped first (struct fields drop in declaration
-    // order), the channel closes, and the worker exits its `recv` loop.
-    _worker: JoinHandle<()>,
+    // Held in `Option` so `Drop::drop` can `take()` and `join()` the
+    // worker explicitly — surfacing any panic from the user's
+    // `LogSink` callback into the operator log instead of silently
+    // disappearing into a detached thread. T-finding "Worker
+    // JoinHandle never joined in Drop; worker panics lost" in
+    // `docs/review-2026-05-05-findings.md`.
+    worker: Option<JoinHandle<()>>,
 }
 
 impl AsyncLogSink {
@@ -190,29 +216,64 @@ impl AsyncLogSink {
                 }
             })?;
         Ok(Self {
-            sender,
+            sender: Some(sender),
             min_level: config.min_level,
-            _worker: worker,
+            worker: Some(worker),
         })
     }
 }
 
 impl LogSink for AsyncLogSink {
+    fn min_level(&self) -> log::LevelFilter {
+        self.min_level
+    }
     fn log(&self, record: &log::Record<'_>) {
         // Producer-side level filter — saves the materialization cost for
         // records the user has opted out of.
         if record.level() > self.min_level {
             return;
         }
+        let Some(sender) = self.sender.as_ref() else {
+            LOG_DROPPED.fetch_add(1, Ordering::Relaxed);
+            return;
+        };
         let event = OwnedLogEvent {
             level: record.level(),
             target: record.target().to_string(),
             message: record.args().to_string(),
         };
-        match self.sender.try_send(event) {
+        match sender.try_send(event) {
             Ok(()) => {}
             Err(TrySendError::Full(_)) | Err(TrySendError::Disconnected(_)) => {
                 LOG_DROPPED.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+impl Drop for AsyncLogSink {
+    fn drop(&mut self) {
+        // Drop the sender first so the worker's `recv()` returns Err
+        // and the loop exits cleanly, then join so a panic inside the
+        // user's `LogSink` callback is logged here rather than
+        // disappearing into a detached thread.
+        drop(self.sender.take());
+        if let Some(worker) = self.worker.take() {
+            if let Err(panic_payload) = worker.join() {
+                let msg = panic_payload
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| panic_payload.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("(non-string panic payload)");
+                // `eprintln` rather than `log::error!`: this Drop runs
+                // during the very tear-down of the log-dispatch path, so
+                // the `log` macros may already be wired to a sink that's
+                // about to disappear. Stderr is the most reliable
+                // surface to surface the panic to the operator.
+                #[allow(clippy::print_stderr)]
+                {
+                    eprintln!("AsyncLogSink dispatcher worker panicked: {msg}");
+                }
             }
         }
     }

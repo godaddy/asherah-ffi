@@ -22,6 +22,20 @@ var (
 	fnLastErrorMessage     func() uintptr // returns *const c_char
 )
 
+// lastErrorMessage reads the most recent error from the FFI's
+// thread-local LAST_ERROR slot.
+//
+// **Threading caveat:** The asherah-ffi side stores the message in a
+// thread-local on the OS thread that produced the error. Go
+// goroutines can be migrated between OS threads at any point —
+// including between an FFI call that sets the error and the
+// follow-up `lastErrorMessage()` read. Callers MUST wrap the FFI
+// call + `lastErrorMessage()` pair in
+// `runtime.LockOSThread()`/`runtime.UnlockOSThread()` so the
+// goroutine stays pinned and reads back the same thread-local it
+// just wrote. T-finding "lastErrorMessage reads thread-local C
+// string from arbitrary OS thread" in
+// `docs/review-2026-05-05-findings.md`.
 func lastErrorMessage() string {
 	ptr := fnLastErrorMessage()
 	if ptr == 0 {

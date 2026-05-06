@@ -52,17 +52,20 @@ fn store_multiple_items() {
 }
 
 #[test]
-fn store_overwrites_same_key() {
+fn store_assigns_unique_key_per_call() {
+    // Behavior change in docs/review-2026-05-05-findings.md: the previous
+    // {Created, Len}-only key collided whenever two DRRs shared the same
+    // created-second and ciphertext length, silently overwriting the
+    // first record. InMemoryStore now adds a monotonic Seq component so
+    // each store() call gets a unique key.
     let store = InMemoryStore::new();
-    // Two DRRs with same created and same data length produce same key
     let drr1 = make_drr(b"aaaa", 100);
     let drr2 = make_drr(b"bbbb", 100);
     let key1 = store.store(&drr1).unwrap();
     let key2 = store.store(&drr2).unwrap();
-    assert_eq!(key1, key2, "same created + same len = same key");
-    // Latest stored wins
-    let loaded = store.load(&key1).unwrap().unwrap();
-    assert_eq!(loaded.data, b"bbbb");
+    assert_ne!(key1, key2, "each store() call produces a unique key");
+    assert_eq!(store.load(&key1).unwrap().unwrap().data, b"aaaa");
+    assert_eq!(store.load(&key2).unwrap().unwrap().data, b"bbbb");
 }
 
 // ──────────────────────────── Default trait ────────────────────────────

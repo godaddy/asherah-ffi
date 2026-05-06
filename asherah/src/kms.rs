@@ -29,6 +29,13 @@ impl<A: AEAD + Send + Sync + 'static> Clone for StaticKMS<A> {
 
 impl<A: AEAD + Send + Sync + 'static> StaticKMS<A> {
     pub fn new(aead: Arc<A>, master_key: Vec<u8>) -> anyhow::Result<Self> {
+        // Wrap in `Zeroizing` immediately so any early-return path
+        // (e.g., invalid key length below) wipes the moved-in
+        // bytes before drop. The previous order validated length
+        // first and dropped the parameter Vec without wiping on
+        // the error path. T-finding "static master-key plaintext
+        // Vec not wiped" in `docs/review-2026-05-05-findings.md`.
+        let master_key = Zeroizing::new(master_key);
         if master_key.len() != 32 {
             return Err(anyhow::anyhow!(
                 "invalid key size {}, must be 32 bytes",
@@ -37,7 +44,7 @@ impl<A: AEAD + Send + Sync + 'static> StaticKMS<A> {
         }
         Ok(Self {
             aead,
-            master_key: Arc::new(Zeroizing::new(master_key)),
+            master_key: Arc::new(master_key),
         })
     }
 }

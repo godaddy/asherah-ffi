@@ -8,11 +8,15 @@ on:
 
 jobs:
   test-github-hosted:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     steps:
       - run: echo "GitHub-hosted runner test"
       
   test-self-hosted:
+    permissions:
+      contents: read
     runs-on:
       - self-hosted
       - X64

@@ -759,14 +759,20 @@ fn order_region_map(
     Ok((entries, pref_idx))
 }
 
-fn decode_static_key_hex(hex: &str) -> anyhow::Result<Vec<u8>> {
+fn decode_static_key_hex(hex: &str) -> anyhow::Result<zeroize::Zeroizing<Vec<u8>>> {
     if !hex.len().is_multiple_of(2) {
         anyhow::bail!(
             "STATIC_MASTER_KEY_HEX has odd length ({}) — must be even",
             hex.len()
         );
     }
-    let mut key = vec![0_u8; hex.len() / 2];
+    // Wrap the decode buffer in `Zeroizing` so the master-key bytes
+    // are wiped on drop. `StaticKMS::new` consumes the inner Vec; up
+    // to that consumption an early return (validation failure, panic)
+    // is covered by the wrapper. T-finding "static master-key
+    // plaintext Vec not wiped" in
+    // `docs/review-2026-05-05-findings.md`.
+    let mut key: zeroize::Zeroizing<Vec<u8>> = zeroize::Zeroizing::new(vec![0_u8; hex.len() / 2]);
     for i in 0..key.len() {
         key[i] = u8::from_str_radix(&hex[2 * i..2 * i + 2], 16).map_err(|_| {
             anyhow::anyhow!(
@@ -797,8 +803,18 @@ fn build_kms(
                 "Using static master key. \
                  This is for testing only — do NOT use in production."
             );
-            let key = decode_static_key_hex(key_hex)?;
-            Ok(Arc::new(crate::kms::StaticKMS::new(crypto.clone(), key)?))
+            let mut key = decode_static_key_hex(key_hex)?;
+            // `StaticKMS::new` takes the Vec by value and re-wraps in
+            // its own `Zeroizing`. We move the bytes out via
+            // `mem::take` (replacing with an empty Vec, which the
+            // outer `Zeroizing` wrapper still wipes on drop). Any
+            // failure from `StaticKMS::new` wipes the moved Vec via
+            // StaticKMS's own internal Zeroizing wrapper.
+            let key_bytes: Vec<u8> = std::mem::take(&mut *key);
+            Ok(Arc::new(crate::kms::StaticKMS::new(
+                crypto.clone(),
+                key_bytes,
+            )?))
         }
         KmsConfig::Aws {
             region_map,

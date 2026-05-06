@@ -14,6 +14,7 @@
 
 use mysql::{Conn, Opts, OptsBuilder, SslOpts};
 use std::collections::VecDeque;
+use std::mem::ManuallyDrop;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -173,85 +174,97 @@ pub struct ManagedPool {
 }
 
 /// A connection checked out from the pool. Returns on drop.
+///
+/// The inner `Conn` is held in `ManuallyDrop` rather than `Option` so
+/// `Deref`/`DerefMut` can hand out `&Conn`/`&mut Conn` without an
+/// `expect()` panic that would violate the no-panic policy. The type
+/// invariant — `conn` is initialized for the entire lifetime of
+/// `ManagedConn` and is moved out exactly once, in `Drop::drop` — is
+/// upheld because the only path that takes the value is `Drop`, which
+/// runs at most once and after which safe code cannot observe the
+/// value.
 #[allow(missing_debug_implementations)]
 pub struct ManagedConn {
     pool: Arc<ManagedPool>,
-    conn: Option<Conn>,
+    conn: ManuallyDrop<Conn>,
     created_at: Instant,
 }
 
 impl ManagedConn {
     /// Access the underlying `mysql::Conn`.
     pub fn as_conn(&mut self) -> &mut Conn {
-        self.conn.as_mut().expect("ManagedConn accessed after drop")
+        &mut self.conn
     }
 }
 
 impl std::ops::Deref for ManagedConn {
     type Target = Conn;
     fn deref(&self) -> &Conn {
-        self.conn.as_ref().expect("ManagedConn accessed after drop")
+        &self.conn
     }
 }
 
 impl std::ops::DerefMut for ManagedConn {
     fn deref_mut(&mut self) -> &mut Conn {
-        self.conn.as_mut().expect("ManagedConn accessed after drop")
+        &mut self.conn
     }
 }
 
 impl Drop for ManagedConn {
     fn drop(&mut self) {
-        if let Some(mut conn) = self.conn.take() {
-            // If the pool was closed while this connection was checked out,
-            // discard it instead of pushing it back into a closed pool's idle
-            // list — that would leak the connection and skew open_count
-            // accounting (T10 in `docs/review-2026-05-05-findings.md`).
-            if self.pool.closed.load(Ordering::Relaxed) {
-                drop(conn);
+        // SAFETY: `conn` is initialized for the lifetime of `self` and
+        // `Drop::drop` runs at most once. Safe code cannot observe
+        // `self` after this point, so the `ManuallyDrop` is never
+        // dereferenced post-take.
+        let mut conn = unsafe { ManuallyDrop::take(&mut self.conn) };
+        // If the pool was closed while this connection was checked out,
+        // discard it instead of pushing it back into a closed pool's idle
+        // list — that would leak the connection and skew open_count
+        // accounting (T10 in `docs/review-2026-05-05-findings.md`).
+        if self.pool.closed.load(Ordering::Relaxed) {
+            drop(conn);
+            self.pool.open_count.fetch_sub(1, Ordering::Relaxed);
+            self.pool.return_slot();
+            return;
+        }
+
+        // Reset connection state if configured
+        if self.pool.config.reset_on_return && conn.reset().is_err() {
+            // Connection is broken, discard it
+            self.pool.open_count.fetch_sub(1, Ordering::Relaxed);
+            self.pool.return_slot();
+            return;
+        }
+
+        let now = Instant::now();
+
+        // Check lifetime before returning — don't put expired connections back
+        if let Some(max_lifetime) = self.pool.config.max_lifetime {
+            if now.duration_since(self.created_at) >= max_lifetime {
                 self.pool.open_count.fetch_sub(1, Ordering::Relaxed);
                 self.pool.return_slot();
                 return;
             }
+        }
 
-            // Reset connection state if configured
-            if self.pool.config.reset_on_return && conn.reset().is_err() {
-                // Connection is broken, discard it
-                self.pool.open_count.fetch_sub(1, Ordering::Relaxed);
-                self.pool.return_slot();
-                return;
-            }
+        let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.checked_out -= 1;
 
-            let now = Instant::now();
-
-            // Check lifetime before returning — don't put expired connections back
-            if let Some(max_lifetime) = self.pool.config.max_lifetime {
-                if now.duration_since(self.created_at) >= max_lifetime {
-                    self.pool.open_count.fetch_sub(1, Ordering::Relaxed);
-                    self.pool.return_slot();
-                    return;
-                }
-            }
-
-            let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
-            inner.checked_out -= 1;
-
-            // Enforce max_idle: only keep if under the idle cap
-            if inner.idle.len() < self.pool.config.max_idle {
-                inner.idle.push_back(IdleConn {
-                    conn,
-                    created_at: self.created_at,
-                    returned_at: now,
-                });
-                drop(inner);
-                self.pool.condvar.notify_one();
-            } else {
-                // Over idle cap — close the connection
-                drop(inner);
-                drop(conn);
-                self.pool.open_count.fetch_sub(1, Ordering::Relaxed);
-                self.pool.condvar.notify_one();
-            }
+        // Enforce max_idle: only keep if under the idle cap
+        if inner.idle.len() < self.pool.config.max_idle {
+            inner.idle.push_back(IdleConn {
+                conn,
+                created_at: self.created_at,
+                returned_at: now,
+            });
+            drop(inner);
+            self.pool.condvar.notify_one();
+        } else {
+            // Over idle cap — close the connection
+            drop(inner);
+            drop(conn);
+            self.pool.open_count.fetch_sub(1, Ordering::Relaxed);
+            self.pool.condvar.notify_one();
         }
     }
 }
@@ -286,27 +299,26 @@ impl ManagedPool {
                 .name("mysql-pool-reaper".into())
                 .spawn(move || {
                     loop {
-                        // Wait for `interval` OR until close() wakes us up.
                         let pool = match weak.upgrade() {
                             Some(p) => p,
                             None => break, // Pool dropped
                         };
-                        // Re-check `closed` inside `reaper_lock`. Pairs with
-                        // `close()`'s own acquisition of `reaper_lock` to
-                        // close the lost-wake race: without serializing
-                        // through this mutex, `close()` could store
-                        // `closed = true` and `notify_all` between this
-                        // check and `wait_timeout`, leaving the reaper
-                        // asleep for the full interval.
+                        // Acquire `reaper_lock` BEFORE checking `closed`. close()
+                        // sets `closed = true` while holding `reaper_lock` and
+                        // then notifies on `reaper_cv`, so this ordering means we
+                        // either (a) see closed=true here and break, or (b) enter
+                        // wait_timeout and the notify wakes us. Without holding
+                        // the lock around the closed check, a notify between the
+                        // check and the wait would be lost and we'd sleep the
+                        // full interval.
                         let guard = pool.reaper_lock.lock().unwrap_or_else(|e| e.into_inner());
                         if pool.closed.load(Ordering::Relaxed) {
                             break;
                         }
-                        let (guard, _) = pool
+                        let (_g, _to) = pool
                             .reaper_cv
                             .wait_timeout(guard, interval)
                             .unwrap_or_else(|e| e.into_inner());
-                        drop(guard);
                         if pool.closed.load(Ordering::Relaxed) {
                             break;
                         }
@@ -337,14 +349,9 @@ impl ManagedPool {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 
         loop {
-            // Re-check on every iteration: a caller blocked at `condvar.wait`
-            // below wakes when `close()` calls `notify_all`. Without this
-            // check, the wakeup falls back into the idle-reuse / new-conn
-            // arms and silently bypasses the closed flag.
             if self.closed.load(Ordering::Relaxed) {
                 anyhow::bail!("MySQL pool is closed");
             }
-
             // Try to reuse an idle connection
             while let Some(idle) = inner.idle.pop_front() {
                 let now = Instant::now();
@@ -378,7 +385,7 @@ impl ManagedPool {
                 inner.checked_out += 1;
                 return Ok(ManagedConn {
                     pool: Arc::clone(self),
-                    conn: Some(conn),
+                    conn: ManuallyDrop::new(conn),
                     created_at: idle.created_at,
                 });
             }
@@ -397,7 +404,7 @@ impl ManagedPool {
                     Ok(conn) => {
                         return Ok(ManagedConn {
                             pool: Arc::clone(self),
-                            conn: Some(conn),
+                            conn: ManuallyDrop::new(conn),
                             created_at: Instant::now(),
                         });
                     }
@@ -470,7 +477,18 @@ impl ManagedPool {
     /// returned to the idle list — when their `ManagedConn` drops, keeping
     /// `open_count` accurate.
     pub fn close(&self) {
-        self.closed.store(true, Ordering::Relaxed);
+        // Set `closed` while holding `reaper_lock` so the reaper either
+        // observes `closed=true` before entering `wait_timeout` (and
+        // breaks immediately) or is parked inside `wait_timeout` and
+        // gets woken by the subsequent `notify_all`. Without this lock
+        // ordering, a notify between the reaper's check and its wait
+        // would be lost and the reaper would sleep the full interval.
+        {
+            let guard = self.reaper_lock.lock().unwrap_or_else(|e| e.into_inner());
+            self.closed.store(true, Ordering::Relaxed);
+            self.reaper_cv.notify_all();
+            drop(guard);
+        }
         // Wake any get_conn() callers waiting for capacity so they observe
         // the closed flag and return promptly.
         self.condvar.notify_all();
@@ -481,22 +499,6 @@ impl ManagedPool {
         drop(inner);
         self.open_count.fetch_sub(count, Ordering::Relaxed);
 
-        // Synchronize with the reaper through `reaper_lock` before notifying.
-        // The reaper checks `closed` inside the same lock, so this pairing
-        // guarantees one of two outcomes:
-        //   1. We acquire first → reaper is still pre-lock; once we release
-        //      it acquires, sees `closed == true`, and breaks without
-        //      sleeping.
-        //   2. Reaper holds the lock and is in `wait_timeout` → we block
-        //      until the wait releases the lock briefly; our subsequent
-        //      `notify_all` wakes the wait, the reaper re-checks `closed`
-        //      and breaks.
-        // Without this acquisition, `close()` could store + notify between
-        // the reaper's check and its wait, losing the wake.
-        drop(self.reaper_lock.lock().unwrap_or_else(|e| e.into_inner()));
-
-        // Wake the reaper so it can observe `closed = true` and exit.
-        self.reaper_cv.notify_all();
         if let Some(handle) = self
             .reaper_handle
             .lock()
@@ -688,11 +690,12 @@ mod tests {
         assert!(slot.is_none(), "close() should have taken the join handle");
     }
 
-    /// Regression test for the lost-wake race in the reaper. Sleeps long
-    /// enough for the reaper thread to enter `wait_timeout` before `close()`
-    /// runs, so that we exercise the "reaper already sleeping" branch
-    /// rather than the "reaper hasn't started yet" branch covered by the
-    /// previous test.
+    /// Regression for the lost-wake race fixed in the hotfix
+    /// conversation: sleeps long enough for the reaper to enter
+    /// `wait_timeout` before `close()` runs, exercising the
+    /// "reaper already sleeping" branch that the previous test
+    /// (which calls close immediately after construction) doesn't
+    /// reliably hit.
     #[test]
     fn close_wakes_reaper_already_sleeping() {
         let cfg = PoolConfig {

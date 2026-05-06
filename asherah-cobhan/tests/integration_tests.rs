@@ -11,11 +11,12 @@ use asherah_cobhan::test_helpers::{
     create_input_buffer, create_output_buffer, create_scalar_buffer, create_string_buffer,
     get_buffer_data, get_buffer_i64, get_buffer_length, get_buffer_string, ERR_ALREADY_INITIALIZED,
     ERR_BAD_CONFIG, ERR_BUFFER_TOO_SMALL, ERR_DECRYPT_FAILED, ERR_ENCRYPT_FAILED,
-    ERR_JSON_DECODE_FAILED, ERR_NONE,
+    ERR_JSON_DECODE_FAILED, ERR_NONE, ERR_NULL_PTR,
 };
 use asherah_cobhan::{
     Decrypt, DecryptFromJson, Encrypt, EncryptToJson, EstimateBuffer, SetEnv, SetupJson, Shutdown,
 };
+use std::ptr;
 
 // ============================================================================
 // Test Configuration
@@ -66,6 +67,7 @@ fn test_full_encryption_workflow() {
     test_empty_partition_id();
     test_buffer_edge_cases_impl();
     test_decrypt_invalid_json_impl();
+    test_null_pointer_inputs_impl();
 
     test_1mb_data_encryption();
     test_concurrent_encrypt_decrypt();
@@ -1472,5 +1474,87 @@ fn test_buffer_edge_cases_impl() {
             result, ERR_BUFFER_TOO_SMALL,
             "EncryptToJson with tiny buffer should return ERR_BUFFER_TOO_SMALL"
         );
+    }
+}
+
+/// Verifies that every FFI entry that takes a buffer pointer rejects
+/// `null` with `ERR_NULL_PTR` instead of dereferencing it. The Go cobhan
+/// shim is allowed to pass nil for any of these arguments and we must
+/// not fault — caller-side panics in a Go binding can land us here.
+fn test_null_pointer_inputs_impl() {
+    let partition_buf = create_string_buffer("null-test");
+    let data_buf = create_input_buffer(b"hello");
+    let mut output = create_output_buffer(1024);
+
+    unsafe {
+        // EncryptToJson: each of the three pointers in turn
+        let r = EncryptToJson(
+            ptr::null(),
+            data_buf.as_ptr().cast::<c_char>(),
+            output.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(r, ERR_NULL_PTR, "EncryptToJson null partition");
+        let r = EncryptToJson(
+            partition_buf.as_ptr().cast::<c_char>(),
+            ptr::null(),
+            output.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(r, ERR_NULL_PTR, "EncryptToJson null data");
+        let r = EncryptToJson(
+            partition_buf.as_ptr().cast::<c_char>(),
+            data_buf.as_ptr().cast::<c_char>(),
+            ptr::null_mut(),
+        );
+        assert_eq!(r, ERR_NULL_PTR, "EncryptToJson null output");
+
+        // DecryptFromJson: same three positions
+        let r = DecryptFromJson(
+            ptr::null(),
+            data_buf.as_ptr().cast::<c_char>(),
+            output.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(r, ERR_NULL_PTR, "DecryptFromJson null partition");
+        let r = DecryptFromJson(
+            partition_buf.as_ptr().cast::<c_char>(),
+            ptr::null(),
+            output.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(r, ERR_NULL_PTR, "DecryptFromJson null json");
+        let r = DecryptFromJson(
+            partition_buf.as_ptr().cast::<c_char>(),
+            data_buf.as_ptr().cast::<c_char>(),
+            ptr::null_mut(),
+        );
+        assert_eq!(r, ERR_NULL_PTR, "DecryptFromJson null output");
+
+        // Encrypt: partition / data / encrypted_data / encrypted_key /
+        // created / parent_key_id / parent_key_created. We test the
+        // first three; the remaining outputs are validated by
+        // `Encrypt` after the inputs.
+        let mut enc_data = create_output_buffer(1024);
+        let mut enc_key = create_output_buffer(1024);
+        let mut created = create_scalar_buffer();
+        let mut pk_id = create_output_buffer(1024);
+        let mut pk_created = create_scalar_buffer();
+        let r = Encrypt(
+            ptr::null(),
+            data_buf.as_ptr().cast::<c_char>(),
+            enc_data.as_mut_ptr().cast::<c_char>(),
+            enc_key.as_mut_ptr().cast::<c_char>(),
+            created.as_mut_ptr().cast::<c_char>(),
+            pk_id.as_mut_ptr().cast::<c_char>(),
+            pk_created.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(r, ERR_NULL_PTR, "Encrypt null partition");
+        let r = Encrypt(
+            partition_buf.as_ptr().cast::<c_char>(),
+            ptr::null(),
+            enc_data.as_mut_ptr().cast::<c_char>(),
+            enc_key.as_mut_ptr().cast::<c_char>(),
+            created.as_mut_ptr().cast::<c_char>(),
+            pk_id.as_mut_ptr().cast::<c_char>(),
+            pk_created.as_mut_ptr().cast::<c_char>(),
+        );
+        assert_eq!(r, ERR_NULL_PTR, "Encrypt null data");
     }
 }

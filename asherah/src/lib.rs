@@ -43,17 +43,41 @@ pub mod metastore_region;
 #[cfg(feature = "sqlite")]
 pub mod metastore_sqlite;
 pub mod metrics;
+// `partition` exposes `DefaultPartition`, an implementation detail
+// used by integration tests inside the same workspace. `#[doc(hidden)]`
+// keeps it off the public API surface (rustdoc landing page) without
+// breaking the tests that import it. T-finding "Most modules pub;
+// many implementation-detail should be pub(crate) or #[doc(hidden)]"
+// in `docs/review-2026-05-05-findings.md`.
+#[doc(hidden)]
 pub mod partition;
 pub mod policy;
 #[cfg(feature = "mysql")]
 pub mod pool_mysql;
 pub mod session;
+/// Implementation-detail of `session.rs` — caches `PublicSession`
+/// instances by partition. External callers should use the
+/// session-cache config knobs on `CryptoPolicy`.
+#[doc(hidden)]
 pub mod session_cache;
+/// Implementation-detail in-memory data store used by integration
+/// tests. External callers should use `metastore::InMemoryMetastore`
+/// for a metastore-shaped equivalent.
+#[doc(hidden)]
 pub mod store;
 pub mod traits;
 pub mod types;
-// Embedded low-level libs
+// Embedded low-level libs.
+//
+// These modules expose unsafe primitives (raw mmap regions, mprotect-guarded
+// pages, unsynchronized SLAB pools) that callers can misuse to corrupt the
+// global memguard state. They remain `pub` so the integration tests can
+// exercise them, but they are excluded from rustdoc and **not** part of the
+// public API. Build on top of `LockedBuffer`, `wipe_bytes`, and the session
+// types instead.
+#[doc(hidden)]
 pub mod memcall;
+#[doc(hidden)]
 pub mod memguard;
 
 // Crate-private helpers (not re-exported)

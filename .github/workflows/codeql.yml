@@ -79,3 +79,36 @@ jobs:
         uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4.35.2
         with:
           category: "/language:go"
+
+  # Rust gets its own job to scope the analysis. CodeQL's Rust
+  # extractor only supports `build-mode: none` (manual mode is
+  # explicitly rejected as of CodeQL 2.25.x: "Rust does not support
+  # the manual build mode"). With `none`, the extractor analyzes the
+  # source directly via Cargo metadata; we don't need to invoke
+  # `cargo build` for CodeQL's sake. T-finding "codeql.yml only
+  # analyzes Actions workflows; no language: rust" in
+  # `docs/review-2026-05-05-findings.md`.
+  analyze-rust:
+    name: Analyze (rust)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4.35.2
+        with:
+          languages: rust
+          build-mode: none
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4.35.2
+        with:
+          category: "/language:rust"

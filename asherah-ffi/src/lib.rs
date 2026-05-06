@@ -98,6 +98,27 @@ fn set_error(msg: impl Into<String>) {
     });
 }
 
+/// Set the FFI thread-local last-error message AND emit the full
+/// `anyhow` chain to the operator log. The user-facing message is the
+/// top-level `Display` only — AWS SDK errors include ARNs, request
+/// IDs, and other internal metadata in their chain that shouldn't
+/// flow to language bindings, but operators need the full chain to
+/// debug. T-finding "format!(\"{e:#}\") returns full anyhow chain to
+/// user callbacks" in `docs/review-2026-05-05-findings.md`.
+///
+/// **Note for maintainers:** `decrypt_from_json` deliberately bypasses
+/// this helper for serde_json parser failures because `serde_json`'s
+/// `Display` already includes the offending input snippet ("expected
+/// ident at line N column M ..."), which on a corrupted/truncated
+/// envelope can expose ciphertext-structure information. That call
+/// site uses a hand-crafted "decrypt_from_json: invalid JSON: {e}"
+/// message and a separate `log::warn!` for the full chain. Don't
+/// unify the two paths without re-checking that.
+fn set_error_sanitized(op: &str, err: &anyhow::Error) {
+    log::warn!("{op} failed: {err:#}");
+    set_error(format!("{op} failed: {err}"));
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn asherah_last_error_message() -> *const c_char {
     match std::panic::catch_unwind(|| {
@@ -125,7 +146,7 @@ pub extern "C" fn asherah_factory_new_from_env() -> *mut AsherahFactory {
             inner: f.with_metrics(true),
         })),
         Err(e) => {
-            set_error(format!("{e:#}"));
+            set_error_sanitized("factory_new_from_env", &e);
             null_mut()
         }
     }) {
@@ -153,7 +174,7 @@ pub unsafe extern "C" fn asherah_apply_config_json(config_json: *const c_char) -
         || match factory_from_config_json(config_json) {
             Ok((_factory, _applied)) => 0,
             Err(e) => {
-                set_error(format!("{e:#}"));
+                set_error_sanitized("apply_config_json", &e);
                 -1
             }
         },
@@ -180,7 +201,7 @@ pub unsafe extern "C" fn asherah_factory_new_with_config(
                 inner: factory.with_metrics(true),
             })),
             Err(e) => {
-                set_error(format!("{e:#}"));
+                set_error_sanitized("factory_new_with_config", &e);
                 null_mut()
             }
         },
@@ -233,7 +254,7 @@ pub unsafe extern "C" fn asherah_factory_get_session(
         let pid = match cstr_to_str(partition_id) {
             Ok(s) => s,
             Err(e) => {
-                set_error(format!("{e:#}"));
+                set_error_sanitized("factory_get_session", &e);
                 return null_mut();
             }
         };
@@ -339,7 +360,7 @@ pub unsafe extern "C" fn asherah_encrypt_to_json(
                 take_vec_into_buffer(v, out)
             }
             Err(e) => {
-                set_error(format!("{e:#}"));
+                set_error_sanitized("encrypt_to_json", &e);
                 -1
             }
         }
@@ -380,12 +401,16 @@ pub unsafe extern "C" fn asherah_decrypt_from_json(
             Ok(drr) => match s.inner.decrypt(drr) {
                 Ok(pt) => take_vec_into_buffer(pt, out),
                 Err(e) => {
-                    set_error(format!("{e:#}"));
+                    set_error_sanitized("decrypt_from_json", &e);
                     -1
                 }
             },
             Err(e) => {
-                set_error(format!("{e:#}"));
+                // serde_json's Display already includes the offending
+                // input snippet ("at line N column M ..."); strip the
+                // chain so the user-facing message stays minimal.
+                set_error(format!("decrypt_from_json: invalid JSON: {e}"));
+                log::warn!("decrypt_from_json: invalid JSON: {e:#}");
                 -1
             }
         }

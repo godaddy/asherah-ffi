@@ -331,7 +331,7 @@ func TestMetricsHookFiresEncryptAndDecrypt(t *testing.T) {
 	defer resetHooks(t)
 
 	var (
-		mu sync.Mutex
+		mu        sync.Mutex
 		seenTypes = map[MetricsEventType]int{}
 	)
 	if err := SetMetricsHook(func(e MetricsEvent) {

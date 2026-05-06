@@ -1,8 +1,70 @@
 use anyhow::{Context, Result};
 use asherah_server::{parse_go_duration, proto};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
+use tokio::task::JoinSet;
 use tonic::transport::Server;
+
+/// Metastore backend selector. Mirrors the values the Go reference
+/// server accepts and keeps them in lockstep so the CLI rejects
+/// typos at parse time rather than failing later inside
+/// `factory_from_config`. T-finding "value_parser with string array;
+/// use typed enum" in `docs/review-2026-05-05-findings.md`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+enum MetastoreMode {
+    Rdbms,
+    Dynamodb,
+    Memory,
+}
+
+impl MetastoreMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Rdbms => "rdbms",
+            Self::Dynamodb => "dynamodb",
+            Self::Memory => "memory",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+enum KmsMode {
+    Aws,
+    Static,
+    TestDebugStatic,
+}
+
+impl KmsMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Aws => "aws",
+            Self::Static => "static",
+            Self::TestDebugStatic => "test-debug-static",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+enum ReplicaReadConsistency {
+    Eventual,
+    Global,
+    Session,
+}
+
+impl ReplicaReadConsistency {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Eventual => "eventual",
+            Self::Global => "global",
+            Self::Session => "session",
+        }
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -41,8 +103,8 @@ struct Cli {
     product: String,
 
     /// Determines the type of metastore to use for persisting keys
-    #[arg(long, value_parser = ["rdbms", "dynamodb", "memory"], env = "ASHERAH_METASTORE_MODE")]
-    metastore: String,
+    #[arg(long, value_enum, env = "ASHERAH_METASTORE_MODE")]
+    metastore: MetastoreMode,
 
     /// The database connection string (required if --metastore=rdbms)
     #[arg(long, env = "ASHERAH_CONNECTION_STRING")]
@@ -51,11 +113,11 @@ struct Cli {
     /// Configures the master key management service
     #[arg(
         long,
-        value_parser = ["aws", "static", "test-debug-static"],
-        default_value = "aws",
+        value_enum,
+        default_value_t = KmsMode::Aws,
         env = "ASHERAH_KMS_MODE"
     )]
-    kms: String,
+    kms: KmsMode,
 
     /// A comma separated list of key-value pairs in the form of REGION1=ARN1[,REGION2=ARN2] (required if --kms=aws)
     #[arg(long, env = "ASHERAH_REGION_MAP")]
@@ -104,16 +166,42 @@ struct Cli {
     dynamodb_table_name: Option<String>,
 
     /// Required for Aurora sessions using write forwarding
-    #[arg(long, value_parser = ["eventual", "global", "session"], env = "ASHERAH_REPLICA_READ_CONSISTENCY")]
-    replica_read_consistency: Option<String>,
+    #[arg(long, value_enum, env = "ASHERAH_REPLICA_READ_CONSISTENCY")]
+    replica_read_consistency: Option<ReplicaReadConsistency>,
 
     /// Configure the metastore to use regional suffixes (only supported by --metastore=dynamodb)
     #[arg(long, env = "ASHERAH_ENABLE_REGION_SUFFIX")]
     enable_region_suffix: bool,
 
-    /// Enable verbose logging output
+    /// Enable verbose logging output.
+    ///
+    /// **Tenant identifier exposure:** verbose mode emits asherah-crate
+    /// debug logs that include intermediate-key IDs of the form
+    /// `_IK_<partition>_<service>_<product>`. The `<partition>`
+    /// component is the caller-supplied partition ID (typically a
+    /// user/tenant identifier). Do not enable verbose mode in
+    /// production environments where operator log access does not
+    /// already imply access to tenant identifiers; restrict to
+    /// developer reproductions and pre-production troubleshooting.
+    /// T-finding "verbose mode emits per-request partition ID logs;
+    /// tenant identifier exposure" in
+    /// `docs/review-2026-05-05-findings.md`.
     #[arg(short = 'v', long, env = "ASHERAH_VERBOSE")]
     verbose: bool,
+
+    /// Maximum time (seconds) to wait for in-flight gRPC sessions to drain
+    /// after a shutdown signal. After the timeout the server future is
+    /// dropped and any still-running session tasks are abandoned. Accepts
+    /// Go-style suffixes via `parse_go_duration` (e.g. `30s`, `2m`). The
+    /// default preserves the previously-hard-coded value; raise it for
+    /// long-lived streaming sessions.
+    #[arg(
+        long,
+        value_parser = parse_go_duration,
+        default_value = "5s",
+        env = "ASHERAH_SHUTDOWN_DRAIN_TIMEOUT"
+    )]
+    shutdown_drain_timeout: i64,
 }
 
 /// Parse an octal file mode (e.g. `0660`, `660`, `0o660`) into a `u32` mode
@@ -182,9 +270,9 @@ fn cli_to_config(cli: &Cli) -> asherah_config::ConfigOptions {
     asherah_config::ConfigOptions {
         service_name: Some(cli.service.clone()),
         product_id: Some(cli.product.clone()),
-        metastore: Some(cli.metastore.clone()),
+        metastore: Some(cli.metastore.as_str().to_string()),
         connection_string: cli.conn.clone(),
-        kms: Some(cli.kms.clone()),
+        kms: Some(cli.kms.as_str().to_string()),
         region_map,
         preferred_region: cli.preferred_region.clone(),
         aws_profile_name: cli.aws_profile_name.clone(),
@@ -196,7 +284,7 @@ fn cli_to_config(cli: &Cli) -> asherah_config::ConfigOptions {
         dynamo_db_endpoint: cli.dynamodb_endpoint.clone(),
         dynamo_db_region: cli.dynamodb_region.clone(),
         dynamo_db_table_name: cli.dynamodb_table_name.clone(),
-        replica_read_consistency: cli.replica_read_consistency.clone(),
+        replica_read_consistency: cli.replica_read_consistency.map(|m| m.as_str().to_string()),
         enable_region_suffix: Some(cli.enable_region_suffix),
         verbose: Some(cli.verbose),
         ..Default::default()
@@ -212,11 +300,29 @@ async fn main() -> Result<()> {
     )
     .init();
 
+    // Build the factory on the blocking pool. Construction may do DNS,
+    // TLS handshakes, and KMS warm-up (synchronous AWS SDK init), all of
+    // which would otherwise hold the Tokio main thread (T8 in
+    // docs/review-2026-05-05-findings.md).
     let config = cli_to_config(&cli);
     let (factory, _applied) =
-        asherah_config::factory_from_config(&config).context("failed to initialize Asherah")?;
+        tokio::task::spawn_blocking(move || asherah_config::factory_from_config(&config))
+            .await
+            .context("factory init task panicked")?
+            .context("failed to initialize Asherah")?;
 
-    let svc = asherah_server::service::AppEncryptionService::new(factory);
+    // Track in-flight per-session tasks so we can `join_next()` them on
+    // shutdown and force-cancel any stragglers that exceed the drain
+    // deadline. Without this, the server future is dropped at the
+    // timeout and abandons in-flight `s.close()` calls — leaking
+    // memguard-locked pages and skipping IK-cache cleanup.
+    let session_tasks: Arc<Mutex<JoinSet<()>>> = Arc::new(Mutex::new(JoinSet::new()));
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let svc = asherah_server::service::AppEncryptionService::with_lifecycle(
+        factory,
+        shutdown_rx.clone(),
+        session_tasks.clone(),
+    );
     let grpc_svc = proto::app_encryption_server::AppEncryptionServer::new(svc);
 
     // Remove stale socket file from previous run (only if it's a socket)
@@ -270,34 +376,121 @@ async fn main() -> Result<()> {
         cli.socket_mode
     );
 
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
-
-    // Spawn a task that listens for SIGTERM/SIGINT and broadcasts shutdown
+    // Spawn a task that listens for SIGTERM/SIGINT and broadcasts shutdown.
+    // shutdown_signal returns a Result so signal-registration failures (a
+    // seccomp-restricted host or a runtime that already owns the signal
+    // disposition) surface to the operator instead of aborting the spawned
+    // task and silently losing shutdown handling.
     tokio::spawn(async move {
-        shutdown_signal().await;
+        match shutdown_signal().await {
+            Ok(()) => {}
+            Err(e) => {
+                log::error!("shutdown signal handler failed to register: {e:#}");
+            }
+        }
         let _ = shutdown_tx.send(true);
     });
 
-    let mut drain_rx = shutdown_rx.clone();
+    let mut server_shutdown_rx = shutdown_rx.clone();
     let server = Server::builder()
         .add_service(grpc_svc)
         .serve_with_incoming_shutdown(incoming, async move {
-            drop(shutdown_rx.changed().await);
+            // changed() returns Err(RecvError) only when shutdown_tx is
+            // dropped without sending — i.e. the spawned signal task
+            // panicked or exited unexpectedly. Treat that as an
+            // immediate-shutdown signal but log it so operators can tell
+            // it apart from a SIGTERM-driven shutdown. T-finding
+            // "drop(shutdown_rx.changed().await) discards the Result"
+            // in `docs/review-2026-05-05-findings.md`.
+            if let Err(e) = server_shutdown_rx.changed().await {
+                log::warn!(
+                    "shutdown signal channel closed unexpectedly ({e}); \
+                     server will drain immediately"
+                );
+            }
         });
 
-    // Race graceful shutdown against a hard drain timeout
-    tokio::select! {
-        result = server => {
-            result.context("server error")?;
+    // Race graceful shutdown against a configurable hard drain timeout.
+    // The drain phase observes the session JoinSet directly: when the
+    // shutdown signal fires, every in-flight per-session task drops out
+    // of its `inbound.message()` loop (drops the response sender so
+    // tonic can return promptly) and then runs `s.close()` on the
+    // blocking pool. After the server future resolves we `join_next()`
+    // the set until it's empty (clean drain) or the deadline passes
+    // (force-cancel via `set.shutdown()`), ensuring `close()` actually
+    // runs before the runtime tears down — the previous design dropped
+    // the server future on timeout and abandoned in-flight `close()`s.
+    let drain_timeout = if cli.shutdown_drain_timeout > 0 {
+        Duration::from_secs(cli.shutdown_drain_timeout as u64)
+    } else {
+        Duration::from_secs(30)
+    };
+
+    tokio::pin!(server);
+    let mut shutdown_observer = shutdown_rx.clone();
+    let shutdown_received = tokio::select! {
+        biased;
+        res = &mut server => {
+            // Server exited on its own (bind error, shutdown future
+            // already completed, etc.) — fall through to drain.
+            if let Err(e) = res {
+                log::warn!("server exited with error: {e:#}");
+            }
+            false
         }
-        _ = async {
-            drop(drain_rx.changed().await);
-            log::info!("received shutdown signal, draining connections...");
-            tokio::time::sleep(Duration::from_secs(5)).await;
-        } => {
-            log::warn!("graceful drain timed out after 5s, forcing shutdown");
+        res = shutdown_observer.changed() => {
+            if let Err(e) = res {
+                log::warn!(
+                    "shutdown signal channel closed unexpectedly ({e}); \
+                     draining immediately"
+                );
+            }
+            true
+        }
+    };
+
+    let drain_deadline = tokio::time::Instant::now() + drain_timeout;
+
+    if shutdown_received {
+        log::info!("received shutdown signal, draining (timeout {drain_timeout:?})...");
+        // Give tonic up to `drain_timeout` to finish its in-flight
+        // streams and return. If it doesn't, we drop the server future
+        // (cancelling any blocked HTTP/2 work) and proceed to force the
+        // session JoinSet down.
+        match tokio::time::timeout_at(drain_deadline, &mut server).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => log::warn!("server exited with error during drain: {e:#}"),
+            Err(_) => log::warn!(
+                "server didn't finish draining within {drain_timeout:?}; \
+                 cancelling and force-shutting session tasks"
+            ),
         }
     }
+
+    {
+        let mut set = session_tasks.lock().await;
+        while !set.is_empty() {
+            match tokio::time::timeout_at(drain_deadline, set.join_next()).await {
+                Ok(Some(Ok(()))) => {}
+                Ok(Some(Err(join_err))) => {
+                    if !join_err.is_cancelled() {
+                        log::debug!("session task ended: {join_err}");
+                    }
+                }
+                Ok(None) => break,
+                Err(_) => {
+                    let remaining = set.len();
+                    log::warn!(
+                        "graceful drain timed out after {drain_timeout:?} with \
+                         {remaining} session task(s) in flight; force-cancelling"
+                    );
+                    set.shutdown().await;
+                    break;
+                }
+            }
+        }
+    }
+    drop(shutdown_rx);
 
     log::info!("shutting down");
     // Only remove if it's still a socket (could have been replaced during runtime)
@@ -323,16 +516,17 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-async fn shutdown_signal() {
+async fn shutdown_signal() -> std::io::Result<()> {
     use tokio::signal::unix::{signal, SignalKind};
 
-    let mut sigterm = signal(SignalKind::terminate()).expect("failed to register SIGTERM handler");
+    let mut sigterm = signal(SignalKind::terminate())?;
     let ctrl_c = tokio::signal::ctrl_c();
 
     tokio::select! {
-        _ = ctrl_c => {}
+        result = ctrl_c => result?,
         _ = sigterm.recv() => {}
     }
+    Ok(())
 }
 
 #[cfg(test)]

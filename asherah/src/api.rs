@@ -17,11 +17,25 @@ pub fn new_session_factory<
     PublicFactory::new(cfg, store, kms, crypto)
 }
 
-// No-op options to mirror Go's FactoryOption pattern
+/// Options for [`new_session_factory_with_options`]. Mirrors the Go
+/// reference's `FactoryOption` pattern.
+///
+/// `SecretFactory` is a no-op in this Rust port — the page-locked memguard
+/// allocator is enabled unconditionally. The variant is retained only for
+/// source-level API parity with the Go bindings; passing it has no effect.
+/// New code should not match on it.
 #[derive(Debug)]
+#[allow(clippy::manual_non_exhaustive)]
 pub enum FactoryOption {
+    /// Enable per-factory metrics collection. Defaults to `true` if no
+    /// option is supplied. Disabling skips the per-encrypt
+    /// `Instant::now()` and the metrics hook dispatch.
     Metrics(bool),
-    SecretFactory, // not applicable in Rust port (memguard-rs is internal)
+    /// Reserved for Go-API parity; has no effect in the Rust core. Kept
+    /// only so existing call sites that pass `FactoryOption::SecretFactory`
+    /// keep compiling.
+    #[doc(hidden)]
+    SecretFactory,
 }
 
 pub fn new_session_factory_with_options<

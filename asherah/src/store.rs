@@ -2,16 +2,19 @@ use crate::traits::{Loader, Storer};
 use crate::types::DataRowRecord;
 use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Debug)]
 pub struct InMemoryStore {
     map: Mutex<HashMap<serde_json::Value, DataRowRecord>>,
+    counter: AtomicU64,
 }
 
 impl InMemoryStore {
     pub fn new() -> Self {
         Self {
             map: Mutex::new(HashMap::new()),
+            counter: AtomicU64::new(0),
         }
     }
 }
@@ -30,9 +33,21 @@ impl Loader for InMemoryStore {
 
 impl Storer for InMemoryStore {
     fn store(&self, d: &DataRowRecord) -> Result<serde_json::Value, anyhow::Error> {
-        // Use Created + hash of data as key example; real impl likely uses DB key
-        let key =
-            serde_json::json!({"Created": d.key.as_ref().map(|k| k.created), "Len": d.data.len()});
+        // Per-store unique key. The previous `{Created, Len}` shape
+        // collided whenever two distinct DataRowRecords happened to share
+        // the same `Created` second and the same ciphertext length —
+        // e.g. two records produced inside the same wall-clock second.
+        // The second `store` would overwrite the first silently, and the
+        // caller had no way to recover the lost record. Use a monotonic
+        // counter so each call gets a unique key. T-finding "InMemoryStore
+        // key collision on {Created, Len}" in
+        // `docs/review-2026-05-05-findings.md`.
+        let n = self.counter.fetch_add(1, Ordering::Relaxed);
+        let key = serde_json::json!({
+            "Created": d.key.as_ref().map(|k| k.created),
+            "Len": d.data.len(),
+            "Seq": n,
+        });
         self.map.lock().insert(key.clone(), d.clone());
         Ok(key)
     }

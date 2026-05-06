@@ -10,7 +10,7 @@ use rand::TryRngCore;
 // LessSafeKey: safe here — enclave sealing uses a monotonic atomic counter
 // for nonces (NONCE_COUNTER), guaranteeing uniqueness without randomness.
 use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use subtle::ConstantTimeEq;
 
@@ -97,6 +97,11 @@ pub enum Error {
     InvalidKeyLength,
     BufferTooSmall,
     DecryptionFailed,
+    /// `pool_acquire` / `coffer_view` timed out waiting for a slab slot
+    /// to be released. Indicates either (a) genuine slot pressure that
+    /// outstrips the slab capacity, or (b) a leaked `PoolSlot` that
+    /// never had `pool_release` called on it.
+    OutOfSlots,
     /// Input was not the required fixed size for this operation.
     InvalidSize {
         expected: usize,
@@ -304,6 +309,18 @@ impl Buffer {
         if !self.alive {
             return Ok(());
         }
+        // Allocate the swap-in placeholder FIRST. The previous order ran
+        // `protect`, `wipe`, the canary check, `unlock_raw`, and only
+        // then allocated the placeholder — so an alloc failure mid-
+        // destroy left the buffer half-destroyed with `alive=true`,
+        // and a retry would fail the canary check on already-wiped
+        // pages with `CanaryFailed`. With the alloc up front, an alloc
+        // failure surfaces while the buffer is still in its original
+        // state, so `destroy()` is genuinely retryable. T-finding
+        // "Buffer::destroy allocates inside the destroy path" in
+        // `docs/review-2026-05-05-findings.md`.
+        let placeholder = memcall::MemBuf::alloc(1)?;
+
         self.mem
             .protect(memcall::MemoryProtectionFlag::read_write())?;
         self.mutable = true;
@@ -326,7 +343,7 @@ impl Buffer {
         unsafe {
             memcall::unlock_raw(self.inner_ptr(), self.inner_len)?;
         }
-        let mem = std::mem::replace(&mut self.mem, memcall::MemBuf::alloc(1)?);
+        let mem = std::mem::replace(&mut self.mem, placeholder);
         mem.free()?;
         self.alive = false;
         self.mutable = false;
@@ -339,6 +356,52 @@ pub const OVERHEAD: usize = 12 + 16; // nonce + tag
 
 static NONCE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Random per-process prefix for the AES-GCM nonce. The 12-byte nonce is
+/// composed of `[NONCE_PREFIX (4 bytes) || NONCE_COUNTER (8 bytes LE)]`.
+///
+/// `NONCE_COUNTER` resets to 0 every process restart but persists across
+/// `rekey_coffer` calls. With the previous all-zero prefix, a counter
+/// reset paired with the same ciphertext-storage-across-rekey path
+/// could replay the same nonce under a freshly rekeyed key — a
+/// catastrophic AES-GCM nonce-reuse. The random prefix breaks that
+/// alignment: even if two process lifetimes both restart the counter
+/// from 0, their nonces don't collide.
+///
+/// T-finding "AES-GCM nonce uses 4 zero bytes + counter; rekey_coffer
+/// doesn't reset counter" in `docs/review-2026-05-05-findings.md`.
+static NONCE_PREFIX: std::sync::OnceLock<[u8; 4]> = std::sync::OnceLock::new();
+
+fn nonce_prefix() -> [u8; 4] {
+    *NONCE_PREFIX.get_or_init(|| {
+        let mut buf = [0_u8; 4];
+        if scramble_bytes(&mut buf).is_err() {
+            // OsRng failure during init is rare but recoverable. The
+            // emergency fallback mixes the system clock's nanos with
+            // the process ID so two processes starting within the
+            // same second-resolution clock window still get distinct
+            // prefixes. A truncated-nanos-only fallback could repeat
+            // every ~4.3s wraparound window; folding in PID widens
+            // the distinctness to PID × clock-tick granularity. This
+            // is not cryptographic randomness — it is a best-effort
+            // tie-breaker for the catastrophic case where OsRng has
+            // failed at process init.
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0) as u64;
+            let pid = std::process::id() as u64;
+            // Mix via SplitMix64-style avalanche so a small delta in
+            // either input produces a fully-different prefix.
+            let mut z = nanos.wrapping_add(pid.wrapping_mul(0x9E3779B97F4A7C15));
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+            z ^= z >> 31;
+            buf.copy_from_slice(&(z as u32).to_le_bytes());
+        }
+        buf
+    })
+}
+
 pub fn encrypt(plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>, Error> {
     if key.len() != 32 {
         return Err(Error::InvalidKeyLength);
@@ -347,6 +410,7 @@ pub fn encrypt(plaintext: &[u8], key: &[u8]) -> Result<Vec<u8>, Error> {
     let aead_key = LessSafeKey::new(unbound);
     let ctr = NONCE_COUNTER.fetch_add(1, Ordering::Relaxed);
     let mut nonce_bytes = [0_u8; 12];
+    nonce_bytes[..4].copy_from_slice(&nonce_prefix());
     nonce_bytes[4..].copy_from_slice(&ctr.to_le_bytes());
     let nonce = Nonce::assume_unique_for_key(nonce_bytes);
     let mut in_out = plaintext.to_vec();
@@ -398,7 +462,30 @@ impl Drop for Enclave {
         // plaintext key bytes are wiped immediately when the owning CryptoKey
         // is dropped (e.g. on cache eviction), rather than waiting for LRU
         // pressure to evict them.
-        cache_evict(self.id);
+        //
+        // SLAB.lock() can `panic` if the slab mutex is poisoned (a previous
+        // holder panicked) or if this Drop runs during another panic
+        // unwind. A double-panic would abort the process and skip every
+        // other Drop in the unwind path — including page-wipes for other
+        // CryptoKeys. Catch and log instead. T-finding "Enclave::Drop
+        // takes SLAB.lock(); reachable from a panic unwind" in
+        // `docs/review-2026-05-05-findings.md`.
+        let id = self.id;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            cache_evict(id);
+        }));
+        if let Err(payload) = result {
+            // Don't `resume_unwind` — that would re-trigger the
+            // double-panic abort we're trying to avoid. Just log.
+            let msg = if let Some(s) = payload.downcast_ref::<&'static str>() {
+                (*s).to_string()
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "unknown panic payload".to_string()
+            };
+            log::error!("Enclave::drop: cache_evict({id}) panicked: {msg}");
+        }
     }
 }
 
@@ -487,6 +574,13 @@ impl Enclave {
 // Transient slots are acquired briefly during crypto operations, then released.
 // When no free slots remain, the LRU cache entry is evicted to make room.
 pub const SLOT_SIZE: usize = 32; // AES-256 key size
+
+/// Maximum time `pool_acquire` / `coffer_view` will wait for a slab slot
+/// before returning `Error::OutOfSlots`. 30 seconds is generous enough
+/// that genuine traffic spikes don't trip it but short enough that a
+/// leaked `PoolSlot` (FFI caller forgot `pool_release`) shows up as a
+/// loud error rather than a hung process.
+const POOL_ACQUIRE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(30);
 const COFFER_LEFT: usize = 0;
 const COFFER_RIGHT: usize = 1;
 const FIRST_SHARED_SLOT: usize = 2;
@@ -497,16 +591,31 @@ struct SecureSlab {
     base: *mut u8,
     slot_count: usize,
 
-    // Free list of shared slot indices (LIFO for cache locality)
+    // Free list of shared slot indices (LIFO for cache locality).
     free: Vec<usize>,
 
-    // Hot key cache: maps enclave_id → slot index
+    // Slots currently checked out as transient PoolSlot handles. A slot is
+    // in exactly one of three states at any moment: on the `free` list, in
+    // `cache_lru`/`cache_map`, or in `transient`. The set lets us assert
+    // single-release and gives explicit positive tracking that
+    // `acquire_slot` will not re-issue or evict an outstanding slot. See
+    // T2 in `docs/review-2026-05-05-findings.md`.
+    transient: HashSet<usize>,
+
+    // Hot key cache: maps enclave_id → slot index.
     cache_map: HashMap<u64, usize>,
     cache_slot_to_id: Vec<u64>, // slot_idx → enclave_id (0 = not cached)
     cache_lru: VecDeque<usize>, // front = least recently used
 }
 
-// SAFETY: base points into mlock'd mmap memory owned by _page.
+// SAFETY: `base` is a `*mut u8` derived from the `mmap`'d, `mlock`'d page
+// owned by `_page`. The page lives for the lifetime of `SecureSlab` (we
+// never replace `_page`), and access through `base` only happens via the
+// `Mutex<SecureSlab>` wrapper around the static `SLAB`. Sending the slab
+// across threads is therefore equivalent to sending the owned buffer plus
+// the index/cache state, which contains no thread-local invariants.
+// `SecureSlab` is intentionally NOT `Sync` — concurrent shared access
+// would race on `free`, `transient`, `cache_lru`, and `cache_map`.
 unsafe impl Send for SecureSlab {}
 
 impl SecureSlab {
@@ -544,6 +653,7 @@ impl SecureSlab {
             base,
             slot_count,
             free,
+            transient: HashSet::with_capacity(shared_count),
             cache_map: HashMap::with_capacity(shared_count),
             cache_slot_to_id: vec![0_u64; slot_count],
             cache_lru: VecDeque::with_capacity(shared_count),
@@ -565,8 +675,17 @@ impl SecureSlab {
     }
 
     /// Acquire a shared slot. Tries free list first, then evicts from cache.
-    /// `exclude` prevents evicting a specific cache slot (used when the caller
-    /// holds a reference to that slot).
+    /// `exclude` prevents evicting a specific cache slot (used when the
+    /// caller holds a reference to that slot).
+    ///
+    /// The returned index is OFF the free list and OFF `cache_lru`. The
+    /// caller is responsible for placing it into exactly one of:
+    ///
+    /// - `self.transient` (via `acquire_transient_slot`) — for handles
+    ///   returned to user code as `PoolSlot`.
+    /// - `cache_lru` + `cache_map` — for `cache_insert`.
+    ///
+    /// Failing to do this is a leak; doing it twice is a soundness bug.
     fn acquire_slot(&mut self, exclude: Option<usize>) -> Option<usize> {
         // Try free list (O(1))
         if let Some(idx) = self.free.pop() {
@@ -588,9 +707,23 @@ impl SecureSlab {
         None
     }
 
+    /// Like `acquire_slot` but records the slot in `transient` so a
+    /// concurrent `release_slot` for the same idx can be detected, and so
+    /// the slot is observably "checked out" rather than just absent.
+    fn acquire_transient_slot(&mut self, exclude: Option<usize>) -> Option<usize> {
+        let idx = self.acquire_slot(exclude)?;
+        debug_assert!(
+            !self.transient.contains(&idx),
+            "acquire_transient_slot: slot {idx} was already transient — \
+             slab invariant violation",
+        );
+        self.transient.insert(idx);
+        Some(idx)
+    }
+
     /// Reconstruct the Coffer master key into a transient slot.
     fn coffer_view(&mut self) -> Option<PoolSlot> {
-        let out_idx = self.acquire_slot(None)?;
+        let out_idx = self.acquire_transient_slot(None)?;
         // Use raw pointers to avoid borrow conflicts on non-overlapping slots
         let right_ptr = self.slot_ptr(COFFER_RIGHT);
         let right = unsafe { std::slice::from_raw_parts(right_ptr, SLOT_SIZE) };
@@ -642,7 +775,7 @@ impl SecureSlab {
         }
         self.cache_lru.push_back(src_idx);
         // Acquire a transient slot (don't evict the one we just found)
-        let out_idx = self.acquire_slot(Some(src_idx))?;
+        let out_idx = self.acquire_transient_slot(Some(src_idx))?;
         // Use raw pointers to avoid borrow conflicts on non-overlapping slots
         let src_ptr = self.slot_ptr(src_idx);
         let dst_ptr = self.slot_ptr(out_idx);
@@ -695,9 +828,21 @@ impl SecureSlab {
         self.cache_lru.clear();
     }
 
-    /// Release a slot back to the free list.
+    /// Release a transient slot back to the free list. Asserts the slot
+    /// was actually checked out as transient — a release without a prior
+    /// `acquire_transient_slot` (or a double release) indicates a leaked
+    /// or duplicated PoolSlot.
     fn release_slot(&mut self, idx: usize) {
         debug_assert!(idx >= FIRST_SHARED_SLOT && idx < self.slot_count);
+        debug_assert!(
+            self.transient.remove(&idx),
+            "release_slot: slot {idx} was not in transient set — double \
+             release or release without acquire",
+        );
+        debug_assert!(
+            !self.free.contains(&idx),
+            "release_slot: slot {idx} already on free list",
+        );
         wipe_bytes(self.slot_slice_mut(idx));
         self.free.push(idx);
     }
@@ -720,8 +865,22 @@ enum SlotOrigin {
     Standalone(Buffer),
 }
 
-// SAFETY: Slab-backed slots point into the mlock'd slab page which outlives
-// the slot. Standalone slots own their Buffer. Neither is aliased.
+// SAFETY for `Send`:
+//   - SlotOrigin::Slab: `ptr` references a slot inside the static `SLAB`'s
+//     `mmap`'d page. The page outlives any individual `PoolSlot`. While a
+//     `PoolSlot` exists, the slot index it references is recorded in
+//     `SecureSlab::transient`; `acquire_slot` never returns a transient idx
+//     and `release_slot` debug-asserts the idx is in `transient` before
+//     reusing it. Crossing a thread boundary therefore transfers exclusive
+//     ownership of those bytes — there is no concurrent access via the
+//     slab data structures.
+//   - SlotOrigin::Standalone: the wrapped `Buffer` exclusively owns its
+//     `mmap`/`mlock`'d region; sending it is equivalent to sending an
+//     owned `Box<[u8]>`.
+// `PoolSlot` deliberately does NOT implement `Sync`. The `bytes()` and
+// `as_slice()` methods hand out exclusive references to the underlying
+// region, and concurrent `&PoolSlot` access from two threads would alias
+// these references.
 unsafe impl Send for PoolSlot {}
 
 impl PoolSlot {
@@ -749,17 +908,35 @@ pub fn pool_acquire(size: usize) -> Result<PoolSlot, Error> {
         });
     }
     let mut slab = SLAB.lock();
-    if let Some(idx) = slab.acquire_slot(None) {
+    if let Some(idx) = slab.acquire_transient_slot(None) {
         return Ok(PoolSlot {
             ptr: slab.slot_ptr(idx),
             len: SLOT_SIZE,
             origin: SlotOrigin::Slab,
         });
     }
-    // All slots held transiently — wait for one to be released
+    // All slots are held transiently — wait for one to be released, with
+    // a hard deadline so a leaked PoolSlot (FFI caller forgot to release)
+    // can't deadlock the pool indefinitely. T-finding "SLAB_CV.wait holds
+    // MutexGuard indefinitely" in `docs/review-2026-05-05-findings.md`.
+    //
+    // The loop has two exit paths:
+    //   - a slot becomes free (notify_one wakes us); we acquire and return
+    //   - we exceed `POOL_ACQUIRE_DEADLINE`; bail with `OutOfSlots` so the
+    //     caller can fall back to a standalone allocation or surface the
+    //     error rather than block forever
+    let start = std::time::Instant::now();
     loop {
-        SLAB_CV.wait(&mut slab);
-        if let Some(idx) = slab.acquire_slot(None) {
+        let remaining = POOL_ACQUIRE_DEADLINE.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            log::error!(
+                "pool_acquire: timed out after {POOL_ACQUIRE_DEADLINE:?} waiting for a \
+                 slab slot; suspected PoolSlot leak"
+            );
+            return Err(Error::OutOfSlots);
+        }
+        SLAB_CV.wait_for(&mut slab, remaining);
+        if let Some(idx) = slab.acquire_transient_slot(None) {
             return Ok(PoolSlot {
                 ptr: slab.slot_ptr(idx),
                 len: SLOT_SIZE,
@@ -786,11 +963,19 @@ pub fn pool_release(slot: PoolSlot) {
 /// Reconstruct the Coffer master key into a transient pool slot.
 pub fn coffer_view() -> Result<PoolSlot, Error> {
     let mut slab = SLAB.lock();
+    let start = std::time::Instant::now();
     loop {
         if let Some(slot) = slab.coffer_view() {
             return Ok(slot);
         }
-        SLAB_CV.wait(&mut slab);
+        let remaining = POOL_ACQUIRE_DEADLINE.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            log::error!(
+                "coffer_view: timed out after {POOL_ACQUIRE_DEADLINE:?} waiting for a slab slot"
+            );
+            return Err(Error::OutOfSlots);
+        }
+        SLAB_CV.wait_for(&mut slab, remaining);
     }
 }
 
@@ -859,6 +1044,23 @@ impl LockedBuffer {
             ct_move(g.bytes(), &mut bytes);
             g.freeze()?;
         }
+        // `ct_move` wipes the live range `[0..len]` of the source Vec,
+        // but the spare capacity `[len..capacity]` may still hold data
+        // from earlier writes the caller made before truncating the
+        // Vec. Wipe the full allocation before drop so any residual
+        // plaintext goes to zeros instead of the allocator's free list.
+        // T-finding "LockedBuffer::from_bytes doesn't wipe Vec spare
+        // capacity" in `docs/review-2026-05-05-findings.md`.
+        let cap = bytes.capacity();
+        if cap > 0 {
+            // SAFETY: `bytes.as_mut_ptr()` is non-null and valid for
+            // `cap` writes because `Vec` invariants guarantee the
+            // allocation. We don't observe the bytes after wiping.
+            unsafe {
+                let full = std::slice::from_raw_parts_mut(bytes.as_mut_ptr(), cap);
+                wipe_bytes(full);
+            }
+        }
         Ok(b)
     }
     fn from_buffer_owned(buf: Buffer) -> Self {
@@ -887,8 +1089,36 @@ impl LockedBuffer {
     pub fn is_mutable(&self) -> bool {
         self.0.lock().mutable()
     }
+    /// Return a heap copy of the locked plaintext as a plain `Vec<u8>`.
+    ///
+    /// # Production callers: prefer [`bytes_zeroizing`](Self::bytes_zeroizing)
+    ///
+    /// **The returned `Vec` is not wiped on drop**: when it goes out of
+    /// scope the allocator reclaims the bytes without zeroing them, and
+    /// any subsequent allocation on the same arena may observe stale
+    /// plaintext. The wipe-on-drop variant
+    /// [`bytes_zeroizing`](Self::bytes_zeroizing) returns the same data
+    /// wrapped in `Zeroizing<Vec<u8>>`, which derefs to `&[u8]` /
+    /// `&Vec<u8>` for the vast majority of read-only uses.
+    ///
+    /// This method exists for **tests**, debug printing, and for callers
+    /// that need direct equality with another `Vec<u8>` — `Zeroizing`'s
+    /// `PartialEq` does not auto-coerce against unwrapped vecs and
+    /// `assert_eq!(lb.bytes(), vec![...])` is much more readable than
+    /// `assert_eq!(lb.bytes_zeroizing().to_vec(), vec![...])`.
     pub fn bytes(&self) -> Vec<u8> {
         self.0.lock().as_slice().to_vec()
+    }
+
+    /// Wipe-on-drop variant of [`bytes`](Self::bytes). Returns the
+    /// plaintext wrapped in `zeroize::Zeroizing<Vec<u8>>` so it's
+    /// volatile-zeroed when the wrapper is dropped. **Prefer this in
+    /// any production code path that doesn't immediately ship the
+    /// bytes onward** — most read-only consumers can deref the wrapper
+    /// to `&[u8]` without unwrapping.
+    #[must_use]
+    pub fn bytes_zeroizing(&self) -> zeroize::Zeroizing<Vec<u8>> {
+        zeroize::Zeroizing::new(self.0.lock().as_slice().to_vec())
     }
     pub fn copy(&self, src: &[u8]) {
         self.copy_at(0, src);
@@ -932,7 +1162,14 @@ pub fn purge() -> Result<(), Error> {
         slab.rekey_coffer()?;
     }
     let snapshot = registry_flush();
-    let mut op_err: Option<String> = None;
+    // Collect per-buffer errors with structured `(was_wiped, error)`
+    // tuples so callers can tell partial-failure (some buffers wiped,
+    // some not) from total failure. The previous implementation
+    // joined `format!`'d strings with `;` separators, which gave the
+    // operator a single opaque string. T-finding "purge joins errors
+    // into one String; loses structure" in
+    // `docs/review-2026-05-05-findings.md`.
+    let mut failures: Vec<(bool, Error)> = Vec::new();
     for arc in snapshot {
         let mut b = arc.lock();
         if let Err(e) = b.destroy() {
@@ -941,22 +1178,43 @@ pub fn purge() -> Result<(), Error> {
                 wipe_bytes(b.bytes());
                 wiped = true;
             }
-            let msg = if wiped {
-                format!("{:?} (wiped)", e)
-            } else {
-                format!("{:?}", e)
-            };
-            op_err = Some(match op_err {
-                None => msg,
-                Some(prev) => format!("{}; {}", prev, msg),
-            });
+            failures.push((wiped, e));
         }
     }
-    if let Some(m) = op_err {
-        return Err(Error::Mem(memcall::MemError::Sys(m)));
+    if failures.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    // Surface the summary in a single Error::Mem(...) but emit each
+    // structured failure to the operator log so they can be parsed
+    // individually if the caller only sees the aggregate.
+    let mut summary = String::with_capacity(64 * failures.len());
+    for (i, (wiped, err)) in failures.iter().enumerate() {
+        let suffix = if *wiped { " (wiped)" } else { "" };
+        log::warn!("memguard::purge: buffer {i} destroy failed{suffix}: {err:?}");
+        if i > 0 {
+            summary.push_str("; ");
+        }
+        let _ =
+            std::fmt::Write::write_fmt(&mut summary, format_args!("buffer {i}: {err:?}{suffix}"));
+    }
+    Err(Error::Mem(memcall::MemError::Sys(summary)))
 }
+/// Wipe all registered `Buffer`s and exit the process.
+///
+/// **Important caveats:**
+/// * `process::exit` skips Drop handlers for stack-resident locals, so
+///   any plaintext held in a `Buffer` that's *not* wrapped in an
+///   `Arc<Mutex<Buffer>>` and registered with `registry_add` (i.e.,
+///   the standalone `Buffer` type rather than `LockedBuffer`) will be
+///   leaked unwiped to the OS reclaim path. Callers that hold raw
+///   `Buffer`s should `destroy()` them explicitly before invoking
+///   `safe_exit`, or use `LockedBuffer` so the registry-driven wipe
+///   here covers them.
+/// * The slab's coffer key is wiped before the per-buffer pass, so
+///   any `Enclave` cached encryption can't be reversed even if a
+///   `Buffer`'s plaintext somehow survives.
+///
+/// This function does NOT return.
 #[allow(clippy::exit)]
 pub fn safe_exit(code: i32) -> ! {
     {
@@ -967,7 +1225,13 @@ pub fn safe_exit(code: i32) -> ! {
     let snapshot = registry_copy();
     for arc in snapshot {
         let mut b = arc.lock();
-        let _destroyed = b.destroy();
+        // Errors here are unrecoverable — we're about to exit. Log
+        // them for forensic purposes but don't try to fall back to a
+        // partial wipe; the slab coffer is already wiped above so
+        // any leftover ciphertext-in-cache can't be decrypted.
+        if let Err(e) = b.destroy() {
+            log::warn!("memguard::safe_exit: buffer destroy failed: {e:?}");
+        }
     }
     std::process::exit(code)
 }
@@ -1033,4 +1297,54 @@ pub fn stream_chunk_size() -> usize {
 /// Configure the streaming chunk size. Pass 0 to clear.
 pub fn set_stream_chunk_size(value: usize) {
     STREAM_CHUNK_SIZE.store(value, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+#[allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
+mod canary_tests {
+    use super::*;
+
+    /// Corrupt one byte of the post-canary guard page and verify
+    /// `Buffer::destroy` reports `Error::CanaryFailed` instead of
+    /// silently freeing memory. Without this assertion path, an
+    /// out-of-bounds write that happens to land on a guard page
+    /// would be invisible to the user.
+    ///
+    /// Test isolation: runs serially with the rest of the memguard
+    /// suite via the `serial_test::serial` attribute used elsewhere
+    /// in the crate; canary corruption is a single-threaded scenario
+    /// and races with the SLAB pool aren't a concern here because
+    /// `Buffer::new` allocates a fresh region.
+    #[test]
+    fn destroy_reports_canary_failed_when_post_guard_corrupted() {
+        // Use a size that yields a non-zero canary_len (must be
+        // smaller than a page).
+        let mut buf = Buffer::new(64).expect("alloc Buffer for canary test");
+
+        // Re-enable RW on the post guard page so we can flip a byte.
+        // The destroy path will re-protect everything to RW anyway,
+        // so this doesn't disturb later state.
+        // SAFETY: `post_ptr()` returns the start of the post guard
+        // page, which is `*PAGE_SIZE` bytes long inside our owned
+        // allocation.
+        unsafe {
+            memcall::protect_raw(
+                buf.post_ptr(),
+                *PAGE_SIZE,
+                memcall::MemoryProtectionFlag::read_write(),
+            )
+            .expect("re-enable post guard for corruption");
+            // Flip the very first byte. The canary check compares
+            // each byte against `canary[i % canary_len]`, so a single
+            // bit flip on byte 0 is sufficient to fail the check.
+            let p = buf.post_ptr();
+            *p = !*p;
+        }
+
+        match buf.destroy() {
+            Err(Error::CanaryFailed) => {}
+            Ok(()) => panic!("destroy should have reported CanaryFailed but returned Ok"),
+            Err(other) => panic!("expected CanaryFailed, got {other:?}"),
+        }
+    }
 }

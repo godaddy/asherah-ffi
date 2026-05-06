@@ -7,6 +7,30 @@ use aws_sdk_kms::{config::Region, primitives::Blob, Client};
 
 use crate::traits::{KeyManagementService, AEAD};
 
+/// Redact the account-number segment of an AWS ARN for logging.
+///
+/// AWS ARNs follow `arn:partition:service:region:account-id:resource`,
+/// where `account-id` is a 12-digit number that several compliance
+/// frameworks treat as PII. Replace it with `***` so debug logs don't
+/// leak per-customer account identifiers. T-finding "log::debug! includes
+/// KMS key ARN" in `docs/review-2026-05-05-findings.md`.
+pub(crate) fn redact_arn(arn: &str) -> String {
+    let mut parts = arn.splitn(6, ':');
+    match (
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+        parts.next(),
+    ) {
+        (Some("arn"), Some(p), Some(svc), Some(region), Some(_account), Some(resource)) => {
+            format!("arn:{p}:{svc}:{region}:***:{resource}")
+        }
+        _ => arn.to_string(),
+    }
+}
+
 /// Process-wide fallback runtime. Built lazily the first time a sync KMS
 /// call lands without an existing Tokio Handle and without a per-instance
 /// runtime — replacing the per-call `tokio::runtime::Runtime::new().expect(...)`
@@ -154,7 +178,7 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
     }
 
     async fn encrypt_key_impl(&self, key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        log::debug!("AwsKms encrypt_key: key_id={}", self.key_id);
+        log::debug!("AwsKms encrypt_key: key_id={}", redact_arn(&self.key_id));
         let resp = self
             .client
             .encrypt()
@@ -165,12 +189,18 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
             .map_err(|e| {
                 log::error!(
                     "AwsKms encrypt_key failed: key_id={}, error={e:#}",
-                    self.key_id
+                    redact_arn(&self.key_id)
                 );
-                anyhow::anyhow!("KMS Encrypt call failed for key {}: {e}", self.key_id)
+                anyhow::anyhow!(
+                    "KMS Encrypt call failed for key {}: {e}",
+                    redact_arn(&self.key_id)
+                )
             })?;
         let ct = resp.ciphertext_blob().ok_or_else(|| {
-            anyhow::anyhow!("KMS Encrypt returned no ciphertext for key {}", self.key_id)
+            anyhow::anyhow!(
+                "KMS Encrypt returned no ciphertext for key {}",
+                redact_arn(&self.key_id)
+            )
         })?;
         Ok(ct.as_ref().to_vec())
     }
@@ -178,7 +208,7 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
     async fn decrypt_key_impl(&self, blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
         log::debug!(
             "AwsKms decrypt_key: key_id={}, blob_len={}",
-            self.key_id,
+            redact_arn(&self.key_id),
             blob.len()
         );
         let resp = self
@@ -191,12 +221,18 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
             .map_err(|e| {
                 log::error!(
                     "AwsKms decrypt_key failed: key_id={}, error={e:#}",
-                    self.key_id
+                    redact_arn(&self.key_id)
                 );
-                anyhow::anyhow!("KMS Decrypt call failed for key {}: {e}", self.key_id)
+                anyhow::anyhow!(
+                    "KMS Decrypt call failed for key {}: {e}",
+                    redact_arn(&self.key_id)
+                )
             })?;
         let pt = resp.plaintext().ok_or_else(|| {
-            anyhow::anyhow!("KMS Decrypt returned no plaintext for key {}", self.key_id)
+            anyhow::anyhow!(
+                "KMS Decrypt returned no plaintext for key {}",
+                redact_arn(&self.key_id)
+            )
         })?;
         Ok(pt.as_ref().to_vec())
     }

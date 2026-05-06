@@ -58,16 +58,21 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     SessionFactory<A, K, M, DefaultPartition>
 {
     pub fn from_config(cfg: Config, metastore: Arc<M>, kms: Arc<K>, crypto: Arc<A>) -> Self {
-        let part = match cfg.region_suffix.clone() {
-            Some(s) => DefaultPartition::new_suffixed(
-                String::new(),
-                cfg.service.clone(),
-                cfg.product.clone(),
-                s,
-            ),
-            None => DefaultPartition::new(String::new(), cfg.service.clone(), cfg.product.clone()),
+        // We own `cfg` by value — destructure to move every field out
+        // exactly once, no per-field `.clone()`. T-finding "from_config
+        // clones every field" in
+        // `docs/review-2026-05-05-findings.md`.
+        let Config {
+            service,
+            product,
+            policy,
+            region_suffix,
+        } = cfg;
+        let part = match region_suffix {
+            Some(s) => DefaultPartition::new_suffixed(String::new(), service, product, s),
+            None => DefaultPartition::new(String::new(), service, product),
         };
-        SessionFactory::new(metastore, kms, cfg.policy.clone(), crypto, Arc::new(part))
+        SessionFactory::new(metastore, kms, policy, crypto, Arc::new(part))
     }
 }
 
@@ -302,17 +307,14 @@ impl<
                 // T-finding "Legacy Session::encrypt doesn't reload
                 // load_latest on race-loss" in
                 // `docs/review-2026-05-05-findings.md`.
-                let stored = self
-                    .f
-                    .metastore
-                    .store(&ekr.id, ekr.created, &ekr)
-                    .unwrap_or_else(|e| {
-                        log::warn!(
-                            "encrypt: IK store failed for id={} (will retry load): {e:#}",
+                let stored =
+                    self.f
+                        .metastore
+                        .store(&ekr.id, ekr.created, &ekr)
+                        .context(format!(
+                            "encrypt: failed to store intermediate key id={}",
                             ekr.id
-                        );
-                        false
-                    });
+                        ))?;
                 if stored {
                     ik
                 } else {
@@ -412,35 +414,27 @@ impl<
                 .unwrap_or(0),
         })?;
         let ik = self.intermediate_key_from_ekr(&sk, &ik_ekr)?;
-        // decrypt DRK then data
-        let mut drk = ik
-            .with_key_func(|ikb| self.f.crypto.decrypt(&key.encrypted_key, ikb))
-            .context("decrypt: failed to decrypt DRK with IK")??;
-        // Use a guard so the DRK is wiped on every exit path — including
-        // the AEAD-decrypt error case below. The async/PublicSession
-        // paths use DrkGuard; the legacy path previously skipped the
-        // wipe on AEAD failure (T-finding "Legacy decrypt doesn't wipe
-        // drk when AEAD fails" in docs/review-2026-05-05-findings.md).
-        struct DrkWipe<'drk>(&'drk mut [u8]);
-        impl Drop for DrkWipe<'_> {
-            fn drop(&mut self) {
-                crate::memguard::wipe_bytes(self.0);
-            }
-        }
-        let drk_guard = DrkWipe(&mut drk[..]);
-        // SAFETY-equivalent: the guard borrows drk for the rest of this
-        // scope. The decrypt call only needs `&[u8]`, so we re-slice
-        // through the guard's owned reference.
-        let pt = {
-            let drk_slice: &[u8] = drk_guard.0;
-            self.f
-                .crypto
-                .decrypt(&drr.data, drk_slice)
-                .context("decrypt: failed to decrypt data with DRK")?
-        };
-        // Explicit drop documents the wipe order: drk is wiped before
-        // returning the plaintext.
-        drop(drk_guard);
+        // decrypt DRK then data. The DRK is wrapped in `Zeroizing` so
+        // it is volatile-wiped on every exit path — including the
+        // AEAD-decrypt error case below. The async/`PublicSession`
+        // paths use a stack-allocated `DrkGuard([u8; 32])`; here the
+        // DRK starts life as a `Vec<u8>` from `crypto.decrypt`, so
+        // wrapping in `Zeroizing<Vec<u8>>` is the equivalent shape.
+        // T-finding "Legacy decrypt doesn't wipe drk when AEAD fails"
+        // in `docs/review-2026-05-05-findings.md`. The previous
+        // implementation defined an inline `DrkWipe<'drk>` borrow-
+        // guard struct that drifted from the canonical `DrkGuard`;
+        // unified by switching to the `Zeroizing` wrapper.
+        let drk: zeroize::Zeroizing<Vec<u8>> = zeroize::Zeroizing::new(
+            ik.with_key_func(|ikb| self.f.crypto.decrypt(&key.encrypted_key, ikb))
+                .context("decrypt: failed to decrypt DRK with IK")??,
+        );
+        let pt = self
+            .f
+            .crypto
+            .decrypt(&drr.data, &drk)
+            .context("decrypt: failed to decrypt data with DRK")?;
+        // `drk` Zeroizing wrapper drops at end of function → wipes.
         // pt is the decrypted plaintext; the FFI layers (asherah_buffer_free,
         // asherah-cobhan Decrypt/DecryptFromJson) are responsible for zeroing
         // it before deallocation.
@@ -490,9 +484,19 @@ impl<
 #[inline(always)]
 pub(crate) fn now_s() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
+    // `duration_since` returns `Err` when the system clock is set
+    // before 1970 — only realistic on a freshly-imaged machine where
+    // NTP hasn't run yet. The previous implementation collapsed that
+    // error to `0`, which silently mapped the entire pre-epoch window
+    // onto epoch 0 and would make every "is_expired" check decide
+    // against the current time of `0`. Use the absolute-value form
+    // (`UNIX_EPOCH - now`) and negate, so the returned timestamp at
+    // least preserves the relative ordering across negative values.
+    // T-finding "now_s returns 0 if SystemTime::now < UNIX_EPOCH" in
+    // `docs/review-2026-05-05-findings.md`.
     match SystemTime::now().duration_since(UNIX_EPOCH) {
         Ok(duration) => duration.as_secs() as i64,
-        Err(_) => 0,
+        Err(e) => -(e.duration().as_secs() as i64),
     }
 }
 
@@ -578,6 +582,19 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     pub fn with_metrics(mut self, enabled: bool) -> Self {
         self.metrics_enabled = enabled;
         self
+    }
+
+    /// Approximate count of distinct intermediate-key entries currently
+    /// held in the shared IK cache. Returns `0` when the IK cache is
+    /// disabled or `shared_intermediate_key_cache` is `false` (per-
+    /// session caches aren't aggregated here). The value is racy under
+    /// concurrent encrypts; callers should use it for assertion-style
+    /// bounds checks only.
+    pub fn ik_cache_entry_count(&self) -> usize {
+        self.shared_ik_cache
+            .as_ref()
+            .map(|c| c.entry_count())
+            .unwrap_or(0)
     }
     pub fn get_session(&self, id: &str) -> PublicSession<A, K, M> {
         let mut suffix = self.metastore.region_suffix();

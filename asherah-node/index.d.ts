@@ -230,11 +230,20 @@ export declare function setenv(env: string): void;
  * const drr = asherah.encrypt('user-42', Buffer.from('secret'));
  * // store drr in your database
  * ```
+ *
+ * **Blocking the Node.js event loop**: this function runs on the JS
+ * thread and synchronously waits for the metastore (MySQL/Postgres/
+ * DynamoDB) and KMS round-trips. While it executes no other JavaScript
+ * — timers, network callbacks, GC scheduling — can run. For any
+ * production workload that touches the network on a cache miss, prefer
+ * {@link encryptAsync}, which offloads to the Rust tokio runtime and
+ * keeps the event loop responsive.
  */
 export declare function encrypt(partitionId: string, data: Buffer): string;
 
 /** Async variant of {@link encrypt}. The work runs on the Rust tokio
- *  runtime; the Node event loop is NOT blocked. */
+ *  runtime; the Node event loop is NOT blocked. Prefer this in any
+ *  service that handles concurrent requests. */
 export declare function encryptAsync(partitionId: string, data: Buffer): Promise<string>;
 
 /**
@@ -248,10 +257,16 @@ export declare function encryptAsync(partitionId: string, data: Buffer): Promise
  * @throws TypeError if either argument is null/undefined.
  * @throws Error if the JSON is malformed, the partition doesn't match,
  *               the parent key has been revoked, or the AEAD tag fails.
+ *
+ * **Blocking the Node.js event loop**: like {@link encrypt}, this runs
+ * synchronously on the JS thread and waits for any metastore/KMS calls.
+ * Use {@link decryptAsync} in services that handle concurrent traffic.
  */
 export declare function decrypt(partitionId: string, dataRowRecordJson: string): Buffer;
 
-/** Async variant of {@link decrypt}. */
+/** Async variant of {@link decrypt}. The work runs on the Rust tokio
+ *  runtime; the Node event loop stays responsive. Prefer this in any
+ *  service that handles concurrent requests. */
 export declare function decryptAsync(partitionId: string, dataRowRecordJson: string): Promise<Buffer>;
 
 /** UTF-8 string-typed wrapper around {@link encrypt}. Empty `string`
@@ -266,6 +281,27 @@ export declare function decryptString(partitionId: string, dataRowRecordJson: st
 
 /** Async variant of {@link decryptString}. */
 export declare function decryptStringAsync(partitionId: string, dataRowRecordJson: string): Promise<string>;
+
+/**
+ * Best-effort wipe of a plaintext `Buffer` returned by {@link decrypt}
+ * or {@link decryptAsync}.
+ *
+ * The native (Rust) buffer is volatile-wiped before the Buffer reaches
+ * JavaScript, but the V8 `Buffer` lives on the JS heap where the GC may
+ * have already copied the bytes during compaction. Pass the Buffer here
+ * to overwrite its current backing store with zeros via
+ * `buffer.fill(0)`. Mirrors `Zeroize([]byte)` in the Go binding,
+ * `AsherahSession.ZeroizePlaintext(byte[])` in .NET, and
+ * `Asherah.clearPlaintext(byte[])` in Java.
+ *
+ * **Caveat:** treat the plaintext as opaque within a tight scope and
+ * never copy or substring it before clearing — V8 may have aliased
+ * portions of the underlying ArrayBuffer that this call doesn't reach.
+ *
+ * T-finding "Node has no parallel `clearPlaintext`" in
+ * `docs/review-2026-05-05-findings.md`.
+ */
+export declare function clearPlaintext(plaintext: Buffer | null | undefined): void;
 
 // ─── Factory / Session API (recommended) ────────────────────────────────────
 
