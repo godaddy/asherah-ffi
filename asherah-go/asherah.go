@@ -21,13 +21,30 @@ type sessionCacheEntry struct {
 }
 
 var (
-	globalMu            sync.RWMutex
-	globalFactory       *Factory
+	// globalMu protects globalFactory + the cache configuration
+	// (sessionCaching, sessionCacheMaxSize). It is held briefly with
+	// RLock for the lookups on the encrypt/decrypt hot path.
+	globalMu      sync.RWMutex
+	globalFactory *Factory
 	// sessionCache is a bounded LRU. The map gives O(1) lookup; the list
 	// orders entries by recency. On hit we move the element to the back
 	// (most-recently-used); on overflow we evict the front (least-
 	// recently-used). The previous implementation was insertion-ordered
 	// FIFO, which evicts hot entries that were re-used after insertion.
+	//
+	// The cache is guarded by `sessionMu` (a `sync.Mutex`, not the
+	// global RWMutex). The original implementation took a write lock
+	// on `globalMu` for every cache hit just to call
+	// `sessionLRU.MoveToBack`, which serialized every encrypt/decrypt
+	// behind a single global writer regardless of whether the caller
+	// touched configuration. Splitting the locks lets the read-heavy
+	// config-lookup path stay on the RWMutex while the cache mutation
+	// uses its own dedicated lock — concurrent encrypts on different
+	// partitions only contend with each other on the cache lock, not
+	// with shutdown/setup operations. T-finding "globalMu write lock
+	// on every cache hit just for MoveToBack" in
+	// `docs/review-2026-05-05-findings.md`.
+	sessionMu           sync.Mutex
 	sessionCache        map[string]*list.Element
 	sessionLRU          *list.List
 	sessionCacheMaxSize int
@@ -60,6 +77,13 @@ func Setup(cfg Config) error {
 	if cfg.SessionCacheMaxSize != nil && *cfg.SessionCacheMaxSize > 0 {
 		sessionCacheMaxSize = *cfg.SessionCacheMaxSize
 	}
+	// Lock order: `globalMu` first (already held), then `sessionMu`.
+	// The cache state is touched by `acquireSession` under `sessionMu`
+	// only after observing a non-nil `globalFactory` under
+	// `globalMu.RLock()`, so initializing the cache here while holding
+	// both prevents an `acquireSession` from racing into a half-built
+	// `sessionCache`/`sessionLRU` pair.
+	sessionMu.Lock()
 	if sessionCaching {
 		sessionCache = make(map[string]*list.Element)
 		sessionLRU = list.New()
@@ -67,6 +91,7 @@ func Setup(cfg Config) error {
 		sessionCache = nil
 		sessionLRU = nil
 	}
+	sessionMu.Unlock()
 
 	return nil
 }
@@ -89,8 +114,10 @@ func SetupFromEnv() error {
 	globalFactory = factory
 	sessionCaching = true
 	sessionCacheMaxSize = defaultSessionCacheMaxSize
+	sessionMu.Lock()
 	sessionCache = make(map[string]*list.Element)
 	sessionLRU = list.New()
+	sessionMu.Unlock()
 	return nil
 }
 
@@ -98,6 +125,12 @@ func SetupFromEnv() error {
 func Shutdown() {
 	globalMu.Lock()
 	factory := globalFactory
+	globalFactory = nil
+	sessionCaching = false
+	// Drain the cache under `sessionMu`. Lock order: `globalMu` first
+	// (already held), then `sessionMu` — see the comment on the
+	// declarations and matching order in `Setup` and `acquireSession`.
+	sessionMu.Lock()
 	var sessions []*Session
 	if sessionLRU != nil {
 		sessions = make([]*Session, 0, sessionLRU.Len())
@@ -105,10 +138,9 @@ func Shutdown() {
 			sessions = append(sessions, e.Value.(sessionCacheEntry).session)
 		}
 	}
-	globalFactory = nil
 	sessionCache = nil
 	sessionLRU = nil
-	sessionCaching = false
+	sessionMu.Unlock()
 	globalMu.Unlock()
 
 	for _, sess := range sessions {
@@ -205,15 +237,15 @@ func acquireSession(partition string) (*Session, func(), error) {
 	}
 
 	if caching {
-		globalMu.Lock()
+		sessionMu.Lock()
 		if elem, ok := sessionCache[partition]; ok {
 			// LRU hit: move to back (most-recently-used).
 			sessionLRU.MoveToBack(elem)
 			sess := elem.Value.(sessionCacheEntry).session
-			globalMu.Unlock()
+			sessionMu.Unlock()
 			return sess, nil, nil
 		}
-		globalMu.Unlock()
+		sessionMu.Unlock()
 	}
 
 	sess, err := factory.GetSession(partition)
@@ -223,12 +255,12 @@ func acquireSession(partition string) (*Session, func(), error) {
 
 	if caching {
 		var evicted *Session
-		globalMu.Lock()
+		sessionMu.Lock()
 		if elem, ok := sessionCache[partition]; ok {
 			// Lost the race — another goroutine inserted while we created.
 			sessionLRU.MoveToBack(elem)
 			existing := elem.Value.(sessionCacheEntry).session
-			globalMu.Unlock()
+			sessionMu.Unlock()
 			sess.Close()
 			return existing, nil, nil
 		}
@@ -248,7 +280,7 @@ func acquireSession(partition string) (*Session, func(), error) {
 				evicted = lruEntry.session
 			}
 		}
-		globalMu.Unlock()
+		sessionMu.Unlock()
 		// Close evicted session outside the lock — Close hits the FFI
 		// and we don't want to serialize all encrypts behind eviction.
 		if evicted != nil {

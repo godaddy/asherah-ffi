@@ -188,16 +188,16 @@ Branch: `fix/review-2026-05-05-priority`. One commit per defect group, in priori
 
 ### Ruby
 - [x] **B — `asherah-ruby/lib/asherah/native.rb:79-80`** `attach_function` lacks `blocking: true`. — *fixed in `d7663b3`; `blocking: true` added to factory_new_*, apply_config_json, encrypt/decrypt, and the async-enqueue twins.*
-- [ ] **B — `asherah-ruby/lib/asherah/session.rb:38-44, 49-55`** Thread-local `AsherahBuffer` reuse without `begin/ensure`. — *deferred (Ruby-side change; needs Ruby maintainer review).*
+- [x] **B — `asherah-ruby/lib/asherah/session.rb:38-44, 49-55`** Thread-local `AsherahBuffer` reuse without `begin/ensure`. — *fixed in pending commit; both `encrypt_bytes` and `decrypt_bytes` now wrap the `read_bytes` + `asherah_buffer_free` pair in `begin/ensure` so the wipe runs even if `read_bytes` raises. Without this, a partial buffer could be left with plaintext until the next successful call on the same thread.*
 - [ ] **S — `asherah-ruby/lib/asherah.rb:85-91, 117-123, 172-186`** `setup_async`/`shutdown_async`/`encrypt_async`/`decrypt_async` swallow Thread exceptions.
 
 ### Go
-- [ ] **B — `asherah-go/asherah.go:193-264`** `globalMu` write lock on every cache hit just for `MoveToBack`; serializes whole library.
+- [x] **B — `asherah-go/asherah.go:193-264`** `globalMu` write lock on every cache hit just for `MoveToBack`; serializes whole library. — *fixed in pending commit; introduced a dedicated `sessionMu sync.Mutex` for cache mutations. The cache-hit fast path no longer takes the global RWMutex — it acquires `sessionMu` only, so concurrent encrypts on different partitions don't serialize behind setup/shutdown operations. Lock ordering (`globalMu` first, then `sessionMu`) is preserved in `Setup`/`Shutdown` so cache initialization/teardown remains atomic with respect to `acquireSession`.*
 - [ ] **S — `asherah-go/ffi.go:25-40`** `lastErrorMessage` reads thread-local C string from arbitrary OS thread.
 - [ ] **S — `asherah-go` plaintext** Returned plaintext `[]byte` lingers in Go heap unwiped after `asherah_buffer_free`.
 
 ### .NET
-- [ ] **B — `asherah-dotnet/src/GoDaddy.Asherah.Encryption/AsherahSession.cs:239-253`** `Dispose()` SpinWait on `_pendingOps` with no deadline; can pin a thread until process exit.
+- [x] **B — `asherah-dotnet/src/GoDaddy.Asherah.Encryption/AsherahSession.cs:239-253`** `Dispose()` SpinWait on `_pendingOps` with no deadline; can pin a thread until process exit. — *fixed in pending commit; `Dispose` now bounds the spin-wait by a configurable deadline (default 5s, override via `ASHERAH_DOTNET_DISPOSE_TIMEOUT_MS`). On timeout it logs to `Debug.WriteLine` and proceeds with native cleanup. Late callbacks remain safe because they decrement `_pendingOps` via existing `finally` blocks and the FFI side holds a refcount on the underlying SharedSession.*
 - [ ] **S — `AsherahSession.cs:263-274, 307`** Managed `byte[]` plaintext from `Marshal.Copy` never wiped; consider `CryptographicOperations.ZeroMemory`.
 - [ ] **S — `AsherahSession.cs:282-316`** `[UnmanagedCallersOnly]` callback can let `SetException` exception unwind into native code (UB in .NET 8).
 

@@ -38,9 +38,16 @@ module Asherah
       buf = thread_local_buffer
       status = Native.asherah_encrypt_to_json(@pointer, data, data.bytesize, buf.pointer)
       raise Asherah::Error::EncryptFailed, Native.last_error unless status.zero?
-      result = buf[:data].read_bytes(buf[:len])
-      Native.asherah_buffer_free(buf.pointer)
-      result
+      # `begin/ensure` so the FFI buffer is always freed (and its
+      # plaintext bytes wiped via `asherah_buffer_free`'s zeroize) even
+      # if `read_bytes` throws — without this the thread-local buffer
+      # would leak the previous call's plaintext until the next
+      # successful encrypt/decrypt on the same thread.
+      begin
+        buf[:data].read_bytes(buf[:len])
+      ensure
+        Native.asherah_buffer_free(buf.pointer)
+      end
     end
 
     def decrypt_bytes(json)
@@ -49,9 +56,13 @@ module Asherah
       buf = thread_local_buffer
       status = Native.asherah_decrypt_from_json(@pointer, json, json.bytesize, buf.pointer)
       raise Asherah::Error::DecryptFailed, Native.last_error unless status.zero?
-      result = buf[:data].read_bytes(buf[:len])
-      Native.asherah_buffer_free(buf.pointer)
-      result
+      # See encrypt_bytes — `ensure` guarantees the wipe runs even if
+      # the read_bytes call somehow raises.
+      begin
+        buf[:data].read_bytes(buf[:len])
+      ensure
+        Native.asherah_buffer_free(buf.pointer)
+      end
     end
 
     # True async encrypt — runs on Rust's tokio runtime, does not block the Ruby thread.
