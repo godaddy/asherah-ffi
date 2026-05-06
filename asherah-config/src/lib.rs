@@ -168,14 +168,21 @@ impl ConfigOptions {
 
     /// Resolve into a structured config — no env var reads or writes.
     pub fn resolve(&self) -> Result<(ResolvedConfig, AppliedConfig)> {
-        // KMS aliases are not normalized here — `test-debug-static` keeps a
-        // distinct identity so it can supply the publicly known fixed key
-        // when no `static_master_key_hex` is provided. `KMS=static` requires
-        // the caller to explicitly set the key.
+        // KMS aliases: `static` and `test-debug-static` are synonyms.
+        // `test-debug-static` is the preferred identifier because it
+        // makes the non-production nature obvious, but both must behave
+        // identically to preserve interop with the canonical Go
+        // implementation of Asherah (which accepts `static` and falls
+        // back to the well-known test key when no hex is provided).
+        // The fail-fast on empty `StaticMasterKeyHex` previously here
+        // diverged from Go-canonical behavior; the static-KMS path
+        // already logs a loud warning and tagged the test key as
+        // public, which is the right safety net.
         fn normalize_alias(value: &str) -> String {
             match value.to_lowercase().as_str() {
                 "test-debug-memory" => "memory".to_string(),
                 "test-debug-sqlite" => "sqlite".to_string(),
+                "test-debug-static" => "static".to_string(),
                 other => other.to_string(),
             }
         }
@@ -255,15 +262,12 @@ impl ConfigOptions {
         let kms_raw = self.kms.as_deref().unwrap_or("static");
         let kms_kind = normalize_alias(kms_raw);
         let kms = match kms_kind.as_str() {
+            // `static` and `test-debug-static` collapse to the same
+            // arm via `normalize_alias` above. Falls back to the
+            // publicly-known test key when no hex is supplied (this
+            // matches Go-canonical asherah behavior); the static-KMS
+            // builder log-warns loudly that the key is non-production.
             "static" => KmsConfig::Static {
-                key_hex: self.static_master_key_hex.clone().ok_or_else(|| {
-                    anyhow!(
-                        "KMS=static requires StaticMasterKeyHex (64-char hex). For local \
-                         testing, set KMS=test-debug-static to use a publicly known fixed key."
-                    )
-                })?,
-            },
-            "test-debug-static" => KmsConfig::Static {
                 key_hex: self
                     .static_master_key_hex
                     .clone()
