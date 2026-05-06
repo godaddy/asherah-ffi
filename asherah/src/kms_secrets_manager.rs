@@ -142,13 +142,14 @@ async fn fetch_secret(
         // heap. T-finding "Hex decode hand-loop; no `0x` strip,
         // whitespace-only outer trim" in
         // `docs/review-2026-05-05-findings.md`.
-        let cleaned: String = hex
-            .trim()
-            .trim_start_matches("0x")
-            .trim_start_matches("0X")
-            .chars()
-            .filter(|ch| !ch.is_whitespace())
-            .collect();
+        let cleaned = Zeroizing::new(
+            hex.trim()
+                .trim_start_matches("0x")
+                .trim_start_matches("0X")
+                .chars()
+                .filter(|ch| !ch.is_whitespace())
+                .collect::<String>(),
+        );
         if !cleaned.len().is_multiple_of(2) {
             anyhow::bail!(
                 "Secrets Manager secret has odd-length hex string ({} chars after trim)",

@@ -99,7 +99,8 @@ impl KeyManagementService for MultiKms {
 /// Heuristic: distinguish errors where retrying another region/backend
 /// is pointless (AccessDenied, InvalidKey, NotAuthorized — the caller's
 /// identity won't suddenly gain permission in a different region) from
-/// errors that warrant a fallback (Throttling, ServerError, network).
+/// errors that warrant a fallback (InvalidCiphertext, Throttling,
+/// ServerError, network).
 ///
 /// We can't pattern-match on AWS SDK typed variants because `MultiKms`
 /// is generic over `dyn KeyManagementService`. Falls back to substring
@@ -114,7 +115,6 @@ fn is_terminal_kms_error(err: &anyhow::Error) -> bool {
         "NotAuthorized",
         "InvalidKey",
         "DisabledException",
-        "InvalidCiphertextException",
         "KMSInvalidKeyUsageException",
     ];
     needles.iter().any(|n| chain.contains(n))
@@ -146,6 +146,32 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct AwsLikeFallbackKms {
+        counter: &'static AtomicUsize,
+        id: u8,
+        err: &'static str,
+    }
+
+    #[async_trait]
+    impl KeyManagementService for AwsLikeFallbackKms {
+        fn encrypt_key(&self, _ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+            self.counter.fetch_add(1, Ordering::Relaxed);
+            let mut out = vec![self.id];
+            out.extend_from_slice(key_bytes);
+            Ok(out)
+        }
+
+        fn decrypt_key(&self, _ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+            self.counter.fetch_add(1, Ordering::Relaxed);
+            if blob.first().copied() == Some(self.id) {
+                Ok(blob[1..].to_vec())
+            } else {
+                Err(anyhow::anyhow!("{}", self.err))
+            }
+        }
+    }
+
     #[test]
     fn multi_kms_pref_encrypts_on_preferred_and_fallbacks_on_decrypt() -> anyhow::Result<()> {
         static C1: AtomicUsize = AtomicUsize::new(0);
@@ -161,6 +187,62 @@ mod tests {
         let out = mk2.decrypt_key(&(), &blob)?;
         assert_eq!(out, pt);
         Ok(())
+    }
+
+    #[test]
+    fn multi_kms_fallbacks_after_invalid_ciphertext_exception() -> anyhow::Result<()> {
+        static WRONG: AtomicUsize = AtomicUsize::new(0);
+        static RIGHT: AtomicUsize = AtomicUsize::new(0);
+
+        let wrong: Arc<dyn KeyManagementService> = Arc::new(AwsLikeFallbackKms {
+            counter: &WRONG,
+            id: 1,
+            err: "InvalidCiphertextException: ciphertext was not encrypted by this key",
+        });
+        let right: Arc<dyn KeyManagementService> = Arc::new(AwsLikeFallbackKms {
+            counter: &RIGHT,
+            id: 2,
+            err: "wrong region",
+        });
+
+        let encrypted = right.encrypt_key(&(), b"region secret")?;
+        let multi = MultiKms::new(0, vec![wrong, right])?;
+        let out = multi.decrypt_key(&(), &encrypted)?;
+
+        assert_eq!(out, b"region secret");
+        assert_eq!(WRONG.load(Ordering::Relaxed), 1);
+        assert_eq!(RIGHT.load(Ordering::Relaxed), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn multi_kms_still_aborts_on_access_denied() {
+        static DENIED: AtomicUsize = AtomicUsize::new(0);
+        static FALLBACK: AtomicUsize = AtomicUsize::new(0);
+
+        let denied: Arc<dyn KeyManagementService> = Arc::new(AwsLikeFallbackKms {
+            counter: &DENIED,
+            id: 1,
+            err: "AccessDeniedException: caller is not authorized",
+        });
+        let fallback: Arc<dyn KeyManagementService> = Arc::new(AwsLikeFallbackKms {
+            counter: &FALLBACK,
+            id: 2,
+            err: "wrong region",
+        });
+        let encrypted = fallback.encrypt_key(&(), b"secret").unwrap();
+        FALLBACK.store(0, Ordering::Relaxed);
+
+        let multi = MultiKms::new(0, vec![denied, fallback]).unwrap();
+        let err = multi.decrypt_key(&(), &encrypted).unwrap_err();
+
+        assert!(format!("{err:#}").contains("terminally"));
+        assert_eq!(DENIED.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            FALLBACK.load(Ordering::Relaxed),
+            0,
+            "AccessDenied must not fan out to later KMS backends"
+        );
     }
 
     #[test]

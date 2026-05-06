@@ -134,25 +134,49 @@ public sealed class AsherahSession : IAsherahSession
             throw new ArgumentNullException(nameof(plaintext));
         }
         EnsureNotDisposed();
+        bool addedRef = false;
+        _handle.DangerousAddRef(ref addedRef);
         Interlocked.Increment(ref _pendingOps);
 
         var tcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
         var gcHandle = GCHandle.Alloc(new AsyncCallbackState(tcs, this));
+        var stateOwnedByCaller = true;
 
-        fixed (byte* ptr = plaintext)
+        try
         {
-            var status = NativeMethods.asherah_encrypt_to_json_async(
-                _handle.DangerousGetHandle(),
-                ptr,
-                new UIntPtr((ulong)plaintext.LongLength),
-                &AsyncCompletionCallback,
-                GCHandle.ToIntPtr(gcHandle));
+            fixed (byte* ptr = plaintext)
+            {
+                var status = NativeMethods.asherah_encrypt_to_json_async(
+                    _handle.DangerousGetHandle(),
+                    ptr,
+                    new UIntPtr((ulong)plaintext.LongLength),
+                    &AsyncCompletionCallback,
+                    GCHandle.ToIntPtr(gcHandle));
 
-            if (status != 0)
+                if (status != 0)
+                {
+                    gcHandle.Free();
+                    Interlocked.Decrement(ref _pendingOps);
+                    stateOwnedByCaller = false;
+                    throw NativeError.Create("encrypt_to_json_async");
+                }
+                stateOwnedByCaller = false;
+            }
+        }
+        catch
+        {
+            if (stateOwnedByCaller)
             {
                 gcHandle.Free();
                 Interlocked.Decrement(ref _pendingOps);
-                throw NativeError.Create("encrypt_to_json_async");
+            }
+            throw;
+        }
+        finally
+        {
+            if (addedRef)
+            {
+                _handle.DangerousRelease();
             }
         }
 
@@ -191,25 +215,49 @@ public sealed class AsherahSession : IAsherahSession
                 "decrypt: ciphertext is empty (expected a DataRowRecord JSON envelope)"));
         }
         EnsureNotDisposed();
+        bool addedRef = false;
+        _handle.DangerousAddRef(ref addedRef);
         Interlocked.Increment(ref _pendingOps);
 
         var tcs = new TaskCompletionSource<byte[]>(TaskCreationOptions.RunContinuationsAsynchronously);
         var gcHandle = GCHandle.Alloc(new AsyncCallbackState(tcs, this));
+        var stateOwnedByCaller = true;
 
-        fixed (byte* ptr = ciphertextJson)
+        try
         {
-            var status = NativeMethods.asherah_decrypt_from_json_async(
-                _handle.DangerousGetHandle(),
-                ptr,
-                new UIntPtr((ulong)ciphertextJson.LongLength),
-                &AsyncCompletionCallback,
-                GCHandle.ToIntPtr(gcHandle));
+            fixed (byte* ptr = ciphertextJson)
+            {
+                var status = NativeMethods.asherah_decrypt_from_json_async(
+                    _handle.DangerousGetHandle(),
+                    ptr,
+                    new UIntPtr((ulong)ciphertextJson.LongLength),
+                    &AsyncCompletionCallback,
+                    GCHandle.ToIntPtr(gcHandle));
 
-            if (status != 0)
+                if (status != 0)
+                {
+                    gcHandle.Free();
+                    Interlocked.Decrement(ref _pendingOps);
+                    stateOwnedByCaller = false;
+                    throw NativeError.Create("decrypt_from_json_async");
+                }
+                stateOwnedByCaller = false;
+            }
+        }
+        catch
+        {
+            if (stateOwnedByCaller)
             {
                 gcHandle.Free();
                 Interlocked.Decrement(ref _pendingOps);
-                throw NativeError.Create("decrypt_from_json_async");
+            }
+            throw;
+        }
+        finally
+        {
+            if (addedRef)
+            {
+                _handle.DangerousRelease();
             }
         }
 

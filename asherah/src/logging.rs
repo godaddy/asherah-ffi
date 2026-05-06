@@ -77,14 +77,10 @@ pub fn ensure_logger() -> Result<(), log::SetLoggerError> {
 
 pub fn set_sink(name: &'static str, sink: Option<Arc<dyn LogSink>>) {
     let mut guard = SUBSCRIBERS.write();
-    match sink {
-        Some(s) => {
-            guard.insert(name, s);
-        }
-        None => {
-            guard.remove(name);
-        }
-    }
+    let old_sink = match sink {
+        Some(s) => guard.insert(name, s),
+        None => guard.remove(name),
+    };
     // Compute the effective max level: the max of every registered
     // sink's `min_level()` (defaults to `Trace` for unimplemented
     // hooks). Empty map → `Off` so log macros short-circuit when no
@@ -95,6 +91,7 @@ pub fn set_sink(name: &'static str, sink: Option<Arc<dyn LogSink>>) {
         .max()
         .unwrap_or(log::LevelFilter::Off);
     drop(guard);
+    drop(old_sink);
 
     // Only manage the global level filter if we actually own the logger.
     // If a different logger was registered before us we leave it alone.

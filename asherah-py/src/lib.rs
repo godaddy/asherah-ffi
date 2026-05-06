@@ -121,10 +121,13 @@ fn setenv(env_obj: &Bound<'_, PyAny>) -> PyResult<()> {
 #[pyfunction]
 fn encrypt_bytes(py: Python<'_>, partition_id: &str, data: &[u8]) -> PyResult<String> {
     let session = with_manager(|mgr| Ok(mgr.get_or_create_session(partition_id)))?;
+    let input = Zeroizing::new(data.to_vec());
     // Release the GIL across the encrypt — encrypt may hit MySQL/Postgres
     // and AWS KMS, both of which can block for tens of milliseconds. T5 in
     // docs/review-2026-05-05-findings.md.
-    let drr = py.detach(|| session.encrypt(data)).map_err(anyhow_to_py)?;
+    let drr = py
+        .detach(|| session.encrypt(&input))
+        .map_err(anyhow_to_py)?;
     let json = serde_json::to_string(&drr)
         .map_err(|e| PyRuntimeError::new_err(format!("json error: {e}")))?;
     Ok(json)
@@ -347,11 +350,12 @@ pub struct PySession {
 #[pymethods]
 impl PySession {
     pub fn encrypt_bytes(&self, py: Python<'_>, data: &[u8]) -> PyResult<String> {
+        let input = Zeroizing::new(data.to_vec());
         // Release the GIL across the encrypt — the operation can hit
         // MySQL/Postgres and AWS KMS, both blocking. T5 in
         // docs/review-2026-05-05-findings.md.
         let drr = py
-            .detach(|| self.inner.encrypt(data))
+            .detach(|| self.inner.encrypt(&input))
             .map_err(anyhow_to_py)?;
         serde_json::to_string(&drr).map_err(|e| PyRuntimeError::new_err(format!("json error: {e}")))
     }

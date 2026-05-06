@@ -66,11 +66,19 @@ pub fn set_sink<T: MetricsSink>(sink: T) {
     // which already used `parking_lot::RwLock`. T-finding
     // "Inconsistent std::sync::RwLock vs parking_lot::RwLock" in
     // `docs/review-2026-05-05-findings.md`.
-    *SINK.write() = Box::new(sink);
+    let old_sink = {
+        let mut guard = SINK.write();
+        std::mem::replace(&mut *guard, Box::new(sink))
+    };
+    drop(old_sink);
 }
 
 pub fn clear_sink() {
-    *SINK.write() = Box::new(NoopSink);
+    let old_sink = {
+        let mut guard = SINK.write();
+        std::mem::replace(&mut *guard, Box::new(NoopSink))
+    };
+    drop(old_sink);
 }
 
 pub fn set_enabled(enabled: bool) {
