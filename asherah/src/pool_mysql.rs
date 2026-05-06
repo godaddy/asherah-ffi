@@ -689,4 +689,32 @@ mod tests {
         let slot = pool.reaper_handle.lock().unwrap();
         assert!(slot.is_none(), "close() should have taken the join handle");
     }
+
+    /// Regression for the lost-wake race fixed in the hotfix
+    /// conversation: sleeps long enough for the reaper to enter
+    /// `wait_timeout` before `close()` runs, exercising the
+    /// "reaper already sleeping" branch that the previous test
+    /// (which calls close immediately after construction) doesn't
+    /// reliably hit.
+    #[test]
+    fn close_wakes_reaper_already_sleeping() {
+        let cfg = PoolConfig {
+            reaper_interval: Some(Duration::from_secs(60)),
+            ..test_config()
+        };
+        let pool = ManagedPool::new(dummy_opts(), cfg);
+        // Give the reaper time to acquire `reaper_lock` and enter
+        // `wait_timeout`. Without the synchronization through
+        // `reaper_lock` in `close()`, the store-then-notify sequence
+        // could race the reaper's pre-wait `closed` check and lose the
+        // wake.
+        std::thread::sleep(Duration::from_millis(250));
+        let start = Instant::now();
+        pool.close();
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "close() must wake an already-sleeping reaper — took {elapsed:?}"
+        );
+    }
 }
