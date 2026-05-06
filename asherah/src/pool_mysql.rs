@@ -291,14 +291,22 @@ impl ManagedPool {
                             Some(p) => p,
                             None => break, // Pool dropped
                         };
+                        // Re-check `closed` inside `reaper_lock`. Pairs with
+                        // `close()`'s own acquisition of `reaper_lock` to
+                        // close the lost-wake race: without serializing
+                        // through this mutex, `close()` could store
+                        // `closed = true` and `notify_all` between this
+                        // check and `wait_timeout`, leaving the reaper
+                        // asleep for the full interval.
+                        let guard = pool.reaper_lock.lock().unwrap_or_else(|e| e.into_inner());
                         if pool.closed.load(Ordering::Relaxed) {
                             break;
                         }
-                        let guard = pool.reaper_lock.lock().unwrap_or_else(|e| e.into_inner());
-                        let _unused = pool
+                        let (guard, _) = pool
                             .reaper_cv
                             .wait_timeout(guard, interval)
                             .unwrap_or_else(|e| e.into_inner());
+                        drop(guard);
                         if pool.closed.load(Ordering::Relaxed) {
                             break;
                         }
@@ -326,12 +334,17 @@ impl ManagedPool {
     /// Get a connection from the pool. Blocks if `max_open` is reached until
     /// a connection is returned by another thread.
     pub fn get_conn(self: &Arc<Self>) -> anyhow::Result<ManagedConn> {
-        if self.closed.load(Ordering::Relaxed) {
-            anyhow::bail!("MySQL pool is closed");
-        }
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 
         loop {
+            // Re-check on every iteration: a caller blocked at `condvar.wait`
+            // below wakes when `close()` calls `notify_all`. Without this
+            // check, the wakeup falls back into the idle-reuse / new-conn
+            // arms and silently bypasses the closed flag.
+            if self.closed.load(Ordering::Relaxed) {
+                anyhow::bail!("MySQL pool is closed");
+            }
+
             // Try to reuse an idle connection
             while let Some(idle) = inner.idle.pop_front() {
                 let now = Instant::now();
@@ -467,6 +480,20 @@ impl ManagedPool {
         inner.idle.clear();
         drop(inner);
         self.open_count.fetch_sub(count, Ordering::Relaxed);
+
+        // Synchronize with the reaper through `reaper_lock` before notifying.
+        // The reaper checks `closed` inside the same lock, so this pairing
+        // guarantees one of two outcomes:
+        //   1. We acquire first → reaper is still pre-lock; once we release
+        //      it acquires, sees `closed == true`, and breaks without
+        //      sleeping.
+        //   2. Reaper holds the lock and is in `wait_timeout` → we block
+        //      until the wait releases the lock briefly; our subsequent
+        //      `notify_all` wakes the wait, the reaper re-checks `closed`
+        //      and breaks.
+        // Without this acquisition, `close()` could store + notify between
+        // the reaper's check and its wait, losing the wake.
+        drop(self.reaper_lock.lock().unwrap_or_else(|e| e.into_inner()));
 
         // Wake the reaper so it can observe `closed = true` and exit.
         self.reaper_cv.notify_all();
@@ -659,5 +686,32 @@ mod tests {
         // Reaper handle must have been taken (joined or absent).
         let slot = pool.reaper_handle.lock().unwrap();
         assert!(slot.is_none(), "close() should have taken the join handle");
+    }
+
+    /// Regression test for the lost-wake race in the reaper. Sleeps long
+    /// enough for the reaper thread to enter `wait_timeout` before `close()`
+    /// runs, so that we exercise the "reaper already sleeping" branch
+    /// rather than the "reaper hasn't started yet" branch covered by the
+    /// previous test.
+    #[test]
+    fn close_wakes_reaper_already_sleeping() {
+        let cfg = PoolConfig {
+            reaper_interval: Some(Duration::from_secs(60)),
+            ..test_config()
+        };
+        let pool = ManagedPool::new(dummy_opts(), cfg);
+        // Give the reaper time to acquire `reaper_lock` and enter
+        // `wait_timeout`. Without the synchronization through
+        // `reaper_lock` in `close()`, the store-then-notify sequence
+        // could race the reaper's pre-wait `closed` check and lose the
+        // wake.
+        std::thread::sleep(Duration::from_millis(250));
+        let start = Instant::now();
+        pool.close();
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "close() must wake an already-sleeping reaper — took {elapsed:?}"
+        );
     }
 }
