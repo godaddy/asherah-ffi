@@ -64,12 +64,21 @@ impl Metastore for InMemoryMetastore {
     ) -> Result<bool, anyhow::Error> {
         let interned: Arc<str> = Arc::from(id);
         let key = (interned.clone(), created);
+        // Insert the row *before* advancing the latest pointer. A
+        // concurrent `load_latest` reads `latest` and then reads
+        // `by_key[(id, latest)]`; if we advanced the pointer first, a
+        // reader could observe a `created` that points at a row that
+        // hasn't been inserted yet and incorrectly conclude no row
+        // exists. By inserting first, any reader that observes the
+        // new pointer is guaranteed to find the row.
+        match self.by_key.insert(key, ekr.clone()) {
+            Ok(_) => {}
+            Err(_) => return Ok(false), // (id, created) already exists
+        }
         // Atomically advance the latest pointer for `id` to `created`,
         // but only when it's an actual advance. The previous read+upsert
         // pattern was racy: a slower writer with a smaller `created`
-        // could overwrite a faster writer's larger value (T-finding
-        // "InMemoryMetastore::store race on latest pointer" in
-        // docs/review-2026-05-05-findings.md).
+        // could overwrite a faster writer's larger value.
         //
         // `scc::HashMap::update` runs the closure under the bucket lock,
         // so the conditional advance is atomic. If the entry is missing
@@ -93,10 +102,7 @@ impl Metastore for InMemoryMetastore {
             }
             // Another writer raced ahead of our insert; loop to update.
         }
-        match self.by_key.insert(key, ekr.clone()) {
-            Ok(_) => Ok(true),
-            Err(_) => Ok(false), // Key already exists
-        }
+        Ok(true)
     }
     fn region_suffix(&self) -> Option<String> {
         None
