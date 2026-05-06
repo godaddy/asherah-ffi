@@ -84,6 +84,16 @@ fn write_canaries(buf: &mut [u8], offset: usize) {
     }
 }
 
+/// Test-only re-export of `verify_canaries` for the subprocess test
+/// in `tests/canary_subprocess.rs`. Wrapping it in a `pub fn` rather
+/// than re-exporting the original keeps the production surface
+/// unchanged (the inner `verify_canaries` stays `fn` in the cobhan
+/// crate). Only available with the `test-helpers` feature enabled.
+#[cfg(feature = "test-helpers")]
+pub fn verify_canaries_for_test(buf: &[u8], offset: usize) {
+    verify_canaries(buf, offset);
+}
+
 /// Verifies canary values at the given offset in a buffer.
 /// Panics (aborts) if canaries are corrupted, matching C++ std::terminate behavior.
 fn verify_canaries(buf: &[u8], offset: usize) {
@@ -221,6 +231,17 @@ unsafe fn cobhan_buffer_get_length(buf: *const c_char) -> i32 {
 }
 
 /// Writes the length to a cobhan buffer header.
+///
+/// **Unchecked**: this helper does *not* compare `len` against the
+/// buffer's pre-existing capacity field. Callers that flow user data
+/// into the buffer must use [`cobhan_bytes_to_buffer`] (which reads
+/// the capacity from the header bytes 0-3 and rejects with
+/// [`ERR_BUFFER_TOO_SMALL`] when `len > capacity`) instead. The only
+/// internal callers that bypass that wrapper are resetting an output
+/// buffer's length to a known-safe value (e.g. `0` or a value already
+/// validated against capacity earlier in the same function).
+/// T-finding "cobhan_buffer_set_length doesn't validate against
+/// capacity" in `docs/review-2026-05-05-findings.md`.
 unsafe fn cobhan_buffer_set_length(buf: *mut c_char, len: i32) {
     if buf.is_null() {
         return;
