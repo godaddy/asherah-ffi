@@ -105,6 +105,15 @@ fn set_error(msg: impl Into<String>) {
 /// flow to language bindings, but operators need the full chain to
 /// debug. T-finding "format!(\"{e:#}\") returns full anyhow chain to
 /// user callbacks" in `docs/review-2026-05-05-findings.md`.
+///
+/// **Note for maintainers:** `decrypt_from_json` deliberately bypasses
+/// this helper for serde_json parser failures because `serde_json`'s
+/// `Display` already includes the offending input snippet ("expected
+/// ident at line N column M ..."), which on a corrupted/truncated
+/// envelope can expose ciphertext-structure information. That call
+/// site uses a hand-crafted "decrypt_from_json: invalid JSON: {e}"
+/// message and a separate `log::warn!` for the full chain. Don't
+/// unify the two paths without re-checking that.
 fn set_error_sanitized(op: &str, err: &anyhow::Error) {
     log::warn!("{op} failed: {err:#}");
     set_error(format!("{op} failed: {err}"));

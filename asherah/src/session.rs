@@ -423,35 +423,27 @@ impl<
                 .unwrap_or(0),
         })?;
         let ik = self.intermediate_key_from_ekr(&sk, &ik_ekr)?;
-        // decrypt DRK then data
-        let mut drk = ik
-            .with_key_func(|ikb| self.f.crypto.decrypt(&key.encrypted_key, ikb))
-            .context("decrypt: failed to decrypt DRK with IK")??;
-        // Use a guard so the DRK is wiped on every exit path — including
-        // the AEAD-decrypt error case below. The async/PublicSession
-        // paths use DrkGuard; the legacy path previously skipped the
-        // wipe on AEAD failure (T-finding "Legacy decrypt doesn't wipe
-        // drk when AEAD fails" in docs/review-2026-05-05-findings.md).
-        struct DrkWipe<'drk>(&'drk mut [u8]);
-        impl Drop for DrkWipe<'_> {
-            fn drop(&mut self) {
-                crate::memguard::wipe_bytes(self.0);
-            }
-        }
-        let drk_guard = DrkWipe(&mut drk[..]);
-        // SAFETY-equivalent: the guard borrows drk for the rest of this
-        // scope. The decrypt call only needs `&[u8]`, so we re-slice
-        // through the guard's owned reference.
-        let pt = {
-            let drk_slice: &[u8] = drk_guard.0;
-            self.f
-                .crypto
-                .decrypt(&drr.data, drk_slice)
-                .context("decrypt: failed to decrypt data with DRK")?
-        };
-        // Explicit drop documents the wipe order: drk is wiped before
-        // returning the plaintext.
-        drop(drk_guard);
+        // decrypt DRK then data. The DRK is wrapped in `Zeroizing` so
+        // it is volatile-wiped on every exit path — including the
+        // AEAD-decrypt error case below. The async/`PublicSession`
+        // paths use a stack-allocated `DrkGuard([u8; 32])`; here the
+        // DRK starts life as a `Vec<u8>` from `crypto.decrypt`, so
+        // wrapping in `Zeroizing<Vec<u8>>` is the equivalent shape.
+        // T-finding "Legacy decrypt doesn't wipe drk when AEAD fails"
+        // in `docs/review-2026-05-05-findings.md`. The previous
+        // implementation defined an inline `DrkWipe<'drk>` borrow-
+        // guard struct that drifted from the canonical `DrkGuard`;
+        // unified by switching to the `Zeroizing` wrapper.
+        let drk: zeroize::Zeroizing<Vec<u8>> = zeroize::Zeroizing::new(
+            ik.with_key_func(|ikb| self.f.crypto.decrypt(&key.encrypted_key, ikb))
+                .context("decrypt: failed to decrypt DRK with IK")??,
+        );
+        let pt = self
+            .f
+            .crypto
+            .decrypt(&drr.data, &drk)
+            .context("decrypt: failed to decrypt data with DRK")?;
+        // `drk` Zeroizing wrapper drops at end of function → wipes.
         // pt is the decrypted plaintext; the FFI layers (asherah_buffer_free,
         // asherah-cobhan Decrypt/DecryptFromJson) are responsible for zeroing
         // it before deallocation.

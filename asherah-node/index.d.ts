@@ -282,6 +282,27 @@ export declare function decryptString(partitionId: string, dataRowRecordJson: st
 /** Async variant of {@link decryptString}. */
 export declare function decryptStringAsync(partitionId: string, dataRowRecordJson: string): Promise<string>;
 
+/**
+ * Best-effort wipe of a plaintext `Buffer` returned by {@link decrypt}
+ * or {@link decryptAsync}.
+ *
+ * The native (Rust) buffer is volatile-wiped before the Buffer reaches
+ * JavaScript, but the V8 `Buffer` lives on the JS heap where the GC may
+ * have already copied the bytes during compaction. Pass the Buffer here
+ * to overwrite its current backing store with zeros via
+ * `buffer.fill(0)`. Mirrors `Zeroize([]byte)` in the Go binding,
+ * `AsherahSession.ZeroizePlaintext(byte[])` in .NET, and
+ * `Asherah.clearPlaintext(byte[])` in Java.
+ *
+ * **Caveat:** treat the plaintext as opaque within a tight scope and
+ * never copy or substring it before clearing — V8 may have aliased
+ * portions of the underlying ArrayBuffer that this call doesn't reach.
+ *
+ * T-finding "Node has no parallel `clearPlaintext`" in
+ * `docs/review-2026-05-05-findings.md`.
+ */
+export declare function clearPlaintext(plaintext: Buffer | null | undefined): void;
+
 // ─── Factory / Session API (recommended) ────────────────────────────────────
 
 /**

@@ -138,6 +138,25 @@ public final class Asherah {
         .thenApply(bytes -> new String(bytes, StandardCharsets.UTF_8));
   }
 
+  /**
+   * Decrypts the supplied DataRowRecord JSON and returns the plaintext bytes.
+   *
+   * <p><b>Plaintext lifecycle:</b> the returned {@code byte[]} lives on the
+   * JVM heap, where Garbage Collection may relocate or copy the buffer at
+   * any time. The native (Rust) buffer that produced these bytes is
+   * volatile-wiped before this method returns, but the JVM has no
+   * deterministic-wipe primitive equivalent to .NET's
+   * {@code CryptographicOperations.ZeroMemory} or Go's {@code Zeroize}.
+   * For best-effort wipe of the returned array, use
+   * {@link #clearPlaintext(byte[])} as soon as the plaintext is no longer
+   * needed; treat it as opaque within a tight scope and never copy or
+   * substring it before clearing. T-finding "Java has no clearPlaintext
+   * helper or doc" in {@code docs/review-2026-05-05-findings.md}.
+   *
+   * @param partitionId        partition ID to derive the session from
+   * @param dataRowRecordJson  serialized DataRowRecord
+   * @return plaintext bytes; never null
+   */
   public static byte[] decrypt(final String partitionId, final byte[] dataRowRecordJson) {
     Objects.requireNonNull(partitionId, "partitionId");
     Objects.requireNonNull(dataRowRecordJson, "dataRowRecordJson");
@@ -152,6 +171,29 @@ public final class Asherah {
     } finally {
       LOCK.readLock().unlock();
     }
+  }
+
+  /**
+   * Best-effort wipe of a plaintext byte array via
+   * {@link java.util.Arrays#fill(byte[], byte)}.
+   *
+   * <p><b>Caveat:</b> the JVM's GC may have already copied the array's
+   * contents during compaction, so deterministic wiping requires the
+   * caller never let the array escape into a copy or substring before
+   * this call. Once a plaintext byte[] is returned from {@link #decrypt}
+   * or {@link #decryptAsync}, callers wanting a strong wipe guarantee
+   * should pass it here as soon as the plaintext is no longer needed.
+   *
+   * <p>Mirrors {@code Zeroize([]byte)} in the Go binding and
+   * {@code AsherahSession.ZeroizePlaintext(byte[])} in the .NET binding.
+   *
+   * @param plaintext  plaintext to wipe; null and empty are no-ops
+   */
+  public static void clearPlaintext(final byte[] plaintext) {
+    if (plaintext == null || plaintext.length == 0) {
+      return;
+    }
+    java.util.Arrays.fill(plaintext, (byte) 0);
   }
 
   public static byte[] decryptJson(final String partitionId, final String dataRowRecordJson) {

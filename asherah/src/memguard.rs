@@ -375,15 +375,28 @@ fn nonce_prefix() -> [u8; 4] {
     *NONCE_PREFIX.get_or_init(|| {
         let mut buf = [0_u8; 4];
         if scramble_bytes(&mut buf).is_err() {
-            // OsRng failure during init is rare but recoverable —
-            // fall back to a hash of the process start time, which
-            // still provides cross-process distinctness even if not
-            // cryptographically random.
+            // OsRng failure during init is rare but recoverable. The
+            // emergency fallback mixes the system clock's nanos with
+            // the process ID so two processes starting within the
+            // same second-resolution clock window still get distinct
+            // prefixes. A truncated-nanos-only fallback could repeat
+            // every ~4.3s wraparound window; folding in PID widens
+            // the distinctness to PID × clock-tick granularity. This
+            // is not cryptographic randomness — it is a best-effort
+            // tie-breaker for the catastrophic case where OsRng has
+            // failed at process init.
             let nanos = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_nanos())
-                .unwrap_or(0) as u32;
-            buf.copy_from_slice(&nanos.to_le_bytes());
+                .unwrap_or(0) as u64;
+            let pid = std::process::id() as u64;
+            // Mix via SplitMix64-style avalanche so a small delta in
+            // either input produces a fully-different prefix.
+            let mut z = nanos.wrapping_add(pid.wrapping_mul(0x9E3779B97F4A7C15));
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+            z ^= z >> 31;
+            buf.copy_from_slice(&(z as u32).to_le_bytes());
         }
         buf
     })
@@ -1078,25 +1091,32 @@ impl LockedBuffer {
     }
     /// Return a heap copy of the locked plaintext as a plain `Vec<u8>`.
     ///
+    /// # Production callers: prefer [`bytes_zeroizing`](Self::bytes_zeroizing)
+    ///
     /// **The returned `Vec` is not wiped on drop**: when it goes out of
     /// scope the allocator reclaims the bytes without zeroing them, and
     /// any subsequent allocation on the same arena may observe stale
-    /// plaintext. Production code that needs a plaintext copy should
-    /// prefer [`bytes_zeroizing`](Self::bytes_zeroizing), which returns
-    /// the same data wrapped in `Zeroizing<Vec<u8>>` so the buffer is
-    /// volatile-zeroed when dropped.
+    /// plaintext. The wipe-on-drop variant
+    /// [`bytes_zeroizing`](Self::bytes_zeroizing) returns the same data
+    /// wrapped in `Zeroizing<Vec<u8>>`, which derefs to `&[u8]` /
+    /// `&Vec<u8>` for the vast majority of read-only uses.
     ///
-    /// This method exists for tests, debug printing, and for callers
+    /// This method exists for **tests**, debug printing, and for callers
     /// that need direct equality with another `Vec<u8>` — `Zeroizing`'s
-    /// `PartialEq` does not auto-coerce against unwrapped vecs.
+    /// `PartialEq` does not auto-coerce against unwrapped vecs and
+    /// `assert_eq!(lb.bytes(), vec![...])` is much more readable than
+    /// `assert_eq!(lb.bytes_zeroizing().to_vec(), vec![...])`.
     pub fn bytes(&self) -> Vec<u8> {
         self.0.lock().as_slice().to_vec()
     }
 
-    /// Same as [`bytes`](Self::bytes) but wraps the cloned plaintext in
-    /// `Zeroizing<Vec<u8>>` so it's volatile-zeroed on drop. Prefer this
-    /// when the caller is going to drop the buffer rather than ship it
-    /// onward.
+    /// Wipe-on-drop variant of [`bytes`](Self::bytes). Returns the
+    /// plaintext wrapped in `zeroize::Zeroizing<Vec<u8>>` so it's
+    /// volatile-zeroed when the wrapper is dropped. **Prefer this in
+    /// any production code path that doesn't immediately ship the
+    /// bytes onward** — most read-only consumers can deref the wrapper
+    /// to `&[u8]` without unwrapping.
+    #[must_use]
     pub fn bytes_zeroizing(&self) -> zeroize::Zeroizing<Vec<u8>> {
         zeroize::Zeroizing::new(self.0.lock().as_slice().to_vec())
     }

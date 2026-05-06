@@ -72,7 +72,9 @@ impl<A: AEAD + Send + Sync + 'static> SecretsManagerKMS<A> {
         );
         Ok(Self {
             aead,
-            master_key: Arc::new(Zeroizing::new(master_key)),
+            // `master_key` is already `Zeroizing<Vec<u8>>` from
+            // `fetch_secret`; wrap in Arc for sharing across clones.
+            master_key: Arc::new(master_key),
         })
     }
 
@@ -92,19 +94,26 @@ impl<A: AEAD + Send + Sync + 'static> SecretsManagerKMS<A> {
         );
         Ok(Self {
             aead,
-            master_key: Arc::new(Zeroizing::new(master_key)),
+            // `master_key` is already `Zeroizing<Vec<u8>>` from
+            // `fetch_secret`; wrap in Arc for sharing across clones.
+            master_key: Arc::new(master_key),
         })
     }
 }
 
 /// Fetch a 32-byte master key from AWS Secrets Manager.
 ///
-/// Tries SecretString first (hex-encoded), then SecretBinary (raw 32 bytes).
+/// Tries SecretString first (hex-encoded), then SecretBinary (raw 32
+/// bytes). Returns the key wrapped in `Zeroizing<Vec<u8>>` so the
+/// caller's handoff into its own storage runs entirely under wipe-on-
+/// drop coverage — the previous return shape was an unwrapped `Vec`
+/// that was wrapped at the call site, leaving a microsecond window
+/// where the bytes lived in a non-zeroizing container.
 async fn fetch_secret(
     secret_id: &str,
     region: Option<String>,
     aws_profile_name: Option<&str>,
-) -> anyhow::Result<Vec<u8>> {
+) -> anyhow::Result<Zeroizing<Vec<u8>>> {
     let region_provider = if let Some(r) = region {
         RegionProviderChain::first_try(Region::new(r))
     } else {
@@ -161,12 +170,10 @@ async fn fetch_secret(
                 key.len()
             );
         }
-        // Move the bytes out of the Zeroizing wrapper into the returned
-        // Vec — the wrapper goes out of scope here, but we want the
-        // *caller* to receive an unwiped Vec so they can store it in
-        // their Zeroizing wrapper. The only Zeroizing benefit was
-        // covering the error paths above.
-        return Ok(std::mem::take(&mut *key));
+        // Return the wrapper directly — the caller stores it inside
+        // its own `Arc<Zeroizing<Vec<u8>>>` so wipe-on-drop coverage
+        // is unbroken across the handoff.
+        return Ok(key);
     }
 
     if let Some(blob) = resp.secret_binary() {
@@ -177,7 +184,7 @@ async fn fetch_secret(
                 bytes.len()
             );
         }
-        return Ok(bytes.to_vec());
+        return Ok(Zeroizing::new(bytes.to_vec()));
     }
 
     anyhow::bail!("Secrets Manager secret '{secret_id}' has neither SecretString nor SecretBinary")

@@ -267,8 +267,9 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
     async fn decrypt_key_impl(&self, blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
         // Redact serde_json's error in the user-facing message — its
         // Display includes the offending input snippet ("at line N
-        // column M ..."), which on a corrupted/truncated envelope can
-        // expose ciphertext-structure information. The full chain still
+        // column M near `...`"), which may expose envelope-structure
+        // hints (region names, ARN prefixes, KEK byte boundaries) on
+        // a corrupted or truncated envelope. The full chain still
         // goes to the operator log via `log::error!`. T-finding
         // "serde_json errors with `{e}` include offending input snippet"
         // in `docs/review-2026-05-05-findings.md`.
@@ -330,8 +331,15 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
                     continue;
                 }
             };
-            let dk = match out.plaintext() {
-                Some(p) => p.as_ref().to_vec(),
+            // Wrap the data-key plaintext returned by KMS in
+            // `Zeroizing` so it is volatile-wiped when this iteration's
+            // scope ends — whether the AEAD decrypt succeeds (we
+            // return early), fails (we continue to the next region),
+            // or the function bails. The previous unwrapped `Vec<u8>`
+            // left ~32 bytes of plaintext data-key resident in the
+            // allocator's free list per failed region attempt.
+            let dk: zeroize::Zeroizing<Vec<u8>> = match out.plaintext() {
+                Some(p) => zeroize::Zeroizing::new(p.as_ref().to_vec()),
                 None => {
                     log::debug!(
                         "AwsKmsEnvelope decrypt_key: KMS returned no plaintext for region={}",
@@ -355,6 +363,8 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
                         c.region
                     );
                     failed_regions.push(c.region.clone());
+                    // `dk` Zeroizing wrapper drops at end of loop
+                    // iteration → wipes the data-key bytes.
                 }
             }
         }

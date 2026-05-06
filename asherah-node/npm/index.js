@@ -264,6 +264,23 @@ function decryptAsync(partitionId, dataRowRecord) {
   return native.decryptAsync(partitionId, toBuffer(dataRowRecord));
 }
 
+// Best-effort wipe of a plaintext Buffer. The native (Rust) buffer is
+// volatile-wiped before reaching JS; this clears the JS-side copy.
+// V8 may have aliased portions of the ArrayBuffer that this call
+// doesn't reach, so the wipe is best-effort. Mirrors Go's `Zeroize`,
+// .NET's `ZeroizePlaintext`, and Java's `clearPlaintext`. T-finding
+// "Node has no parallel clearPlaintext" in
+// docs/review-2026-05-05-findings.md.
+function clearPlaintext(plaintext) {
+  if (plaintext == null) {
+    return;
+  }
+  if (typeof plaintext.fill !== 'function') {
+    throw new TypeError('clearPlaintext: argument must be a Buffer or Uint8Array');
+  }
+  plaintext.fill(0);
+}
+
 // Export everything from native addon
 Object.assign(module.exports, native);
 
@@ -272,6 +289,7 @@ module.exports.setup = setup;
 module.exports.setupAsync = setupAsync;
 module.exports.decrypt = decrypt;
 module.exports.decryptAsync = decryptAsync;
+module.exports.clearPlaintext = clearPlaintext;
 
 // snake_case aliases for canonical API compatibility
 module.exports.setup_async = setupAsync;
