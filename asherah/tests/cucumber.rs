@@ -11,7 +11,7 @@ use cucumber::{given, then, when, World as _};
 use serde::{Deserialize, Serialize};
 use testcontainers::core::{IntoContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
-use testcontainers::{GenericImage, ImageExt};
+use testcontainers::GenericImage;
 
 use asherah as ael;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -188,17 +188,36 @@ fn create_store() -> Arc<ael::metastore_mysql::MySqlMetastore> {
 }
 
 /// Start a MySQL container and return (container, connection_url).
+///
+/// Uses `--innodb-use-native-aio=0` so InnoDB falls back to synchronous
+/// I/O when the host's AIO subsystem is exhausted (a common failure on
+/// Docker Desktop for macOS where the linux VM's `aio-max-nr` is shared
+/// across all containers — when another MySQL test container is already
+/// up, `io_setup()` returns EAGAIN and the second container's InnoDB
+/// init aborts before the wait-for-port log line is emitted).
 async fn start_mysql() -> (testcontainers::ContainerAsync<GenericImage>, String) {
+    use testcontainers::ImageExt as _;
     for attempt in 0..3 {
-        let container = GenericImage::new("mysql", "8.1")
+        let start_result = GenericImage::new("mysql", "8.1")
             .with_exposed_port(3306.tcp())
             .with_wait_for(WaitFor::message_on_stderr("port: 3306"))
             .with_env_var("MYSQL_DATABASE", "test")
             .with_env_var("MYSQL_ALLOW_EMPTY_PASSWORD", "yes")
+            .with_cmd(["mysqld", "--innodb-use-native-aio=0"])
             .with_startup_timeout(std::time::Duration::from_secs(120))
             .start()
-            .await
-            .unwrap_or_else(|e| panic!("Docker must be available for cross-language tests: {e}"));
+            .await;
+        let container = match start_result {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!(
+                    "MySQL container start failed (attempt {attempt}): {e}; \
+                     retrying after backoff"
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                continue;
+            }
+        };
 
         match container.get_host_port_ipv4(3306).await {
             Ok(port) => {

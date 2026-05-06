@@ -46,11 +46,15 @@ async function main() {
 }
 
 async function testMinimalAsyncSetup() {
-  // This is how most consumers call it — from an async function
+  // This is how most consumers call it — from an async function.
+  // `kms: 'test-debug-static'` is now required (commit 9049fa4) — the
+  // previous default-to-static path rejects an empty
+  // STATIC_MASTER_KEY_HEX.
   await asherah.setupAsync({
     serviceName: 'e2e-consumer',
     productId: 'e2e-product',
     metastore: 'memory',
+    kms: 'test-debug-static',
   });
 
   const encrypted = asherah.encryptString('user-123', 'sensitive data');

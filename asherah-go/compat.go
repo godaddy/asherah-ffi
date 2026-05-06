@@ -99,6 +99,11 @@ func (s *StaticKMS) DecryptKey(_ context.Context, _ []byte) ([]byte, error) {
 func (s *StaticKMS) applyConfig(cfg *Config) {
 	cfg.KMS = "static"
 	hex := fmt.Sprintf("%x", s.key)
+	// As of asherah core 9049fa4, KMS=static requires the hex key to
+	// be supplied in the JSON config (StaticMasterKeyHex). The env-var
+	// path is only consulted for the env-driven `factory_new_from_env`
+	// constructor; `factory_new_with_config` reads from the JSON.
+	// Continue setting the env for any path that still consults it.
 	cfg.StaticMasterKeyHex = &hex
 	os.Setenv("STATIC_MASTER_KEY_HEX", hex)
 }

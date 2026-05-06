@@ -206,11 +206,15 @@ function testNullConfig() {
 }
 
 async function testNullConfigAsync() {
-  // Async setup with null values
+  // Async setup with null values. `kms: 'test-debug-static'` is now
+  // required (commit 9049fa4) — the previous default-to-static path
+  // rejects an empty STATIC_MASTER_KEY_HEX, so tests must opt into
+  // the publicly-known debug key explicitly.
   await addon.setupAsync({
     serviceName: 'async-null',
     productId: 'async-prod',
     metastore: 'memory',
+    kms: 'test-debug-static',
     expireAfter: null,
     sessionCacheDuration: null,
     enableSessionCaching: null,

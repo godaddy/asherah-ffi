@@ -1315,9 +1315,14 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 20
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+      - name: Install Zig (with retries)
+        # Replaces `mlugg/setup-zig@v2`, which has no internal retry —
+        # a single transient `fetch failed` blocked PR CI repeatedly.
+        # `scripts/install-zig.sh` wraps curl with `--retry 10` plus an
+        # outer 3-attempt loop, and is shared with the publish
+        # workflows so dry-runs can't drift.
+        shell: bash
+        run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
       - uses: taiki-e/install-action@481c34c1cf3a84c68b5e46f4eccfc82af798415a # v2
         with:
           tool: cargo-zigbuild
@@ -1500,9 +1505,14 @@ jobs:
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version: 20
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+      - name: Install Zig (with retries)
+        # Replaces `mlugg/setup-zig@v2`, which has no internal retry —
+        # a single transient `fetch failed` blocked PR CI repeatedly.
+        # `scripts/install-zig.sh` wraps curl with `--retry 10` plus an
+        # outer 3-attempt loop, and is shared with the publish
+        # workflows so dry-runs can't drift.
+        shell: bash
+        run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
       - uses: taiki-e/install-action@481c34c1cf3a84c68b5e46f4eccfc82af798415a # v2
         with:
           tool: cargo-zigbuild
@@ -1571,9 +1581,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: x86_64-unknown-linux-musl
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+      - name: Install Zig (with retries)
+        # Replaces `mlugg/setup-zig@v2`, which has no internal retry —
+        # a single transient `fetch failed` blocked PR CI repeatedly.
+        # `scripts/install-zig.sh` wraps curl with `--retry 10` plus an
+        # outer 3-attempt loop, and is shared with the publish
+        # workflows so dry-runs can't drift.
+        shell: bash
+        run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
       - uses: taiki-e/install-action@481c34c1cf3a84c68b5e46f4eccfc82af798415a # v2
         with:
           tool: cargo-zigbuild
@@ -1612,9 +1627,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: aarch64-unknown-linux-musl
-      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+      - name: Install Zig (with retries)
+        # Replaces `mlugg/setup-zig@v2`, which has no internal retry —
+        # a single transient `fetch failed` blocked PR CI repeatedly.
+        # `scripts/install-zig.sh` wraps curl with `--retry 10` plus an
+        # outer 3-attempt loop, and is shared with the publish
+        # workflows so dry-runs can't drift.
+        shell: bash
+        run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
       - uses: taiki-e/install-action@481c34c1cf3a84c68b5e46f4eccfc82af798415a # v2
         with:
           tool: cargo-zigbuild
