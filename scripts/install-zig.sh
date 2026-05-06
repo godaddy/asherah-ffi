@@ -47,7 +47,15 @@ case "$(uname -s)" in
 esac
 
 ZIG_TARBALL="zig-${ZIG_ARCH}-${ZIG_OS}-${ZIG_VERSION}.tar.xz"
-PRIMARY_URL="https://ziglang.org/download/${ZIG_VERSION}/${ZIG_TARBALL}"
+# Primary + two community mirrors. ziglang.org occasionally rejects
+# CI egress with `SSL_read: Connection reset by peer`; the community
+# mirrors (listed at https://ziglang.org/download/community-mirrors/)
+# serve the same payload from independent infrastructure.
+URLS=(
+    "https://ziglang.org/download/${ZIG_VERSION}/${ZIG_TARBALL}"
+    "https://zigmirror.hryx.net/zig/${ZIG_TARBALL}"
+    "https://pkg.machengine.org/zig/${ZIG_TARBALL}"
+)
 
 INSTALL_DIR="${ZIG_INSTALL_DIR:-${RUNNER_TEMP:-/tmp}/zig}"
 mkdir -p "$INSTALL_DIR"
@@ -73,20 +81,25 @@ download() {
 }
 
 echo ">>> Installing Zig ${ZIG_VERSION} for ${ZIG_OS}-${ZIG_ARCH}"
-# Outer retry loop: curl --retry handles connect-level transients within
-# a single invocation, but a 5xx mid-body or DNS hiccup can still slip
-# through. Three outer attempts with backoff gives belt-and-suspenders.
+# Try each URL with 2 attempts. curl --retry handles connect-level
+# transients within a single invocation; the outer attempt covers
+# mid-body resets (SSL_read EAGAIN, etc.). On exhaustion, fall through
+# to the next mirror. With 3 URLs × 2 attempts = 6 chances against
+# 3 independent infrastructures.
 download_ok=0
-for attempt in 1 2 3; do
-    if download "$PRIMARY_URL"; then
-        download_ok=1
-        break
-    fi
-    echo "::warning::install-zig.sh: download attempt $attempt failed; retrying after backoff"
-    sleep $((attempt * 5))
+for url in "${URLS[@]}"; do
+    for attempt in 1 2; do
+        echo ">>> Download attempt $attempt from $url"
+        if download "$url"; then
+            download_ok=1
+            break 2
+        fi
+        echo "::warning::install-zig.sh: $url attempt $attempt failed"
+        sleep $((attempt * 3))
+    done
 done
 if [[ $download_ok -ne 1 ]]; then
-    echo "::error::install-zig.sh: download failed after 3 attempts"
+    echo "::error::install-zig.sh: all mirrors failed (tried ${#URLS[@]} URLs × 2 attempts)"
     exit 1
 fi
 

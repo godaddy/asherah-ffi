@@ -22,7 +22,7 @@ func TestSessionCache_RoundTripUnderEvictionChurn(t *testing.T) {
 		ServiceName:         "svc",
 		ProductID:           "prod",
 		Metastore:           "memory",
-		KMS:                 "static",
+		KMS:                 "test-debug-static",
 		SessionCacheMaxSize: &maxSize,
 	}
 	if err := asherah.Setup(cfg); err != nil {
@@ -56,7 +56,7 @@ func TestSessionCache_HotPartitionsRoundTripRepeatedly(t *testing.T) {
 		ServiceName:         "svc",
 		ProductID:           "prod",
 		Metastore:           "memory",
-		KMS:                 "static",
+		KMS:                 "test-debug-static",
 		SessionCacheMaxSize: &maxSize,
 	}
 	if err := asherah.Setup(cfg); err != nil {
@@ -90,7 +90,7 @@ func TestSessionCache_DefaultBoundRoundTripsPastThousand(t *testing.T) {
 		ServiceName: "svc",
 		ProductID:   "prod",
 		Metastore:   "memory",
-		KMS:         "static",
+		KMS:         "test-debug-static",
 	}
 	if err := asherah.Setup(cfg); err != nil {
 		t.Fatalf("Setup failed: %v", err)

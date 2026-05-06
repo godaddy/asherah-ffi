@@ -15,7 +15,7 @@ func Example() {
 		ServiceName: "example-service",
 		ProductID:   "example-product",
 		Metastore:   "memory",
-		KMS:         "static",
+		KMS:         "test-debug-static",
 	})
 	if err != nil {
 		fmt.Println("setup error:", err)

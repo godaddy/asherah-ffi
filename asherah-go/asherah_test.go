@@ -21,7 +21,7 @@ func TestEncryptDecryptRoundTrip(t *testing.T) {
         ServiceName: "svc",
         ProductID:   "prod",
         Metastore:   "memory",
-        KMS:         "static",
+        KMS:         "test-debug-static",
     }
 
     if err := asherah.Setup(cfg); err != nil {
@@ -61,7 +61,7 @@ func setupForBoundary(t *testing.T) {
 		ServiceName: "ffi-test",
 		ProductID:   "prod",
 		Metastore:   "memory",
-		KMS:         "static",
+		KMS:         "test-debug-static",
 	}
 	if err := asherah.Setup(cfg); err != nil {
 		t.Fatalf("Setup failed: %v", err)
@@ -261,7 +261,7 @@ func TestSetupShutdownRepeatable(t *testing.T) {
         ServiceName: "svc",
         ProductID:   "prod",
         Metastore:   "memory",
-        KMS:         "static",
+        KMS:         "test-debug-static",
     }
 
     if err := asherah.Setup(cfg); err != nil {
@@ -315,7 +315,7 @@ func newTestFactory(t *testing.T) *asherah.Factory {
 		ServiceName:          "factory-test",
 		ProductID:            "prod",
 		Metastore:            "memory",
-		KMS:                  "static",
+		KMS:                  "test-debug-static",
 		EnableSessionCaching: boolPtr(false),
 	}
 	factory, err := asherah.NewFactory(cfg)
