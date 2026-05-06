@@ -408,7 +408,14 @@ impl VaultTransitKms {
             .json(&body)
             .send()
             .map_err(|e| {
-                log::error!("VaultTransitKms encrypt HTTP error: {e:#}");
+                // `warn!` rather than `error!` because the error chain is
+                // also propagated to the caller via the returned anyhow.
+                // Transient Vault hiccups would otherwise spam `error!`
+                // and trip on-call paging despite the application having
+                // a chance to handle/retry. T-finding "Vault transit logs
+                // full reqwest chain at error!" in
+                // `docs/review-2026-05-05-findings.md`.
+                log::warn!("VaultTransitKms encrypt HTTP error: {e:#}");
                 anyhow::anyhow!("Vault Transit encrypt request failed: {e}")
             })?;
         let status = resp.status();
@@ -452,7 +459,9 @@ impl VaultTransitKms {
             .json(&body)
             .send()
             .map_err(|e| {
-                log::error!("VaultTransitKms decrypt HTTP error: {e:#}");
+                // See the matching note in encrypt — `warn!` because the
+                // error is also returned to the caller.
+                log::warn!("VaultTransitKms decrypt HTTP error: {e:#}");
                 anyhow::anyhow!("Vault Transit decrypt request failed: {e}")
             })?;
         // Check the HTTP status *before* parsing JSON. A 5xx with an HTML
@@ -495,7 +504,7 @@ impl VaultTransitKms {
             .send()
             .await
             .map_err(|e| {
-                log::error!("VaultTransitKms encrypt HTTP error: {e:#}");
+                log::warn!("VaultTransitKms encrypt HTTP error: {e:#}");
                 anyhow::anyhow!("Vault Transit encrypt request failed: {e}")
             })?;
         let status = resp.status();
@@ -535,7 +544,9 @@ impl VaultTransitKms {
             .send()
             .await
             .map_err(|e| {
-                log::error!("VaultTransitKms decrypt HTTP error: {e:#}");
+                // See the matching note in encrypt — `warn!` because the
+                // error is also returned to the caller.
+                log::warn!("VaultTransitKms decrypt HTTP error: {e:#}");
                 anyhow::anyhow!("Vault Transit decrypt request failed: {e}")
             })?;
         let status = resp.status();

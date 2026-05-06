@@ -4,6 +4,7 @@ use crate::traits::Metastore;
 use crate::types::EnvelopeKeyRecord;
 use anyhow::Context;
 use postgres::Client;
+use std::mem::ManuallyDrop;
 use std::sync::{Arc, Mutex};
 
 /// Default max open connections — 0 means unlimited, matching Go's `database/sql`.
@@ -64,37 +65,47 @@ struct PgPool {
 }
 
 /// A connection checked out from the pool. Returns to the pool on drop.
+///
+/// The inner `Client` is held in `ManuallyDrop` rather than `Option`
+/// so `Deref`/`DerefMut` can return `&Client`/`&mut Client` without an
+/// `expect()` that would violate the no-panic policy. The type
+/// invariant — `client` is initialized for the whole lifetime of
+/// `PgPooledClient` and is taken out exactly once in `Drop::drop` — is
+/// upheld because the only way to remove the `ManuallyDrop` value is
+/// through `Drop`, which by definition runs at most once and after
+/// which the value is no longer accessible to safe code.
 struct PgPooledClient {
     pool: Arc<PgPool>,
-    client: Option<Client>,
+    client: ManuallyDrop<Client>,
 }
 
 impl Drop for PgPooledClient {
     fn drop(&mut self) {
-        if let Some(client) = self.client.take() {
-            let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
-            inner.checked_out -= 1;
-            if !client.is_closed() && inner.conns.len() < self.pool.max_idle {
-                inner.conns.push(client);
-            }
+        // SAFETY: `client` is initialized for the lifetime of `self`
+        // and `Drop::drop` runs at most once. The value is not
+        // accessed via `Deref`/`DerefMut` after this point because
+        // safe code can't observe a dropped value.
+        let client = unsafe { ManuallyDrop::take(&mut self.client) };
+        let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.checked_out -= 1;
+        if !client.is_closed() && inner.conns.len() < self.pool.max_idle {
+            inner.conns.push(client);
         }
+        // Otherwise `client` drops here — closing the postgres
+        // connection cleanly.
     }
 }
 
 impl std::ops::Deref for PgPooledClient {
     type Target = Client;
     fn deref(&self) -> &Client {
-        self.client
-            .as_ref()
-            .expect("PgPooledClient accessed after drop")
+        &self.client
     }
 }
 
 impl std::ops::DerefMut for PgPooledClient {
     fn deref_mut(&mut self) -> &mut Client {
-        self.client
-            .as_mut()
-            .expect("PgPooledClient accessed after drop")
+        &mut self.client
     }
 }
 
@@ -231,7 +242,7 @@ impl PostgresMetastore {
                         inner.checked_out += 1;
                         return Ok(PgPooledClient {
                             pool: Arc::clone(&self.pool),
-                            client: Some(client),
+                            client: ManuallyDrop::new(client),
                         });
                     }
                 }
@@ -296,7 +307,7 @@ impl PostgresMetastore {
             // Apply replica read consistency on new connections
             let mut pooled = PgPooledClient {
                 pool: Arc::clone(&self.pool),
-                client: Some(client),
+                client: ManuallyDrop::new(client),
             };
             if let Some(consistency) = self.pool.replica_consistency {
                 if let Err(e) = pooled.batch_execute(consistency.as_set_statement()) {
@@ -313,8 +324,14 @@ impl PostgresMetastore {
             return Ok(pooled);
         }
 
-        // Unreachable — the loop either returns or bails on the last iteration
-        unreachable!()
+        // The loop above either returns Ok/Err on every iteration or
+        // continues; reaching here means a logic bug, but don't panic
+        // — surface a defensive error instead so callers can decide
+        // how to handle it.
+        anyhow::bail!(
+            "Postgres connection pool: control fell through retry loop without acquiring \
+             or rejecting a connection (this is a bug — please report)"
+        );
     }
 }
 

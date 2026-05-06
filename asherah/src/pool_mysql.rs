@@ -14,6 +14,7 @@
 
 use mysql::{Conn, Opts, OptsBuilder, SslOpts};
 use std::collections::VecDeque;
+use std::mem::ManuallyDrop;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -173,85 +174,97 @@ pub struct ManagedPool {
 }
 
 /// A connection checked out from the pool. Returns on drop.
+///
+/// The inner `Conn` is held in `ManuallyDrop` rather than `Option` so
+/// `Deref`/`DerefMut` can hand out `&Conn`/`&mut Conn` without an
+/// `expect()` panic that would violate the no-panic policy. The type
+/// invariant — `conn` is initialized for the entire lifetime of
+/// `ManagedConn` and is moved out exactly once, in `Drop::drop` — is
+/// upheld because the only path that takes the value is `Drop`, which
+/// runs at most once and after which safe code cannot observe the
+/// value.
 #[allow(missing_debug_implementations)]
 pub struct ManagedConn {
     pool: Arc<ManagedPool>,
-    conn: Option<Conn>,
+    conn: ManuallyDrop<Conn>,
     created_at: Instant,
 }
 
 impl ManagedConn {
     /// Access the underlying `mysql::Conn`.
     pub fn as_conn(&mut self) -> &mut Conn {
-        self.conn.as_mut().expect("ManagedConn accessed after drop")
+        &mut self.conn
     }
 }
 
 impl std::ops::Deref for ManagedConn {
     type Target = Conn;
     fn deref(&self) -> &Conn {
-        self.conn.as_ref().expect("ManagedConn accessed after drop")
+        &self.conn
     }
 }
 
 impl std::ops::DerefMut for ManagedConn {
     fn deref_mut(&mut self) -> &mut Conn {
-        self.conn.as_mut().expect("ManagedConn accessed after drop")
+        &mut self.conn
     }
 }
 
 impl Drop for ManagedConn {
     fn drop(&mut self) {
-        if let Some(mut conn) = self.conn.take() {
-            // If the pool was closed while this connection was checked out,
-            // discard it instead of pushing it back into a closed pool's idle
-            // list — that would leak the connection and skew open_count
-            // accounting (T10 in `docs/review-2026-05-05-findings.md`).
-            if self.pool.closed.load(Ordering::Relaxed) {
-                drop(conn);
+        // SAFETY: `conn` is initialized for the lifetime of `self` and
+        // `Drop::drop` runs at most once. Safe code cannot observe
+        // `self` after this point, so the `ManuallyDrop` is never
+        // dereferenced post-take.
+        let mut conn = unsafe { ManuallyDrop::take(&mut self.conn) };
+        // If the pool was closed while this connection was checked out,
+        // discard it instead of pushing it back into a closed pool's idle
+        // list — that would leak the connection and skew open_count
+        // accounting (T10 in `docs/review-2026-05-05-findings.md`).
+        if self.pool.closed.load(Ordering::Relaxed) {
+            drop(conn);
+            self.pool.open_count.fetch_sub(1, Ordering::Relaxed);
+            self.pool.return_slot();
+            return;
+        }
+
+        // Reset connection state if configured
+        if self.pool.config.reset_on_return && conn.reset().is_err() {
+            // Connection is broken, discard it
+            self.pool.open_count.fetch_sub(1, Ordering::Relaxed);
+            self.pool.return_slot();
+            return;
+        }
+
+        let now = Instant::now();
+
+        // Check lifetime before returning — don't put expired connections back
+        if let Some(max_lifetime) = self.pool.config.max_lifetime {
+            if now.duration_since(self.created_at) >= max_lifetime {
                 self.pool.open_count.fetch_sub(1, Ordering::Relaxed);
                 self.pool.return_slot();
                 return;
             }
+        }
 
-            // Reset connection state if configured
-            if self.pool.config.reset_on_return && conn.reset().is_err() {
-                // Connection is broken, discard it
-                self.pool.open_count.fetch_sub(1, Ordering::Relaxed);
-                self.pool.return_slot();
-                return;
-            }
+        let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.checked_out -= 1;
 
-            let now = Instant::now();
-
-            // Check lifetime before returning — don't put expired connections back
-            if let Some(max_lifetime) = self.pool.config.max_lifetime {
-                if now.duration_since(self.created_at) >= max_lifetime {
-                    self.pool.open_count.fetch_sub(1, Ordering::Relaxed);
-                    self.pool.return_slot();
-                    return;
-                }
-            }
-
-            let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
-            inner.checked_out -= 1;
-
-            // Enforce max_idle: only keep if under the idle cap
-            if inner.idle.len() < self.pool.config.max_idle {
-                inner.idle.push_back(IdleConn {
-                    conn,
-                    created_at: self.created_at,
-                    returned_at: now,
-                });
-                drop(inner);
-                self.pool.condvar.notify_one();
-            } else {
-                // Over idle cap — close the connection
-                drop(inner);
-                drop(conn);
-                self.pool.open_count.fetch_sub(1, Ordering::Relaxed);
-                self.pool.condvar.notify_one();
-            }
+        // Enforce max_idle: only keep if under the idle cap
+        if inner.idle.len() < self.pool.config.max_idle {
+            inner.idle.push_back(IdleConn {
+                conn,
+                created_at: self.created_at,
+                returned_at: now,
+            });
+            drop(inner);
+            self.pool.condvar.notify_one();
+        } else {
+            // Over idle cap — close the connection
+            drop(inner);
+            drop(conn);
+            self.pool.open_count.fetch_sub(1, Ordering::Relaxed);
+            self.pool.condvar.notify_one();
         }
     }
 }
@@ -372,7 +385,7 @@ impl ManagedPool {
                 inner.checked_out += 1;
                 return Ok(ManagedConn {
                     pool: Arc::clone(self),
-                    conn: Some(conn),
+                    conn: ManuallyDrop::new(conn),
                     created_at: idle.created_at,
                 });
             }
@@ -391,7 +404,7 @@ impl ManagedPool {
                     Ok(conn) => {
                         return Ok(ManagedConn {
                             pool: Arc::clone(self),
-                            conn: Some(conn),
+                            conn: ManuallyDrop::new(conn),
                             created_at: Instant::now(),
                         });
                     }
