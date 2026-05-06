@@ -1,10 +1,29 @@
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use async_trait::async_trait;
 use aws_config::meta::region::RegionProviderChain;
 use aws_sdk_kms::{config::Region, primitives::Blob, types::DataKeySpec, Client};
 
 use crate::traits::{KeyManagementService, AEAD};
+
+/// Process-wide fallback runtime — same role as `kms_aws::fallback_runtime()`
+/// but lives here so the envelope module compiles without depending on a
+/// sibling module's private item. Built once via `OnceLock`; transient init
+/// failures surface as `anyhow::Error` instead of panicking. T4 in
+/// `docs/review-2026-05-05-findings.md`.
+fn fallback_runtime() -> Result<&'static tokio::runtime::Runtime, std::io::Error> {
+    static FALLBACK: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    if let Some(rt) = FALLBACK.get() {
+        return Ok(rt);
+    }
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .thread_name("asherah-kms-envelope-fallback")
+        .enable_all()
+        .build()?;
+    Ok(FALLBACK.get_or_init(|| rt))
+}
 
 #[derive(Clone)]
 struct RegionalClient {
@@ -162,22 +181,30 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
         })
     }
 
-    fn block_on_maybe<F: std::future::Future>(&self, f: F) -> F::Output {
-        match &self.rt {
-            Some(rt) => {
-                if tokio::runtime::Handle::try_current().is_ok() {
-                    tokio::task::block_in_place(|| rt.block_on(f))
-                } else {
-                    rt.block_on(f)
-                }
-            }
-            None => match tokio::runtime::Handle::try_current() {
-                Ok(h) => tokio::task::block_in_place(|| h.block_on(f)),
-                Err(_) => tokio::runtime::Runtime::new()
-                    .expect("failed to create temporary tokio runtime")
-                    .block_on(f),
-            },
+    /// Run a fallible future to completion from a sync caller. See
+    /// `kms_aws::AwsKms::block_on_result` — same fallback ladder with
+    /// runtime-init failures surfaced as `anyhow::Error` instead of
+    /// `Runtime::new().expect(...)`.
+    fn block_on_result<T, F>(&self, f: F) -> anyhow::Result<T>
+    where
+        F: std::future::Future<Output = anyhow::Result<T>>,
+    {
+        if let Some(rt) = &self.rt {
+            return if tokio::runtime::Handle::try_current().is_ok() {
+                tokio::task::block_in_place(|| rt.block_on(f))
+            } else {
+                rt.block_on(f)
+            };
         }
+        if let Ok(h) = tokio::runtime::Handle::try_current() {
+            return tokio::task::block_in_place(|| h.block_on(f));
+        }
+        let rt = fallback_runtime().map_err(|e| {
+            anyhow::anyhow!(
+                "AwsKmsEnvelope: failed to build fallback tokio runtime for sync KMS call: {e}"
+            )
+        })?;
+        rt.block_on(f)
     }
 
     async fn encrypt_key_impl(&self, key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
@@ -247,9 +274,27 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
         for k in &env.keks {
             map.insert(k.region.as_str(), k);
         }
-        let mut errors: Vec<String> = Vec::new();
-        // Try preferred first, then others
-        for (i, c) in self.clients.iter().enumerate() {
+
+        // Iterate configured regions in preferred-first order so the
+        // preferred region's KMS bills first when the envelope has a
+        // matching KEK. Per-region log entries are kept at debug level
+        // so they don't broadcast region/ARN identity at info+; the
+        // aggregated error string returned to the caller is also
+        // sanitized — no per-region details, just region names. The
+        // envelope's `arn` field is informational only; AEAD's tag
+        // provides the integrity binding for the actual data key, so
+        // an envelope with a mismatched `arn` cannot trick us into
+        // returning a forged data key (the AEAD decrypt fails for any
+        // wrong-key candidate). T-finding "Multi-region decrypt
+        // fallthrough is silently permissive" in
+        // `docs/review-2026-05-05-findings.md`.
+        let mut order: Vec<usize> = (0..self.clients.len()).collect();
+        if self.preferred < order.len() {
+            order.swap(0, self.preferred);
+        }
+        let mut failed_regions: Vec<String> = Vec::new();
+        for i in order {
+            let c = &self.clients[i];
             let reg_kek = match map.get(c.region.as_str()) {
                 Some(k) => *k,
                 None => {
@@ -270,46 +315,50 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
             let out = match out {
                 Ok(v) => v,
                 Err(e) => {
-                    log::warn!(
-                        "AwsKmsEnvelope decrypt_key: KMS Decrypt failed for region={} arn={}: {e:#}",
-                        c.region,
-                        c.key_arn
+                    log::debug!(
+                        "AwsKmsEnvelope decrypt_key: KMS Decrypt failed for region={}: {e:#}",
+                        c.region
                     );
-                    errors.push(format!("region {}: {e}", c.region));
-                    if i == self.preferred { /* try fallbacks */ }
+                    failed_regions.push(c.region.clone());
                     continue;
                 }
             };
             let dk = match out.plaintext() {
                 Some(p) => p.as_ref().to_vec(),
                 None => {
-                    log::warn!(
+                    log::debug!(
                         "AwsKmsEnvelope decrypt_key: KMS returned no plaintext for region={}",
                         c.region
                     );
-                    errors.push(format!("region {}: no plaintext returned", c.region));
+                    failed_regions.push(c.region.clone());
                     continue;
                 }
             };
             match self.aead.decrypt(&env.encrypted_key, &dk) {
                 Ok(key) => return Ok(key),
                 Err(e) => {
-                    log::warn!(
+                    // AEAD failure here means the regional KEK decrypted
+                    // to a value that doesn't match the data-key encryption.
+                    // Either the envelope is corrupt or the regional KEK
+                    // was rotated out of band. Don't leak the AEAD error
+                    // detail (which can include cipher state info) to the
+                    // aggregated user-facing string.
+                    log::debug!(
                         "AwsKmsEnvelope decrypt_key: AEAD decrypt failed for region={}: {e:#}",
                         c.region
                     );
-                    errors.push(format!("region {}: AEAD decrypt failed: {e}", c.region));
+                    failed_regions.push(c.region.clone());
                 }
             }
         }
-        let detail = if errors.is_empty() {
+        let detail = if failed_regions.is_empty() {
             "no matching regions found".to_string()
         } else {
-            errors.join("; ")
+            format!("tried regions: {}", failed_regions.join(", "))
         };
         log::error!("AwsKmsEnvelope decrypt_key: all backends failed: {detail}");
         Err(anyhow::anyhow!(
-            "all KMS backends failed to decrypt: {detail}"
+            "all KMS backends failed to decrypt ({detail})"
         ))
     }
 }
@@ -362,6 +411,10 @@ fn new_kms_client(
         }
         b.build()
     };
+    // The (None, None) arm is rare but reachable: between the
+    // `Handle::try_current().ok()` snapshot and this match, the outer
+    // runtime can be torn down. Use the process-wide fallback rather than
+    // panicking with `unreachable!()`.
     let conf = match (&rt, handle) {
         (Some(rt), _) => {
             if tokio::runtime::Handle::try_current().is_ok() {
@@ -371,7 +424,14 @@ fn new_kms_client(
             }
         }
         (None, Some(h)) => tokio::task::block_in_place(|| h.block_on(conf_fut)),
-        (None, None) => unreachable!("tokio runtime unavailable"),
+        (None, None) => {
+            let fb = fallback_runtime().map_err(|e| {
+                anyhow::anyhow!(
+                    "new_kms_client: tokio runtime unavailable and fallback build failed: {e}"
+                )
+            })?;
+            fb.block_on(conf_fut)
+        }
     };
     let client = Client::from_conf(conf.clone());
     let resolved_region = conf
@@ -410,7 +470,14 @@ fn new_kms_client_with_rt(
             }
         }
         (None, Some(h)) => tokio::task::block_in_place(|| h.block_on(conf_fut)),
-        (None, None) => unreachable!(),
+        (None, None) => {
+            let fb = fallback_runtime().map_err(|e| {
+                anyhow::anyhow!(
+                    "new_kms_client_with_rt: tokio runtime unavailable and fallback build failed: {e}"
+                )
+            })?;
+            fb.block_on(conf_fut)
+        }
     };
     let client = Client::from_conf(conf.clone());
     let resolved_region = conf.region().map(|r| r.to_string()).unwrap_or(region);
@@ -420,11 +487,11 @@ fn new_kms_client_with_rt(
 #[async_trait]
 impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKmsEnvelope<A> {
     fn encrypt_key(&self, _ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        self.block_on_maybe(self.encrypt_key_impl(key_bytes))
+        self.block_on_result(self.encrypt_key_impl(key_bytes))
     }
 
     fn decrypt_key(&self, _ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
-        self.block_on_maybe(self.decrypt_key_impl(blob))
+        self.block_on_result(self.decrypt_key_impl(blob))
     }
 
     async fn encrypt_key_async(
@@ -553,9 +620,8 @@ mod tests {
         let err = kms.decrypt_key(&(), &blob).unwrap_err();
         assert!(
             err.to_string()
-                .contains("all KMS backends failed to decrypt:"),
-            "expected 'all KMS backends failed to decrypt:', got: {}",
-            err
+                .contains("all KMS backends failed to decrypt"),
+            "expected 'all KMS backends failed to decrypt', got: {err}"
         );
     }
 }

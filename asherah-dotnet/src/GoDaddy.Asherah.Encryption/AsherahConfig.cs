@@ -90,6 +90,9 @@ public sealed class AsherahConfig
     /// <summary>RDBMS pool idle timeout in seconds.</summary>
     public long? PoolMaxIdleTime { get; }
 
+    /// <summary>Static master key as 64-char hex (32 bytes). Required when <see cref="Kms"/> is <c>"static"</c>.</summary>
+    public string? StaticMasterKeyHex { get; }
+
     /// <summary>Single-region KMS key id/ARN (<c>null</c> when using <see cref="RegionMap"/> alone).</summary>
     public string? KmsKeyId { get; }
 
@@ -158,6 +161,7 @@ public sealed class AsherahConfig
         PoolMaxIdle = builder.PoolMaxIdle;
         PoolMaxLifetime = builder.PoolMaxLifetime;
         PoolMaxIdleTime = builder.PoolMaxIdleTime;
+        StaticMasterKeyHex = builder.StaticMasterKeyHex;
         KmsKeyId = builder.KmsKeyId;
         SecretsManagerSecretId = builder.SecretsManagerSecretId;
         VaultAddr = builder.VaultAddr;
@@ -222,6 +226,7 @@ public sealed class AsherahConfig
         AddOptional("PoolMaxIdle", PoolMaxIdle);
         AddOptional("PoolMaxLifetime", PoolMaxLifetime);
         AddOptional("PoolMaxIdleTime", PoolMaxIdleTime);
+        AddOptional("StaticMasterKeyHex", StaticMasterKeyHex);
         AddOptional("KmsKeyId", KmsKeyId);
         AddOptional("SecretsManagerSecretId", SecretsManagerSecretId);
         AddOptional("VaultAddr", VaultAddr);
@@ -327,6 +332,9 @@ public sealed class AsherahConfig
 
         /// <summary>Seconds from <see cref="WithPoolMaxIdleTime"/>.</summary>
         public long? PoolMaxIdleTime { get; private set; }
+
+        /// <summary>From <see cref="WithStaticMasterKeyHex"/>.</summary>
+        public string? StaticMasterKeyHex { get; private set; }
 
         /// <summary>From <see cref="WithKmsKeyId"/>.</summary>
         public string? KmsKeyId { get; private set; }
@@ -653,6 +661,20 @@ public sealed class AsherahConfig
         public Builder WithPoolMaxIdleTime(TimeSpan? duration)
         {
             PoolMaxIdleTime = duration is null ? null : (long)duration.Value.TotalSeconds;
+            return this;
+        }
+
+        /// <summary>
+        /// 64-char hex (32-byte) static master key. Required when the KMS
+        /// selector is <see cref="KmsKind.Static"/> (commit 9049fa4 in the
+        /// native core hard-rejects an empty hex). Pass <c>null</c> to
+        /// clear; rely on the <c>STATIC_MASTER_KEY_HEX</c> env var only
+        /// for the env-driven init path (<c>factory_new_from_env</c>),
+        /// not <c>factory_new_with_config</c>.
+        /// </summary>
+        public Builder WithStaticMasterKeyHex(string? value)
+        {
+            StaticMasterKeyHex = value;
             return this;
         }
 

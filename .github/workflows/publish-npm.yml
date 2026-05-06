@@ -168,11 +168,12 @@ jobs:
         with:
           targets: ${{ matrix.settings.target }}
 
-      - name: Install Zig (musl builds)
+      - name: Install Zig (musl builds, with retries)
+        # See scripts/install-zig.sh for rationale (no-retry flake in
+        # mlugg/setup-zig@v2 was blocking dry-runs in CI).
         if: contains(matrix.settings.target, 'musl')
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+        shell: bash
+        run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
 
       - name: Install cargo-zigbuild (musl builds)
         if: contains(matrix.settings.target, 'musl')

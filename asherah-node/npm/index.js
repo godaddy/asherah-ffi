@@ -152,10 +152,15 @@ const METASTORE_ALIASES = {
   'test-debug-static': 'static',
 };
 
-// Legacy/debug KMS aliases
-const KMS_ALIASES = {
-  'test-debug-static': 'static',
-};
+// Legacy/debug KMS aliases.
+//
+// `test-debug-static` is intentionally NOT aliased to `static` here:
+// the Rust core has a dedicated `test-debug-static` KMS kind that
+// auto-supplies a publicly-known test key. Rewriting it to `static`
+// would trip the `KMS=static requires STATIC_MASTER_KEY_HEX`
+// validation (commit 9049fa4) and break every binding test that
+// uses the debug fixture.
+const KMS_ALIASES = {};
 
 function normalizeConfig(config) {
   if (!config || typeof config !== 'object') {

@@ -71,7 +71,7 @@ func hooksConfig() Config {
 		ServiceName:          "hooks-svc",
 		ProductID:            "hooks-prod",
 		Metastore:            "memory",
-		KMS:                  "static",
+		KMS:                  "test-debug-static",
 		EnableSessionCaching: &caching,
 	}
 }

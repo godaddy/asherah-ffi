@@ -46,11 +46,15 @@ async function main() {
 }
 
 async function testMinimalAsyncSetup() {
-  // This is how most consumers call it — from an async function
+  // This is how most consumers call it — from an async function.
+  // `kms: 'test-debug-static'` is now required (commit 9049fa4) — the
+  // previous default-to-static path rejects an empty
+  // STATIC_MASTER_KEY_HEX.
   await asherah.setupAsync({
     serviceName: 'e2e-consumer',
     productId: 'e2e-product',
     metastore: 'memory',
+    kms: 'test-debug-static',
   });
 
   const encrypted = asherah.encryptString('user-123', 'sensitive data');
@@ -70,7 +74,7 @@ async function testPascalCaseWithNulls() {
     ServiceName: 'e2e-pascal',
     ProductID: 'e2e-prod',
     Metastore: 'memory',
-    KMS: 'static',
+    KMS: 'test-debug-static',
     ConnectionString: null,
     DynamoDBEndpoint: null,
     DynamoDBRegion: null,
@@ -101,7 +105,7 @@ async function testFullConfig() {
     serviceName: 'e2e-full',
     productId: 'e2e-full-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
     enableSessionCaching: true,
     sessionCacheMaxSize: 100,
     sessionCacheDuration: 3600,
@@ -124,7 +128,7 @@ async function testConcurrentAsync() {
     serviceName: 'e2e-concurrent',
     productId: 'e2e-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
 
   // 10 concurrent encrypt/decrypt across different partitions
@@ -162,7 +166,7 @@ function testErrorMessages() {
     serviceName: 'err-test',
     productId: 'err-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
   caught = false;
   try {
@@ -184,7 +188,7 @@ async function testSetupShutdownCycle() {
       serviceName: `cycle-${cycle}`,
       productId: 'cycle-prod',
       metastore: 'memory',
-      kms: 'static',
+      kms: 'test-debug-static',
     });
 
     const enc = await asherah.encryptStringAsync('cycle-p', `cycle-${cycle}`);
@@ -201,7 +205,7 @@ async function testSyncAsyncInterop() {
     serviceName: 'e2e-interop',
     productId: 'e2e-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
 
   // Encrypt sync, decrypt async
@@ -223,7 +227,7 @@ async function testHeavyConcurrentAsync() {
     serviceName: 'e2e-heavy',
     productId: 'e2e-prod',
     metastore: 'memory',
-    kms: 'static',
+    kms: 'test-debug-static',
   });
 
   // 100 concurrent async operations across 20 partitions

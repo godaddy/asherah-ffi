@@ -76,7 +76,8 @@ fn install_slow_sync_sink() {
 }
 
 fn install_slow_async_sink() {
-    let async_sink = AsyncMetricsSink::new(SlowCountingSink, AsyncMetricsConfig::default());
+    let async_sink = AsyncMetricsSink::new(SlowCountingSink, AsyncMetricsConfig::default())
+        .expect("spawn metrics dispatcher in tests");
     metrics::set_sink(async_sink);
     metrics::set_enabled(true);
 }

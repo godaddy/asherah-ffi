@@ -295,14 +295,50 @@ impl<
                         created: sk.created(),
                     }),
                 };
-                self.f
+                // Match the modern `create_intermediate_key` race-loss
+                // recovery: if our store loses to another encrypter that
+                // created the IK first, reload the winner's IK rather
+                // than surfacing a misleading "store failed" error.
+                // T-finding "Legacy Session::encrypt doesn't reload
+                // load_latest on race-loss" in
+                // `docs/review-2026-05-05-findings.md`.
+                let stored = self
+                    .f
                     .metastore
                     .store(&ekr.id, ekr.created, &ekr)
-                    .context(format!(
-                        "encrypt: failed to store intermediate key id={}",
+                    .unwrap_or_else(|e| {
+                        log::warn!(
+                            "encrypt: IK store failed for id={} (will retry load): {e:#}",
+                            ekr.id
+                        );
+                        false
+                    });
+                if stored {
+                    ik
+                } else {
+                    log::debug!(
+                        "encrypt: IK store returned false, loading latest for id={}",
                         ekr.id
-                    ))?;
-                ik
+                    );
+                    let latest = self
+                        .f
+                        .metastore
+                        .load_latest(&ekr.id)
+                        .context("encrypt: race-loss fallback load_latest failed")?
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "encrypt: store returned false for id={} but load_latest \
+                                 returned None — metastore may be inconsistent",
+                                ekr.id
+                            )
+                        })?;
+                    let sk_meta = latest.parent_key_meta.clone().unwrap_or(KeyMeta {
+                        id: self.f.partition.system_key_id(),
+                        created: 0,
+                    });
+                    let sk2 = self.load_system_key(sk_meta)?;
+                    self.intermediate_key_from_ekr(&sk2, &latest)?
+                }
             }
         };
         // DRK and encrypt
@@ -380,14 +416,31 @@ impl<
         let mut drk = ik
             .with_key_func(|ikb| self.f.crypto.decrypt(&key.encrypted_key, ikb))
             .context("decrypt: failed to decrypt DRK with IK")??;
-        let pt = self
-            .f
-            .crypto
-            .decrypt(&drr.data, &drk)
-            .context("decrypt: failed to decrypt data with DRK")?;
-        // wipe DRK bytes after use; wipe_bytes uses zeroize for volatile
-        // writes plus a SeqCst compiler fence to prevent DSE.
-        crate::memguard::wipe_bytes(&mut drk);
+        // Use a guard so the DRK is wiped on every exit path — including
+        // the AEAD-decrypt error case below. The async/PublicSession
+        // paths use DrkGuard; the legacy path previously skipped the
+        // wipe on AEAD failure (T-finding "Legacy decrypt doesn't wipe
+        // drk when AEAD fails" in docs/review-2026-05-05-findings.md).
+        struct DrkWipe<'drk>(&'drk mut [u8]);
+        impl Drop for DrkWipe<'_> {
+            fn drop(&mut self) {
+                crate::memguard::wipe_bytes(self.0);
+            }
+        }
+        let drk_guard = DrkWipe(&mut drk[..]);
+        // SAFETY-equivalent: the guard borrows drk for the rest of this
+        // scope. The decrypt call only needs `&[u8]`, so we re-slice
+        // through the guard's owned reference.
+        let pt = {
+            let drk_slice: &[u8] = drk_guard.0;
+            self.f
+                .crypto
+                .decrypt(&drr.data, drk_slice)
+                .context("decrypt: failed to decrypt data with DRK")?
+        };
+        // Explicit drop documents the wipe order: drk is wiped before
+        // returning the plaintext.
+        drop(drk_guard);
         // pt is the decrypted plaintext; the FFI layers (asherah_buffer_free,
         // asherah-cobhan Decrypt/DecryptFromJson) are responsible for zeroing
         // it before deallocation.
@@ -592,8 +645,16 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         };
         if let Some(cache) = &self.session_cache {
             let arc = cache.get_or_create(id, construct);
-            // clone out the Arc contents by cloning fields (PublicSession is not Clone). Here, just deref copy
-            Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone_for_return())
+            // Always go through `clone_for_return` (a manual deref-clone)
+            // so the cache keeps its entry. The previous
+            // `Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone_for_return())`
+            // dropped the cache's entry whenever this thread happened to
+            // be the only Arc holder — undermining the bounded
+            // session-cache LRU semantics on every contended call.
+            // T-finding "Arc::try_unwrap causes the cache to lose the
+            // entry on every contended call" in
+            // `docs/review-2026-05-05-findings.md`.
+            (*arc).clone_for_return()
         } else {
             construct()
         }
@@ -603,8 +664,13 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         if let Some(c) = &self.session_cache {
             c.close();
         }
+        // Surface IK-cache close failures rather than silently dropping them
+        // — the caller has no other channel for noticing memguard/munlock
+        // errors. T-finding "PublicFactory::close swallows c.close() errors
+        // via drop(...)" in docs/review-2026-05-05-findings.md.
         if let Some(c) = &self.shared_ik_cache {
-            drop(c.close());
+            c.close()
+                .context("PublicFactory::close: failed to close shared IK cache")?;
         }
         Ok(())
     }
@@ -977,23 +1043,28 @@ impl<
 {
     async fn get_or_load_system_key_async(&self, meta: KeyMeta) -> anyhow::Result<Arc<CryptoKey>> {
         // SK load/create calls sync metastore methods which may internally call
-        // block_on (e.g. the Postgres crate). Use cache check + plain thread for
-        // the loader to avoid panicking from a tokio runtime context.
+        // block_on (e.g. the Postgres crate). Use cache check + the tokio
+        // blocking pool for the loader to avoid panicking from a tokio
+        // runtime context. The previous implementation spawned a fresh
+        // OS thread per call (`std::thread::spawn`) which is unbounded and
+        // can exhaust the process's thread quota under load —
+        // `tokio::task::spawn_blocking` uses a bounded pool (default 512)
+        // and applies backpressure via the JoinHandle. T-finding "Async
+        // SK loaders use std::thread::spawn per call" in
+        // `docs/review-2026-05-05-findings.md`.
         if meta.created == 0 {
             let id = self.inner.f.partition.system_key_id();
             match self.sk_cache.check_latest(&id) {
                 CacheCheck::Hit(v) | CacheCheck::StaleOther(v) => Ok(v),
                 CacheCheck::StaleReload(stale) => {
                     let inner = self.inner.f.clone();
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-                    std::thread::spawn(move || {
+                    let result = tokio::task::spawn_blocking(move || {
                         let session = Session { f: inner };
-                        drop(tx.send(session.load_latest_or_create_system_key().map(Arc::new)));
-                    });
-                    match rx
-                        .await
-                        .map_err(|_| anyhow::anyhow!("SK load thread panicked"))?
-                    {
+                        session.load_latest_or_create_system_key().map(Arc::new)
+                    })
+                    .await
+                    .map_err(|e| anyhow::anyhow!("SK load task failed: {e}"))?;
+                    match result {
                         Ok(key) => {
                             self.sk_cache.insert_latest_key(&id, key.clone());
                             Ok(key)
@@ -1003,14 +1074,12 @@ impl<
                 }
                 CacheCheck::Miss => {
                     let inner = self.inner.f.clone();
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-                    std::thread::spawn(move || {
+                    let key = tokio::task::spawn_blocking(move || {
                         let session = Session { f: inner };
-                        drop(tx.send(session.load_latest_or_create_system_key().map(Arc::new)));
-                    });
-                    let key = rx
-                        .await
-                        .map_err(|_| anyhow::anyhow!("SK load thread panicked"))??;
+                        session.load_latest_or_create_system_key().map(Arc::new)
+                    })
+                    .await
+                    .map_err(|e| anyhow::anyhow!("SK load task failed: {e}"))??;
                     self.sk_cache.insert_latest_key(&id, key.clone());
                     Ok(key)
                 }
@@ -1023,14 +1092,12 @@ impl<
                 CacheCheck::Miss => {
                     let inner = self.inner.f.clone();
                     let meta_clone = meta.clone();
-                    let (tx, rx) = tokio::sync::oneshot::channel();
-                    std::thread::spawn(move || {
+                    let key = tokio::task::spawn_blocking(move || {
                         let session = Session { f: inner };
-                        drop(tx.send(session.load_system_key(meta_clone).map(Arc::new)));
-                    });
-                    let key = rx
-                        .await
-                        .map_err(|_| anyhow::anyhow!("SK load thread panicked"))??;
+                        session.load_system_key(meta_clone).map(Arc::new)
+                    })
+                    .await
+                    .map_err(|e| anyhow::anyhow!("SK load task failed: {e}"))??;
                     self.sk_cache.insert_meta_key(&meta, key.clone());
                     Ok(key)
                 }

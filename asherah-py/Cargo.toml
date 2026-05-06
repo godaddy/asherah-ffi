@@ -29,6 +29,7 @@ once_cell = "1.21"
 parking_lot = "0.12"
 lru = "0.16"
 log = "0.4"
+zeroize = "1"
 
 [package.metadata.maturin]
 module-name = "asherah._asherah"

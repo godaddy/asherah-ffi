@@ -27,7 +27,7 @@ fn create_test_config() -> String {
         "ServiceName": "test-service",
         "ProductID": "test-product",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "Verbose": false,
         "EnableSessionCaching": true
     }"#
@@ -73,6 +73,9 @@ fn test_full_encryption_workflow() {
     test_all_byte_values_roundtrip();
     test_combining_characters();
     test_json_special_chars_in_data();
+
+    // SetEnv post-init rejection — must run while the factory is up
+    test_set_env_rejected_after_setup_impl();
 
     // Shutdown and re-initialize lifecycle test
     test_shutdown_and_reinitialize_impl();
@@ -1254,25 +1257,76 @@ fn test_set_env_integration() {
     let json = format!(r#"{{"{key1}": "integration_value_1", "{key2}": "integration_value_2"}}"#);
     let buf = create_string_buffer(&json);
 
-    unsafe {
-        let result = SetEnv(buf.as_ptr().cast::<c_char>());
-        assert_eq!(result, ERR_NONE, "SetEnv should succeed");
+    let result = unsafe { SetEnv(buf.as_ptr().cast::<c_char>()) };
+
+    // Tests in this binary share the global FACTORY. If
+    // `test_full_encryption_workflow` ran first, SetEnv now refuses
+    // post-init env mutation (commit 09db712) and returns
+    // ERR_ALREADY_INITIALIZED. Both outcomes are acceptable for the
+    // export/integration smoke. When SetEnv succeeded, verify the
+    // env mutations propagated; when it refused, verify the env was
+    // not mutated.
+    match result {
+        ERR_NONE => {
+            assert_eq!(
+                std::env::var(&key1).ok(),
+                Some("integration_value_1".to_string()),
+                "Environment variable should be set"
+            );
+            assert_eq!(
+                std::env::var(&key2).ok(),
+                Some("integration_value_2".to_string()),
+                "Environment variable should be set"
+            );
+            std::env::remove_var(&key1);
+            std::env::remove_var(&key2);
+        }
+        ERR_ALREADY_INITIALIZED => {
+            assert!(
+                std::env::var(&key1).is_err(),
+                "post-init SetEnv must not mutate env (key1 leaked: {:?})",
+                std::env::var(&key1)
+            );
+            assert!(
+                std::env::var(&key2).is_err(),
+                "post-init SetEnv must not mutate env (key2 leaked: {:?})",
+                std::env::var(&key2)
+            );
+        }
+        other => panic!("SetEnv returned unexpected code {other}"),
     }
+}
 
-    assert_eq!(
-        std::env::var(&key1).ok(),
-        Some("integration_value_1".to_string()),
-        "Environment variable should be set"
-    );
-    assert_eq!(
-        std::env::var(&key2).ok(),
-        Some("integration_value_2".to_string()),
-        "Environment variable should be set"
-    );
+// ============================================================================
+// SetEnv Post-Init Rejection
+// ============================================================================
 
-    // Cleanup
-    std::env::remove_var(&key1);
-    std::env::remove_var(&key2);
+/// Regression for the post-init SetEnv reject path (commit 09db712).
+/// Once the factory has been constructed, the process has spawned
+/// tokio workers, log/metrics dispatch threads, KMS clients, and DB
+/// pools — all of which may call `getenv`. Mutating the environ block
+/// from `SetEnv` here would race. The cobhan FFI must reject with
+/// `ERR_ALREADY_INITIALIZED` and leave the environment untouched.
+fn test_set_env_rejected_after_setup_impl() {
+    let pid = std::process::id();
+    let key = format!("ASHERAH_REJECT_TEST_{pid}");
+    // Make sure the env var doesn't exist before we run.
+    std::env::remove_var(&key);
+
+    let json = format!(r#"{{"{key}": "must_not_be_set"}}"#);
+    let buf = create_string_buffer(&json);
+
+    let result = unsafe { SetEnv(buf.as_ptr().cast::<c_char>()) };
+    assert_eq!(
+        result, ERR_ALREADY_INITIALIZED,
+        "SetEnv after Setup must return ERR_ALREADY_INITIALIZED, got {result}"
+    );
+    assert!(
+        std::env::var(&key).is_err(),
+        "SetEnv must not mutate the environ block after Setup; \
+         {key} should remain unset but was: {:?}",
+        std::env::var(&key)
+    );
 }
 
 // ============================================================================

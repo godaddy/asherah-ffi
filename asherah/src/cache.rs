@@ -153,6 +153,18 @@ impl SimpleKeyCache {
         policy: CachePolicy,
         expire_after_s: i64,
     ) -> Self {
+        // The `Simple` policy is intentionally unbounded — it never evicts.
+        // Pairing it with `max > 0` is a misconfiguration: the bound will
+        // be silently ignored. Surface a warning so operators noticing
+        // unbounded memory growth can correct the policy. T-finding
+        // "Simple policy bypasses eviction entirely" in
+        // docs/review-2026-05-05-findings.md.
+        if matches!(policy, CachePolicy::Simple) && max > 0 {
+            log::warn!(
+                "SimpleKeyCache: policy=Simple is unbounded; max={max} will be ignored. \
+                 Use Lru, Lfu, Slru, or TinyLfu to enforce a bound."
+            );
+        }
         Self {
             by_meta: scc::HashMap::new(),
             latest: scc::HashMap::new(),
@@ -173,8 +185,14 @@ impl SimpleKeyCache {
     }
 
     fn is_expired(&self, loaded_at_ms: u64, jitter_ms: u64) -> bool {
+        // ttl_ms == 0 means "no TTL" — entries do not expire on a clock,
+        // they are only invalidated by metastore-level events. Returning
+        // `true` here would force a reload on every access (cache thrash).
+        // The previous behavior was the source of T-finding "is_expired
+        // returns true when ttl_ms == 0" in
+        // docs/review-2026-05-05-findings.md.
         if self.ttl_ms == 0 {
-            return true;
+            return false;
         }
         now_ms().saturating_sub(loaded_at_ms) >= self.ttl_ms + jitter_ms
     }
@@ -446,6 +464,10 @@ impl SimpleKeyCache {
     /// Returns true if this thread claimed the reload (and should do the metastore query).
     /// Other threads see the updated loaded_at and return the stale key without reloading.
     fn try_claim_reload_latest(&self, id: &str) -> bool {
+        if self.ttl_ms == 0 {
+            // No TTL means no reload — see `is_expired`.
+            return false;
+        }
         let Some((interned_id, created)) = self.latest.read(id, |k, &v| (k.clone(), v)) else {
             return false;
         };
@@ -465,6 +487,9 @@ impl SimpleKeyCache {
 
     /// Attempt to claim the reload for a specific key meta by CAS-ing loaded_at_ms.
     fn try_claim_reload_meta(&self, meta: &KeyMeta) -> bool {
+        if self.ttl_ms == 0 {
+            return false;
+        }
         let cache_key = (Arc::<str>::from(meta.id.as_str()), meta.created);
         let fresh = now_ms();
         let mut claimed = false;

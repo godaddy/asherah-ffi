@@ -19,6 +19,19 @@ struct Cli {
     )]
     socket_file: String,
 
+    /// File mode (octal) applied to the listening Unix socket after bind. The
+    /// default `0660` restricts access to the owner and group; set explicitly
+    /// to a wider mode (e.g. `0666`) only when you understand the local
+    /// trust model. Any local UID with read/write on this socket can ask the
+    /// sidecar to encrypt or decrypt arbitrary records.
+    #[arg(
+        long,
+        default_value = "0660",
+        value_parser = parse_octal_mode,
+        env = "ASHERAH_SOCKET_MODE"
+    )]
+    socket_mode: u32,
+
     /// The name of this service
     #[arg(long, env = "ASHERAH_SERVICE_NAME")]
     service: String,
@@ -36,7 +49,12 @@ struct Cli {
     conn: Option<String>,
 
     /// Configures the master key management service
-    #[arg(long, value_parser = ["aws", "static"], default_value = "aws", env = "ASHERAH_KMS_MODE")]
+    #[arg(
+        long,
+        value_parser = ["aws", "static", "test-debug-static"],
+        default_value = "aws",
+        env = "ASHERAH_KMS_MODE"
+    )]
     kms: String,
 
     /// A comma separated list of key-value pairs in the form of REGION1=ARN1[,REGION2=ARN2] (required if --kms=aws)
@@ -96,6 +114,30 @@ struct Cli {
     /// Enable verbose logging output
     #[arg(short = 'v', long, env = "ASHERAH_VERBOSE")]
     verbose: bool,
+}
+
+/// Parse an octal file mode (e.g. `0660`, `660`, `0o660`) into a `u32` mode
+/// suitable for `Permissions::from_mode`. Accepts an optional `0o` or `0`
+/// prefix; rejects modes outside `0o000..=0o777`.
+fn parse_octal_mode(s: &str) -> Result<u32, String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Err("socket mode must not be empty".to_string());
+    }
+    let body = trimmed
+        .strip_prefix("0o")
+        .or_else(|| trimmed.strip_prefix("0O"))
+        .or_else(|| trimmed.strip_prefix('0'))
+        .unwrap_or(trimmed);
+    let body = if body.is_empty() { "0" } else { body };
+    let mode = u32::from_str_radix(body, 8)
+        .map_err(|_| format!("invalid octal socket mode '{trimmed}'"))?;
+    if mode > 0o777 {
+        return Err(format!(
+            "socket mode {trimmed} (parsed as {mode:o}) exceeds 0o777"
+        ));
+    }
+    Ok(mode)
 }
 
 /// Parse region map from Go-style `REGION1=ARN1[,REGION2=ARN2]` or JSON format.
@@ -203,9 +245,30 @@ async fn main() -> Result<()> {
 
     let listener =
         tokio::net::UnixListener::bind(&cli.socket_file).context("failed to bind Unix socket")?;
+
+    // The socket inherits umask-dependent permissions (typically 0o666). For a
+    // sidecar holding KMS access and decrypted plaintext, that lets any local
+    // UID encrypt/decrypt. Tighten to the configured mode immediately after
+    // bind. Permission tightening is best-effort on non-Unix targets.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(cli.socket_mode);
+        std::fs::set_permissions(&cli.socket_file, perms).with_context(|| {
+            format!(
+                "failed to set socket mode {:o} on '{}'",
+                cli.socket_mode, cli.socket_file
+            )
+        })?;
+    }
+
     let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener);
 
-    log::info!("listening on {}", cli.socket_file);
+    log::info!(
+        "listening on {} (mode {:#o})",
+        cli.socket_file,
+        cli.socket_mode
+    );
 
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::watch::channel(false);
 
@@ -269,5 +332,41 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => {}
         _ = sigterm.recv() => {}
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::panic, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_octal_mode_accepts_canonical_forms() {
+        assert_eq!(parse_octal_mode("0660").unwrap(), 0o660);
+        assert_eq!(parse_octal_mode("660").unwrap(), 0o660);
+        assert_eq!(parse_octal_mode("0o660").unwrap(), 0o660);
+        assert_eq!(parse_octal_mode("0O660").unwrap(), 0o660);
+        assert_eq!(parse_octal_mode(" 0600 ").unwrap(), 0o600);
+        assert_eq!(parse_octal_mode("0").unwrap(), 0);
+        assert_eq!(parse_octal_mode("777").unwrap(), 0o777);
+    }
+
+    #[test]
+    fn parse_octal_mode_rejects_non_octal_digits() {
+        assert!(parse_octal_mode("0689").is_err());
+        assert!(parse_octal_mode("0xff").is_err());
+        assert!(parse_octal_mode("abc").is_err());
+    }
+
+    #[test]
+    fn parse_octal_mode_rejects_empty() {
+        assert!(parse_octal_mode("").is_err());
+        assert!(parse_octal_mode("   ").is_err());
+    }
+
+    #[test]
+    fn parse_octal_mode_rejects_overlarge_values() {
+        assert!(parse_octal_mode("01000").is_err());
+        assert!(parse_octal_mode("7777").is_err());
     }
 }

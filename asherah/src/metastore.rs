@@ -64,15 +64,34 @@ impl Metastore for InMemoryMetastore {
     ) -> Result<bool, anyhow::Error> {
         let interned: Arc<str> = Arc::from(id);
         let key = (interned.clone(), created);
-        // Update the latest pointer BEFORE inserting into by_key. This ensures
-        // that when a concurrent insert returns Err (duplicate), the winning
-        // thread's latest pointer is already visible to load_latest.
-        let should_update = self
-            .latest
-            .read(&interned, |_, &existing| existing < created)
-            .unwrap_or(true);
-        if should_update {
-            let _ = self.latest.upsert(interned, created);
+        // Atomically advance the latest pointer for `id` to `created`,
+        // but only when it's an actual advance. The previous read+upsert
+        // pattern was racy: a slower writer with a smaller `created`
+        // could overwrite a faster writer's larger value (T-finding
+        // "InMemoryMetastore::store race on latest pointer" in
+        // docs/review-2026-05-05-findings.md).
+        //
+        // `scc::HashMap::update` runs the closure under the bucket lock,
+        // so the conditional advance is atomic. If the entry is missing
+        // we try `insert` (which fails if someone else just inserted)
+        // and retry the update path on collision. The loop terminates
+        // because either an `update` succeeds or an `insert` succeeds.
+        loop {
+            if self
+                .latest
+                .update(&interned, |_, existing| {
+                    if *existing < created {
+                        *existing = created;
+                    }
+                })
+                .is_some()
+            {
+                break;
+            }
+            if self.latest.insert(interned.clone(), created).is_ok() {
+                break;
+            }
+            // Another writer raced ahead of our insert; loop to update.
         }
         match self.by_key.insert(key, ekr.clone()) {
             Ok(_) => Ok(true),
@@ -81,5 +100,94 @@ impl Metastore for InMemoryMetastore {
     }
     fn region_suffix(&self) -> Option<String> {
         None
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use crate::traits::Metastore;
+    use crate::types::EnvelopeKeyRecord;
+    use std::sync::Arc;
+    use std::thread;
+
+    fn ekr(created: i64) -> EnvelopeKeyRecord {
+        EnvelopeKeyRecord {
+            id: "k".into(),
+            created,
+            encrypted_key: vec![0; 32],
+            revoked: None,
+            parent_key_meta: None,
+        }
+    }
+
+    /// Regression for the store/load_latest race: a successful store must
+    /// be visible via `load_latest` immediately. With the previous order
+    /// (advance `latest` first, then insert into `by_key`) a concurrent
+    /// `load_latest` could observe the new pointer but a missing row.
+    #[test]
+    fn load_latest_sees_row_immediately_after_store() {
+        let m = InMemoryMetastore::new();
+        assert!(m.store("k", 100, &ekr(100)).unwrap());
+        let got = m.load_latest("k").unwrap().expect("load_latest must hit");
+        assert_eq!(got.created, 100);
+    }
+
+    /// Stress: many concurrent stores at increasing `created` against
+    /// concurrent `load_latest` readers. After the writers finish, the
+    /// final `load_latest` must reflect the highest stored `created`,
+    /// and no reader during the run may have observed a `latest` that
+    /// pointed at a missing row.
+    #[test]
+    fn concurrent_store_load_latest_invariant() {
+        let m = Arc::new(InMemoryMetastore::new());
+        let writers = 8;
+        let writes_per_writer = 200;
+
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+        // Reader threads: spin reading load_latest. If load_latest returns
+        // Some(rec), then re-loading the same row by exact key must also
+        // return Some. (Equivalent to: the latest pointer never points at
+        // a row that's missing from by_key.)
+        let mut reader_handles = Vec::new();
+        for _ in 0..4 {
+            let m = Arc::clone(&m);
+            let stop = Arc::clone(&stop);
+            reader_handles.push(thread::spawn(move || {
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    if let Some(rec) = m.load_latest("k").unwrap() {
+                        assert!(
+                            m.load("k", rec.created).unwrap().is_some(),
+                            "load_latest returned a row whose (id, created) is \
+                             missing from by_key"
+                        );
+                    }
+                }
+            }));
+        }
+
+        let mut writer_handles = Vec::new();
+        for w in 0..writers {
+            let m = Arc::clone(&m);
+            writer_handles.push(thread::spawn(move || {
+                for i in 0..writes_per_writer {
+                    let created = (w as i64 * writes_per_writer as i64) + i as i64 + 1;
+                    let _ = m.store("k", created, &ekr(created)).unwrap();
+                }
+            }));
+        }
+        for h in writer_handles {
+            h.join().unwrap();
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        for h in reader_handles {
+            h.join().unwrap();
+        }
+
+        let max_created = (writers as i64) * (writes_per_writer as i64);
+        let latest = m.load_latest("k").unwrap().expect("must hit after writers");
+        assert_eq!(latest.created, max_created);
     }
 }

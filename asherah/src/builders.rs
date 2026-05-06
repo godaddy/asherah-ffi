@@ -703,6 +703,62 @@ async fn build_metastore_async(
     }
 }
 
+/// Hex of `b"thisIsAStaticMasterKeyForTesting"` (32 bytes). Public test value
+/// used only when the caller explicitly requests the `test-debug-static` KMS
+/// alias. Production KMS=static configurations require a non-empty
+/// `STATIC_MASTER_KEY_HEX` and must never reach this constant.
+pub const TEST_DEBUG_STATIC_MASTER_KEY_HEX: &str =
+    "746869734973415374617469634d61737465724b6579466f7254657374696e67";
+
+/// Validate and order an AWS multi-region map.
+///
+/// Returns `(entries, preferred_idx)` with `entries` sorted by region name
+/// so the chosen preferred region is deterministic across processes (the
+/// caller-supplied `HashMap` has nondeterministic iteration order).
+///
+/// Errors when the map is empty, when an entry has an empty region name or
+/// key ARN, or when `preferred_region` is set but absent from the map.
+fn order_region_map(
+    regions: &std::collections::HashMap<String, String>,
+    preferred_region: Option<&str>,
+) -> anyhow::Result<(Vec<(String, String)>, usize)> {
+    if regions.is_empty() {
+        anyhow::bail!("REGION_MAP must contain at least one region → key-ARN entry");
+    }
+
+    let mut entries: Vec<(String, String)> = regions
+        .iter()
+        .map(|(r, k)| (r.clone(), k.clone()))
+        .collect();
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (region, key_arn) in &entries {
+        if region.trim().is_empty() {
+            anyhow::bail!("REGION_MAP contains an empty region name");
+        }
+        if key_arn.trim().is_empty() {
+            anyhow::bail!("REGION_MAP entry for region '{region}' has an empty key ARN");
+        }
+    }
+
+    let pref_idx = match preferred_region {
+        Some(want) => entries.iter().position(|(r, _)| r == want).ok_or_else(|| {
+            let known: Vec<&str> = entries.iter().map(|(r, _)| r.as_str()).collect();
+            anyhow::anyhow!(
+                "PREFERRED_REGION '{want}' is not present in REGION_MAP; known: {known:?}"
+            )
+        })?,
+        None if entries.len() == 1 => 0,
+        None => anyhow::bail!(
+            "PREFERRED_REGION must be set when REGION_MAP contains multiple entries; \
+             got {} regions",
+            entries.len()
+        ),
+    };
+
+    Ok((entries, pref_idx))
+}
+
 fn decode_static_key_hex(hex: &str) -> anyhow::Result<Vec<u8>> {
     if !hex.len().is_multiple_of(2) {
         anyhow::bail!(
@@ -730,16 +786,18 @@ fn build_kms(
 ) -> anyhow::Result<Arc<dyn crate::traits::KeyManagementService>> {
     match kms {
         KmsConfig::Static { key_hex } => {
+            if key_hex.is_empty() {
+                anyhow::bail!(
+                    "KMS=static requires STATIC_MASTER_KEY_HEX to be set to a 64-char hex \
+                     string (32-byte AES-256 key). For local testing, set KMS=test-debug-static \
+                     to use a publicly known fixed key."
+                );
+            }
             log::warn!(
                 "Using static master key. \
                  This is for testing only — do NOT use in production."
             );
-            let hex = if key_hex.is_empty() {
-                "746869734973415374617469634d61737465724b6579466f7254657374696e67"
-            } else {
-                key_hex.as_str()
-            };
-            let key = decode_static_key_hex(hex)?;
+            let key = decode_static_key_hex(key_hex)?;
             Ok(Arc::new(crate::kms::StaticKMS::new(crypto.clone(), key)?))
         }
         KmsConfig::Aws {
@@ -749,14 +807,7 @@ fn build_kms(
             region,
         } => {
             if let Some(regions) = region_map {
-                let mut entries: Vec<(String, String)> = Vec::new();
-                let mut pref_idx = 0_usize;
-                for (i, (r, k)) in regions.iter().enumerate() {
-                    if preferred_region.as_ref() == Some(r) {
-                        pref_idx = i;
-                    }
-                    entries.push((r.clone(), k.clone()));
-                }
+                let (entries, pref_idx) = order_region_map(regions, preferred_region.as_deref())?;
                 let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_multi(
                     crypto.clone(),
                     pref_idx,
@@ -826,14 +877,7 @@ async fn build_kms_async(
             region,
         } => {
             if let Some(regions) = region_map {
-                let mut entries: Vec<(String, String)> = Vec::new();
-                let mut pref_idx = 0_usize;
-                for (i, (r, k)) in regions.iter().enumerate() {
-                    if preferred_region.as_ref() == Some(r) {
-                        pref_idx = i;
-                    }
-                    entries.push((r.clone(), k.clone()));
-                }
+                let (entries, pref_idx) = order_region_map(regions, preferred_region.as_deref())?;
                 let kms = crate::kms_aws_envelope::AwsKmsEnvelope::new_multi_async(
                     crypto.clone(),
                     pref_idx,
@@ -1064,8 +1108,17 @@ pub fn resolve_from_env() -> anyhow::Result<ResolvedConfig> {
         .unwrap_or_else(|_| "static".into())
         .to_lowercase();
     let kms = match kms_kind.as_str() {
-        "static" | "test-debug-static" => KmsConfig::Static {
-            key_hex: std::env::var("STATIC_MASTER_KEY_HEX").unwrap_or_default(),
+        "static" => KmsConfig::Static {
+            key_hex: std::env::var("STATIC_MASTER_KEY_HEX").map_err(|_| {
+                anyhow::anyhow!(
+                    "KMS=static requires STATIC_MASTER_KEY_HEX (64-char hex). For local \
+                     testing, set KMS=test-debug-static to use a publicly known fixed key."
+                )
+            })?,
+        },
+        "test-debug-static" => KmsConfig::Static {
+            key_hex: std::env::var("STATIC_MASTER_KEY_HEX")
+                .unwrap_or_else(|_| TEST_DEBUG_STATIC_MASTER_KEY_HEX.to_string()),
         },
         "aws" => {
             let region_map = std::env::var("REGION_MAP")
@@ -1319,6 +1372,102 @@ mod tests {
         match classify_connection_string(conn) {
             DbKind::Unknown(s) => assert_eq!(s, conn),
             other => panic!("expected Unknown, got {other:?}"),
+        }
+    }
+
+    // ────────────── order_region_map (T11 + REGION_MAP validation) ──────────
+
+    fn region_map_of(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(r, k)| ((*r).to_string(), (*k).to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn region_map_empty_is_rejected() {
+        let m = std::collections::HashMap::<String, String>::new();
+        let err = order_region_map(&m, None).expect_err("empty map must error");
+        assert!(format!("{err:#}").contains("REGION_MAP"));
+    }
+
+    #[test]
+    fn region_map_empty_region_name_is_rejected() {
+        let m = region_map_of(&[("", "arn")]);
+        let err = order_region_map(&m, Some("us-east-1")).expect_err("empty region must error");
+        assert!(format!("{err:#}").contains("empty region"));
+    }
+
+    #[test]
+    fn region_map_empty_arn_is_rejected() {
+        let m = region_map_of(&[("us-east-1", "")]);
+        let err = order_region_map(&m, Some("us-east-1")).expect_err("empty ARN must error");
+        assert!(format!("{err:#}").contains("empty key ARN"));
+    }
+
+    #[test]
+    fn region_map_unknown_preferred_region_is_rejected() {
+        let m = region_map_of(&[("us-east-1", "arn-east"), ("us-west-2", "arn-west")]);
+        let err = order_region_map(&m, Some("eu-central-1"))
+            .expect_err("preferred not in map must error");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("eu-central-1"), "{msg}");
+        assert!(
+            msg.contains("us-east-1") && msg.contains("us-west-2"),
+            "{msg}"
+        );
+    }
+
+    #[test]
+    fn region_map_missing_preferred_with_multiple_entries_is_rejected() {
+        let m = region_map_of(&[("us-east-1", "arn-east"), ("us-west-2", "arn-west")]);
+        let err =
+            order_region_map(&m, None).expect_err("multi-region map without preferred must error");
+        assert!(format!("{err:#}").contains("PREFERRED_REGION"));
+    }
+
+    #[test]
+    fn region_map_single_entry_defaults_to_only_region() {
+        let m = region_map_of(&[("us-east-1", "arn-east")]);
+        let (entries, idx) =
+            order_region_map(&m, None).expect("single-entry map without preferred is allowed");
+        assert_eq!(idx, 0);
+        assert_eq!(entries, [("us-east-1".to_string(), "arn-east".to_string())]);
+    }
+
+    #[test]
+    fn region_map_orders_entries_alphabetically_and_resolves_preferred() {
+        let m = region_map_of(&[
+            ("us-west-2", "arn-west"),
+            ("ap-south-1", "arn-south"),
+            ("eu-central-1", "arn-eu"),
+        ]);
+        let (entries, idx) = order_region_map(&m, Some("us-west-2")).expect("ordered");
+        let names: Vec<&str> = entries.iter().map(|(r, _)| r.as_str()).collect();
+        assert_eq!(names, ["ap-south-1", "eu-central-1", "us-west-2"]);
+        assert_eq!(idx, 2);
+        assert_eq!(entries[idx].1, "arn-west");
+    }
+
+    #[test]
+    fn region_map_ordering_is_stable_across_calls() {
+        // HashMap iteration is randomized — order_region_map must produce
+        // the same (entries, idx) regardless of insertion order.
+        let pairs = [
+            ("us-east-1", "arn-1"),
+            ("us-east-2", "arn-2"),
+            ("us-west-1", "arn-3"),
+            ("us-west-2", "arn-4"),
+            ("eu-west-1", "arn-5"),
+        ];
+        let mut prev: Option<(Vec<(String, String)>, usize)> = None;
+        for _ in 0..32 {
+            let m = region_map_of(&pairs);
+            let result = order_region_map(&m, Some("us-west-2")).expect("ordered");
+            if let Some(p) = &prev {
+                assert_eq!(p, &result, "deterministic ordering broken");
+            }
+            prev = Some(result);
         }
     }
 }

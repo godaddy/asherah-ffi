@@ -4,7 +4,7 @@ class RoundTripTest < Minitest::Test
   def setup
     ENV["SERVICE_NAME"] = "svc"
     ENV["PRODUCT_ID"] = "prod"
-    ENV["KMS"] = "static"
+    ENV["KMS"] = "test-debug-static"
     ENV["STATIC_MASTER_KEY_HEX"] = "22" * 32
     ENV["Metastore"] = "memory"
     ENV["SESSION_CACHE"] = "0"
@@ -12,7 +12,7 @@ class RoundTripTest < Minitest::Test
       "ServiceName" => "svc",
       "ProductID" => "prod",
       "Metastore" => "memory",
-      "KMS" => "static",
+      "KMS" => "test-debug-static",
       "EnableSessionCaching" => true,
       "Verbose" => false
     }
@@ -42,7 +42,7 @@ class RoundTripTest < Minitest::Test
       "ServiceName" => "svc",
       "ProductID" => "prod",
       "Metastore" => "memory",
-      "KMS" => "static",
+      "KMS" => "test-debug-static",
       "EnableSessionCaching" => false,
       "Verbose" => false
     }
@@ -186,7 +186,7 @@ class FactorySessionTest < Minitest::Test
     "ServiceName" => "svc",
     "ProductID" => "prod",
     "Metastore" => "memory",
-    "KMS" => "static",
+    "KMS" => "test-debug-static",
     "EnableSessionCaching" => true,
     "Verbose" => false
   }.freeze
@@ -382,7 +382,7 @@ class CanonicalCompatTest < Minitest::Test
     Asherah.configure do |config|
       config.service_name = "compat-svc"
       config.product_id = "compat-prod"
-      config.kms = "static"
+      config.kms = "test-debug-static"
       config.metastore = "memory"
     end
     ct = Asherah.encrypt("compat-part", "block config works")
@@ -394,7 +394,7 @@ class CanonicalCompatTest < Minitest::Test
     Asherah.configure do |config|
       config.service_name = "cache-svc"
       config.product_id = "cache-prod"
-      config.kms = "static"
+      config.kms = "test-debug-static"
       config.metastore = "memory"
       config.enable_session_caching = true
     end
@@ -426,13 +426,17 @@ class CanonicalCompatTest < Minitest::Test
     config = Asherah::Config.new
     config.service_name = "svc"
     config.product_id = "prod"
-    config.kms = "static"
+    config.kms = "test-debug-static"
     config.metastore = "memory"
     config.verbose = true
     h = config.to_h
     assert_equal "svc", h[:ServiceName]
     assert_equal "prod", h[:ProductID]
-    assert_equal "static", h[:KMS]
+    # `to_h` does not normalize KMS aliases — the value passes through
+    # to the Rust core verbatim, which has a dedicated
+    # `test-debug-static` KMS kind. Aliasing it to "static" here would
+    # trip the empty-`STATIC_MASTER_KEY_HEX` rejection from 9049fa4.
+    assert_equal "test-debug-static", h[:KMS]
     assert_equal "memory", h[:Metastore]
     assert_equal true, h[:Verbose]
     refute h.key?(:ConnectionString) # nil values excluded
@@ -442,7 +446,7 @@ class CanonicalCompatTest < Minitest::Test
     config = Asherah::Config.new
     config.service_name = "svc"
     config.product_id = "prod"
-    config.kms = "static"
+    config.kms = "test-debug-static"
     config.metastore = "memory"
     config.aws_profile_name = "staging"
     h = config.to_h
@@ -457,7 +461,7 @@ class CanonicalCompatTest < Minitest::Test
     config = Asherah::Config.new
     config.service_name = "svc"
     config.product_id = "prod"
-    config.kms = "static"
+    config.kms = "test-debug-static"
     config.metastore = "dynamodb"
     config.dynamo_db_region = "us-east-1"
     config.dynamo_db_signing_region = "us-west-2"
@@ -480,7 +484,7 @@ class CanonicalCompatTest < Minitest::Test
     config = Asherah::Config.new
     config.service_name = "svc"
     config.product_id = "prod"
-    config.kms = "static"
+    config.kms = "test-debug-static"
     config.metastore = "memory"
     json = config.to_json
     parsed = JSON.parse(json)
@@ -496,7 +500,7 @@ class AsyncSessionTest < Minitest::Test
     "ServiceName" => "svc",
     "ProductID" => "prod",
     "Metastore" => "memory",
-    "KMS" => "static",
+    "KMS" => "test-debug-static",
     "EnableSessionCaching" => true,
     "Verbose" => false
   }.freeze

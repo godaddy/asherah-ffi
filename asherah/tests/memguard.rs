@@ -35,6 +35,87 @@ fn buffer_new_zero_returns_null_buffer_error() {
     assert!(matches!(err, memguard::Error::NullBuffer));
 }
 
+#[test]
+fn buffer_new_huge_size_rejected_without_overflow() {
+    // Pre-fix, `round_to_page_size(usize::MAX)` wrapped to 0 and
+    // `data_off = ps + inner_len - size` underflowed, producing a buffer
+    // with all-guard-page layout and OOB writes. With explicit overflow
+    // checks the layout calculation must surface an `Err` cleanly.
+    let result = memguard::Buffer::new(usize::MAX);
+    assert!(result.is_err(), "usize::MAX size must error, not panic");
+    let result = memguard::Buffer::new(usize::MAX - 1024);
+    assert!(
+        result.is_err(),
+        "size near usize::MAX must error, not panic"
+    );
+}
+
+/// Sweep adversarial sizes that could trip each of the three overflow
+/// guards in `Buffer::new`:
+///   1. `round_to_page_size(size) < size` (round wraps to 0)
+///   2. `2 * ps + inner_len` overflows usize
+///   3. `ps + inner_len - size` underflows (defensive; reachable only
+///      if guards 1 and 2 are both bypassed)
+///
+/// The actual page size varies by platform (4 KiB on x86_64 Linux,
+/// 16 KiB on Apple Silicon), so we test inputs just below `usize::MAX`
+/// as well as the boundary where layout overflow actually occurs.
+/// What matters is that none of these panic, none allocate a malformed
+/// buffer, and all return `Err(Error::Mem(...))` (or `Error::NullBuffer`
+/// for size 0).
+#[test]
+fn buffer_new_overflow_guards_no_panic() {
+    // Sweep the top of usize::MAX from MAX down to MAX - 1 MiB,
+    // stepping by page-size-ish increments. At least one of these will
+    // exercise guard 1 (round wrap); on platforms where page_size is
+    // small enough, others will exercise guard 2 (layout overflow).
+    let offsets = [
+        0_usize, 1, 2, 3, 7, 15, 1023, 4095, 8191, 16383, 65535, 1_048_575,
+    ];
+    for off in offsets {
+        let size = usize::MAX - off;
+        let result = memguard::Buffer::new(size);
+        assert!(
+            result.is_err(),
+            "Buffer::new(usize::MAX - {off}) = {size} must error, not panic"
+        );
+        let err = result.unwrap_err();
+        // Either NullBuffer (only for size 0, unreachable here) or Mem(_).
+        assert!(
+            matches!(err, memguard::Error::Mem(_)),
+            "expected Error::Mem for adversarial size {size}, got {err:?}"
+        );
+    }
+}
+
+/// Verify a "small but page-misaligned" adversarial size still
+/// allocates correctly. Specifically, the canary length is
+/// `inner_len - size`; we want to make sure off-by-one rounding doesn't
+/// produce a 0-canary buffer with bogus pre/post slices.
+#[test]
+fn buffer_new_misaligned_sizes_layout_correct() {
+    // 1, 4097, page_size+1: a write through the data slice must not
+    // touch the guard page (if it did the protect() would SIGSEGV
+    // when we try to write through the data offset).
+    for size in [1_usize, 31, 4097, 8193, 65537] {
+        let mut buf = memguard::Buffer::new(size).expect("layout must succeed");
+        assert_eq!(buf.size(), size);
+        let bytes = buf.bytes();
+        assert_eq!(bytes.len(), size);
+        // Fill the entire data region with a pattern; if the layout
+        // computed data_off incorrectly, this write would either
+        // SIGSEGV (touching a PROT_NONE guard page) or overwrite the
+        // canary (which `destroy` would detect via canary check).
+        for (i, b) in bytes.iter_mut().enumerate() {
+            *b = (i & 0xFF) as u8;
+        }
+        for (i, &b) in buf.as_slice().iter().enumerate() {
+            assert_eq!(b, (i & 0xFF) as u8);
+        }
+        buf.destroy().expect("destroy must succeed (canary intact)");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Buffer freeze / melt
 // ---------------------------------------------------------------------------

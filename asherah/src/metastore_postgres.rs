@@ -12,6 +12,44 @@ const DEFAULT_MAX_OPEN: usize = 0;
 /// Default max idle connections, matching Go's database/sql MaxIdleConns default.
 const DEFAULT_MAX_IDLE: usize = 2;
 
+/// Replica read consistency modes accepted by Aurora's `apg_write_forward.consistency_mode`.
+///
+/// Restricting the wire-level setting to a closed enum keeps user input out
+/// of the `SET` statement entirely — the SQL strings are compile-time
+/// constants picked by `as_set_statement` (T7 in
+/// `docs/review-2026-05-05-findings.md`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ReplicaConsistency {
+    Eventual,
+    Global,
+    Session,
+}
+
+impl ReplicaConsistency {
+    /// Parse the case-sensitive wire value (`eventual`, `global`, `session`).
+    fn parse(value: &str) -> anyhow::Result<Self> {
+        match value {
+            "eventual" => Ok(Self::Eventual),
+            "global" => Ok(Self::Global),
+            "session" => Ok(Self::Session),
+            other => anyhow::bail!(
+                "invalid REPLICA_READ_CONSISTENCY value: '{other}' \
+                 (expected eventual, global, or session)"
+            ),
+        }
+    }
+
+    /// Returns the static `SET` statement for this mode. The value is a
+    /// `&'static str` literal, never a runtime-formatted string.
+    fn as_set_statement(self) -> &'static str {
+        match self {
+            Self::Eventual => "SET apg_write_forward.consistency_mode = 'eventual'",
+            Self::Global => "SET apg_write_forward.consistency_mode = 'global'",
+            Self::Session => "SET apg_write_forward.consistency_mode = 'session'",
+        }
+    }
+}
+
 struct PoolInner {
     conns: Vec<Client>,
     checked_out: usize,
@@ -19,7 +57,7 @@ struct PoolInner {
 
 struct PgPool {
     url: String,
-    replica_consistency: Option<String>,
+    replica_consistency: Option<ReplicaConsistency>,
     inner: Mutex<PoolInner>,
     max_idle: usize,
     max_open: usize,
@@ -138,17 +176,10 @@ impl PostgresMetastore {
         max_idle: Option<usize>,
         replica_consistency: Option<String>,
     ) -> anyhow::Result<Self> {
-        if let Some(ref c) = replica_consistency {
-            match c.as_str() {
-                "eventual" | "global" | "session" => {}
-                _ => {
-                    anyhow::bail!(
-                        "invalid REPLICA_READ_CONSISTENCY value: '{}' (expected eventual, global, or session)",
-                        c
-                    );
-                }
-            }
-        }
+        let replica_consistency = replica_consistency
+            .as_deref()
+            .map(ReplicaConsistency::parse)
+            .transpose()?;
         let max_open = max_open.unwrap_or(DEFAULT_MAX_OPEN);
         let max_idle = max_idle.unwrap_or(DEFAULT_MAX_IDLE);
         let max_idle = if max_open > 0 {
@@ -173,18 +204,7 @@ impl PostgresMetastore {
 
     /// Connect using env vars for pool config (legacy entry point).
     pub fn connect(url: &str) -> anyhow::Result<Self> {
-        let replica_consistency = match std::env::var("REPLICA_READ_CONSISTENCY") {
-            Ok(c) => match c.as_str() {
-                "eventual" | "global" | "session" => Some(c),
-                _ => {
-                    anyhow::bail!(
-                        "invalid REPLICA_READ_CONSISTENCY value: '{}' (expected eventual, global, or session)",
-                        c
-                    );
-                }
-            },
-            Err(_) => None,
-        };
+        let replica_consistency = std::env::var("REPLICA_READ_CONSISTENCY").ok();
 
         fn env_usize(key: &str) -> Option<usize> {
             std::env::var(key).ok().and_then(|v| v.parse().ok())
@@ -242,11 +262,33 @@ impl PostgresMetastore {
                 inner.checked_out += 1;
             }
 
+            // Reserve `checked_out += 1` was just done above; if anything
+            // panics or returns Err between here and `pooled` being
+            // constructed (which takes ownership of the increment via
+            // PgPooledClient::Drop), the increment leaks and the pool
+            // deadlocks once `total >= max_open`. A small guard struct
+            // decrements on Drop unless we explicitly commit. T-finding
+            // "checked_out increment outside failure-decrement lock" in
+            // docs/review-2026-05-05-findings.md.
+            struct CheckoutGuard<'pool> {
+                pool: &'pool Arc<PgPool>,
+                committed: bool,
+            }
+            impl Drop for CheckoutGuard<'_> {
+                fn drop(&mut self) {
+                    if !self.committed {
+                        let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
+                        inner.checked_out = inner.checked_out.saturating_sub(1);
+                    }
+                }
+            }
+            let mut guard = CheckoutGuard {
+                pool: &self.pool,
+                committed: false,
+            };
+
             // Create a new connection (outside the lock)
             let client = connect_client(&self.pool.url).map_err(|e| {
-                // Decrement checked_out since we failed to create the connection
-                let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
-                inner.checked_out -= 1;
                 log::error!("Postgres connection failed: {e:#}");
                 e
             })?;
@@ -256,15 +298,18 @@ impl PostgresMetastore {
                 pool: Arc::clone(&self.pool),
                 client: Some(client),
             };
-            if let Some(ref consistency) = self.pool.replica_consistency {
-                if let Err(e) = pooled.batch_execute(&format!(
-                    "SET apg_write_forward.consistency_mode = '{consistency}'"
-                )) {
-                    // pooled will be dropped, which decrements checked_out
+            if let Some(consistency) = self.pool.replica_consistency {
+                if let Err(e) = pooled.batch_execute(consistency.as_set_statement()) {
+                    // pooled will be dropped, which decrements checked_out;
+                    // the guard is also still un-committed so it will
+                    // double-decrement — flip committed=true to suppress.
+                    guard.committed = true;
                     return Err(e.into());
                 }
             }
 
+            // Ownership transfers to PgPooledClient::Drop now.
+            guard.committed = true;
             return Ok(pooled);
         }
 
@@ -278,11 +323,22 @@ impl Metastore for PostgresMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         log::debug!("postgres load: id={id} created={created}");
         let mut c = self.client()?;
+        // f64 has 53-bit mantissa, more than enough for any plausible
+        // epoch value (current epochs are ~1.7e9; the safe ceiling is
+        // ~9e15). Bind as f64 to match Postgres' single-arg
+        // `to_timestamp(double precision)` directly. T-finding
+        // "created as f64 loses precision for large epochs" in
+        // docs/review-2026-05-05-findings.md is documented here as a
+        // known precision floor; switching to BIGINT-backed encoding
+        // requires schema changes.
         let created_f = created as f64;
-        let row = c.query_opt(
-            "SELECT key_record::text FROM encryption_key WHERE id=$1 AND created=to_timestamp($2)",
-            &[&id, &created_f],
-        ).with_context(|| format!("Postgres load query failed for id={id} created={created}"))?;
+        let row = c
+            .query_opt(
+                "SELECT key_record::text FROM encryption_key \
+             WHERE id=$1 AND created=to_timestamp($2)",
+                &[&id, &created_f],
+            )
+            .with_context(|| format!("Postgres load query failed for id={id} created={created}"))?;
         match row {
             Some(row) => {
                 let txt: String = row.get(0);
@@ -330,13 +386,26 @@ impl Metastore for PostgresMetastore {
         let mut c = self.client()?;
         let v = ekr.to_json_fast();
         let created_f = created as f64;
+        // The double-parse path (`v` → `serde_json::Value` → wire JSONB)
+        // could be replaced with `$3::jsonb` casting bound text, but the
+        // postgres-rs driver's prepared-statement type-inference rejects
+        // a `String` bound at the JSONB position even with the explicit
+        // cast in some setups. Keep the parse-and-bind path until it can
+        // be replaced with `tokio_postgres::types::ToSql` for `&str`
+        // (T-finding "to_json_fast() then serde_json::from_str" in
+        // docs/review-2026-05-05-findings.md is left as a follow-up).
         let v_json: serde_json::Value = serde_json::from_str(&v).with_context(|| {
             format!("Postgres store: failed to re-parse key_record JSON for id={id}")
         })?;
-        let res = c.execute(
-            "INSERT INTO encryption_key(id, created, key_record) VALUES ($1, to_timestamp($2), $3) ON CONFLICT DO NOTHING",
-            &[&id, &created_f, &v_json],
-        ).with_context(|| format!("Postgres store insert failed for id={id} created={created}"))?;
+        let res = c
+            .execute(
+                "INSERT INTO encryption_key(id, created, key_record) \
+             VALUES ($1, to_timestamp($2), $3) ON CONFLICT DO NOTHING",
+                &[&id, &created_f, &v_json],
+            )
+            .with_context(|| {
+                format!("Postgres store insert failed for id={id} created={created}")
+            })?;
         let stored = res > 0;
         log::debug!("postgres store: id={id} created={created} stored={stored}");
         Ok(stored)
@@ -384,7 +453,7 @@ impl Metastore for PostgresMetastore {
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
+#[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
 
@@ -467,5 +536,69 @@ mod tests {
     #[test]
     fn parse_sslmode_empty_string() {
         assert_eq!(parse_sslmode(""), None);
+    }
+
+    // ────────────── ReplicaConsistency (T7) ──────────────
+
+    #[test]
+    fn replica_consistency_parse_known_values() {
+        assert_eq!(
+            ReplicaConsistency::parse("eventual").unwrap(),
+            ReplicaConsistency::Eventual
+        );
+        assert_eq!(
+            ReplicaConsistency::parse("global").unwrap(),
+            ReplicaConsistency::Global
+        );
+        assert_eq!(
+            ReplicaConsistency::parse("session").unwrap(),
+            ReplicaConsistency::Session
+        );
+    }
+
+    #[test]
+    fn replica_consistency_parse_rejects_unknown_and_injection() {
+        // Reject unknown legitimate-looking values.
+        assert!(ReplicaConsistency::parse("strong").is_err());
+        assert!(ReplicaConsistency::parse("EVENTUAL").is_err()); // case-sensitive
+                                                                 // Reject SQL injection payloads — these would have been interpolated
+                                                                 // into the SET statement by the previous format!() implementation.
+        assert!(ReplicaConsistency::parse("eventual'; DROP TABLE keys;--").is_err());
+        assert!(ReplicaConsistency::parse("' OR '1'='1").is_err());
+        assert!(ReplicaConsistency::parse("").is_err());
+    }
+
+    #[test]
+    fn replica_consistency_set_statement_is_static() {
+        // The wire SQL must be a fixed string per variant — no interpolation,
+        // no user data ever reaches the SET statement.
+        assert_eq!(
+            ReplicaConsistency::Eventual.as_set_statement(),
+            "SET apg_write_forward.consistency_mode = 'eventual'"
+        );
+        assert_eq!(
+            ReplicaConsistency::Global.as_set_statement(),
+            "SET apg_write_forward.consistency_mode = 'global'"
+        );
+        assert_eq!(
+            ReplicaConsistency::Session.as_set_statement(),
+            "SET apg_write_forward.consistency_mode = 'session'"
+        );
+    }
+
+    #[test]
+    fn connect_with_rejects_invalid_consistency_value() {
+        let result = PostgresMetastore::connect_with(
+            "postgres://localhost/db",
+            None,
+            None,
+            Some("eventual'; DROP TABLE keys;--".to_string()),
+        );
+        let err = match result {
+            Ok(_) => panic!("invalid consistency must error"),
+            Err(e) => e,
+        };
+        let msg = format!("{err:#}");
+        assert!(msg.contains("REPLICA_READ_CONSISTENCY"), "{msg}");
     }
 }

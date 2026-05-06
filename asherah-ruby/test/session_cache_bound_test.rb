@@ -19,7 +19,7 @@ class SessionCacheBoundTest < Minitest::Test
       "ServiceName" => "svc",
       "ProductID" => "prod",
       "Metastore" => "memory",
-      "KMS" => "static",
+      "KMS" => "test-debug-static",
       "EnableSessionCaching" => true,
       "Verbose" => false
     }

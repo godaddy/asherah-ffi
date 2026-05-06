@@ -21,7 +21,7 @@ class AsherahConfigTest {
             .serviceName("svc")
             .productId("prod")
             .metastore("memory")
-            .kms("static");
+            .kms("test-debug-static");
     if (configure != null) {
       configure.accept(b);
     }

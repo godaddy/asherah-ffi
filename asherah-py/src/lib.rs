@@ -17,6 +17,7 @@ use lru::LruCache;
 use parking_lot::Mutex;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+use zeroize::Zeroizing;
 
 type Factory = ael::session::PublicFactory<
     ael::aead::AES256GCM,
@@ -118,17 +119,23 @@ fn setenv(env_obj: &Bound<'_, PyAny>) -> PyResult<()> {
 }
 
 #[pyfunction]
-fn encrypt_bytes(partition_id: &str, data: &[u8]) -> PyResult<String> {
+fn encrypt_bytes(py: Python<'_>, partition_id: &str, data: &[u8]) -> PyResult<String> {
     let session = with_manager(|mgr| Ok(mgr.get_or_create_session(partition_id)))?;
-    let drr = session.encrypt(data).map_err(anyhow_to_py)?;
+    let input = Zeroizing::new(data.to_vec());
+    // Release the GIL across the encrypt — encrypt may hit MySQL/Postgres
+    // and AWS KMS, both of which can block for tens of milliseconds. T5 in
+    // docs/review-2026-05-05-findings.md.
+    let drr = py
+        .detach(|| session.encrypt(&input))
+        .map_err(anyhow_to_py)?;
     let json = serde_json::to_string(&drr)
         .map_err(|e| PyRuntimeError::new_err(format!("json error: {e}")))?;
     Ok(json)
 }
 
 #[pyfunction]
-fn encrypt_string(partition_id: &str, text: &str) -> PyResult<String> {
-    encrypt_bytes(partition_id, text.as_bytes())
+fn encrypt_string(py: Python<'_>, partition_id: &str, text: &str) -> PyResult<String> {
+    encrypt_bytes(py, partition_id, text.as_bytes())
 }
 
 #[pyfunction]
@@ -140,15 +147,32 @@ fn decrypt_bytes<'py>(
     let session = with_manager(|mgr| Ok(mgr.get_or_create_session(partition_id)))?;
     let drr: ael::types::DataRowRecord = serde_json::from_str(data_row_record)
         .map_err(|e| PyRuntimeError::new_err(format!("invalid DataRowRecord JSON: {e}")))?;
-    let bytes = session.decrypt(drr).map_err(anyhow_to_py)?;
+    // `PyBytes::new` copies into a Python-managed buffer that we can no
+    // longer wipe — but we *can* wipe our own intermediate Vec the
+    // moment the copy completes. Wrap in `Zeroizing` so any early
+    // return (e.g., a panic in `PyBytes::new`) still wipes.
+    let bytes: Zeroizing<Vec<u8>> =
+        Zeroizing::new(py.detach(|| session.decrypt(drr)).map_err(anyhow_to_py)?);
     Ok(PyBytes::new(py, &bytes))
 }
 
 #[pyfunction]
 fn decrypt_string(partition_id: &str, data_row_record: &str) -> PyResult<String> {
     Python::attach(|py| {
-        let bytes = decrypt_bytes(py, partition_id, data_row_record)?;
-        String::from_utf8(bytes.as_bytes().to_vec())
+        let session = with_manager(|mgr| Ok(mgr.get_or_create_session(partition_id)))?;
+        let drr: ael::types::DataRowRecord = serde_json::from_str(data_row_record)
+            .map_err(|e| PyRuntimeError::new_err(format!("invalid DataRowRecord JSON: {e}")))?;
+        let bytes: Zeroizing<Vec<u8>> =
+            Zeroizing::new(py.detach(|| session.decrypt(drr)).map_err(anyhow_to_py)?);
+        // Validate UTF-8 against the wiped-on-drop buffer; only allocate
+        // the final `String` (which Python will own and we can't wipe)
+        // if validation succeeds. The intermediate `Vec` from `to_vec`
+        // is unavoidable because `String` requires ownership of its
+        // backing buffer and we can't move out of `Zeroizing` without
+        // skipping the wipe.
+        std::str::from_utf8(&bytes)
+            .map_err(|e| PyRuntimeError::new_err(format!("utf8 error: {e}")))?;
+        String::from_utf8(bytes.to_vec())
             .map_err(|e| PyRuntimeError::new_err(format!("utf8 error: {e}")))
     })
 }
@@ -171,6 +195,11 @@ async fn encrypt_bytes_async(partition_id: String, data: Vec<u8>) -> PyResult<St
 }
 
 /// Module-level async decrypt — runs on Rust's tokio runtime, returns a Python coroutine.
+///
+/// PyO3's `Vec<u8>` return type forces a copy into a Python `bytes`
+/// before we get a chance to wipe; the wipe of our intermediate Vec
+/// happens immediately after the copy. Once the plaintext lives in
+/// Python's heap as `bytes` it's beyond our control.
 #[pyfunction]
 async fn decrypt_bytes_async(partition_id: String, data_row_record: String) -> PyResult<Vec<u8>> {
     let session = with_manager(|mgr| Ok(mgr.get_or_create_session(&partition_id)))?;
@@ -181,9 +210,12 @@ async fn decrypt_bytes_async(partition_id: String, data_row_record: String) -> P
         let result = session.decrypt_async(drr).await;
         drop(tx.send(result));
     });
-    rx.await
-        .map_err(|_| PyRuntimeError::new_err("async decrypt cancelled"))?
-        .map_err(anyhow_to_py)
+    let pt: Zeroizing<Vec<u8>> = Zeroizing::new(
+        rx.await
+            .map_err(|_| PyRuntimeError::new_err("async decrypt cancelled"))?
+            .map_err(anyhow_to_py)?,
+    );
+    Ok(pt.to_vec())
 }
 
 struct FactoryManager {
@@ -317,13 +349,19 @@ pub struct PySession {
 
 #[pymethods]
 impl PySession {
-    pub fn encrypt_bytes(&self, data: &[u8]) -> PyResult<String> {
-        let drr = self.inner.encrypt(data).map_err(anyhow_to_py)?;
+    pub fn encrypt_bytes(&self, py: Python<'_>, data: &[u8]) -> PyResult<String> {
+        let input = Zeroizing::new(data.to_vec());
+        // Release the GIL across the encrypt — the operation can hit
+        // MySQL/Postgres and AWS KMS, both blocking. T5 in
+        // docs/review-2026-05-05-findings.md.
+        let drr = py
+            .detach(|| self.inner.encrypt(&input))
+            .map_err(anyhow_to_py)?;
         serde_json::to_string(&drr).map_err(|e| PyRuntimeError::new_err(format!("json error: {e}")))
     }
 
-    pub fn encrypt_text(&self, text: &str) -> PyResult<String> {
-        self.encrypt_bytes(text.as_bytes())
+    pub fn encrypt_text(&self, py: Python<'_>, text: &str) -> PyResult<String> {
+        self.encrypt_bytes(py, text.as_bytes())
     }
 
     pub fn decrypt_bytes<'py>(
@@ -331,13 +369,21 @@ impl PySession {
         py: Python<'py>,
         data_row_record: &str,
     ) -> PyResult<Bound<'py, PyBytes>> {
-        let pt = self.decrypt_raw(data_row_record)?;
+        let pt = self.decrypt_raw(py, data_row_record)?;
+        // `pt` is `Zeroizing<Vec<u8>>` — copies into PyBytes here, then
+        // wipes the Rust-side buffer when it goes out of scope.
         Ok(PyBytes::new(py, &pt))
     }
 
-    pub fn decrypt_text(&self, data_row_record: &str) -> PyResult<String> {
-        let bytes = self.decrypt_raw(data_row_record)?;
-        String::from_utf8(bytes).map_err(|e| PyRuntimeError::new_err(format!("utf8 error: {e}")))
+    pub fn decrypt_text(&self, py: Python<'_>, data_row_record: &str) -> PyResult<String> {
+        let bytes = self.decrypt_raw(py, data_row_record)?;
+        std::str::from_utf8(&bytes)
+            .map_err(|e| PyRuntimeError::new_err(format!("utf8 error: {e}")))?;
+        // The cloned `Vec` becomes the String's backing buffer and is
+        // owned by Python from here on. We can't wipe a Python `str`,
+        // so this is a documented limitation of the text path.
+        String::from_utf8(bytes.to_vec())
+            .map_err(|e| PyRuntimeError::new_err(format!("utf8 error: {e}")))
     }
 
     /// True async encrypt — runs on Rust's tokio runtime, returns a Python coroutine.
@@ -365,9 +411,12 @@ impl PySession {
             let result = session.decrypt_async(drr).await;
             drop(tx.send(result));
         });
-        rx.await
-            .map_err(|_| PyRuntimeError::new_err("async decrypt cancelled"))?
-            .map_err(anyhow_to_py)
+        let pt: Zeroizing<Vec<u8>> = Zeroizing::new(
+            rx.await
+                .map_err(|_| PyRuntimeError::new_err("async decrypt cancelled"))?
+                .map_err(anyhow_to_py)?,
+        );
+        Ok(pt.to_vec())
     }
 
     pub fn close(&self) -> PyResult<()> {
@@ -387,11 +436,19 @@ impl PySession {
     ) -> PyResult<()> {
         self.close()
     }
+}
 
-    fn decrypt_raw(&self, data_row_record: &str) -> PyResult<Vec<u8>> {
+// Helper impl block kept separate from `#[pymethods]` so PyO3 doesn't
+// try to expose the `Zeroizing<Vec<u8>>` return type to Python.
+#[allow(clippy::multiple_inherent_impl)]
+impl PySession {
+    fn decrypt_raw(&self, py: Python<'_>, data_row_record: &str) -> PyResult<Zeroizing<Vec<u8>>> {
         let drr: ael::types::DataRowRecord =
             serde_json::from_str(data_row_record).map_err(json_parse_err)?;
-        self.inner.decrypt(drr).map_err(anyhow_to_py)
+        let pt = py
+            .detach(|| self.inner.decrypt(drr))
+            .map_err(anyhow_to_py)?;
+        Ok(Zeroizing::new(pt))
     }
 }
 

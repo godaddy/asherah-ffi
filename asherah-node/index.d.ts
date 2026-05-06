@@ -169,7 +169,7 @@ export type AsherahConfigCompat = {
  *   serviceName: 'my-svc',
  *   productId: 'my-prod',
  *   metastore: 'memory',     // production: 'rdbms' or 'dynamodb'
- *   kms: 'static',           // production: 'aws'
+ *   kms: 'test-debug-static',           // production: 'aws'
  * });
  * ```
  *
@@ -280,7 +280,7 @@ export declare function decryptStringAsync(partitionId: string, dataRowRecordJso
  *   serviceName: 'my-svc',
  *   productId: 'my-prod',
  *   metastore: 'memory',
- *   kms: 'static',
+ *   kms: 'test-debug-static',
  * });
  * const session = factory.getSession('user-42');
  * try {

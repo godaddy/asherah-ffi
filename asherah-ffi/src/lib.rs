@@ -33,7 +33,6 @@ use std::sync::Arc;
 
 use asherah as ael;
 use asherah_config as config;
-use once_cell::sync::Lazy;
 
 type Factory = ael::session::PublicFactory<
     ael::aead::AES256GCM,
@@ -431,21 +430,44 @@ impl AsyncContext {
     }
 
     /// Restore the callback function pointer and user data for invocation.
+    ///
+    /// The callback is stored as `usize` so the surrounding struct can be
+    /// `Send` across the tokio runtime; we round-trip through `*const ()`
+    /// before transmuting to a function pointer. The Rust reference does
+    /// not directly guarantee `usize → fn` transmutes, but
+    /// `*const () → fn` is implementation-defined and works on every
+    /// Tier-1 platform (T-finding "transmute<usize, fn> not guaranteed by
+    /// Rust reference" in docs/review-2026-05-05-findings.md).
     unsafe fn restore_callback(&self) -> (AsherahCompletionFn, usize) {
-        let callback: AsherahCompletionFn = std::mem::transmute(self.callback);
+        let cb_ptr = self.callback as *const ();
+        let callback: AsherahCompletionFn =
+            std::mem::transmute::<*const (), AsherahCompletionFn>(cb_ptr);
         (callback, self.user_data)
     }
 }
 
 /// Shared tokio runtime for async FFI operations.
-static ASYNC_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
+///
+/// Initialization is fallible — building a multi-thread runtime can fail
+/// under FD/thread exhaustion, seccomp policies, or memory pressure. We use
+/// `OnceLock` so a transient failure does not poison the slot for the rest
+/// of the process; `try_async_rt()` retries until the runtime builds. The
+/// previous `Lazy::new(...).expect(...)` would have aborted the host
+/// process on first async use after such a failure (T4 in
+/// `docs/review-2026-05-05-findings.md`).
+static ASYNC_RT: std::sync::OnceLock<tokio::runtime::Runtime> = std::sync::OnceLock::new();
+
+fn try_async_rt() -> Result<&'static tokio::runtime::Runtime, std::io::Error> {
+    if let Some(rt) = ASYNC_RT.get() {
+        return Ok(rt);
+    }
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .thread_name("asherah-async-ffi")
         .enable_all()
-        .build()
-        .expect("failed to create async FFI tokio runtime")
-});
+        .build()?;
+    Ok(ASYNC_RT.get_or_init(|| rt))
+}
 
 /// Completion callback type for async operations.
 /// - `user_data`: opaque pointer passed through from the async call.
@@ -504,7 +526,20 @@ pub unsafe extern "C" fn asherah_encrypt_to_json_async(
 }
 
 fn spawn_encrypt_async(ctx: AsyncContext, input: Vec<u8>) {
-    ASYNC_RT.spawn(async move {
+    let rt = match try_async_rt() {
+        Ok(rt) => rt,
+        Err(e) => {
+            // Synthesize a callback failure: the user expected exactly one
+            // callback per async call, so signal the runtime-init error
+            // through the same channel rather than dropping the request.
+            let (cb, ud) = unsafe { ctx.restore_callback() };
+            let msg = CString::new(format!("async runtime init failed: {e}"))
+                .unwrap_or_else(|_| c"async runtime init failed".into());
+            unsafe { cb(ud as *mut c_void, std::ptr::null(), 0, msg.as_ptr()) };
+            return;
+        }
+    };
+    rt.spawn(async move {
         let (cb, ud) = unsafe { ctx.restore_callback() };
         match ctx.session.inner.encrypt_async(&input).await {
             Ok(drr) => {
@@ -529,7 +564,17 @@ fn spawn_encrypt_async(ctx: AsyncContext, input: Vec<u8>) {
 }
 
 fn spawn_decrypt_async(ctx: AsyncContext, input: Vec<u8>) {
-    ASYNC_RT.spawn(async move {
+    let rt = match try_async_rt() {
+        Ok(rt) => rt,
+        Err(e) => {
+            let (cb, ud) = unsafe { ctx.restore_callback() };
+            let msg = CString::new(format!("async runtime init failed: {e}"))
+                .unwrap_or_else(|_| c"async runtime init failed".into());
+            unsafe { cb(ud as *mut c_void, std::ptr::null(), 0, msg.as_ptr()) };
+            return;
+        }
+    };
+    rt.spawn(async move {
         let (cb, ud) = unsafe { ctx.restore_callback() };
         let drr = match serde_json::from_slice::<ael::types::DataRowRecord>(&input) {
             Ok(d) => d,
@@ -541,8 +586,17 @@ fn spawn_decrypt_async(ctx: AsyncContext, input: Vec<u8>) {
             }
         };
         match ctx.session.inner.decrypt_async(drr).await {
-            Ok(pt) => {
+            Ok(mut pt) => {
+                // Hand the plaintext to the language binding, then wipe our
+                // copy. The callback runs synchronously here so the binding
+                // has already copied the bytes by the time `cb(...)` returns.
+                // Without the wipe, the freed Vec leaves plaintext in the
+                // heap allocator until the slot is reused (the sync path was
+                // fixed in PR #216; this is the async-path variant noted in
+                // docs/review-2026-05-05-findings.md).
                 unsafe { cb(ud as *mut c_void, pt.as_ptr(), pt.len(), std::ptr::null()) };
+                use zeroize::Zeroize;
+                pt.zeroize();
             }
             Err(e) => {
                 let msg =
@@ -655,7 +709,7 @@ mod tests {
                 "ServiceName": "test-service",
                 "ProductID": "test-product",
                 "Metastore": "memory",
-                "KMS": "static",
+                "KMS": "test-debug-static",
                 "EnableSessionCaching": false
             }"#,
         )

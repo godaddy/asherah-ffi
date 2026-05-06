@@ -45,15 +45,23 @@ impl MetricsSink for NoopSink {}
 static SINK: Lazy<RwLock<Box<dyn MetricsSink>>> = Lazy::new(|| RwLock::new(Box::new(NoopSink)));
 
 pub fn set_sink<T: MetricsSink>(sink: T) {
-    if let Ok(mut guard) = SINK.write() {
-        *guard = Box::new(sink);
-    }
+    // Take the old sink out under the lock, then drop it AFTER the
+    // lock is released. If the old sink's Drop ever calls back into
+    // `metrics::record_*` (e.g., a histogram sink that flushes on
+    // drop), holding the lock during the drop would deadlock.
+    let old_sink: Box<dyn MetricsSink> = match SINK.write() {
+        Ok(mut guard) => std::mem::replace(&mut *guard, Box::new(sink)),
+        Err(_) => return,
+    };
+    drop(old_sink);
 }
 
 pub fn clear_sink() {
-    if let Ok(mut guard) = SINK.write() {
-        *guard = Box::new(NoopSink);
-    }
+    let old_sink: Box<dyn MetricsSink> = match SINK.write() {
+        Ok(mut guard) => std::mem::replace(&mut *guard, Box::new(NoopSink)),
+        Err(_) => return,
+    };
+    drop(old_sink);
 }
 
 pub fn set_enabled(enabled: bool) {
@@ -190,7 +198,12 @@ pub struct AsyncMetricsSink {
 
 impl AsyncMetricsSink {
     /// Construct an async dispatcher wrapping `inner`.
-    pub fn new<S: MetricsSink>(inner: S, config: AsyncMetricsConfig) -> Self {
+    ///
+    /// Returns `Err(io::Error)` when the OS rejects the worker thread
+    /// spawn (EAGAIN under thread quota, seccomp policy, etc.). The
+    /// previous `expect()` aborted the host process, which is
+    /// unacceptable in cdylib-loaded FFI contexts.
+    pub fn new<S: MetricsSink>(inner: S, config: AsyncMetricsConfig) -> std::io::Result<Self> {
         let (sender, receiver) = sync_channel::<OwnedMetricsEvent>(config.queue_capacity);
         let worker = ThreadBuilder::new()
             .name("asherah-metrics-dispatch".into())
@@ -206,12 +219,11 @@ impl AsyncMetricsSink {
                         OwnedMetricsEvent::CacheStale(name) => inner.cache_stale(&name),
                     }
                 }
-            })
-            .expect("spawn asherah-metrics-dispatch worker");
-        Self {
+            })?;
+        Ok(Self {
             sender,
             _worker: worker,
-        }
+        })
     }
 
     fn try_send(&self, event: OwnedMetricsEvent) {

@@ -13,13 +13,24 @@ public class RoundTripTests
 {
     static RoundTripTests()
     {
-        Environment.SetEnvironmentVariable("SERVICE_NAME", Environment.GetEnvironmentVariable("SERVICE_NAME") ?? "svc");
-        Environment.SetEnvironmentVariable("PRODUCT_ID", Environment.GetEnvironmentVariable("PRODUCT_ID") ?? "prod");
-        Environment.SetEnvironmentVariable("KMS", Environment.GetEnvironmentVariable("KMS") ?? "static");
-        Environment.SetEnvironmentVariable(
-            "STATIC_MASTER_KEY_HEX",
-            Environment.GetEnvironmentVariable("STATIC_MASTER_KEY_HEX")
-                ?? "2222222222222222222222222222222222222222222222222222222222222222");
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SERVICE_NAME")))
+        {
+            Environment.SetEnvironmentVariable("SERVICE_NAME", "svc");
+        }
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("PRODUCT_ID")))
+        {
+            Environment.SetEnvironmentVariable("PRODUCT_ID", "prod");
+        }
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("KMS")))
+        {
+            Environment.SetEnvironmentVariable("KMS", "static");
+        }
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("STATIC_MASTER_KEY_HEX")))
+        {
+            Environment.SetEnvironmentVariable(
+                "STATIC_MASTER_KEY_HEX",
+                "2222222222222222222222222222222222222222222222222222222222222222");
+        }
 
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASHERAH_DOTNET_NATIVE")))
         {
@@ -35,9 +46,20 @@ public class RoundTripTests
             .WithServiceName("test-svc")
             .WithProductId("test-prod")
             .WithMetastore(MetastoreKind.Memory)
-            .WithKms(KmsKind.Static)
+            .WithKms(KmsKind.TestDebugStatic)
             .WithEnableSessionCaching(sessionCaching)
             .Build();
+    }
+
+    private static AsherahFactory CreateFactoryFromEnv()
+    {
+        Environment.SetEnvironmentVariable("SERVICE_NAME", "svc");
+        Environment.SetEnvironmentVariable("PRODUCT_ID", "prod");
+        Environment.SetEnvironmentVariable("KMS", "static");
+        Environment.SetEnvironmentVariable(
+            "STATIC_MASTER_KEY_HEX",
+            "2222222222222222222222222222222222222222222222222222222222222222");
+        return AsherahFactory.FromEnv();
     }
 
     // ============================================================
@@ -47,7 +69,7 @@ public class RoundTripTests
     [Fact]
     public void FactoryFromEnv_RoundTrip()
     {
-        using var factory = AsherahFactory.FromEnv();
+        using var factory = CreateFactoryFromEnv();
         using var session = factory.GetSession("env-test");
 
         var plaintext = Encoding.UTF8.GetBytes("dotnet secret payload");
@@ -103,7 +125,7 @@ public class RoundTripTests
     [Fact]
     public void Factory_ImplementsIAsherahFactory()
     {
-        using IAsherahFactory factory = AsherahFactory.FromEnv();
+        using IAsherahFactory factory = CreateFactoryFromEnv();
         using IAsherahSession session = factory.GetSession("iface-test");
         var ciphertext = session.EncryptString("interface payload");
         Assert.Equal("interface payload", session.DecryptString(ciphertext));
@@ -416,7 +438,7 @@ public class RoundTripTests
     [Fact]
     public void Binary_AllByteValues_RoundTrip()
     {
-        using var factory = AsherahFactory.FromEnv();
+        using var factory = CreateFactoryFromEnv();
         using var session = factory.GetSession("binary");
 
         var payload = new byte[256];
@@ -429,7 +451,7 @@ public class RoundTripTests
     [Fact]
     public void Empty_Payload_RoundTrip()
     {
-        using var factory = AsherahFactory.FromEnv();
+        using var factory = CreateFactoryFromEnv();
         using var session = factory.GetSession("empty");
 
         var ct = session.EncryptBytes(Array.Empty<byte>());
@@ -439,7 +461,7 @@ public class RoundTripTests
     [Fact]
     public void Large_1MB_Payload_RoundTrip()
     {
-        using var factory = AsherahFactory.FromEnv();
+        using var factory = CreateFactoryFromEnv();
         using var session = factory.GetSession("large");
 
         var payload = new byte[1024 * 1024];

@@ -183,7 +183,11 @@ fn simple_cache_different_ids_are_separate() {
 // ──────────────────────────── TTL=0 bypass ────────────────────────────
 
 #[test]
-fn cache_ttl_zero_always_reloads() {
+fn cache_ttl_zero_never_expires() {
+    // Behavior change in docs/review-2026-05-05-findings.md: ttl=0 now
+    // means "no TTL" (never expire) instead of "always expired" (cache
+    // thrash). The cache hit on the second call returns the existing
+    // entry without re-invoking the loader.
     let cache = SimpleKeyCache::new_with_ttl(0);
     let mut count = 0;
     let _ = cache
@@ -198,7 +202,7 @@ fn cache_ttl_zero_always_reloads() {
             Ok(make_key(count as i64))
         })
         .unwrap();
-    assert_eq!(count, 2, "TTL=0 should always expire");
+    assert_eq!(count, 1, "TTL=0 means never-expire; loader runs once");
 }
 
 // ──────────────────────────── LRU eviction ────────────────────────────

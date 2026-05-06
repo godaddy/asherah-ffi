@@ -545,11 +545,19 @@ fn test_exported_symbols_exist() {
     // NOTE: Shutdown() is NOT called here because it runs in parallel
     // with other tests and would tear down the shared factory.
 
-    // SetEnv with empty JSON
+    // SetEnv with empty JSON. The intent here is just to confirm the
+    // symbol is exported and callable — accept either ERR_NONE (no
+    // factory yet) or ERR_ALREADY_INITIALIZED (another test running
+    // in this binary already initialized the global factory; per
+    // 09db712, SetEnv refuses post-init to avoid racing the spawned
+    // tokio/log/metrics threads).
     let empty_json = create_string_buffer("{}");
     unsafe {
         let result = SetEnv(empty_json.as_ptr().cast::<c_char>());
-        assert_eq!(result, ERR_NONE, "SetEnv should work with empty JSON");
+        assert!(
+            result == ERR_NONE || result == ERR_ALREADY_INITIALIZED,
+            "SetEnv with empty JSON returned unexpected code {result}"
+        );
     }
 
     // EstimateBuffer
@@ -630,7 +638,7 @@ fn setup_test_factory() {
         "ServiceName": "interop-test-service",
         "ProductID": "interop-test-product",
         "Metastore": "memory",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "EnableSessionCaching": true
     }"#;
 

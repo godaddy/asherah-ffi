@@ -24,7 +24,12 @@ public class StaticKeyManagementServiceImpl : IKeyManagementService
     /// <inheritdoc />
     public void ApplyConfig(AsherahConfig.Builder builder)
     {
-        builder.WithKms(KmsKind.Static);
+        // 9049fa4 in the native core requires StaticMasterKeyHex in
+        // the JSON config when KMS=static (the env var is only
+        // consulted by `factory_new_from_env`). Set both: the JSON
+        // field for the canonical init path and the env var for any
+        // path that still consults it.
+        builder.WithKms(KmsKind.Static).WithStaticMasterKeyHex(_masterKeyHex);
         Environment.SetEnvironmentVariable("STATIC_MASTER_KEY_HEX", _masterKeyHex);
     }
 

@@ -67,7 +67,7 @@ def main():
     config = {
         "ServiceName": "bench-svc",
         "ProductID": "bench-prod",
-        "KMS": "static",
+        "KMS": "test-debug-static",
         "EnableSessionCaching": True,
     }
     if mode == "hot":

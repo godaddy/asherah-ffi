@@ -56,6 +56,16 @@ impl KeyManagementService for MultiKms {
                     "MultiKms decrypt_key: preferred backend {} failed: {e:#}",
                     self.preferred
                 );
+                if is_terminal_kms_error(&e) {
+                    log::error!(
+                        "MultiKms decrypt_key: preferred backend returned a terminal \
+                         error ({e:#}); aborting fallback to avoid spurious cross-region \
+                         KMS calls"
+                    );
+                    return Err(anyhow::anyhow!(
+                        "preferred KMS backend failed terminally: {e}"
+                    ));
+                }
                 errors.push(format!("backend[{}]: {e}", self.preferred));
             }
         }
@@ -66,7 +76,14 @@ impl KeyManagementService for MultiKms {
             match kms.decrypt_key(ctx, blob) {
                 Ok(pt) => return Ok(pt),
                 Err(e) => {
-                    log::warn!("MultiKms decrypt_key: backend {} failed: {e:#}", i);
+                    log::warn!("MultiKms decrypt_key: backend {i} failed: {e:#}");
+                    if is_terminal_kms_error(&e) {
+                        log::error!(
+                            "MultiKms decrypt_key: backend {i} returned a terminal \
+                             error ({e:#}); aborting fallback"
+                        );
+                        return Err(anyhow::anyhow!("KMS backend {i} failed terminally: {e}"));
+                    }
                     errors.push(format!("backend[{i}]: {e}"));
                 }
             }
@@ -77,6 +94,30 @@ impl KeyManagementService for MultiKms {
             "all KMS backends failed to decrypt: {detail}"
         ))
     }
+}
+
+/// Heuristic: distinguish errors where retrying another region/backend
+/// is pointless (AccessDenied, InvalidKey, NotAuthorized — the caller's
+/// identity won't suddenly gain permission in a different region) from
+/// errors that warrant a fallback (InvalidCiphertext, Throttling,
+/// ServerError, network).
+///
+/// We can't pattern-match on AWS SDK typed variants because `MultiKms`
+/// is generic over `dyn KeyManagementService`. Falls back to substring
+/// matching on the error chain — best-effort, errs on the side of
+/// continuing the fallback when uncertain (T-finding "blindly retries
+/// every backend on any error" in `docs/review-2026-05-05-findings.md`).
+fn is_terminal_kms_error(err: &anyhow::Error) -> bool {
+    let chain = format!("{err:#}");
+    let needles: &[&str] = &[
+        "AccessDenied",
+        "AccessDeniedException",
+        "NotAuthorized",
+        "InvalidKey",
+        "DisabledException",
+        "KMSInvalidKeyUsageException",
+    ];
+    needles.iter().any(|n| chain.contains(n))
 }
 
 #[cfg(test)]
@@ -105,6 +146,32 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct AwsLikeFallbackKms {
+        counter: &'static AtomicUsize,
+        id: u8,
+        err: &'static str,
+    }
+
+    #[async_trait]
+    impl KeyManagementService for AwsLikeFallbackKms {
+        fn encrypt_key(&self, _ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+            self.counter.fetch_add(1, Ordering::Relaxed);
+            let mut out = vec![self.id];
+            out.extend_from_slice(key_bytes);
+            Ok(out)
+        }
+
+        fn decrypt_key(&self, _ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
+            self.counter.fetch_add(1, Ordering::Relaxed);
+            if blob.first().copied() == Some(self.id) {
+                Ok(blob[1..].to_vec())
+            } else {
+                Err(anyhow::anyhow!("{}", self.err))
+            }
+        }
+    }
+
     #[test]
     fn multi_kms_pref_encrypts_on_preferred_and_fallbacks_on_decrypt() -> anyhow::Result<()> {
         static C1: AtomicUsize = AtomicUsize::new(0);
@@ -120,6 +187,62 @@ mod tests {
         let out = mk2.decrypt_key(&(), &blob)?;
         assert_eq!(out, pt);
         Ok(())
+    }
+
+    #[test]
+    fn multi_kms_fallbacks_after_invalid_ciphertext_exception() -> anyhow::Result<()> {
+        static WRONG: AtomicUsize = AtomicUsize::new(0);
+        static RIGHT: AtomicUsize = AtomicUsize::new(0);
+
+        let wrong: Arc<dyn KeyManagementService> = Arc::new(AwsLikeFallbackKms {
+            counter: &WRONG,
+            id: 1,
+            err: "InvalidCiphertextException: ciphertext was not encrypted by this key",
+        });
+        let right: Arc<dyn KeyManagementService> = Arc::new(AwsLikeFallbackKms {
+            counter: &RIGHT,
+            id: 2,
+            err: "wrong region",
+        });
+
+        let encrypted = right.encrypt_key(&(), b"region secret")?;
+        let multi = MultiKms::new(0, vec![wrong, right])?;
+        let out = multi.decrypt_key(&(), &encrypted)?;
+
+        assert_eq!(out, b"region secret");
+        assert_eq!(WRONG.load(Ordering::Relaxed), 1);
+        assert_eq!(RIGHT.load(Ordering::Relaxed), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn multi_kms_still_aborts_on_access_denied() {
+        static DENIED: AtomicUsize = AtomicUsize::new(0);
+        static FALLBACK: AtomicUsize = AtomicUsize::new(0);
+
+        let denied: Arc<dyn KeyManagementService> = Arc::new(AwsLikeFallbackKms {
+            counter: &DENIED,
+            id: 1,
+            err: "AccessDeniedException: caller is not authorized",
+        });
+        let fallback: Arc<dyn KeyManagementService> = Arc::new(AwsLikeFallbackKms {
+            counter: &FALLBACK,
+            id: 2,
+            err: "wrong region",
+        });
+        let encrypted = fallback.encrypt_key(&(), b"secret").unwrap();
+        FALLBACK.store(0, Ordering::Relaxed);
+
+        let multi = MultiKms::new(0, vec![denied, fallback]).unwrap();
+        let err = multi.decrypt_key(&(), &encrypted).unwrap_err();
+
+        assert!(format!("{err:#}").contains("terminally"));
+        assert_eq!(DENIED.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            FALLBACK.load(Ordering::Relaxed),
+            0,
+            "AccessDenied must not fan out to later KMS backends"
+        );
     }
 
     #[test]

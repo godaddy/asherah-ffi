@@ -92,7 +92,7 @@ public class AsherahBenchmark {
         AsherahConfig.Builder cfgBuilder = AsherahConfig.builder()
             .serviceName("bench-svc")
             .productId("bench-prod")
-            .kms("static")
+            .kms("test-debug-static")
             .enableSessionCaching(enableSessionCaching);
 
         if (benchmarkMode.equals("hot")) {

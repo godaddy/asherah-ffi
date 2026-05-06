@@ -155,7 +155,10 @@ pub struct AppliedConfig {
     pub session_cache_max_size: usize,
 }
 
-use asherah::builders::{KmsConfig, MetastoreConfig, PolicyConfig, PoolConfig, ResolvedConfig};
+use asherah::builders::{
+    KmsConfig, MetastoreConfig, PolicyConfig, PoolConfig, ResolvedConfig,
+    TEST_DEBUG_STATIC_MASTER_KEY_HEX,
+};
 
 impl ConfigOptions {
     pub fn from_json(json: &str) -> Result<Self> {
@@ -165,11 +168,14 @@ impl ConfigOptions {
 
     /// Resolve into a structured config — no env var reads or writes.
     pub fn resolve(&self) -> Result<(ResolvedConfig, AppliedConfig)> {
+        // KMS aliases are not normalized here — `test-debug-static` keeps a
+        // distinct identity so it can supply the publicly known fixed key
+        // when no `static_master_key_hex` is provided. `KMS=static` requires
+        // the caller to explicitly set the key.
         fn normalize_alias(value: &str) -> String {
             match value.to_lowercase().as_str() {
                 "test-debug-memory" => "memory".to_string(),
                 "test-debug-sqlite" => "sqlite".to_string(),
-                "test-debug-static" => "static".to_string(),
                 other => other.to_string(),
             }
         }
@@ -250,7 +256,18 @@ impl ConfigOptions {
         let kms_kind = normalize_alias(kms_raw);
         let kms = match kms_kind.as_str() {
             "static" => KmsConfig::Static {
-                key_hex: self.static_master_key_hex.clone().unwrap_or_default(),
+                key_hex: self.static_master_key_hex.clone().ok_or_else(|| {
+                    anyhow!(
+                        "KMS=static requires StaticMasterKeyHex (64-char hex). For local \
+                         testing, set KMS=test-debug-static to use a publicly known fixed key."
+                    )
+                })?,
+            },
+            "test-debug-static" => KmsConfig::Static {
+                key_hex: self
+                    .static_master_key_hex
+                    .clone()
+                    .unwrap_or_else(|| TEST_DEBUG_STATIC_MASTER_KEY_HEX.to_string()),
             },
             "aws" => KmsConfig::Aws {
                 region_map: self.region_map.clone(),
@@ -466,6 +483,9 @@ mod tests {
             product_id: Some("prod".into()),
             metastore: Some("dynamodb".into()),
             kms: Some("static".into()),
+            // Static KMS now requires a key — provide a fixed value so these
+            // tests stay focused on metastore resolution.
+            static_master_key_hex: Some("00".repeat(32)),
             ..Default::default()
         }
     }

@@ -59,7 +59,7 @@ public class AsherahBenchmark
         var ffiBuilder = GoDaddy.Asherah.Encryption.AsherahConfig.CreateBuilder()
             .WithServiceName(ServiceName)
             .WithProductId(ProductId)
-            .WithKms(KmsKind.Static)
+            .WithKms(KmsKind.TestDebugStatic)
             .WithEnableSessionCaching(_mode != "cold");
 
         if (_mode == "memory")

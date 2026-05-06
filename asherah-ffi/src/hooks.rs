@@ -115,7 +115,13 @@ impl LogSink for CallbackLogSink {
         // catch_unwind so a foreign panic cannot unwind into Rust.
         drop(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
             || {
-                let cb: AsherahLogCallback = unsafe { std::mem::transmute(registration.callback) };
+                // usize → *const () → fn pointer. See the analogous note
+                // on `restore_callback` in lib.rs — pointer-to-fn-pointer
+                // transmute is well-defined where the platform supports
+                // it (every Tier-1 target), unlike usize-to-fn transmute.
+                let cb_ptr = registration.callback as *const ();
+                let cb: AsherahLogCallback =
+                    unsafe { std::mem::transmute::<*const (), AsherahLogCallback>(cb_ptr) };
                 unsafe {
                     cb(
                         registration.user_data as *mut c_void,
@@ -183,7 +189,7 @@ fn install_log_hook_with_config(
         user_data: user_data as usize,
     });
     let inner = CallbackLogSink;
-    let async_sink = AsyncLogSink::new(
+    let async_sink = match AsyncLogSink::new(
         inner,
         AsyncLogConfig {
             queue_capacity: if queue_capacity == 0 {
@@ -193,7 +199,25 @@ fn install_log_hook_with_config(
             },
             min_level: map_log_level(min_level),
         },
-    );
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!(
+                "asherah_set_log_hook: failed to spawn async dispatcher thread: {e}; \
+                 falling back to synchronous dispatch on the producer thread"
+            );
+            // Synchronous fallback: deliver records on the calling
+            // thread instead of dropping the hook entirely. Slower per
+            // record but functional under thread-quota pressure.
+            logging::set_sink(
+                "asherah-ffi-log",
+                Some(Arc::new(SyncFilteredLogSink {
+                    min_level: map_log_level(min_level),
+                })),
+            );
+            return;
+        }
+    };
     logging::set_sink("asherah-ffi-log", Some(Arc::new(async_sink)));
 }
 
@@ -386,8 +410,11 @@ impl CallbackMetricsSink {
             .unwrap_or(std::ptr::null());
         drop(std::panic::catch_unwind(std::panic::AssertUnwindSafe(
             || {
+                // Same usize → *const () → fn-ptr indirection used for
+                // log callbacks above.
+                let cb_ptr = registration.callback as *const ();
                 let cb: AsherahMetricsCallback =
-                    unsafe { std::mem::transmute(registration.callback) };
+                    unsafe { std::mem::transmute::<*const (), AsherahMetricsCallback>(cb_ptr) };
                 unsafe {
                     cb(
                         registration.user_data as *mut c_void,
@@ -437,7 +464,7 @@ fn install_metrics_hook_with_config(
         user_data: user_data as usize,
     });
     METRICS_HOOK_INSTALLED.store(1, Ordering::Release);
-    let async_sink = AsyncMetricsSink::new(
+    match AsyncMetricsSink::new(
         CallbackMetricsSink,
         AsyncMetricsConfig {
             queue_capacity: if queue_capacity == 0 {
@@ -446,8 +473,16 @@ fn install_metrics_hook_with_config(
                 queue_capacity
             },
         },
-    );
-    metrics::set_sink(async_sink);
+    ) {
+        Ok(s) => metrics::set_sink(s),
+        Err(e) => {
+            log::error!(
+                "asherah_set_metrics_hook: failed to spawn async dispatcher: {e}; \
+                 falling back to synchronous dispatch on the producer thread"
+            );
+            metrics::set_sink(CallbackMetricsSink);
+        }
+    }
     metrics::set_enabled(true);
 }
 

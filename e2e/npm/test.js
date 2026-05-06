@@ -23,7 +23,7 @@ asherah.setup({
   serviceName: 'e2e-svc',
   productId: 'e2e-prod',
   metastore: 'memory',
-  kms: 'static',
+  kms: 'test-debug-static',
   enableSessionCaching: false,
 });
 
@@ -84,7 +84,7 @@ asherah.setup({
   ServiceName: 'compat-svc',
   ProductID: 'compat-prod',
   Metastore: 'memory',
-  KMS: 'static',
+  KMS: 'test-debug-static',
   EnableSessionCaching: false,
 });
 
@@ -117,7 +117,7 @@ asherah.setup({
   serviceName: 'cycle-svc',
   productId: 'cycle-prod',
   metastore: 'memory',
-  kms: 'static',
+  kms: 'test-debug-static',
 });
 
 test('second setup works after shutdown', () => {
