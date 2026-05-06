@@ -60,6 +60,13 @@ struct PgPool {
     url: String,
     replica_consistency: Option<ReplicaConsistency>,
     inner: Mutex<PoolInner>,
+    /// Notified when a connection is returned to the pool. Replaces
+    /// the previous `std::thread::sleep` exponential backoff so a
+    /// waiting thread wakes immediately on availability instead of
+    /// sleeping out the full backoff. T-finding "std::thread::sleep
+    /// up to 320ms on blocking pool worker; consider Condvar" in
+    /// `docs/review-2026-05-05-findings.md`.
+    return_cv: std::sync::Condvar,
     max_idle: usize,
     max_open: usize,
 }
@@ -86,11 +93,20 @@ impl Drop for PgPooledClient {
         // accessed via `Deref`/`DerefMut` after this point because
         // safe code can't observe a dropped value.
         let client = unsafe { ManuallyDrop::take(&mut self.client) };
-        let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
-        inner.checked_out -= 1;
-        if !client.is_closed() && inner.conns.len() < self.pool.max_idle {
-            inner.conns.push(client);
+        {
+            let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
+            inner.checked_out -= 1;
+            if !client.is_closed() && inner.conns.len() < self.pool.max_idle {
+                inner.conns.push(client);
+            }
+            // Drop `inner` (and therefore the lock) before notifying so
+            // the woken waiter doesn't immediately block trying to
+            // acquire the lock we still hold.
         }
+        // Wake one waiter (if any) so it can retake the released slot
+        // immediately rather than sleeping out the rest of its
+        // backoff window.
+        self.pool.return_cv.notify_one();
         // Otherwise `client` drops here — closing the postgres
         // connection cleanly.
     }
@@ -207,6 +223,7 @@ impl PostgresMetastore {
                     conns: Vec::with_capacity(max_idle),
                     checked_out: 0,
                 }),
+                return_cv: std::sync::Condvar::new(),
                 max_idle,
                 max_open,
             }),
@@ -228,110 +245,118 @@ impl PostgresMetastore {
     }
 
     fn client(&self) -> anyhow::Result<PgPooledClient> {
-        // Retry with backoff when the pool is exhausted, giving other threads
-        // time to return connections instead of failing immediately.
-        const MAX_RETRIES: u32 = 10;
-        const BASE_BACKOFF_MS: u64 = 5;
+        // Total time we'll wait for a checked-out connection to come
+        // back before giving up. Matches the prior backoff-sum
+        // (~640ms across 10 retries) but spent on a Condvar wait
+        // instead of a polling sleep so a return wakes us immediately.
+        let total_wait = std::time::Duration::from_millis(640);
+        let deadline = std::time::Instant::now() + total_wait;
 
-        for attempt in 0..=MAX_RETRIES {
-            // Try to reuse an idle connection from the pool
-            {
-                let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
-                while let Some(client) = inner.conns.pop() {
-                    if !client.is_closed() {
-                        inner.checked_out += 1;
-                        return Ok(PgPooledClient {
-                            pool: Arc::clone(&self.pool),
-                            client: ManuallyDrop::new(client),
-                        });
-                    }
+        loop {
+            let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
+
+            // Try to reuse an idle connection from the pool.
+            while let Some(client) = inner.conns.pop() {
+                if !client.is_closed() {
+                    inner.checked_out += 1;
+                    return Ok(PgPooledClient {
+                        pool: Arc::clone(&self.pool),
+                        client: ManuallyDrop::new(client),
+                    });
                 }
+            }
 
-                // No idle connection available — check if we can open a new one
-                // max_open == 0 means unlimited (matching Go's database/sql)
-                let total = inner.checked_out + inner.conns.len();
-                if self.pool.max_open > 0 && total >= self.pool.max_open {
-                    if attempt == MAX_RETRIES {
-                        anyhow::bail!(
-                            "Postgres connection pool exhausted after {} retries (max_open={})",
-                            MAX_RETRIES,
-                            self.pool.max_open
-                        );
-                    }
-                    // Drop the lock before sleeping
+            // No idle connection available — check if we can open a new one.
+            // max_open == 0 means unlimited (matching Go's database/sql).
+            let total = inner.checked_out + inner.conns.len();
+            if self.pool.max_open > 0 && total >= self.pool.max_open {
+                let now = std::time::Instant::now();
+                if now >= deadline {
                     drop(inner);
-                    let backoff = BASE_BACKOFF_MS * 2_u64.pow(attempt.min(6));
-                    log::warn!(
-                        "Postgres pool exhausted (attempt {}/{}), retrying in {}ms",
-                        attempt + 1,
-                        MAX_RETRIES,
-                        backoff
+                    anyhow::bail!(
+                        "Postgres connection pool exhausted after {:?} wait (max_open={})",
+                        total_wait,
+                        self.pool.max_open
                     );
-                    std::thread::sleep(std::time::Duration::from_millis(backoff));
-                    continue;
                 }
-                inner.checked_out += 1;
+                // Wait on the Condvar — released when a `PgPooledClient`
+                // is dropped and returns its connection.
+                let remaining = deadline - now;
+                let (returned_inner, _timeout) = self
+                    .pool
+                    .return_cv
+                    .wait_timeout(inner, remaining)
+                    .unwrap_or_else(|e| {
+                        // Mutex was poisoned; recover the guard. The
+                        // wait_timeout API returns the inner Result via
+                        // PoisonError so we have to peel both layers.
+                        let inner = e.into_inner();
+                        (inner.0, inner.1)
+                    });
+                drop(returned_inner);
+                continue;
             }
+            inner.checked_out += 1;
+            // Re-acquire is implicit on the next loop iteration's `lock()`.
+            drop(inner);
+            // Continue past the lock-scoped block to construction.
+            break;
+        }
+        // ── connection-creation path (lock-free) ────────────────────
 
-            // Reserve `checked_out += 1` was just done above; if anything
-            // panics or returns Err between here and `pooled` being
-            // constructed (which takes ownership of the increment via
-            // PgPooledClient::Drop), the increment leaks and the pool
-            // deadlocks once `total >= max_open`. A small guard struct
-            // decrements on Drop unless we explicitly commit. T-finding
-            // "checked_out increment outside failure-decrement lock" in
-            // docs/review-2026-05-05-findings.md.
-            struct CheckoutGuard<'pool> {
-                pool: &'pool Arc<PgPool>,
-                committed: bool,
-            }
-            impl Drop for CheckoutGuard<'_> {
-                fn drop(&mut self) {
-                    if !self.committed {
-                        let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
-                        inner.checked_out = inner.checked_out.saturating_sub(1);
-                    }
-                }
-            }
-            let mut guard = CheckoutGuard {
-                pool: &self.pool,
-                committed: false,
-            };
-
-            // Create a new connection (outside the lock)
-            let client = connect_client(&self.pool.url).map_err(|e| {
-                log::error!("Postgres connection failed: {e:#}");
-                e
-            })?;
-
-            // Apply replica read consistency on new connections
-            let mut pooled = PgPooledClient {
-                pool: Arc::clone(&self.pool),
-                client: ManuallyDrop::new(client),
-            };
-            if let Some(consistency) = self.pool.replica_consistency {
-                if let Err(e) = pooled.batch_execute(consistency.as_set_statement()) {
-                    // pooled will be dropped, which decrements checked_out;
-                    // the guard is also still un-committed so it will
-                    // double-decrement — flip committed=true to suppress.
-                    guard.committed = true;
-                    return Err(e.into());
+        // `checked_out += 1` was committed inside the loop above; if
+        // anything between here and `pooled` being constructed
+        // (which takes ownership of the increment via
+        // `PgPooledClient::Drop`) returns Err, the increment leaks
+        // and the pool deadlocks once `total >= max_open`. A small
+        // guard struct decrements on Drop unless we explicitly
+        // commit. T-finding "checked_out increment outside
+        // failure-decrement lock" in
+        // `docs/review-2026-05-05-findings.md`.
+        struct CheckoutGuard<'pool> {
+            pool: &'pool Arc<PgPool>,
+            committed: bool,
+        }
+        impl Drop for CheckoutGuard<'_> {
+            fn drop(&mut self) {
+                if !self.committed {
+                    let mut inner = self.pool.inner.lock().unwrap_or_else(|e| e.into_inner());
+                    inner.checked_out = inner.checked_out.saturating_sub(1);
+                    // Wake a waiting acquirer so it can either retake
+                    // the slot or hit the deadline cleanly.
+                    self.pool.return_cv.notify_one();
                 }
             }
+        }
+        let mut guard = CheckoutGuard {
+            pool: &self.pool,
+            committed: false,
+        };
 
-            // Ownership transfers to PgPooledClient::Drop now.
-            guard.committed = true;
-            return Ok(pooled);
+        // Create a new connection (outside the lock)
+        let client = connect_client(&self.pool.url).map_err(|e| {
+            log::error!("Postgres connection failed: {e:#}");
+            e
+        })?;
+
+        // Apply replica read consistency on new connections
+        let mut pooled = PgPooledClient {
+            pool: Arc::clone(&self.pool),
+            client: ManuallyDrop::new(client),
+        };
+        if let Some(consistency) = self.pool.replica_consistency {
+            if let Err(e) = pooled.batch_execute(consistency.as_set_statement()) {
+                // pooled will be dropped, which decrements checked_out;
+                // the guard is also still un-committed so it will
+                // double-decrement — flip committed=true to suppress.
+                guard.committed = true;
+                return Err(e.into());
+            }
         }
 
-        // The loop above either returns Ok/Err on every iteration or
-        // continues; reaching here means a logic bug, but don't panic
-        // — surface a defensive error instead so callers can decide
-        // how to handle it.
-        anyhow::bail!(
-            "Postgres connection pool: control fell through retry loop without acquiring \
-             or rejecting a connection (this is a bug — please report)"
-        );
+        // Ownership transfers to PgPooledClient::Drop now.
+        guard.committed = true;
+        Ok(pooled)
     }
 }
 

@@ -156,6 +156,16 @@ impl AeadTrait for AES256GCM {
 /// Encrypt using a pre-expanded LessSafeKey (skips key schedule).
 /// Nonce safety: a fresh 12-byte random nonce is generated per call from
 /// a CSPRNG (ChaCha20 seeded from OS entropy).
+///
+/// **AAD**: this function uses `Aad::empty()` deliberately for cross-
+/// language binary compatibility with the Go reference implementation.
+/// The Go `appencryption` library does not include any associated
+/// authenticated data, so any non-empty AAD here would produce
+/// ciphertexts that the Go side cannot decrypt (and vice versa). If
+/// future revisions add AAD, both implementations must rev in lockstep
+/// and version the envelope format. T-finding "AEAD uses Aad::empty();
+/// document intentional cross-language compatibility" in
+/// `docs/review-2026-05-05-findings.md`.
 #[inline(always)]
 pub fn encrypt_with_lsk(data: &[u8], key: &LessSafeKey) -> Result<Vec<u8>, anyhow::Error> {
     let mut nonce = [0_u8; GCM_NONCE_SIZE];
