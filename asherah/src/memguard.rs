@@ -1206,3 +1206,53 @@ pub fn stream_chunk_size() -> usize {
 pub fn set_stream_chunk_size(value: usize) {
     STREAM_CHUNK_SIZE.store(value, Ordering::Relaxed);
 }
+
+#[cfg(test)]
+#[allow(clippy::panic, clippy::unwrap_used, clippy::expect_used)]
+mod canary_tests {
+    use super::*;
+
+    /// Corrupt one byte of the post-canary guard page and verify
+    /// `Buffer::destroy` reports `Error::CanaryFailed` instead of
+    /// silently freeing memory. Without this assertion path, an
+    /// out-of-bounds write that happens to land on a guard page
+    /// would be invisible to the user.
+    ///
+    /// Test isolation: runs serially with the rest of the memguard
+    /// suite via the `serial_test::serial` attribute used elsewhere
+    /// in the crate; canary corruption is a single-threaded scenario
+    /// and races with the SLAB pool aren't a concern here because
+    /// `Buffer::new` allocates a fresh region.
+    #[test]
+    fn destroy_reports_canary_failed_when_post_guard_corrupted() {
+        // Use a size that yields a non-zero canary_len (must be
+        // smaller than a page).
+        let mut buf = Buffer::new(64).expect("alloc Buffer for canary test");
+
+        // Re-enable RW on the post guard page so we can flip a byte.
+        // The destroy path will re-protect everything to RW anyway,
+        // so this doesn't disturb later state.
+        // SAFETY: `post_ptr()` returns the start of the post guard
+        // page, which is `*PAGE_SIZE` bytes long inside our owned
+        // allocation.
+        unsafe {
+            memcall::protect_raw(
+                buf.post_ptr(),
+                *PAGE_SIZE,
+                memcall::MemoryProtectionFlag::read_write(),
+            )
+            .expect("re-enable post guard for corruption");
+            // Flip the very first byte. The canary check compares
+            // each byte against `canary[i % canary_len]`, so a single
+            // bit flip on byte 0 is sufficient to fail the check.
+            let p = buf.post_ptr();
+            *p = !*p;
+        }
+
+        match buf.destroy() {
+            Err(Error::CanaryFailed) => {}
+            Ok(()) => panic!("destroy should have reported CanaryFailed but returned Ok"),
+            Err(other) => panic!("expected CanaryFailed, got {other:?}"),
+        }
+    }
+}

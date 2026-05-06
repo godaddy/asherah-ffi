@@ -101,6 +101,7 @@ dependencies = [
  "asherah-cobhan",
  "asherah-config",
  "libfuzzer-sys",
+ "once_cell",
  "serde_json",
 ]
 
