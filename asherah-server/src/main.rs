@@ -1,11 +1,70 @@
 use anyhow::{Context, Result};
 use asherah_server::{parse_go_duration, proto};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use tonic::transport::Server;
+
+/// Metastore backend selector. Mirrors the values the Go reference
+/// server accepts and keeps them in lockstep so the CLI rejects
+/// typos at parse time rather than failing later inside
+/// `factory_from_config`. T-finding "value_parser with string array;
+/// use typed enum" in `docs/review-2026-05-05-findings.md`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+enum MetastoreMode {
+    Rdbms,
+    Dynamodb,
+    Memory,
+}
+
+impl MetastoreMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Rdbms => "rdbms",
+            Self::Dynamodb => "dynamodb",
+            Self::Memory => "memory",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+enum KmsMode {
+    Aws,
+    Static,
+    TestDebugStatic,
+}
+
+impl KmsMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Aws => "aws",
+            Self::Static => "static",
+            Self::TestDebugStatic => "test-debug-static",
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, ValueEnum)]
+#[clap(rename_all = "kebab-case")]
+enum ReplicaReadConsistency {
+    Eventual,
+    Global,
+    Session,
+}
+
+impl ReplicaReadConsistency {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Eventual => "eventual",
+            Self::Global => "global",
+            Self::Session => "session",
+        }
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(
@@ -44,8 +103,8 @@ struct Cli {
     product: String,
 
     /// Determines the type of metastore to use for persisting keys
-    #[arg(long, value_parser = ["rdbms", "dynamodb", "memory"], env = "ASHERAH_METASTORE_MODE")]
-    metastore: String,
+    #[arg(long, value_enum, env = "ASHERAH_METASTORE_MODE")]
+    metastore: MetastoreMode,
 
     /// The database connection string (required if --metastore=rdbms)
     #[arg(long, env = "ASHERAH_CONNECTION_STRING")]
@@ -54,11 +113,11 @@ struct Cli {
     /// Configures the master key management service
     #[arg(
         long,
-        value_parser = ["aws", "static", "test-debug-static"],
-        default_value = "aws",
+        value_enum,
+        default_value_t = KmsMode::Aws,
         env = "ASHERAH_KMS_MODE"
     )]
-    kms: String,
+    kms: KmsMode,
 
     /// A comma separated list of key-value pairs in the form of REGION1=ARN1[,REGION2=ARN2] (required if --kms=aws)
     #[arg(long, env = "ASHERAH_REGION_MAP")]
@@ -107,14 +166,26 @@ struct Cli {
     dynamodb_table_name: Option<String>,
 
     /// Required for Aurora sessions using write forwarding
-    #[arg(long, value_parser = ["eventual", "global", "session"], env = "ASHERAH_REPLICA_READ_CONSISTENCY")]
-    replica_read_consistency: Option<String>,
+    #[arg(long, value_enum, env = "ASHERAH_REPLICA_READ_CONSISTENCY")]
+    replica_read_consistency: Option<ReplicaReadConsistency>,
 
     /// Configure the metastore to use regional suffixes (only supported by --metastore=dynamodb)
     #[arg(long, env = "ASHERAH_ENABLE_REGION_SUFFIX")]
     enable_region_suffix: bool,
 
-    /// Enable verbose logging output
+    /// Enable verbose logging output.
+    ///
+    /// **Tenant identifier exposure:** verbose mode emits asherah-crate
+    /// debug logs that include intermediate-key IDs of the form
+    /// `_IK_<partition>_<service>_<product>`. The `<partition>`
+    /// component is the caller-supplied partition ID (typically a
+    /// user/tenant identifier). Do not enable verbose mode in
+    /// production environments where operator log access does not
+    /// already imply access to tenant identifiers; restrict to
+    /// developer reproductions and pre-production troubleshooting.
+    /// T-finding "verbose mode emits per-request partition ID logs;
+    /// tenant identifier exposure" in
+    /// `docs/review-2026-05-05-findings.md`.
     #[arg(short = 'v', long, env = "ASHERAH_VERBOSE")]
     verbose: bool,
 
@@ -199,9 +270,9 @@ fn cli_to_config(cli: &Cli) -> asherah_config::ConfigOptions {
     asherah_config::ConfigOptions {
         service_name: Some(cli.service.clone()),
         product_id: Some(cli.product.clone()),
-        metastore: Some(cli.metastore.clone()),
+        metastore: Some(cli.metastore.as_str().to_string()),
         connection_string: cli.conn.clone(),
-        kms: Some(cli.kms.clone()),
+        kms: Some(cli.kms.as_str().to_string()),
         region_map,
         preferred_region: cli.preferred_region.clone(),
         aws_profile_name: cli.aws_profile_name.clone(),
@@ -213,7 +284,7 @@ fn cli_to_config(cli: &Cli) -> asherah_config::ConfigOptions {
         dynamo_db_endpoint: cli.dynamodb_endpoint.clone(),
         dynamo_db_region: cli.dynamodb_region.clone(),
         dynamo_db_table_name: cli.dynamodb_table_name.clone(),
-        replica_read_consistency: cli.replica_read_consistency.clone(),
+        replica_read_consistency: cli.replica_read_consistency.map(|m| m.as_str().to_string()),
         enable_region_suffix: Some(cli.enable_region_suffix),
         verbose: Some(cli.verbose),
         ..Default::default()

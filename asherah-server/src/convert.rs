@@ -1,9 +1,27 @@
 use crate::proto;
 
+/// Convert a protobuf `DataRowRecord` (over the wire) into the
+/// in-process `asherah::DataRowRecord` shape.
+///
+/// The proto schema is intentionally narrower than the Rust struct:
+/// the wire format omits `revoked` (revocation is a server-side
+/// metastore property, not part of the DRR a client ships) and `id`
+/// (the metastore lookup key is reconstructed from the partition +
+/// `parent_key_meta`, not transmitted). Both fields are filled in
+/// with default placeholders here for parity with the Go reference
+/// `asherah-server`, whose proto-to-internal converter does the
+/// same. Future schema changes that add these fields must rev both
+/// the Go and Rust sides in lockstep. T-finding "`proto_to_drr`
+/// populates `id: String::new()`/`revoked: None`; document this is
+/// deliberate parity with Go server" in
+/// `docs/review-2026-05-05-findings.md`.
 pub(crate) fn proto_to_drr(p: proto::DataRowRecord) -> asherah::DataRowRecord {
     asherah::DataRowRecord {
         key: p.key.map(|k| asherah::EnvelopeKeyRecord {
+            // Not transmitted by the proto schema (matches Go).
             revoked: None,
+            // Not transmitted; the metastore fills this in from the
+            // partition + parent_key_meta on load.
             id: String::new(),
             created: k.created,
             encrypted_key: k.key,
