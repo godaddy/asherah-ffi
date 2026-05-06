@@ -1,0 +1,28 @@
+ARG IMAGE_TAG=php:8.4-cli-alpine
+FROM ${IMAGE_TAG} AS builder
+
+RUN apk add --no-cache --virtual .build-deps \
+        autoconf \
+        g++ \
+        gcc \
+        libc-dev \
+        libffi-dev \
+        libzip-dev \
+        linux-headers \
+        make \
+        pkgconf \
+        re2c \
+        zlib-dev \
+    && docker-php-ext-install ffi zip
+
+FROM ${IMAGE_TAG}
+
+COPY --from=builder /usr/local/etc/php/conf.d/docker-php-ext-ffi.ini /usr/local/etc/php/conf.d/
+COPY --from=builder /usr/local/etc/php/conf.d/docker-php-ext-zip.ini /usr/local/etc/php/conf.d/
+COPY --from=builder /usr/local/lib/php/extensions/ /usr/local/lib/php/extensions/
+COPY --from=composer:2 /usr/bin/composer /usr/local/bin/composer
+
+RUN apk add --no-cache bash git libffi libgcc unzip \
+    && echo "ffi.enable=1" > /usr/local/etc/php/conf.d/ffi-enable.ini
+
+WORKDIR /work/asherah-php
