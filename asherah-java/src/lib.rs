@@ -188,8 +188,21 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_closeSession(
     .resolve::<ThrowRuntimeExAndDefault>();
 }
 
-/// Free the caller's session handle. If async tasks still hold Arc clones,
-/// the underlying session remains alive until those tasks complete.
+/// Free a session handle previously returned by `getSession`. If async
+/// tasks still hold Arc clones, the underlying session remains alive
+/// until those tasks complete.
+///
+/// **Caller contract:** the Java side MUST guarantee single-free per
+/// handle. Calling `freeSession` twice with the same non-zero
+/// `session_handle` is undefined behaviour — the second call would
+/// reconstruct a `Box` over freed memory. The Rust side returns
+/// silently on `session_handle == 0` so the Java side can implement
+/// "swap to 0 then free" without an extra check (this is what
+/// `AsherahSession.SessionCleanup.take()` does — a synchronized
+/// take-and-zero pattern, paired with the `Cleaner.run()` fallback
+/// also calling `take()` so close/cleanup never both reach a non-
+/// zero handle). T-finding "freeSession has no double-free guard"
+/// in `docs/review-2026-05-05-findings.md`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_freeSession(
     _env: EnvUnowned<'_>,
@@ -197,6 +210,11 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_freeSession(
     session_handle: jlong,
 ) {
     if session_handle != 0 {
+        // SAFETY: caller (Java side) guarantees `session_handle` is a
+        // non-null pointer previously returned by `Java_..._getSession`
+        // and not yet freed. The `take()` synchronization in
+        // `SessionCleanup` plus the `closed` AtomicBoolean on
+        // `AsherahSession.close()` makes single-free invariant hold.
         unsafe { drop(Box::from_raw(session_handle as *mut SharedJniSession)) }
     }
 }
@@ -326,6 +344,45 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decryptAsync<'
     .resolve::<ThrowRuntimeExAndDefault>();
 }
 
+/// Cached `RuntimeMethodSignature`s for the three signatures
+/// `complete_java_future` invokes on every async completion. Parsing
+/// the JNI signature strings is cheap but non-trivial, and these
+/// signatures never change at runtime — caching avoids repeating
+/// the parse on every encrypt/decrypt result. T-finding
+/// "complete_java_future builds class/method lookups and strings on
+/// every async completion" in
+/// `docs/review-2026-05-05-findings.md`.
+struct CompletionSignatures {
+    /// `CompletableFuture::complete(Ljava/lang/Object;)Z`
+    complete: jni::signature::RuntimeMethodSignature,
+    /// `CompletableFuture::completeExceptionally(Ljava/lang/Throwable;)Z`
+    except: jni::signature::RuntimeMethodSignature,
+    /// `RuntimeException(Ljava/lang/String;)V`
+    rt_ctor: jni::signature::RuntimeMethodSignature,
+}
+
+static COMPLETION_SIGS: std::sync::OnceLock<CompletionSignatures> = std::sync::OnceLock::new();
+
+fn completion_sigs() -> &'static CompletionSignatures {
+    COMPLETION_SIGS.get_or_init(|| {
+        // Each `from_str` returns a parse error only for malformed
+        // input. These three are compile-time constants with the
+        // canonical Java method shapes, so any failure here is a
+        // build-time bug — fall back to a defensive `expect` whose
+        // message points at the exact constant that broke.
+        CompletionSignatures {
+            complete: jni::signature::RuntimeMethodSignature::from_str("(Ljava/lang/Object;)Z")
+                .expect("CompletableFuture.complete signature is a compile-time constant"),
+            except: jni::signature::RuntimeMethodSignature::from_str("(Ljava/lang/Throwable;)Z")
+                .expect(
+                    "CompletableFuture.completeExceptionally signature is a compile-time constant",
+                ),
+            rt_ctor: jni::signature::RuntimeMethodSignature::from_str("(Ljava/lang/String;)V")
+                .expect("RuntimeException(String) signature is a compile-time constant"),
+        }
+    })
+}
+
 /// Complete a Java CompletableFuture<byte[]> from a tokio worker thread.
 fn complete_java_future(
     jvm: &JavaVM,
@@ -334,19 +391,14 @@ fn complete_java_future(
 ) {
     let jni_result: Result<(), jni::errors::Error> =
         jvm.attach_current_thread(|env| -> Result<(), jni::errors::Error> {
-            let complete_sig =
-                jni::signature::RuntimeMethodSignature::from_str("(Ljava/lang/Object;)Z")?;
-            let except_sig =
-                jni::signature::RuntimeMethodSignature::from_str("(Ljava/lang/Throwable;)Z")?;
-            let rt_ctor_sig =
-                jni::signature::RuntimeMethodSignature::from_str("(Ljava/lang/String;)V")?;
+            let sigs = completion_sigs();
             match result {
                 Ok(ref bytes) => {
                     let byte_array = env.byte_array_from_slice(bytes)?;
                     env.call_method(
                         future_ref.as_obj(),
                         JNIString::from("complete"),
-                        complete_sig.method_signature(),
+                        sigs.complete.method_signature(),
                         &[jni::objects::JValue::Object(&byte_array.into())],
                     )?;
                 }
@@ -355,13 +407,13 @@ fn complete_java_future(
                     let jmsg = env.new_string(&msg)?;
                     let exception = env.new_object(
                         JNIString::from("java/lang/RuntimeException"),
-                        rt_ctor_sig.method_signature(),
+                        sigs.rt_ctor.method_signature(),
                         &[jni::objects::JValue::Object(&jmsg.into())],
                     )?;
                     env.call_method(
                         future_ref.as_obj(),
                         JNIString::from("completeExceptionally"),
-                        except_sig.method_signature(),
+                        sigs.except.method_signature(),
                         &[jni::objects::JValue::Object(&exception)],
                     )?;
                 }

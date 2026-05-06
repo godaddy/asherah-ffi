@@ -273,6 +273,28 @@ public sealed class AsherahSession : IAsherahSession
         return managed;
     }
 
+    /// <summary>
+    /// Volatile-zero a managed byte array via
+    /// <see cref="System.Security.Cryptography.CryptographicOperations.ZeroMemory(System.Span{byte})"/>,
+    /// which the runtime guarantees won't be elided by the JIT. Best-effort
+    /// only: the GC may have already copied the array's contents during
+    /// compaction, so deterministic wiping requires the caller never let the
+    /// array escape into a copy or substring before this call. Once a managed
+    /// `byte[]` is returned from `Decrypt`/`DecryptAsync`, callers wanting a
+    /// strong wipe guarantee should pass it here as soon as the plaintext is
+    /// no longer needed. T-finding "Managed `byte[]` plaintext from
+    /// `Marshal.Copy` never wiped" in
+    /// `docs/review-2026-05-05-findings.md`.
+    /// </summary>
+    public static void ZeroizePlaintext(byte[]? plaintext)
+    {
+        if (plaintext is null || plaintext.Length == 0)
+        {
+            return;
+        }
+        System.Security.Cryptography.CryptographicOperations.ZeroMemory(plaintext);
+    }
+
     private sealed record AsyncCallbackState(TaskCompletionSource<byte[]> Tcs, AsherahSession Session);
 
     /// <summary>
@@ -286,32 +308,67 @@ public sealed class AsherahSession : IAsherahSession
         UIntPtr resultLen,
         IntPtr errorMessage)
     {
-        var gcHandle = GCHandle.FromIntPtr(userData);
-        var state = (AsyncCallbackState)gcHandle.Target!;
-        gcHandle.Free();
-
+        // Wrap the entire callback body in a catch-all because this
+        // function is invoked from native code (a tokio worker
+        // thread). An exception that unwinds out of an
+        // `[UnmanagedCallersOnly]` method into native code is UB on
+        // .NET 8 — the runtime can't propagate managed exceptions
+        // through Rust frames, so the process dies with an opaque
+        // `EXCEPTION_NONCONTINUABLE` or terminates silently. Catch
+        // everything, surface it through the TaskCompletionSource so
+        // the awaiting consumer sees a normal AggregateException, and
+        // never let an exception escape this frame. T-finding
+        // "[UnmanagedCallersOnly] callback can let SetException
+        // exception unwind into native code (UB in .NET 8)" in
+        // `docs/review-2026-05-05-findings.md`.
+        AsyncCallbackState? state = null;
         try
         {
-            if (errorMessage != IntPtr.Zero)
+            var gcHandle = GCHandle.FromIntPtr(userData);
+            state = (AsyncCallbackState)gcHandle.Target!;
+            gcHandle.Free();
+
+            try
             {
-                var error = Marshal.PtrToStringUTF8(errorMessage) ?? "unknown async error";
-                state.Tcs.SetException(new AsherahException(error));
+                if (errorMessage != IntPtr.Zero)
+                {
+                    var error = Marshal.PtrToStringUTF8(errorMessage) ?? "unknown async error";
+                    state.Tcs.TrySetException(new AsherahException(error));
+                }
+                else if (resultData == IntPtr.Zero || resultLen == UIntPtr.Zero)
+                {
+                    state.Tcs.TrySetResult(Array.Empty<byte>());
+                }
+                else
+                {
+                    var length = checked((int)resultLen.ToUInt64());
+                    var managed = new byte[length];
+                    Marshal.Copy(resultData, managed, 0, length);
+                    state.Tcs.TrySetResult(managed);
+                }
             }
-            else if (resultData == IntPtr.Zero || resultLen == UIntPtr.Zero)
+            finally
             {
-                state.Tcs.SetResult(Array.Empty<byte>());
-            }
-            else
-            {
-                var length = checked((int)resultLen.ToUInt64());
-                var managed = new byte[length];
-                Marshal.Copy(resultData, managed, 0, length);
-                state.Tcs.SetResult(managed);
+                Interlocked.Decrement(ref state.Session._pendingOps);
             }
         }
-        finally
+        catch (Exception ex)
         {
-            Interlocked.Decrement(ref state.Session._pendingOps);
+            // Last-resort: the GCHandle lookup, marshal, or counter
+            // decrement threw. Try to surface the failure through the
+            // Tcs if we have one; otherwise log and swallow so we
+            // don't unwind into the Rust caller.
+            try
+            {
+                state?.Tcs.TrySetException(ex);
+            }
+            catch
+            {
+                // Tcs already completed — nowhere to send the
+                // exception. Log to debug output and swallow.
+            }
+            System.Diagnostics.Debug.WriteLine(
+                $"AsherahSession.AsyncCompletionCallback: caught and swallowed: {ex}");
         }
     }
 }
