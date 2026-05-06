@@ -650,27 +650,36 @@ impl MetricsSink for JsMetricsSink {
 }
 
 static METRICS_HOOK: Lazy<Mutex<Option<MetricsHook>>> = Lazy::new(|| Mutex::new(None));
+static NODE_CLEANUP_HOOK_INSTALLED: AtomicBool = AtomicBool::new(false);
+
+fn ensure_node_cleanup_hook(env: &mut Env) -> Result<()> {
+    if NODE_CLEANUP_HOOK_INSTALLED.swap(true, Ordering::AcqRel) {
+        return Ok(());
+    }
+    if let Err(e) = env.add_env_cleanup_hook((), |_| {
+        metrics::clear_sink();
+        metrics::set_enabled(false);
+        *METRICS_HOOK.lock() = None;
+        set_log_sink("node", None);
+        *LOG_HOOK.lock() = None;
+        NODE_CLEANUP_HOOK_INSTALLED.store(false, Ordering::Release);
+    }) {
+        NODE_CLEANUP_HOOK_INSTALLED.store(false, Ordering::Release);
+        return Err(e);
+    }
+    Ok(())
+}
 
 #[napi]
-pub fn set_metrics_hook(env: Env, callback: Option<Function<'_>>) -> Result<()> {
+pub fn set_metrics_hook(mut env: Env, callback: Option<Function<'_>>) -> Result<()> {
+    ensure_node_cleanup_hook(&mut env)?;
     if let Some(cb) = callback {
         let func_ref = cb.create_ref()?;
         let borrowed = func_ref.borrow_back(&env)?;
-        // SAFETY: `Function<'_>` borrows from the napi-rs `Env`, but
-        // we need a `'static` form so the threadsafe-function builder
-        // can hand the wrapper across thread boundaries. The
-        // soundness invariant is held by `clear_metrics_hook`/
-        // `Drop` of `METRICS_HOOK`: the `FunctionRef` we store keeps
-        // a JS-side reference to the callback alive, and we MUST
-        // call `clear_metrics_hook` before the V8 isolate is torn
-        // down. Calling tsfn methods after isolate teardown would
-        // dereference freed JS memory. Node consumers are expected
-        // to call `clearMetricsHook()` from a process-shutdown hook
-        // (the sample app and the published @asherah/asherah typings
-        // document this contract). T-finding "two transmute
-        // Function<'_> -> Function<'static>; latent UAF if V8
-        // isolate torn down before clear_log_hook fires" in
-        // `docs/review-2026-05-05-findings.md`.
+        // SAFETY: napi-rs requires a `'static` `Function` to construct a
+        // `ThreadsafeFunction`. The `FunctionRef` stored in `METRICS_HOOK`
+        // owns a JS reference for the same callback, and the env cleanup hook
+        // above clears the hook before isolate teardown.
         let borrowed_static: Function<'static> = unsafe { std::mem::transmute(borrowed) };
         let tsfn = borrowed_static
             .build_threadsafe_function::<MetricsEvent>()
@@ -763,17 +772,15 @@ fn ensure_logger_initialized() -> Result<()> {
 
 #[napi]
 pub fn set_log_hook(env: Env, callback: Option<Function<'_>>) -> Result<()> {
+    let mut env = env;
+    ensure_node_cleanup_hook(&mut env)?;
     ensure_logger_initialized()?;
 
     if let Some(cb) = callback {
         let func_ref = cb.create_ref()?;
         let borrowed = func_ref.borrow_back(&env)?;
-        // SAFETY: see the matching note in `set_metrics_hook`. The
-        // `'static` lifetime is preserved across the V8 isolate's
-        // lifetime by the `LOG_HOOK` mutex retaining the
-        // `FunctionRef`; consumers MUST call `clearLogHook()` from
-        // a process-shutdown hook before the isolate tears down or
-        // tsfn invocations would dereference freed JS memory.
+        // SAFETY: see `set_metrics_hook`; the retained `FunctionRef` plus
+        // env cleanup hook bound this lifetime to the Node environment.
         let borrowed_static: Function<'static> = unsafe { std::mem::transmute(borrowed) };
         let tsfn = borrowed_static
             .build_threadsafe_function::<LogEvent>()

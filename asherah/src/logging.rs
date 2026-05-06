@@ -58,16 +58,18 @@ pub fn ensure_logger() -> Result<(), log::SetLoggerError> {
 pub fn set_sink(name: &'static str, sink: Option<Arc<dyn LogSink>>) {
     let mut guard = SUBSCRIBERS.write();
     let was_empty = guard.is_empty();
-    match sink {
-        Some(s) => {
-            guard.insert(name, s);
-        }
-        None => {
-            guard.remove(name);
-        }
-    }
+    // Capture the displaced sink under the lock so we can drop it
+    // AFTER releasing the guard. If the old sink's Drop ever calls
+    // back into a `log::*` macro (a histogram-flush, a panic-on-drop
+    // logger, etc.), holding the SUBSCRIBERS lock during the drop
+    // would deadlock against `MultiplexLogger::log`'s read lock.
+    let old_sink = match sink {
+        Some(s) => guard.insert(name, s),
+        None => guard.remove(name),
+    };
     let is_empty_now = guard.is_empty();
     drop(guard);
+    drop(old_sink);
 
     // Only manage the global level filter if we actually own the logger.
     // If a different logger was registered before us we leave it alone.

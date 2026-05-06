@@ -10,6 +10,37 @@ use crate::traits::Metastore;
 use crate::types::{EnvelopeKeyRecord, KeyMeta};
 use anyhow::Context;
 
+#[allow(missing_debug_implementations)]
+struct RuntimeHolder {
+    rt: Option<tokio::runtime::Runtime>,
+}
+
+impl RuntimeHolder {
+    fn new(rt: tokio::runtime::Runtime) -> Self {
+        Self { rt: Some(rt) }
+    }
+
+    fn runtime(&self) -> &tokio::runtime::Runtime {
+        match self.rt.as_ref() {
+            Some(rt) => rt,
+            None => unreachable!("runtime holder initialized"),
+        }
+    }
+}
+
+impl Drop for RuntimeHolder {
+    fn drop(&mut self) {
+        let Some(rt) = self.rt.take() else {
+            return;
+        };
+        if tokio::runtime::Handle::try_current().is_ok() {
+            drop(std::thread::spawn(move || drop(rt)).join());
+        } else {
+            drop(rt);
+        }
+    }
+}
+
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
 pub struct DynamoDbMetastore {
@@ -24,7 +55,7 @@ pub struct DynamoDbMetastore {
     sdk_conf: aws_sdk_dynamodb::Config,
     table: String,
     /// Private runtime for sync callers (Python, Java, Go, etc.)
-    rt: Arc<tokio::runtime::Runtime>,
+    rt: Arc<RuntimeHolder>,
     region_suffix_enabled: bool,
     region_suffix: Option<String>,
 }
@@ -60,17 +91,7 @@ impl DynamoDbMetastore {
         // when EnableRegionSuffix=true. T-finding "region_suffix_enabled
         // with no region produces silent None" in
         // docs/review-2026-05-05-findings.md.
-        let suffix = if region_suffix {
-            match conf.region() {
-                Some(r) => Some(r.to_string()),
-                None => anyhow::bail!(
-                    "DynamoDB metastore: region_suffix=true but no AWS region resolved. \
-                     Set AWS_REGION (or DynamoDBRegion) explicitly."
-                ),
-            }
-        } else {
-            None
-        };
+        let suffix = resolve_region_suffix(conf.region(), region_suffix)?;
         let table_name = {
             let t = table.into();
             if t.is_empty() {
@@ -84,7 +105,7 @@ impl DynamoDbMetastore {
             async_client: Arc::new(OnceCell::new()),
             sdk_conf: conf,
             table: table_name,
-            rt: Arc::new(rt),
+            rt: Arc::new(RuntimeHolder::new(rt)),
             region_suffix_enabled: region_suffix,
             region_suffix: suffix,
         })
@@ -124,11 +145,7 @@ impl DynamoDbMetastore {
         let client = Client::from_conf(conf.clone());
         let rt = tokio::runtime::Runtime::new()?;
         let sync_client = Client::from_conf(conf.clone());
-        let suffix = if region_suffix {
-            conf.region().map(|r| r.to_string())
-        } else {
-            None
-        };
+        let suffix = resolve_region_suffix(conf.region(), region_suffix)?;
         let table_name = {
             let t = table.into();
             if t.is_empty() {
@@ -147,7 +164,7 @@ impl DynamoDbMetastore {
             async_client: async_cell,
             sdk_conf: conf,
             table: table_name,
-            rt: Arc::new(rt),
+            rt: Arc::new(RuntimeHolder::new(rt)),
             region_suffix_enabled: region_suffix,
             region_suffix: suffix,
         })
@@ -440,15 +457,31 @@ impl DynamoDbMetastore {
     }
 }
 
+fn resolve_region_suffix(
+    region: Option<&Region>,
+    region_suffix: bool,
+) -> anyhow::Result<Option<String>> {
+    if !region_suffix {
+        return Ok(None);
+    }
+    match region {
+        Some(r) => Ok(Some(r.to_string())),
+        None => anyhow::bail!(
+            "DynamoDB metastore: region_suffix=true but no AWS region resolved. \
+             Set AWS_REGION (or DynamoDBRegion) explicitly."
+        ),
+    }
+}
+
 #[async_trait]
 impl Metastore for DynamoDbMetastore {
     // Sync methods — use sync_client on private runtime
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
-        Self::block_on_maybe(&self.rt, self.load_impl_sync(id, created))
+        Self::block_on_maybe(self.rt.runtime(), self.load_impl_sync(id, created))
     }
 
     fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
-        Self::block_on_maybe(&self.rt, self.load_latest_impl_sync(id))
+        Self::block_on_maybe(self.rt.runtime(), self.load_latest_impl_sync(id))
     }
 
     fn store(
@@ -457,7 +490,7 @@ impl Metastore for DynamoDbMetastore {
         created: i64,
         ekr: &EnvelopeKeyRecord,
     ) -> Result<bool, anyhow::Error> {
-        Self::block_on_maybe(&self.rt, self.store_impl_sync(id, created, ekr))
+        Self::block_on_maybe(self.rt.runtime(), self.store_impl_sync(id, created, ekr))
     }
 
     fn region_suffix(&self) -> Option<String> {
@@ -491,5 +524,31 @@ impl Metastore for DynamoDbMetastore {
         ekr: &EnvelopeKeyRecord,
     ) -> Result<bool, anyhow::Error> {
         self.store_impl_async(id, created, ekr).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn region_suffix_requires_resolved_region() {
+        let err = resolve_region_suffix(None, true).expect_err("missing region must fail");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("region_suffix=true"), "{msg}");
+        assert!(msg.contains("AWS_REGION"), "{msg}");
+    }
+
+    #[test]
+    fn region_suffix_disabled_allows_missing_region() {
+        let suffix = resolve_region_suffix(None, false).expect("suffix disabled");
+        assert_eq!(suffix, None);
+    }
+
+    #[test]
+    fn region_suffix_uses_resolved_region() {
+        let region = Region::new("us-west-2");
+        let suffix = resolve_region_suffix(Some(&region), true).expect("resolved region");
+        assert_eq!(suffix.as_deref(), Some("us-west-2"));
     }
 }

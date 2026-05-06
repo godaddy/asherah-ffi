@@ -5,6 +5,7 @@
 use asherah::logging::{self, AsyncLogConfig, AsyncLogSink, LogSink};
 use asherah::metrics::{self, AsyncMetricsConfig, AsyncMetricsSink, MetricsSink};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -148,6 +149,66 @@ fn async_log_sink_drops_when_queue_overflows() {
     logging::set_sink("async-overflow-test", None);
 }
 
+struct ReentrantLogSink {
+    entered: Mutex<Option<mpsc::Sender<()>>>,
+    proceed: Mutex<mpsc::Receiver<()>>,
+}
+
+impl LogSink for ReentrantLogSink {
+    fn log(&self, record: &log::Record<'_>) {
+        if record.target() != TEST_TARGET {
+            return;
+        }
+        if let Some(tx) = self.entered.lock().expect("entered lock").take() {
+            tx.send(()).expect("signal entered");
+            self.proceed
+                .lock()
+                .expect("proceed lock")
+                .recv()
+                .expect("wait for proceed");
+            log::warn!(target: TEST_TARGET, "nested log while old sink is being removed");
+        }
+    }
+}
+
+#[test]
+fn replacing_async_log_sink_does_not_deadlock_reentrant_callback() {
+    let _guard = SERIAL.lock().expect("serial lock");
+    logging::ensure_logger().expect("ensure_logger");
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (proceed_tx, proceed_rx) = mpsc::channel();
+    let sink = AsyncLogSink::new(
+        ReentrantLogSink {
+            entered: Mutex::new(Some(entered_tx)),
+            proceed: Mutex::new(proceed_rx),
+        },
+        AsyncLogConfig {
+            queue_capacity: 8,
+            min_level: log::LevelFilter::Trace,
+        },
+    )
+    .expect("spawn log dispatcher");
+    logging::set_sink("async-reentrant-test", Some(Arc::new(sink)));
+
+    log::warn!(target: TEST_TARGET, "enter");
+    entered_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("worker entered callback");
+
+    let (done_tx, done_rx) = mpsc::channel();
+    let remover = std::thread::spawn(move || {
+        logging::set_sink("async-reentrant-test", None);
+        done_tx.send(()).expect("signal removal done");
+    });
+    std::thread::sleep(Duration::from_millis(50));
+    proceed_tx.send(()).expect("release callback");
+
+    done_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("sink replacement must not deadlock");
+    remover.join().expect("remover thread");
+}
+
 // ────────────────────────── metrics ──────────────────────────
 
 #[derive(Default)]
@@ -233,4 +294,59 @@ fn async_metrics_sink_drops_when_queue_overflows() {
     std::thread::sleep(Duration::from_millis(20));
     let dropped = metrics::metrics_dropped_count() - baseline;
     assert!(dropped > 0, "expected drops, got {dropped}");
+}
+
+struct ReentrantMetricsSink {
+    entered: Mutex<Option<mpsc::Sender<()>>>,
+    proceed: Mutex<mpsc::Receiver<()>>,
+}
+
+impl MetricsSink for ReentrantMetricsSink {
+    fn encrypt(&self, _dur: Duration) {
+        if let Some(tx) = self.entered.lock().expect("entered lock").take() {
+            tx.send(()).expect("signal entered");
+            self.proceed
+                .lock()
+                .expect("proceed lock")
+                .recv()
+                .expect("wait for proceed");
+            metrics::record_decrypt(Instant::now());
+        }
+    }
+}
+
+#[test]
+fn replacing_async_metrics_sink_does_not_deadlock_reentrant_callback() {
+    let _guard = SERIAL.lock().expect("serial lock");
+    let (entered_tx, entered_rx) = mpsc::channel();
+    let (proceed_tx, proceed_rx) = mpsc::channel();
+    let sink = AsyncMetricsSink::new(
+        ReentrantMetricsSink {
+            entered: Mutex::new(Some(entered_tx)),
+            proceed: Mutex::new(proceed_rx),
+        },
+        AsyncMetricsConfig { queue_capacity: 8 },
+    )
+    .expect("spawn metrics dispatcher");
+    metrics::set_sink(sink);
+    metrics::set_enabled(true);
+
+    metrics::record_encrypt(Instant::now());
+    entered_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("worker entered callback");
+
+    let (done_tx, done_rx) = mpsc::channel();
+    let remover = std::thread::spawn(move || {
+        metrics::clear_sink();
+        done_tx.send(()).expect("signal removal done");
+    });
+    std::thread::sleep(Duration::from_millis(50));
+    proceed_tx.send(()).expect("release callback");
+
+    done_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("metrics sink replacement must not deadlock");
+    remover.join().expect("remover thread");
+    metrics::set_enabled(false);
 }
