@@ -1257,25 +1257,44 @@ fn test_set_env_integration() {
     let json = format!(r#"{{"{key1}": "integration_value_1", "{key2}": "integration_value_2"}}"#);
     let buf = create_string_buffer(&json);
 
-    unsafe {
-        let result = SetEnv(buf.as_ptr().cast::<c_char>());
-        assert_eq!(result, ERR_NONE, "SetEnv should succeed");
+    let result = unsafe { SetEnv(buf.as_ptr().cast::<c_char>()) };
+
+    // Tests in this binary share the global FACTORY. If
+    // `test_full_encryption_workflow` ran first, SetEnv now refuses
+    // post-init env mutation (commit 09db712) and returns
+    // ERR_ALREADY_INITIALIZED. Both outcomes are acceptable for the
+    // export/integration smoke. When SetEnv succeeded, verify the
+    // env mutations propagated; when it refused, verify the env was
+    // not mutated.
+    match result {
+        ERR_NONE => {
+            assert_eq!(
+                std::env::var(&key1).ok(),
+                Some("integration_value_1".to_string()),
+                "Environment variable should be set"
+            );
+            assert_eq!(
+                std::env::var(&key2).ok(),
+                Some("integration_value_2".to_string()),
+                "Environment variable should be set"
+            );
+            std::env::remove_var(&key1);
+            std::env::remove_var(&key2);
+        }
+        ERR_ALREADY_INITIALIZED => {
+            assert!(
+                std::env::var(&key1).is_err(),
+                "post-init SetEnv must not mutate env (key1 leaked: {:?})",
+                std::env::var(&key1)
+            );
+            assert!(
+                std::env::var(&key2).is_err(),
+                "post-init SetEnv must not mutate env (key2 leaked: {:?})",
+                std::env::var(&key2)
+            );
+        }
+        other => panic!("SetEnv returned unexpected code {other}"),
     }
-
-    assert_eq!(
-        std::env::var(&key1).ok(),
-        Some("integration_value_1".to_string()),
-        "Environment variable should be set"
-    );
-    assert_eq!(
-        std::env::var(&key2).ok(),
-        Some("integration_value_2".to_string()),
-        "Environment variable should be set"
-    );
-
-    // Cleanup
-    std::env::remove_var(&key1);
-    std::env::remove_var(&key2);
 }
 
 // ============================================================================
