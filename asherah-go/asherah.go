@@ -237,15 +237,23 @@ func acquireSession(partition string) (*Session, func(), error) {
 	}
 
 	if caching {
+		globalMu.RLock()
 		sessionMu.Lock()
+		if !sessionCaching || globalFactory != factory {
+			sessionMu.Unlock()
+			globalMu.RUnlock()
+			return nil, nil, errors.New("asherah-go: Shutdown raced with session acquisition")
+		}
 		if elem, ok := sessionCache[partition]; ok {
 			// LRU hit: move to back (most-recently-used).
 			sessionLRU.MoveToBack(elem)
 			sess := elem.Value.(sessionCacheEntry).session
 			sessionMu.Unlock()
+			globalMu.RUnlock()
 			return sess, nil, nil
 		}
 		sessionMu.Unlock()
+		globalMu.RUnlock()
 	}
 
 	sess, err := factory.GetSession(partition)
@@ -255,12 +263,20 @@ func acquireSession(partition string) (*Session, func(), error) {
 
 	if caching {
 		var evicted *Session
+		globalMu.RLock()
 		sessionMu.Lock()
+		if !sessionCaching || globalFactory != factory {
+			sessionMu.Unlock()
+			globalMu.RUnlock()
+			sess.Close()
+			return nil, nil, errors.New("asherah-go: Shutdown raced with session acquisition")
+		}
 		if elem, ok := sessionCache[partition]; ok {
 			// Lost the race — another goroutine inserted while we created.
 			sessionLRU.MoveToBack(elem)
 			existing := elem.Value.(sessionCacheEntry).session
 			sessionMu.Unlock()
+			globalMu.RUnlock()
 			sess.Close()
 			return existing, nil, nil
 		}
@@ -281,6 +297,7 @@ func acquireSession(partition string) (*Session, func(), error) {
 			}
 		}
 		sessionMu.Unlock()
+		globalMu.RUnlock()
 		// Close evicted session outside the lock — Close hits the FFI
 		// and we don't want to serialize all encrypts behind eviction.
 		if evicted != nil {

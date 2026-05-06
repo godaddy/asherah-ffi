@@ -19,17 +19,11 @@ pub struct SessionFactory<
     M: Metastore + Clone,
     P: Partition + Clone,
 > {
-    // Crate-internal: external code interacts with `PublicFactory`
-    // (re-exported as `asherah::SessionFactory`) and constructs the
-    // inner factory via `SessionFactory::new` / `factory_from_config`.
-    // Mid-session mutation of these fields would invalidate cached
-    // keys and partition derivations, so direct external access is
-    // not part of the supported API surface.
-    pub(crate) metastore: Arc<M>,
-    pub(crate) kms: Arc<K>,
-    pub(crate) policy: CryptoPolicy,
-    pub(crate) crypto: Arc<A>,
-    pub(crate) partition: Arc<P>,
+    pub metastore: Arc<M>,
+    pub kms: Arc<K>,
+    pub policy: CryptoPolicy,
+    pub crypto: Arc<A>,
+    pub partition: Arc<P>,
 }
 
 impl<
@@ -313,17 +307,14 @@ impl<
                 // T-finding "Legacy Session::encrypt doesn't reload
                 // load_latest on race-loss" in
                 // `docs/review-2026-05-05-findings.md`.
-                let stored = self
-                    .f
-                    .metastore
-                    .store(&ekr.id, ekr.created, &ekr)
-                    .unwrap_or_else(|e| {
-                        log::warn!(
-                            "encrypt: IK store failed for id={} (will retry load): {e:#}",
+                let stored =
+                    self.f
+                        .metastore
+                        .store(&ekr.id, ekr.created, &ekr)
+                        .context(format!(
+                            "encrypt: failed to store intermediate key id={}",
                             ekr.id
-                        );
-                        false
-                    });
+                        ))?;
                 if stored {
                     ik
                 } else {

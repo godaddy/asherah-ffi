@@ -99,6 +99,7 @@ func (s *StaticKMS) DecryptKey(_ context.Context, _ []byte) ([]byte, error) {
 func (s *StaticKMS) applyConfig(cfg *Config) {
 	cfg.KMS = "static"
 	hex := fmt.Sprintf("%x", s.key)
+	cfg.StaticMasterKeyHex = &hex
 	os.Setenv("STATIC_MASTER_KEY_HEX", hex)
 }
 

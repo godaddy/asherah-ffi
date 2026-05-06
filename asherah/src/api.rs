@@ -25,7 +25,7 @@ pub fn new_session_factory<
 /// source-level API parity with the Go bindings; passing it has no effect.
 /// New code should not match on it.
 #[derive(Debug)]
-#[non_exhaustive]
+#[allow(clippy::manual_non_exhaustive)]
 pub enum FactoryOption {
     /// Enable per-factory metrics collection. Defaults to `true` if no
     /// option is supplied. Disabling skips the per-encrypt

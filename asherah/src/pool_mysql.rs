@@ -346,12 +346,12 @@ impl ManagedPool {
     /// Get a connection from the pool. Blocks if `max_open` is reached until
     /// a connection is returned by another thread.
     pub fn get_conn(self: &Arc<Self>) -> anyhow::Result<ManagedConn> {
-        if self.closed.load(Ordering::Relaxed) {
-            anyhow::bail!("MySQL pool is closed");
-        }
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 
         loop {
+            if self.closed.load(Ordering::Relaxed) {
+                anyhow::bail!("MySQL pool is closed");
+            }
             // Try to reuse an idle connection
             while let Some(idle) = inner.idle.pop_front() {
                 let now = Instant::now();

@@ -165,6 +165,10 @@ struct SyncFilteredLogSink {
 }
 
 impl LogSink for SyncFilteredLogSink {
+    fn min_level(&self) -> log::LevelFilter {
+        self.min_level
+    }
+
     fn log(&self, record: &log::Record<'_>) {
         if record.level() > self.min_level {
             return;

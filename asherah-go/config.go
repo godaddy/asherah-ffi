@@ -18,6 +18,7 @@ type Config struct {
 	SessionCacheMaxSize    *int              `json:"SessionCacheMaxSize,omitempty"`
 	SessionCacheDuration   *int64            `json:"SessionCacheDuration,omitempty"`
 	KMS                    string            `json:"KMS,omitempty"`
+	StaticMasterKeyHex     *string           `json:"StaticMasterKeyHex,omitempty"`
 	RegionMap              map[string]string `json:"RegionMap,omitempty"`
 	PreferredRegion        *string           `json:"PreferredRegion,omitempty"`
 	AwsProfileName         *string           `json:"AwsProfileName,omitempty"`
@@ -26,10 +27,10 @@ type Config struct {
 	Verbose                *bool             `json:"Verbose,omitempty"`
 
 	// Connection pool
-	PoolMaxOpen     *int    `json:"PoolMaxOpen,omitempty"`
-	PoolMaxIdle     *int    `json:"PoolMaxIdle,omitempty"`
-	PoolMaxLifetime *int64  `json:"PoolMaxLifetime,omitempty"`
-	PoolMaxIdleTime *int64  `json:"PoolMaxIdleTime,omitempty"`
+	PoolMaxOpen     *int   `json:"PoolMaxOpen,omitempty"`
+	PoolMaxIdle     *int   `json:"PoolMaxIdle,omitempty"`
+	PoolMaxLifetime *int64 `json:"PoolMaxLifetime,omitempty"`
+	PoolMaxIdleTime *int64 `json:"PoolMaxIdleTime,omitempty"`
 
 	// KMS: AWS
 	KmsKeyID *string `json:"KmsKeyId,omitempty"`
@@ -53,9 +54,9 @@ type Config struct {
 }
 
 func (c Config) toJSON() ([]byte, error) {
-    cloned := c
-    if cloned.KMS == "" {
-        cloned.KMS = "static"
-    }
-    return json.Marshal(&cloned)
+	cloned := c
+	if cloned.KMS == "" {
+		cloned.KMS = "static"
+	}
+	return json.Marshal(&cloned)
 }
