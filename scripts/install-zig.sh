@@ -56,11 +56,14 @@ TARBALL_PATH="${INSTALL_DIR}/${ZIG_TARBALL}"
 download() {
     local url="$1"
     # --retry 10 --retry-connrefused covers transient connection /
-    # 5xx failures. --max-time bounds runaway hangs at ~3 min.
+    # 5xx failures. --max-time 600 bounds runaway hangs but is loose
+    # enough that a slow link can complete the ~46 MB tarball; CI
+    # runners usually finish in seconds.
     curl --retry 10 \
         --retry-connrefused \
         --retry-delay 5 \
-        --max-time 180 \
+        --connect-timeout 30 \
+        --max-time 600 \
         --fail \
         --silent \
         --show-error \
