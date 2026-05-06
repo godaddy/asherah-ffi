@@ -79,3 +79,44 @@ jobs:
         uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4.35.2
         with:
           category: "/language:go"
+
+  # Rust gets its own job because CodeQL's Rust analyzer needs the
+  # workspace to compile end-to-end and its `build-mode: manual`
+  # ergonomics differ from the Actions/JS/Python matrix above. We
+  # build a representative subset (the asherah core + asherah-server)
+  # rather than the full workspace because some FFI crates need
+  # platform toolchains the CodeQL runner doesn't have. T-finding
+  # "codeql.yml only analyzes Actions workflows; no language: rust"
+  # in `docs/review-2026-05-05-findings.md`.
+  analyze-rust:
+    name: Analyze (rust)
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4.35.2
+        with:
+          languages: rust
+          build-mode: manual
+
+      - name: Build Rust code (asherah core + server)
+        run: |
+          cargo build -p asherah --features sqlite,mysql,postgres,dynamodb,vault,secrets-manager
+          cargo build -p asherah-server
+          cargo build -p asherah-config
+          cargo build -p asherah-ffi
+          cargo build -p asherah-cobhan
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4.35.2
+        with:
+          category: "/language:rust"

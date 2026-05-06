@@ -146,19 +146,28 @@ fn simple_cache_meta_caching() {
         created: 42,
     };
     let mut count = 0;
-    let _ = cache
+    let k1 = cache
         .get_or_load(&meta, &mut || {
             count += 1;
             Ok(make_key(42))
         })
         .unwrap();
-    let _ = cache
+    let k2 = cache
         .get_or_load(&meta, &mut || {
             count += 1;
-            Ok(make_key(42))
+            // If the cache returned this loader's key (which it
+            // shouldn't on the second call), the assertion below
+            // would fail because `created` is different.
+            Ok(make_key(99))
         })
         .unwrap();
-    assert_eq!(count, 1);
+    assert_eq!(count, 1, "second call should hit cache");
+    assert_eq!(k1.created(), 42, "first key carries the loaded `created`");
+    assert_eq!(
+        k2.created(),
+        42,
+        "second call must return the cached key, not the loader-produced one"
+    );
 }
 
 #[test]

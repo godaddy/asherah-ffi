@@ -27,11 +27,28 @@ impl std::fmt::Debug for CryptoKey {
 
 impl CryptoKey {
     pub fn new(created: i64, revoked: bool, mut bytes: Vec<u8>) -> anyhow::Result<Self> {
-        // Pre-expand key schedule for 32-byte keys
+        // Pre-expand key schedule for 32-byte keys.
+        //
+        // `UnboundKey::new` returns Err only for an algorithm/key-length
+        // mismatch. We've already gated on `bytes.len() == 32` for
+        // AES-256-GCM, so the error path is unreachable. Surface a
+        // contextual error rather than the previous `.ok()` silent
+        // discard so that a future regression (changing the gate
+        // without updating the algo) doesn't disappear into a
+        // `cached_lsk: None` and silently fall through to the
+        // not-cached path. T-finding "UnboundKey::new(&AES_256_GCM,
+        // &bytes).ok() silently discards unreachable error" in
+        // `docs/review-2026-05-05-findings.md`.
         let cached_lsk = if bytes.len() == 32 {
-            UnboundKey::new(&AES_256_GCM, &bytes)
-                .ok()
-                .map(LessSafeKey::new)
+            match UnboundKey::new(&AES_256_GCM, &bytes) {
+                Ok(k) => Some(LessSafeKey::new(k)),
+                Err(_) => {
+                    return Err(anyhow::anyhow!(
+                        "internal: UnboundKey::new failed for 32-byte AES-256-GCM key — \
+                         algorithm/key-length gate mismatch (please report)"
+                    ));
+                }
+            }
         } else {
             None
         };
@@ -81,9 +98,30 @@ impl CryptoKey {
             .secret
             .open()
             .map_err(|e| anyhow::anyhow!("failed to open key enclave: {:?}", e))?;
-        let result = f(buf.as_slice());
+        // Guard the caller closure with `catch_unwind` so a panic
+        // doesn't leak the borrowed slot from the SLAB pool. Without
+        // this, a panic in `f(...)` would unwind past the
+        // `pool_release` call and the slot would stay marked as in
+        // use forever — eventually exhausting the pool. Repackage
+        // any payload as an anyhow error so the caller can decide
+        // whether to bubble or recover. T-finding "with_key_func
+        // lacks panic guard; closure panic leaks buffer from pool"
+        // in `docs/review-2026-05-05-findings.md`.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(buf.as_slice())));
         crate::memguard::pool_release(buf);
-        Ok(result)
+        match result {
+            Ok(r) => Ok(r),
+            Err(payload) => {
+                let msg = payload
+                    .downcast_ref::<&str>()
+                    .copied()
+                    .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+                    .unwrap_or("(non-string panic payload)");
+                Err(anyhow::anyhow!(
+                    "CryptoKey::with_key_func: closure panicked: {msg}"
+                ))
+            }
+        }
     }
 }
 

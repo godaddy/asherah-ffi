@@ -29,6 +29,23 @@ pub struct CryptoPolicy {
 }
 
 impl Default for CryptoPolicy {
+    /// Defaults match the Go reference implementation. Notable
+    /// trade-offs:
+    ///
+    /// * `expire_key_after_s = 90 days`, `revoke_check_interval_s =
+    ///   1 hour`. Once a key is revoked in the metastore, in-flight
+    ///   encrypt/decrypt calls keep using the cached key for at most
+    ///   `revoke_check_interval_s` before the cache re-checks.
+    ///   Operators who need tighter revocation latency should lower
+    ///   `revoke_check_interval_s` at the cost of higher metastore
+    ///   read load. T-finding "Default simple IK cache + 90-day TTL +
+    ///   revocation gap = IK can stay cached past revocation" in
+    ///   `docs/review-2026-05-05-findings.md`.
+    /// * `intermediate_key_cache_eviction_policy = "simple"` is
+    ///   unbounded by design — paired with `cache_max_size = 1000`
+    ///   the cache will warn at construction (see `cache.rs:162`) and
+    ///   operators wanting bounded cardinality should pick `lru`,
+    ///   `slru`, `lfu`, or `tinylfu`.
     fn default() -> Self {
         Self {
             create_date_precision_s: 60,

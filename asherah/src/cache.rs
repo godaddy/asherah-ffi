@@ -58,6 +58,18 @@ struct CacheEntry {
 type CacheKey = (Arc<str>, i64);
 
 /// Result of a cache check (no loader call).
+///
+/// The four variants encode three orthogonal pieces of information:
+/// freshness, who owns the reload claim, and whether we have any key
+/// at all. `Hit` and `StaleOther` happen to be handled identically by
+/// the current encrypt-side consumer (both return the cached key), but
+/// the distinction matters for metrics — `StaleOther` records a
+/// `cache_stale` event while `Hit` records `cache_hit`. Collapsing the
+/// two would lose that observability. Likewise `StaleReload` and
+/// `Miss` are both "go to the metastore" but the former carries a
+/// fallback key for the loader-failure path. T-finding "CacheCheck
+/// reinvents Result; Hit | StaleOther arms merged identically" in
+/// `docs/review-2026-05-05-findings.md`.
 #[derive(Debug)]
 pub enum CacheCheck {
     /// Fresh hit — use this key directly.

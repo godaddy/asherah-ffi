@@ -180,8 +180,13 @@ do_unit() {
 
     # Run asherah crate unit tests: lib tests + all test files except
     # integration_containers (Docker) and cucumber (BDD framework).
+    # Include `vault` and `secrets-manager` so the adapters compile
+    # under their own cfg gates and any breakage shows up before
+    # publish. T-finding "Unit tests omit `vault` and
+    # `secrets-manager` features" in
+    # `docs/review-2026-05-05-findings.md`.
     local asherah_test_args=(
-        cargo test -p asherah --features sqlite,mysql,postgres,dynamodb --lib
+        cargo test -p asherah --features sqlite,mysql,postgres,dynamodb,vault,secrets-manager --lib
     )
     for f in asherah/tests/*.rs; do
         local name

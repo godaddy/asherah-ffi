@@ -30,6 +30,30 @@ fn ik_cache_ttl_expires_and_reloads() {
     sleep(Duration::from_millis(1100));
     let d3 = sess.encrypt(b"again").unwrap();
     let ik3 = d3.key.unwrap().parent_key_meta.unwrap().created;
-    // Not strictly guaranteed to differ, but ensure not panicking and value is present
-    assert!(ik3 >= ik2);
+    // The previous `assert!(ik3 >= ik2)` was a no-op: `created` is a
+    // monotonic-clock-derived second count, so the comparison is true
+    // by construction. Replace with the actual invariant — after a TTL
+    // expiry the IK metadata's parent_key_meta should still parse to a
+    // sane epoch (positive within the last hour) and the encrypt
+    // succeeded, returning bytes that didn't blow up the call. The
+    // rotation-rather-than-reuse path is exercised by
+    // `tests/revocation.rs`. T-finding "assert!(ik3 >= ik2) is a no-op"
+    // in `docs/review-2026-05-05-findings.md`.
+    assert!(
+        ik3 > 0,
+        "IK metadata.created should be a non-zero epoch; got {ik3}"
+    );
+    let now_s = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    assert!(
+        ik3 <= now_s,
+        "IK metadata.created should not be in the future; got {ik3} > now {now_s}"
+    );
+    assert!(
+        now_s - ik3 < 3600,
+        "IK metadata.created should be within the last hour for a fresh test; got delta {}",
+        now_s - ik3
+    );
 }
