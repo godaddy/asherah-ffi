@@ -1737,6 +1737,8 @@ jobs:
         with:
           name: bindings-linux-x86_64-part-ffi
           path: ci-artifacts
+      - name: Normalize FFI artifact permissions
+        run: chmod +x ci-artifacts/libasherah_ffi.so
       - name: Install Zig (with retries)
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
@@ -1772,7 +1774,7 @@ jobs:
       - name: Consumer source install smoke
         run: |
           docker run --rm -v "$PWD":/work -w /work \
-            -e ASHERAH_PHP_NATIVE=/work/ci-artifacts/ffi \
+            -e ASHERAH_PHP_NATIVE=/work/ci-artifacts \
             asherah-php-ffi-test sh -lc '
               set -e
               rm -rf /tmp/asherah-php-consumer
