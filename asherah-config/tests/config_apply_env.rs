@@ -570,26 +570,43 @@ fn test_static_master_key_hex() {
     }
 }
 
-fn test_static_kms_without_key_is_rejected() {
-    // T1 regression: KMS=static must NOT silently fall back to a publicly
-    // known testing key when StaticMasterKey is omitted.
+fn test_static_kms_without_key_falls_back_to_test_key() {
+    // Drop-in compatibility with the canonical asherah Go server: when
+    // KMS=static is set and StaticMasterKey is omitted, fall back to the
+    // canonical test key (`thisIsAStaticMasterKeyForTesting`) so the
+    // value of KMS=static matches the Go reference's `kms.NewStatic`
+    // hardcoded behavior. The earlier "must error" stance was a
+    // unilateral hardening from the 2026-05-05 review that broke every
+    // Go-server-compatible deployment using KMS=static; the safety
+    // story is preserved by emitting a `WARN asherah::builders` "Using
+    // static master key. This is for testing only" log line at startup
+    // in either the static or test-debug-static path.
+    use asherah::builders::TEST_DEBUG_STATIC_MASTER_KEY_HEX;
+
     let cfg = ConfigOptions {
         kms: Some("static".into()),
         static_master_key_hex: None,
         ..base_config()
     };
-    let err = cfg
+    let (resolved, _applied) = cfg
         .resolve()
-        .expect_err("KMS=static without key must error");
-    let msg = format!("{err:#}");
+        .expect("KMS=static must fall back to the canonical test key");
+    // Avoid `{other:?}` for the non-Static fallthrough — `KmsConfig::Static`
+    // carries the master key hex, so debug-formatting the enum on the
+    // failure path would leak key material into the test's panic message
+    // and CodeQL (rule rust/cleartext-logging) flags it as cleartext
+    // logging. Asserting the variant via `matches!` keeps the payload
+    // out of the failure output.
     assert!(
-        msg.contains("StaticMasterKeyHex") || msg.contains("static_master_key_hex"),
-        "error must reference the missing key field: {msg}"
+        matches!(resolved.kms, KmsConfig::Static { .. }),
+        "expected KmsConfig::Static fallback variant"
     );
-    assert!(
-        msg.contains("test-debug-static"),
-        "error must mention the test-debug-static escape hatch: {msg}"
-    );
+    if let KmsConfig::Static { key_hex } = resolved.kms {
+        assert_eq!(
+            key_hex, TEST_DEBUG_STATIC_MASTER_KEY_HEX,
+            "fallback key must equal canonical Asherah test key hex"
+        );
+    }
 }
 
 fn test_no_env_side_effects() {
@@ -732,8 +749,8 @@ fn main() {
     );
     run_test!("test_static_master_key_hex", test_static_master_key_hex);
     run_test!(
-        "test_static_kms_without_key_is_rejected",
-        test_static_kms_without_key_is_rejected
+        "test_static_kms_without_key_falls_back_to_test_key",
+        test_static_kms_without_key_falls_back_to_test_key
     );
     run_test!("test_no_env_side_effects", test_no_env_side_effects);
 

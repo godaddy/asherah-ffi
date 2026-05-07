@@ -1,8 +1,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
-//! Regression tests for T1 in docs/review-2026-05-05-findings.md:
-//! `KmsConfig::Static { key_hex: "" }` must NOT silently fall through to a
-//! publicly known testing key. The well-known key is reachable only through
-//! the explicit `test-debug-static` alias.
+//! Tests for the static KMS path. `KMS=static` and `KMS=test-debug-static`
+//! are synonyms — the latter is the preferred identifier because its name
+//! makes the non-production nature obvious, but both must behave
+//! identically to preserve interop with the canonical Go implementation.
+//! When no `key_hex` is supplied, both fall back to the publicly known
+//! test key. The static-KMS builder log-warns loudly so an operator who
+//! accidentally ships `static` without an explicit hex sees the warning.
 
 use asherah::builders::{
     factory_from_resolved, KmsConfig, MetastoreConfig, PolicyConfig, ResolvedConfig,
@@ -22,23 +25,14 @@ fn resolved_with_kms(kms: KmsConfig) -> ResolvedConfig {
 }
 
 #[test]
-fn static_kms_with_empty_key_hex_is_rejected() {
+fn static_kms_with_empty_key_hex_falls_back_to_test_key() {
+    // Empty `key_hex` falls back to the publicly known test key
+    // (Go-canonical behavior). The warning emitted by the builder is
+    // the production-safety net — there is no hard rejection here.
     let cfg = resolved_with_kms(KmsConfig::Static {
         key_hex: String::new(),
     });
-    let err = match factory_from_resolved(&cfg) {
-        Ok(_) => panic!("empty key_hex must error"),
-        Err(e) => e,
-    };
-    let msg = format!("{err:#}");
-    assert!(
-        msg.contains("STATIC_MASTER_KEY_HEX"),
-        "error must reference STATIC_MASTER_KEY_HEX: {msg}"
-    );
-    assert!(
-        msg.contains("test-debug-static"),
-        "error must mention the test-debug-static escape hatch: {msg}"
-    );
+    factory_from_resolved(&cfg).expect("empty key_hex must fall back to test key, not error");
 }
 
 #[test]
