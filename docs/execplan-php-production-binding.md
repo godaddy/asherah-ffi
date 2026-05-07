@@ -139,6 +139,17 @@ interoperability coverage, and production docs are incomplete.
     filesystems;
   - fixed the no-vendor smoke-test fallback to load all required source classes;
   - added no-vendor smoke coverage to the PHP binding test runner.
+- 2026-05-06: Follow-up convergence sweep closed a package lifecycle gap:
+  - changed `scripts/build-php-source-archive.sh` to build from a temporary
+    package copy instead of writing `vendor/` and `composer.lock` into the
+    checkout;
+  - isolated the archive build's Composer cache under the temporary workspace so
+    it cannot interfere with the checkout's dependency install;
+  - preserved Composer package versioning for source archives by exporting the
+    current tag or branch as `COMPOSER_ROOT_VERSION` before building from the
+    temporary copy;
+  - added binding-test, CI dry-run, and publish guards that fail if source
+    archive construction mutates `asherah-php/`.
 
 No known implementation gaps remain in this ExecPlan. Composer publication is
 source-only, the workflow supports GitHub Release source archive publication,

@@ -43,6 +43,9 @@ jobs:
           docker run --rm -v "$PWD":/work -w /work/asherah-php asherah-php-publish sh -lc '
             set -e
             ARCHIVE="$(/work/scripts/build-php-source-archive.sh /tmp/asherah-php-dist | tail -n 1)"
+            test ! -e /work/asherah-php/composer.lock
+            test ! -d /work/asherah-php/vendor
+            test ! -d /work/asherah-php/native
             cp "$ARCHIVE" /work/asherah-php-source.zip
           '
       - name: Upload dry-run artifact

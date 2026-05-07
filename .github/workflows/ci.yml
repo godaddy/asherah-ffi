@@ -1765,6 +1765,9 @@ jobs:
           docker run --rm -v "$PWD":/work -w /work/asherah-php asherah-php-ffi-test sh -lc '
             set -e
             /work/scripts/build-php-source-archive.sh /tmp/asherah-php-dist
+            test ! -e /work/asherah-php/composer.lock
+            test ! -d /work/asherah-php/vendor
+            test ! -d /work/asherah-php/native
           '
       - name: Consumer source install smoke
         run: |
