@@ -1,0 +1,95 @@
+# Side-by-side asherah gRPC interop harness.
+#
+# Two server containers (canonical Go reference + our Rust implementation)
+# run with the SAME asherah env vars and bind their sockets onto a shared
+# `sockets/` volume. The interop-client container mounts the same volume
+# and dials each server in turn, asserting equivalent observable behavior.
+# A shared MySQL container backs the rdbms metastore so cross-decrypt
+# (encrypt with Go, decrypt with Rust, and vice versa) can be exercised.
+#
+# Driven by `./run.sh`. Do not invoke directly — the driver populates
+# build args, env, and waits for socket readiness.
+
+services:
+  mysql:
+    # MariaDB has native arm64 + amd64 images and speaks the MySQL wire
+    # protocol the Go MySQL driver and our Rust mysql crate both target.
+    # Avoids the Apple-Silicon-via-emulation flakiness of mysql:8.0.
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: rootpw
+      MARIADB_DATABASE: asherah
+      MARIADB_USER: testuser
+      MARIADB_PASSWORD: testpass
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    tmpfs:
+      - /var/lib/mysql
+    volumes:
+      - ./scripts:/docker-entrypoint-initdb.d:ro
+
+  go-server:
+    image: asherah-server-go-ref:interop
+    depends_on:
+      mysql:
+        condition: service_healthy
+    # The Go reference reads ASHERAH_* env vars but does NOT have an env
+    # binding for the socket file; we must pass it via --socket-file.
+    # Asherah env knobs are otherwise identical between the two servers.
+    command:
+      - "--socket-file=/sockets/go.sock"
+    environment:
+      ASHERAH_SERVICE_NAME: ${ASHERAH_SERVICE_NAME:-interop_service}
+      ASHERAH_PRODUCT_NAME: ${ASHERAH_PRODUCT_NAME:-interop_product}
+      ASHERAH_METASTORE_MODE: ${ASHERAH_METASTORE_MODE:-rdbms}
+      ASHERAH_CONNECTION_STRING: ${ASHERAH_CONNECTION_STRING:-testuser:testpass@tcp(mysql:3306)/asherah}
+      ASHERAH_KMS_MODE: ${ASHERAH_KMS_MODE:-static}
+      ASHERAH_EXPIRE_AFTER: ${ASHERAH_EXPIRE_AFTER:-60m}
+      ASHERAH_CHECK_INTERVAL: ${ASHERAH_CHECK_INTERVAL:-10m}
+      ASHERAH_VERBOSE: ${ASHERAH_VERBOSE:-true}
+    volumes:
+      - sockets:/sockets
+
+  rust-server:
+    image: asherah-server-rust:interop
+    depends_on:
+      mysql:
+        condition: service_healthy
+    # Override the Dockerfile's CMD ["--help"] with an explicit socket
+    # flag so the binary actually serves. All other config flows from
+    # env vars below.
+    command:
+      - "--socket-file=/sockets/rust.sock"
+    # Same asherah env vars as the Go server. Our binary reads
+    # ASHERAH_SOCKET_FILE for the bind path.
+    environment:
+      ASHERAH_SOCKET_FILE: /sockets/rust.sock
+      ASHERAH_SERVICE_NAME: ${ASHERAH_SERVICE_NAME:-interop_service}
+      ASHERAH_PRODUCT_NAME: ${ASHERAH_PRODUCT_NAME:-interop_product}
+      ASHERAH_METASTORE_MODE: ${ASHERAH_METASTORE_MODE:-rdbms}
+      ASHERAH_CONNECTION_STRING: ${ASHERAH_CONNECTION_STRING:-testuser:testpass@tcp(mysql:3306)/asherah}
+      ASHERAH_KMS_MODE: ${ASHERAH_KMS_MODE:-static}
+      ASHERAH_EXPIRE_AFTER: ${ASHERAH_EXPIRE_AFTER:-60m}
+      ASHERAH_CHECK_INTERVAL: ${ASHERAH_CHECK_INTERVAL:-10m}
+      ASHERAH_VERBOSE: ${ASHERAH_VERBOSE:-true}
+      # The driver may inject ASHERAH_SOCKET_MODE per scenario.
+      ASHERAH_SOCKET_MODE: ${ASHERAH_SOCKET_MODE:-0666}
+    volumes:
+      - sockets:/sockets
+
+  client:
+    image: asherah-server-interop-client:interop
+    depends_on:
+      - go-server
+      - rust-server
+    volumes:
+      - sockets:/sockets
+    # The driver overrides `command` per assertion; this default is just
+    # a sanity check that proves the image runs.
+    command: ["--help"]
+
+volumes:
+  sockets:
