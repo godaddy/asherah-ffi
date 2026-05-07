@@ -62,6 +62,10 @@ library instead of the default `native/` staging directory.
 Use `--install-dir=<dir>` when building container images that stage native
 libraries outside the Composer package tree.
 
+For private repositories or rate-limited release downloads, set `GITHUB_TOKEN`
+or `GH_TOKEN` in the image build environment. The helper sends the token only to
+the configured GitHub release host.
+
 ## Supported Platforms
 
 The source package can run anywhere PHP FFI can load the matching Asherah native
@@ -131,6 +135,30 @@ $config = (new AsherahConfig(
 Array configs are still accepted for compatibility, but typed configs provide
 better IDE completion and static-analysis coverage.
 
+For explicit lifecycle control, use a factory and session directly:
+
+```php
+use GoDaddy\Asherah\SessionFactory;
+
+$factory = SessionFactory::fromConfig($config);
+$session = $factory->getSession('tenant-123');
+
+try {
+    $ciphertext = $session->encryptString('secret');
+    $plaintext = $session->decryptString($ciphertext);
+} finally {
+    $session->close();
+    $factory->close();
+}
+```
+
+The static API caches native sessions by partition when session caching is
+enabled, bounded by `SessionCacheMaxSize` with LRU eviction. Call
+`Asherah::shutdown()` from long-lived workers before process shutdown or worker
+recycle so cached native handles are closed deterministically. Set
+`withSessionCache(false)` for short-lived scripts or tests that should create
+and close a session per call.
+
 ## PHP-FPM Preload
 
 Production PHP-FPM deployments often use `ffi.enable=preload`, which disables
@@ -144,6 +172,39 @@ opcache.preload=/path/to/vendor/godaddy/asherah/preload.php
 
 Runtime code first uses `FFI::scope('ASHERAH')` from preload mode and falls
 back to dynamic `FFI::cdef()` for CLI and development environments.
+
+## Publishing Model
+
+The PHP package is source-only. Publish it through Packagist, GitHub Packages,
+or an internal Composer repository as PHP source, not as a fat package with
+native binaries. Native libraries remain release artifacts produced by the
+existing native release workflow and are staged into application images with
+`scripts/install_native.php` or an equivalent artifact-copy step.
+
+This keeps Composer installs small and avoids Git LFS behavior that Composer
+does not handle reliably for large native assets.
+
+## Security Notes
+
+Asherah still protects keys and native buffers in Rust, but PHP strings are
+ordinary managed memory. Treat plaintext and decrypted payload strings as
+sensitive application data, keep their lifetime short, and do not log config
+JSON, KMS ARNs, encrypted keys, ciphertexts, or plaintexts from application
+error handlers.
+
+## Troubleshooting
+
+- `PHP FFI extension is not enabled`: install/enable `ext-ffi`. For PHP-FPM
+  preload deployments, use `ffi.enable=preload`; for CLI development, use
+  `ffi.enable=1`.
+- `ASHERAH_PHP_NATIVE does not point to a readable native library`: set
+  `ASHERAH_PHP_NATIVE` to either the native library file or a directory
+  containing `libasherah_ffi.so`, `libasherah_ffi.dylib`, or `asherah_ffi.dll`.
+- `failed to initialize Asherah FFI`: verify the native library matches the
+  operating system and C runtime. A glibc `.so` will not load in an Alpine/musl
+  image.
+- Native download checksum failures usually mean the release tag and source
+  package version do not match. Pass `--version=<tag>` explicitly.
 
 ## Development
 

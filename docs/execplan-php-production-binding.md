@@ -77,9 +77,14 @@ interoperability coverage, and production docs are incomplete.
 - 2026-05-06: Extended the PHP source-package dry-run with Alpine/musl x64
   runtime coverage by building the musl FFI library through `cargo zigbuild`
   and running the consumer install smoke in the Alpine PHP image.
+- 2026-05-06: Expanded package documentation for native staging with GitHub
+  tokens, explicit factory/session lifecycle, static session-cache lifecycle,
+  source-only publishing, PHP plaintext caveats, and troubleshooting.
 
-Remaining major gaps before production merge are release/publish workflow
-integration and expanded docs.
+Remaining major gap before production merge is the final release/publish
+workflow decision for Packagist, GitHub Packages, or an internal Composer
+repository. The source-only archive dry-run and release-asset staging model are
+implemented.
 
 ## Non-Goals
 
