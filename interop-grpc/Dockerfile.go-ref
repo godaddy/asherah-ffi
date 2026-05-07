@@ -1,0 +1,33 @@
+# Builds the canonical github.com/godaddy/asherah Go gRPC server pinned
+# to a known SHA. Used by the interop suite to assert behavioral parity
+# between the Go reference and our Rust asherah-server with identical
+# inputs.
+#
+# Build with:
+#   docker build \
+#     --build-arg ASHERAH_GO_REF=<sha> \
+#     -f Dockerfile.go-ref -t asherah-server-go-ref:interop .
+#
+ARG GOVERSION=1.24
+ARG ALPINEVERSION=3.20
+FROM golang:${GOVERSION}-alpine${ALPINEVERSION} AS builder
+
+ARG ASHERAH_GO_REF
+RUN test -n "$ASHERAH_GO_REF" || (echo "ASHERAH_GO_REF build-arg is required" && exit 1)
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /src
+RUN git clone --no-checkout https://github.com/godaddy/asherah.git . \
+ && git checkout "$ASHERAH_GO_REF"
+
+WORKDIR /src/server/go
+ENV CGO_ENABLED=0 GO111MODULE=on GOOS=linux
+RUN go mod download \
+ && go build -trimpath -ldflags "-s -w" -o /out/asherah-server-go .
+
+FROM alpine:${ALPINEVERSION}
+RUN apk add --no-cache ca-certificates tini
+COPY --from=builder /out/asherah-server-go /usr/local/bin/asherah-server-go
+ENTRYPOINT ["/sbin/tini", "--", "asherah-server-go"]
+CMD ["--help"]

@@ -134,10 +134,19 @@ impl Metastore for MySqlMetastore {
         let rec = ekr.to_json_fast();
         let mut conn = self.conn()?;
         let ts = epoch_to_utc_datetime(created);
+        // The Go reference's canonical schema uses `key_record TEXT NOT NULL`
+        // and inserts the JSON string verbatim — no `CAST(? AS JSON)`. The
+        // cast is MySQL 8.0+ only and breaks against MariaDB and MySQL 5.7
+        // entirely (syntax error), so it broke drop-in compatibility with
+        // every Go-server deployment using either of those backends. The
+        // `key_record` value is already a serialized JSON string from
+        // `EnvelopeKeyRecord::to_json_fast`; storing it as text matches
+        // the reference exactly.
         conn.exec_drop(
-            "INSERT IGNORE INTO encryption_key(id, created, key_record) VALUES(?, ?, CAST(? AS JSON))",
+            "INSERT IGNORE INTO encryption_key(id, created, key_record) VALUES(?, ?, ?)",
             (id, &ts, rec),
-        ).with_context(|| format!("MySQL store insert failed for id={id} created={created}"))?;
+        )
+        .with_context(|| format!("MySQL store insert failed for id={id} created={created}"))?;
         let stored = conn.affected_rows() > 0;
         drop(conn);
         log::debug!("mysql store: id={id} created={created} stored={stored}");
