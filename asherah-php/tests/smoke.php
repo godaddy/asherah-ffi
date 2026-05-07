@@ -6,6 +6,11 @@ if (file_exists(__DIR__ . '/../vendor/autoload.php')) {
     require __DIR__ . '/../vendor/autoload.php';
 } else {
     require __DIR__ . '/../src/AsherahException.php';
+    require __DIR__ . '/../src/ConfigurationException.php';
+    require __DIR__ . '/../src/LifecycleException.php';
+    require __DIR__ . '/../src/NativeLibraryException.php';
+    require __DIR__ . '/../src/NativeOperationException.php';
+    require __DIR__ . '/../src/ConfigValidator.php';
     require __DIR__ . '/../src/Native.php';
     require __DIR__ . '/../src/Session.php';
     require __DIR__ . '/../src/SessionFactory.php';

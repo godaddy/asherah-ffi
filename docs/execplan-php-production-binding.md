@@ -131,6 +131,14 @@ interoperability coverage, and production docs are incomplete.
     `ConfigurationException`;
   - made the FFI-unavailable negative test skip only when the local PHP binary
     still exposes FFI under `php -n`.
+- 2026-05-06: Additional convergence sweep closed filesystem and standalone
+  smoke-test edges:
+  - checked native installer temporary-file writes, checksum sidecar writes, and
+    executable-bit changes instead of assuming they succeeded;
+  - added copy/unlink fallback when final native-library `rename()` cannot cross
+    filesystems;
+  - fixed the no-vendor smoke-test fallback to load all required source classes;
+  - added no-vendor smoke coverage to the PHP binding test runner.
 
 No known implementation gaps remain in this ExecPlan. Composer publication is
 source-only, the workflow supports GitHub Release source archive publication,

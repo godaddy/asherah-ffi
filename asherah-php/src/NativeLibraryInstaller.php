@@ -90,7 +90,10 @@ final class NativeLibraryInstaller
                 $this->installFile($tmp, $destination);
                 $this->verifyInstalledLibrary($destination);
                 if ($checksum !== null) {
-                    file_put_contents($destination . '.sha256', $checksum . "  {$artifact['library']}\n");
+                    $checksumPath = $destination . '.sha256';
+                    if (file_put_contents($checksumPath, $checksum . "  {$artifact['library']}\n") === false) {
+                        throw new NativeLibraryException("Failed to write checksum file: {$checksumPath}");
+                    }
                 }
             } finally {
                 if (is_file($tmp)) {
@@ -279,7 +282,10 @@ final class NativeLibraryInstaller
             throw new NativeLibraryException("Failed to download {$url}");
         }
 
-        file_put_contents($tmp, $data);
+        if (file_put_contents($tmp, $data) === false) {
+            unlink($tmp);
+            throw new NativeLibraryException('Failed to write temporary download file');
+        }
         return $tmp;
     }
 
@@ -333,12 +339,12 @@ final class NativeLibraryInstaller
             throw new NativeLibraryException("Failed to create native directory: {$dir}");
         }
 
-        if (!rename($tmp, $destination)) {
+        if (!rename($tmp, $destination) && !(copy($tmp, $destination) && unlink($tmp))) {
             throw new NativeLibraryException("Failed to move native library to {$destination}");
         }
 
-        if (PHP_OS_FAMILY !== 'Windows') {
-            chmod($destination, 0o755);
+        if (PHP_OS_FAMILY !== 'Windows' && !chmod($destination, 0o755)) {
+            throw new NativeLibraryException("Failed to make native library executable: {$destination}");
         }
     }
 

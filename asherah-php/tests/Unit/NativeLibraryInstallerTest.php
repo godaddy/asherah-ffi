@@ -130,6 +130,7 @@ final class NativeLibraryInstallerTest extends TestCase
         self::assertFileExists($installed);
         self::assertSame(hash('sha256', $payload), hash_file('sha256', $installed));
         self::assertFileExists($installed . '.sha256');
+        self::assertSame(hash('sha256', $payload) . "  libasherah_ffi.so\n", file_get_contents($installed . '.sha256'));
     }
 
     public function testInstallDirStagesOutsidePackageNativeDirectory(): void

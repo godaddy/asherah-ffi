@@ -389,6 +389,10 @@ do_bindings() {
                         -e CARGO_TARGET_DIR=/work/target-php-linux \
                         rust:1.91-bookworm cargo build -p asherah-ffi
                 fi
+                run_test "PHP no-vendor smoke" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work \
+                    -e ASHERAH_PHP_NATIVE="$php_native_container" \
+                    asherah-php-ffi-test sh -c 'set -e; rm -rf /tmp/asherah-php-no-vendor; cp -a /work/asherah-php /tmp/asherah-php-no-vendor; rm -rf /tmp/asherah-php-no-vendor/vendor /tmp/asherah-php-no-vendor/composer.lock; cd /tmp/asherah-php-no-vendor; php tests/smoke.php'
                 run_test "PHP Composer install" docker run --rm \
                     -v "$ROOT_DIR:/work" -w /work/asherah-php \
                     asherah-php-ffi-test sh -c 'rm -f composer.lock && composer install --prefer-dist --no-progress'
@@ -431,6 +435,7 @@ do_bindings() {
                     -r 'require "vendor/autoload.php"; GoDaddy\Asherah\Native::ffi();'
             elif command -v php >/dev/null 2>&1 && command -v composer >/dev/null 2>&1; then
                 local php_native="${ASHERAH_PHP_NATIVE:-$ROOT_DIR/target/release}"
+                run_test "PHP no-vendor smoke" bash -c "rm -rf /tmp/asherah-php-no-vendor && cp -a \"$ROOT_DIR/asherah-php\" /tmp/asherah-php-no-vendor && rm -rf /tmp/asherah-php-no-vendor/vendor /tmp/asherah-php-no-vendor/composer.lock && cd /tmp/asherah-php-no-vendor && ASHERAH_PHP_NATIVE=\"$php_native\" php tests/smoke.php"
                 run_test "PHP Composer install" bash -c "cd asherah-php && rm -f composer.lock && composer install --prefer-dist --no-progress"
                 run_test "PHP composer validate" bash -c "cd asherah-php && composer validate --strict"
                 run_test "PHP syntax" bash -c "cd asherah-php && for f in src/*.php scripts/*.php tests/*.php tests/*/*.php preload.php ../interop/php/*.php; do php -l \"\$f\" || exit 1; done"
