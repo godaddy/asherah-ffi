@@ -390,7 +390,25 @@ do_bindings() {
                 )
                 if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then
                     local php_native_host=""
-                    php_native_host=$(find "$BINDING_ARTIFACTS_DIR" \( -type f -o -type l \) -name 'libasherah_ffi.so' ! -path '*/deps/*' -print -quit 2>/dev/null || true)
+                    for candidate in \
+                        "$BINDING_ARTIFACTS_DIR/ffi/libasherah_ffi.so" \
+                        "$BINDING_ARTIFACTS_DIR/libasherah_ffi.so" \
+                        "$ASHERAH_PHP_NATIVE/libasherah_ffi.so"
+                    do
+                        if [ -r "$candidate" ]; then
+                            php_native_host="$candidate"
+                            break
+                        fi
+                    done
+                    if [ -z "$php_native_host" ]; then
+                        php_native_host=$(find "$BINDING_ARTIFACTS_DIR" \( -type f -o -type l \) -name 'libasherah_ffi.so' -path '*/ffi/*' -print -quit 2>/dev/null || true)
+                    fi
+                    if [ -z "$php_native_host" ]; then
+                        php_native_host=$(find "$BINDING_ARTIFACTS_DIR" \( -type f -o -type l \) -name 'libasherah_ffi.so' ! -path '*/deps/*' -print -quit 2>/dev/null || true)
+                    fi
+                    if [ -n "$php_native_host" ]; then
+                        chmod +x "$php_native_host" 2>/dev/null || true
+                    fi
                     if [ -n "$php_native_host" ] && container_path_for_work_mount "$php_native_host" >/dev/null; then
                         php_native_container="$(container_path_for_work_mount "$php_native_host")"
                     else
