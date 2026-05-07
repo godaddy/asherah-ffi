@@ -1703,13 +1703,37 @@ jobs:
     needs: build-ffi-x86_64
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        with:
+          targets: x86_64-unknown-linux-musl
       - name: Download x86_64 FFI artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: bindings-linux-x86_64-part-ffi
           path: ci-artifacts
+      - name: Install Zig (with retries)
+        shell: bash
+        run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
+      - uses: taiki-e/install-action@481c34c1cf3a84c68b5e46f4eccfc82af798415a # v2
+        with:
+          tool: cargo-zigbuild
+      - name: Setup musl OpenSSL
+        shell: bash
+        run: |
+          ARCH=x86_64 source "$GITHUB_WORKSPACE/scripts/download-musl-openssl.sh"
+          {
+            echo "OPENSSL_DIR=$OPENSSL_DIR"
+            echo "OPENSSL_STATIC=$OPENSSL_STATIC"
+            echo "OPENSSL_NO_VENDOR=$OPENSSL_NO_VENDOR"
+          } >> "$GITHUB_ENV"
       - name: Build PHP test image
         run: docker build -t asherah-php-ffi-test -f asherah-php/.Dockerfile.debian asherah-php
+      - name: Build PHP Alpine test image
+        run: docker build -t asherah-php-ffi-test-alpine -f asherah-php/.Dockerfile.alpine asherah-php
+      - name: Build musl FFI for PHP Alpine smoke
+        env:
+          RUSTFLAGS: "-C target-feature=-crt-static"
+        run: cargo zigbuild --release -p asherah-ffi --target x86_64-unknown-linux-musl
       - name: Build source-only Composer archive
         run: |
           docker run --rm -v "$PWD":/work -w /work/asherah-php asherah-php-ffi-test sh -lc '
@@ -1726,6 +1750,22 @@ jobs:
           docker run --rm -v "$PWD":/work -w /work \
             -e ASHERAH_PHP_NATIVE=/work/ci-artifacts/ffi \
             asherah-php-ffi-test sh -lc '
+              set -e
+              rm -rf /tmp/asherah-php-consumer
+              mkdir /tmp/asherah-php-consumer
+              cd /tmp/asherah-php-consumer
+              composer init --name asherah/consumer-smoke --no-interaction >/dev/null
+              composer config repositories.asherah path /work/asherah-php
+              composer config minimum-stability dev
+              composer config prefer-stable true
+              composer require godaddy/asherah:* --no-interaction --no-progress >/dev/null
+              php vendor/godaddy/asherah/tests/consumer_smoke.php
+            '
+      - name: Consumer source install smoke (musl)
+        run: |
+          docker run --rm -v "$PWD":/work -w /work \
+            -e ASHERAH_PHP_NATIVE=/work/target/x86_64-unknown-linux-musl/release \
+            asherah-php-ffi-test-alpine sh -lc '
               set -e
               rm -rf /tmp/asherah-php-consumer
               mkdir /tmp/asherah-php-consumer

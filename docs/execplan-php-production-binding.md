@@ -74,9 +74,12 @@ interoperability coverage, and production docs are incomplete.
 - 2026-05-06: Added a PHP base64 interop CLI and wired PHP into the primary
   Python/Node/Rust/Ruby interop test as an optional participant when local PHP
   and Composer are available.
+- 2026-05-06: Extended the PHP source-package dry-run with Alpine/musl x64
+  runtime coverage by building the musl FFI library through `cargo zigbuild`
+  and running the consumer install smoke in the Alpine PHP image.
 
 Remaining major gaps before production merge are release/publish workflow
-integration, expanded docs, and final platform support decisions.
+integration and expanded docs.
 
 ## Non-Goals
 
