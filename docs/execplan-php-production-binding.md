@@ -71,10 +71,12 @@ interoperability coverage, and production docs are incomplete.
   DynamoDB region/signing-region round trips. These skip by default and run when
   the documented `ASHERAH_PHP_AWS_*` environment variables and AWS credentials
   are present.
+- 2026-05-06: Added a PHP base64 interop CLI and wired PHP into the primary
+  Python/Node/Rust/Ruby interop test as an optional participant when local PHP
+  and Composer are available.
 
 Remaining major gaps before production merge are release/publish workflow
-integration, cross-language interop tests, expanded docs, and final platform
-support decisions.
+integration, expanded docs, and final platform support decisions.
 
 ## Non-Goals
 

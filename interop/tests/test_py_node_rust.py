@@ -25,6 +25,7 @@ RUST_TRIPLE_DEBUG = _CARGO_TARGET_DIR / "debug" / "asherah-interop"
 RUST_TRIPLE_RELEASE = _CARGO_TARGET_DIR / "release" / "asherah-interop"
 RUBY_DIR = conftest.ROOT / "asherah-ruby"
 RUBY_SCRIPT = RUBY_DIR / "scripts" / "interop.rb"
+PHP_SCRIPT = conftest.ROOT / "interop" / "php" / "interop.php"
 
 # Prefer Homebrew Ruby over macOS system Ruby (2.6, missing gems)
 _HOMEBREW_RUBY = Path("/opt/homebrew/opt/ruby/bin/ruby")
@@ -81,6 +82,24 @@ def ruby_cli(action: str, partition: str, payload: bytes) -> bytes:
     result = subprocess.run(
         [RUBY_CMD, str(RUBY_SCRIPT), action, partition, payload_b64],
         cwd=RUBY_DIR,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return base64.b64decode(result.stdout.strip())
+
+
+def php_cli(action: str, partition: str, payload: bytes) -> bytes:
+    if not conftest.PHP_AVAILABLE:
+        raise RuntimeError("PHP interop participant is unavailable")
+
+    payload_b64 = base64.b64encode(payload).decode()
+    env = conftest.ensure_env({"ASHERAH_PHP_NATIVE": str(conftest.ROOT / "target" / "debug")})
+    LOGGER.info("php %s partition=%s payload=%d bytes", action, partition, len(payload))
+    result = subprocess.run(
+        ["php", str(PHP_SCRIPT), action, partition, payload_b64],
+        cwd=conftest.ROOT,
         env=env,
         check=True,
         capture_output=True,
@@ -161,6 +180,8 @@ def test_cross_language_round_trip(build_artifacts):
     assert node_cli("decrypt", partition, py_json.encode()) == plaintext
     assert rust_cli("decrypt", partition, py_json.encode()) == plaintext
     assert ruby_cli("decrypt", partition, py_json.encode()) == plaintext
+    if conftest.PHP_AVAILABLE:
+        assert php_cli("decrypt", partition, py_json.encode()) == plaintext
 
     # Node -> Python/Rust
     LOGGER.info("=== Node encrypt -> Python + Rust decrypt ===")
@@ -168,6 +189,8 @@ def test_cross_language_round_trip(build_artifacts):
     assert python_decrypt(partition, node_json.decode()) == plaintext
     assert rust_cli("decrypt", partition, node_json) == plaintext
     assert ruby_cli("decrypt", partition, node_json) == plaintext
+    if conftest.PHP_AVAILABLE:
+        assert php_cli("decrypt", partition, node_json) == plaintext
 
     # Rust -> Python/Node
     LOGGER.info("=== Rust encrypt -> Python + Node decrypt ===")
@@ -175,6 +198,8 @@ def test_cross_language_round_trip(build_artifacts):
     assert python_decrypt(partition, rust_json.decode()) == plaintext
     assert node_cli("decrypt", partition, rust_json) == plaintext
     assert ruby_cli("decrypt", partition, rust_json) == plaintext
+    if conftest.PHP_AVAILABLE:
+        assert php_cli("decrypt", partition, rust_json) == plaintext
 
     # Ruby -> Python/Node/Rust
     LOGGER.info("=== Ruby encrypt -> Python + Node + Rust decrypt ===")
@@ -182,6 +207,16 @@ def test_cross_language_round_trip(build_artifacts):
     assert python_decrypt(partition, ruby_json.decode()) == plaintext
     assert node_cli("decrypt", partition, ruby_json) == plaintext
     assert rust_cli("decrypt", partition, ruby_json) == plaintext
+    if conftest.PHP_AVAILABLE:
+        assert php_cli("decrypt", partition, ruby_json) == plaintext
+
+    if conftest.PHP_AVAILABLE:
+        LOGGER.info("=== PHP encrypt -> Python + Node + Rust + Ruby decrypt ===")
+        php_json = php_cli("encrypt", partition, plaintext)
+        assert python_decrypt(partition, php_json.decode()) == plaintext
+        assert node_cli("decrypt", partition, php_json) == plaintext
+        assert rust_cli("decrypt", partition, php_json) == plaintext
+        assert ruby_cli("decrypt", partition, php_json) == plaintext
 
 
 def test_cross_language_unicode(build_artifacts):

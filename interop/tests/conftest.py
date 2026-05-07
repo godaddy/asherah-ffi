@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 NODE_DIR = ROOT / "asherah-node"
 PY_DIR = ROOT / "asherah-py"
 RUBY_DIR = ROOT / "asherah-ruby"
+PHP_DIR = ROOT / "asherah-php"
 LEGACY_NODE_DIR = ROOT / "interop" / "legacy-node"
 
 BASE_ENV = {
@@ -38,6 +39,7 @@ BASE_ENV = {
 }
 
 SQLITE_DB: Path | None = None
+PHP_AVAILABLE = False
 
 
 def ensure_env(target_env):
@@ -133,16 +135,19 @@ def build_artifacts():
         raise RuntimeError("maturin did not produce a wheel")
     wheel_path = wheels[-1]
     LOGGER.info("installing freshly built Python wheel")
+    pip_install = ["python3", "-m", "pip", "install"]
+    pip_help = subprocess.run(
+        pip_install + ["--break-system-packages", "--help"],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if pip_help.returncode == 0:
+        pip_install.append("--break-system-packages")
     subprocess.run(
-        [
-            "python3",
-            "-m",
-            "pip",
-            "install",
-            "--force-reinstall",
-            "--no-deps",
-            str(wheel_path),
-        ],
+        pip_install + ["--force-reinstall", "--no-deps", str(wheel_path)],
         cwd=ROOT,
         env=env,
         check=True,
@@ -155,6 +160,20 @@ def build_artifacts():
         env=env,
         check=True,
     )
+
+    global PHP_AVAILABLE
+    if PHP_DIR.exists() and shutil.which("php") and shutil.which("composer"):
+        LOGGER.info("installing PHP Composer dependencies for interop")
+        subprocess.run(
+            ["composer", "install", "--prefer-dist", "--no-progress"],
+            cwd=PHP_DIR,
+            env=env,
+            check=True,
+        )
+        env["ASHERAH_PHP_NATIVE"] = str(ROOT / "target" / "debug")
+        PHP_AVAILABLE = True
+    else:
+        LOGGER.info("skipping PHP interop participant; php or composer is unavailable")
 
     LOGGER.info("building asherah-interop Rust CLI")
     subprocess.run(
