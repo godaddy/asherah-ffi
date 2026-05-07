@@ -20,7 +20,11 @@ final class SessionFactory
     public static function fromConfig(array|AsherahConfig $config): self
     {
         $config = ConfigValidator::normalize($config);
-        $json = json_encode($config, JSON_THROW_ON_ERROR);
+        try {
+            $json = json_encode($config, JSON_THROW_ON_ERROR);
+        } catch (\JsonException $e) {
+            throw new ConfigurationException('config must be JSON serializable: ' . $e->getMessage(), previous: $e);
+        }
         $handle = Native::ffi()->asherah_factory_new_with_config($json);
         return new self($handle, 'factory creation failed');
     }

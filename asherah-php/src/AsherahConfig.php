@@ -70,11 +70,19 @@ final class AsherahConfig implements JsonSerializable
 
     public function withExpireAfter(int $seconds): self
     {
+        if ($seconds < 1) {
+            throw new ConfigurationException('ExpireAfter must be >= 1');
+        }
+
         return $this->withOption('ExpireAfter', $seconds);
     }
 
     public function withCheckInterval(int $seconds): self
     {
+        if ($seconds < 1) {
+            throw new ConfigurationException('CheckInterval must be >= 1');
+        }
+
         return $this->withOption('CheckInterval', $seconds);
     }
 
@@ -88,6 +96,9 @@ final class AsherahConfig implements JsonSerializable
             $next = $next->withOption('SessionCacheMaxSize', $maxSize);
         }
         if ($durationSeconds !== null) {
+            if ($durationSeconds < 0) {
+                throw new ConfigurationException('SessionCacheDuration must be >= 0');
+            }
             $next = $next->withOption('SessionCacheDuration', $durationSeconds);
         }
 

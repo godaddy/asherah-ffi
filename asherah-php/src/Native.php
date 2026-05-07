@@ -94,7 +94,11 @@ CDEF;
 
     public static function newOutputBuffer(): CData
     {
-        return self::ffi()->new('AsherahBuffer');
+        $buffer = self::ffi()->new('AsherahBuffer');
+        $buffer->data = null;
+        $buffer->len = 0;
+        $buffer->capacity = 0;
+        return $buffer;
     }
 
     public static function readAndFree(CData $buffer): string
@@ -108,6 +112,11 @@ CDEF;
         } finally {
             self::ffi()->asherah_buffer_free(FFI::addr($buffer));
         }
+    }
+
+    public static function freeOutputBuffer(CData $buffer): void
+    {
+        self::ffi()->asherah_buffer_free(FFI::addr($buffer));
     }
 
     public static function resolveLibraryPath(): string

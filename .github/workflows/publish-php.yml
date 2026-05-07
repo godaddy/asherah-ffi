@@ -31,6 +31,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: ${{ github.event.inputs.tag || github.event.release.tag_name || github.ref }}
+      - name: Validate publish target
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && github.event.inputs.tag == '' }}
+        run: |
+          echo "::error::Manual non-dry-run PHP publication requires a release tag input."
+          exit 1
       - name: Build PHP package image
         run: docker build -t asherah-php-publish -f asherah-php/.Dockerfile.debian asherah-php
       - name: Build source-only Composer archive
@@ -52,20 +57,3 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
         run: gh release upload "$RELEASE_TAG" asherah-php-source.zip --clobber
-      - name: Notify Packagist
-        if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }}
-        env:
-          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
-          PACKAGIST_API_TOKEN: ${{ secrets.PACKAGIST_API_TOKEN }}
-          PACKAGE_REPOSITORY_URL: https://github.com/godaddy/asherah-ffi
-        run: |
-          if [ -z "$PACKAGIST_USERNAME" ] || [ -z "$PACKAGIST_API_TOKEN" ]; then
-            echo "Packagist credentials are not configured; source archive publication is complete."
-            exit 0
-          fi
-
-          curl --fail-with-body \
-            --request POST \
-            --header 'Content-Type: application/json' \
-            --data "{\"repository\":{\"url\":\"${PACKAGE_REPOSITORY_URL}\"}}" \
-            "https://packagist.org/api/update-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_API_TOKEN}"

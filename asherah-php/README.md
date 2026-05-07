@@ -15,8 +15,10 @@ The Composer package is source-only. It does not bundle native binaries and it
 does not rely on Git LFS or Composer dependency scripts to make native libraries
 appear during install.
 
-Install the PHP source with Composer, then stage the one native library your
-image or host needs from an Asherah release:
+After configuring Composer to use the published source archive, an internal
+Composer repository, or a subtree-split package repository, install the PHP
+source with Composer and stage the one native library your image or host needs
+from an Asherah release:
 
 ```bash
 composer require godaddy/asherah
@@ -63,8 +65,9 @@ Use `--install-dir=<dir>` when building container images that stage native
 libraries outside the Composer package tree.
 
 For private repositories or rate-limited release downloads, set `GITHUB_TOKEN`
-or `GH_TOKEN` in the image build environment. The helper sends the token only to
-the configured GitHub release host.
+or `GH_TOKEN` in the image build environment. The helper sends the token only
+when downloading from `github.com` or a `*.github.com` host, not to arbitrary
+custom `--release-base-url` hosts.
 
 ## Supported Platforms
 
@@ -198,18 +201,22 @@ See `samples/php/preload-fpm.ini` for the minimum PHP-FPM settings.
 
 ## Publishing Model
 
-The PHP package is source-only. Publish it through Packagist, GitHub Packages,
-or an internal Composer repository as PHP source, not as a fat package with
-native binaries. Native libraries remain release artifacts produced by the
-existing native release workflow and are staged into application images with
-`scripts/install_native.php` or an equivalent artifact-copy step.
+The PHP package is source-only. Publish it as PHP source through the GitHub
+release archive produced by `.github/workflows/publish-php.yml` or through an
+internal Composer/artifact repository that consumes that archive, not as a fat
+package with native binaries. Native libraries remain release artifacts produced
+by the existing native release workflow and are staged into application images
+with `scripts/install_native.php` or an equivalent artifact-copy step.
 
 This keeps Composer installs small and avoids Git LFS behavior that Composer
 does not handle reliably for large native assets.
 
 `.github/workflows/publish-php.yml` validates the Composer source archive,
-attaches the source archive to a GitHub release, and can notify Packagist when
-`PACKAGIST_USERNAME` and `PACKAGIST_API_TOKEN` repository secrets are present.
+attaches the source archive to a GitHub release, and requires an explicit tag
+when manually run in non-dry-run mode. A direct Packagist notify is intentionally
+not wired here because Packagist reads `composer.json` from a repository root,
+while this package lives under `asherah-php/` in a monorepo. Use a subtree split
+or internal Composer repository if Packagist-style indexing is required.
 Native libraries remain the existing release assets consumed by
 `scripts/install_native.php`.
 

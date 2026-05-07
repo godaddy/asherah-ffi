@@ -26,7 +26,11 @@ final class Session
         $out = Native::newOutputBuffer();
         $rc = Native::ffi()->asherah_encrypt_to_json($this->handle, $input, strlen($payload), FFI::addr($out));
         if ($rc !== 0) {
-            throw new NativeOperationException('encrypt failed: ' . Native::lastError());
+            try {
+                throw new NativeOperationException('encrypt failed: ' . Native::lastError());
+            } finally {
+                Native::freeOutputBuffer($out);
+            }
         }
 
         return Native::readAndFree($out);
@@ -44,7 +48,11 @@ final class Session
         $out = Native::newOutputBuffer();
         $rc = Native::ffi()->asherah_decrypt_from_json($this->handle, $input, strlen($dataRowRecord), FFI::addr($out));
         if ($rc !== 0) {
-            throw new NativeOperationException('decrypt failed: ' . Native::lastError());
+            try {
+                throw new NativeOperationException('decrypt failed: ' . Native::lastError());
+            } finally {
+                Native::freeOutputBuffer($out);
+            }
         }
 
         return Native::readAndFree($out);

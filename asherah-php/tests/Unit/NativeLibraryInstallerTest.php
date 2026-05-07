@@ -40,6 +40,53 @@ final class NativeLibraryInstallerTest extends TestCase
         NativeLibraryInstaller::artifactForPlatform('solaris-sparc');
     }
 
+    public function testEmptyVersionOptionFails(): void
+    {
+        $installer = new NativeLibraryInstaller($this->tmpDir . '/package');
+
+        ob_start();
+        $code = $installer->run(['--platform=linux-x64', '--version=', '--quiet']);
+        ob_end_clean();
+
+        self::assertSame(1, $code);
+    }
+
+    public function testEmptyReleaseBaseUrlOptionFails(): void
+    {
+        $installer = new NativeLibraryInstaller($this->tmpDir . '/package');
+
+        ob_start();
+        $code = $installer->run(['--platform=linux-x64', '--version=v1.2.3', '--release-base-url=', '--quiet']);
+        ob_end_clean();
+
+        self::assertSame(1, $code);
+    }
+
+    public function testGitHubTokenIsNotSentToArbitraryReleaseHosts(): void
+    {
+        $restore = $this->setEnv(['GITHUB_TOKEN' => 'secret-token']);
+        try {
+            $headers = $this->headersForUrl('https://example.invalid/releases/v1/libasherah-x64.so');
+
+            self::assertStringContainsString('User-Agent: asherah-php-native-installer', $headers);
+            self::assertStringNotContainsString('Authorization:', $headers);
+        } finally {
+            $restore();
+        }
+    }
+
+    public function testGitHubTokenIsSentToGitHubReleaseHosts(): void
+    {
+        $restore = $this->setEnv(['GITHUB_TOKEN' => 'secret-token']);
+        try {
+            $headers = $this->headersForUrl('https://github.com/godaddy/asherah-ffi/releases/download/v1/libasherah-x64.so');
+
+            self::assertStringContainsString('Authorization: Bearer secret-token', $headers);
+        } finally {
+            $restore();
+        }
+    }
+
     public function testDownloadsAndVerifiesCurrentPlatformArtifact(): void
     {
         $tag = 'v9.9.9-test';
@@ -286,6 +333,38 @@ final class NativeLibraryInstallerTest extends TestCase
         file_put_contents($installed, $payload);
         chmod($installed, 0o755);
         return $installed;
+    }
+
+    private function headersForUrl(string $url): string
+    {
+        $installer = new NativeLibraryInstaller($this->tmpDir . '/package');
+        $method = new \ReflectionMethod(NativeLibraryInstaller::class, 'streamContext');
+        $context = $method->invoke($installer, $url);
+        self::assertIsResource($context);
+
+        $options = stream_context_get_options($context);
+        self::assertIsString($options['http']['header']);
+        return $options['http']['header'];
+    }
+
+    /**
+     * @param array<string, ?string> $updates
+     * @return callable(): void
+     */
+    private function setEnv(array $updates): callable
+    {
+        $previous = [];
+        foreach ($updates as $name => $value) {
+            $old = getenv($name);
+            $previous[$name] = $old === false ? null : $old;
+            putenv($value === null ? $name : "{$name}={$value}");
+        }
+
+        return static function () use ($previous): void {
+            foreach ($previous as $name => $value) {
+                putenv($value === null ? $name : "{$name}={$value}");
+            }
+        };
     }
 
     private function removeTree(string $path): void

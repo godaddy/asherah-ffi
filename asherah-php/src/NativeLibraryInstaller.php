@@ -41,11 +41,13 @@ final class NativeLibraryInstaller
      */
     public function run(array $args): int
     {
-        $options = $this->parseArgs($args);
-        $this->quiet = $options['quiet'];
-        $this->verbose = $options['verbose'];
+        $this->quiet = in_array('--quiet', $args, true) || in_array('-q', $args, true);
 
         try {
+            $options = $this->parseArgs($args);
+            $this->quiet = $options['quiet'];
+            $this->verbose = $options['verbose'];
+
             $platform = $options['platform'] ?? self::detectPlatform();
             if ($options['help']) {
                 $this->printHelp();
@@ -190,9 +192,17 @@ final class NativeLibraryInstaller
             } elseif (str_starts_with($arg, '--platform=')) {
                 $options['platform'] = substr($arg, strlen('--platform='));
             } elseif (str_starts_with($arg, '--release-base-url=')) {
-                $options['releaseBaseUrl'] = rtrim(substr($arg, strlen('--release-base-url=')), '/');
+                $releaseBaseUrl = rtrim(substr($arg, strlen('--release-base-url=')), '/');
+                if ($releaseBaseUrl === '') {
+                    throw new NativeLibraryException('--release-base-url must not be empty');
+                }
+                $options['releaseBaseUrl'] = $releaseBaseUrl;
             } elseif (str_starts_with($arg, '--version=')) {
-                $options['version'] = substr($arg, strlen('--version='));
+                $version = substr($arg, strlen('--version='));
+                if ($version === '') {
+                    throw new NativeLibraryException('--version must not be empty');
+                }
+                $options['version'] = $version;
             } else {
                 throw new NativeLibraryException("Unknown option: {$arg}");
             }
@@ -248,7 +258,7 @@ final class NativeLibraryInstaller
 
     private function downloadString(string $url): string
     {
-        $contents = @file_get_contents($url, false, $this->streamContext());
+        $contents = @file_get_contents($url, false, $this->streamContext($url));
         if ($contents === false || $contents === '') {
             throw new NativeLibraryException("Failed to download {$url}");
         }
@@ -263,7 +273,7 @@ final class NativeLibraryInstaller
             throw new NativeLibraryException('Failed to create temporary download file');
         }
 
-        $data = @file_get_contents($url, false, $this->streamContext());
+        $data = @file_get_contents($url, false, $this->streamContext($url));
         if ($data === false) {
             unlink($tmp);
             throw new NativeLibraryException("Failed to download {$url}");
@@ -335,11 +345,11 @@ final class NativeLibraryInstaller
     /**
      * @return resource
      */
-    private function streamContext()
+    private function streamContext(string $url)
     {
         $headers = ['User-Agent: asherah-php-native-installer'];
         $token = $this->envString('GITHUB_TOKEN') ?? $this->envString('GH_TOKEN');
-        if ($token !== null) {
+        if ($token !== null && $this->shouldSendAuthorization($url)) {
             $headers[] = 'Authorization: Bearer ' . $token;
         }
 
@@ -350,6 +360,17 @@ final class NativeLibraryInstaller
                 'timeout' => self::TIMEOUT_SECONDS,
             ],
         ]);
+    }
+
+    private function shouldSendAuthorization(string $url): bool
+    {
+        $host = parse_url($url, PHP_URL_HOST);
+        if (!is_string($host)) {
+            return false;
+        }
+
+        $host = strtolower($host);
+        return $host === 'github.com' || str_ends_with($host, '.github.com');
     }
 
     private static function isMusl(): bool

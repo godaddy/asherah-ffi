@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace GoDaddy\Asherah\Tests\Unit;
 
 use GoDaddy\Asherah\Asherah;
+use GoDaddy\Asherah\AsherahConfig;
+use GoDaddy\Asherah\KmsConfig;
+use GoDaddy\Asherah\MetastoreConfig;
 use GoDaddy\Asherah\SessionFactory;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
@@ -113,6 +116,21 @@ final class AsherahValidationTest extends TestCase
         SessionFactory::fromConfig($this->config(['KMS' => false]));
     }
 
+    public function testSessionFactoryWrapsUnserializableConfigValues(): void
+    {
+        $handle = fopen('php://temp', 'r');
+        self::assertIsResource($handle);
+
+        try {
+            $this->expectException(InvalidArgumentException::class);
+            $this->expectExceptionMessage('config must be JSON serializable');
+
+            SessionFactory::fromConfig($this->config(['FutureRustOption' => $handle]));
+        } finally {
+            fclose($handle);
+        }
+    }
+
     public function testSetupRejectsInvalidSessionCacheMaxSize(): void
     {
         $this->expectException(InvalidArgumentException::class);
@@ -143,6 +161,40 @@ final class AsherahValidationTest extends TestCase
         $this->expectExceptionMessage('CheckInterval must be an integer >= 1');
 
         Asherah::setup($this->config(['CheckInterval' => false]));
+    }
+
+    public function testTypedConfigRejectsInvalidLifecycleDurationsImmediately(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('ExpireAfter must be >= 1');
+
+        AsherahConfig::memoryTestDebugStatic('service', 'product')->withExpireAfter(0);
+    }
+
+    public function testTypedConfigRejectsInvalidSessionCacheDurationImmediately(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('SessionCacheDuration must be >= 0');
+
+        AsherahConfig::memoryTestDebugStatic('service', 'product')->withSessionCache(true, durationSeconds: -1);
+    }
+
+    public function testTypedKmsRegionMapRejectsNumericRegionKeys(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('RegionMap regions must be strings');
+
+        $decoded = json_decode('{"1":"arn:aws:kms:us-west-2:111122223333:key/west"}', true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($decoded);
+        /** @var array<string, string> $regionMap */
+        $regionMap = $decoded;
+
+        new AsherahConfig(
+            'service',
+            'product',
+            MetastoreConfig::memory(),
+            KmsConfig::aws(regionMap: $regionMap)
+        );
     }
 
     /**
