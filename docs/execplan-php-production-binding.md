@@ -81,10 +81,12 @@ interoperability coverage, and production docs are incomplete.
   tokens, explicit factory/session lifecycle, static session-cache lifecycle,
   source-only publishing, PHP plaintext caveats, and troubleshooting.
 
-Remaining major gap before production merge is the final release/publish
-workflow decision for Packagist, GitHub Packages, or an internal Composer
-repository. The source-only archive dry-run and release-asset staging model are
-implemented.
+No known implementation gaps remain in this ExecPlan. Composer publication is
+source-only and registry/tag driven; the concrete registry decision
+(Packagist, GitHub Packages, or an internal Composer repository) is release
+policy, not package implementation. The merge gate implemented here is the
+source-only Composer archive dry-run plus glibc and musl native staging
+validation.
 
 ## Non-Goals
 
