@@ -48,6 +48,43 @@ final class NativeRoundTripTest extends TestCase
         $ciphertext = Asherah::encryptString('tenant-no-cache', 'payload');
 
         self::assertSame('payload', Asherah::decryptString('tenant-no-cache', $ciphertext));
+        self::assertSame([], $this->cachedPartitions());
+    }
+
+    public function testStaticApiReusesCachedSessionForPartition(): void
+    {
+        Asherah::setup($this->config(['SessionCacheMaxSize' => 2]));
+
+        $ciphertext = Asherah::encryptString('tenant-cache', 'payload');
+        self::assertSame(['tenant-cache'], $this->cachedPartitions());
+
+        self::assertSame('payload', Asherah::decryptString('tenant-cache', $ciphertext));
+        self::assertSame(['tenant-cache'], $this->cachedPartitions());
+    }
+
+    public function testSessionCacheEvictsLeastRecentlyUsedPartition(): void
+    {
+        Asherah::setup($this->config(['SessionCacheMaxSize' => 2]));
+
+        Asherah::encryptString('tenant-a', 'a');
+        Asherah::encryptString('tenant-b', 'b');
+        Asherah::encryptString('tenant-a', 'a2');
+        Asherah::encryptString('tenant-c', 'c');
+
+        self::assertSame(['tenant-a', 'tenant-c'], $this->cachedPartitions());
+    }
+
+    public function testShutdownDrainsCachedSessions(): void
+    {
+        Asherah::setup($this->config(['SessionCacheMaxSize' => 2]));
+
+        Asherah::encryptString('tenant-a', 'a');
+        Asherah::encryptString('tenant-b', 'b');
+        self::assertSame(['tenant-a', 'tenant-b'], $this->cachedPartitions());
+
+        Asherah::shutdown();
+
+        self::assertSame([], $this->cachedPartitions());
     }
 
     public function testDoubleSetupFailsWithLifecycleException(): void
@@ -157,5 +194,15 @@ final class NativeRoundTripTest extends TestCase
             'KMS' => 'test-debug-static',
             'SessionCacheMaxSize' => 2,
         ], $overrides);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function cachedPartitions(): array
+    {
+        $reader = \Closure::bind(static fn (): array => array_keys(Asherah::$sessions), null, Asherah::class);
+
+        return $reader();
     }
 }

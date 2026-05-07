@@ -60,6 +60,13 @@ interoperability coverage, and production docs are incomplete.
   - added PHP source-package publish dry-run in CI;
   - added consumer install smoke test for source-only path repository usage;
   - added PHP interop probe scripts for future cross-language interop wiring.
+- 2026-05-06: Hardened static session cache parity:
+  - added tests for cache disabled mode, same-partition reuse, bounded LRU
+    eviction, and shutdown draining cached native sessions;
+  - added pre-FFI validation for required `KMS`, `EnableSessionCaching`, and
+    `SessionCacheMaxSize`;
+  - changed configuration validation failures to use `ConfigurationException`
+    while preserving `InvalidArgumentException` catch compatibility.
 
 Remaining major gaps before production merge are release/publish workflow
 integration, real AWS opt-in integration tests, cross-language interop tests,

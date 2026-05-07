@@ -56,7 +56,7 @@ final class AsherahConfig implements JsonSerializable
         $next = $this->withOption('EnableSessionCaching', $enabled);
         if ($maxSize !== null) {
             if ($maxSize < 1) {
-                throw new \InvalidArgumentException('SessionCacheMaxSize must be >= 1');
+                throw new ConfigurationException('SessionCacheMaxSize must be >= 1');
             }
             $next = $next->withOption('SessionCacheMaxSize', $maxSize);
         }
@@ -121,7 +121,7 @@ final class AsherahConfig implements JsonSerializable
     public static function requireNonEmpty(string $value, string $field): void
     {
         if (trim($value) === '') {
-            throw new \InvalidArgumentException("{$field} is required");
+            throw new ConfigurationException("{$field} is required");
         }
     }
 }

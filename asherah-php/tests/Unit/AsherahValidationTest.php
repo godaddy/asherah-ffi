@@ -45,4 +45,46 @@ final class AsherahValidationTest extends TestCase
             'KMS' => 'test-debug-static',
         ]);
     }
+
+    public function testSetupRequiresKms(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('KMS is required');
+
+        Asherah::setup([
+            'ServiceName' => 'service',
+            'ProductID' => 'product',
+            'Metastore' => 'memory',
+        ]);
+    }
+
+    public function testSetupRejectsNonBooleanSessionCacheFlag(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('EnableSessionCaching must be boolean');
+
+        Asherah::setup($this->config(['EnableSessionCaching' => 'false']));
+    }
+
+    public function testSetupRejectsInvalidSessionCacheMaxSize(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('SessionCacheMaxSize must be an integer >= 1');
+
+        Asherah::setup($this->config(['SessionCacheMaxSize' => 0]));
+    }
+
+    /**
+     * @param array<string, mixed> $overrides
+     * @return array<string, mixed>
+     */
+    private function config(array $overrides = []): array
+    {
+        return array_replace([
+            'ServiceName' => 'service',
+            'ProductID' => 'product',
+            'Metastore' => 'memory',
+            'KMS' => 'test-debug-static',
+        ], $overrides);
+    }
 }

@@ -44,7 +44,7 @@ final class KmsConfig
 
         if ($regionMap !== null) {
             if ($regionMap === []) {
-                throw new \InvalidArgumentException('RegionMap must contain at least one entry');
+                throw new ConfigurationException('RegionMap must contain at least one entry');
             }
             foreach ($regionMap as $mapRegion => $keyArn) {
                 AsherahConfig::requireNonEmpty((string) $mapRegion, 'RegionMap region');
