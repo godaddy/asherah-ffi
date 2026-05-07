@@ -52,6 +52,30 @@ final class PackageEntrypointTest extends TestCase
         self::assertStringNotContainsString('autoload', strtolower($result['output']));
     }
 
+    public function testPreloadDefaultHeaderPathIsNotPredictable(): void
+    {
+        $native = $this->tmpDir . '/libasherah_ffi.so';
+        file_put_contents($native, 'not a real native library');
+        chmod($native, 0o755);
+        $predictable = sys_get_temp_dir() . '/asherah_ffi_' . hash('sha256', $native) . '.h';
+        @unlink($predictable);
+
+        $result = $this->runPhp([
+            '-d',
+            'ffi.enable=1',
+            '-r',
+            'try { require "preload.php"; } catch (Throwable $e) { exit(0); } exit(1);',
+        ], [
+            'ASHERAH_PHP_NATIVE' => $native,
+            'ASHERAH_PHP_PRELOAD_HEADER' => '',
+            'TMPDIR' => $this->tmpDir,
+        ]);
+
+        self::assertSame(0, $result['exitCode'], $result['output']);
+        self::assertFileDoesNotExist($predictable);
+        self::assertSame([], glob($this->tmpDir . '/asherah_ffi_*'));
+    }
+
     private function createConsumerPackageLayout(): string
     {
         $consumer = $this->tmpDir . '/consumer';

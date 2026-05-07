@@ -163,6 +163,13 @@ interoperability coverage, and production docs are incomplete.
     root autoloader when the package is installed under `vendor/godaddy/asherah`;
   - added consumer-layout regression tests for native installation help output
     and preload autoload resolution without a package-local `vendor/`.
+- 2026-05-06: Follow-up convergence sweep hardened preload header generation:
+  - changed the default generated FFI header path from a predictable
+    hash-derived `/tmp` filename to a unique `tempnam()` file;
+  - removed auto-generated preload headers after `FFI::load()` attempts while
+    preserving explicit `ASHERAH_PHP_PRELOAD_HEADER` paths;
+  - added a regression test that fails if the old deterministic header path is
+    written or if generated preload header files are left behind.
 
 No known implementation gaps remain in this ExecPlan. Composer publication is
 source-only, the workflow supports GitHub Release source archive publication,

@@ -22,8 +22,13 @@ if (!class_exists(Native::class)) {
 
 $library = Native::resolveLibraryPath();
 $header = getenv('ASHERAH_PHP_PRELOAD_HEADER');
+$removeHeader = false;
 if (!is_string($header) || trim($header) === '') {
-    $header = sys_get_temp_dir() . '/asherah_ffi_' . hash('sha256', $library) . '.h';
+    $header = tempnam(sys_get_temp_dir(), 'asherah_ffi_');
+    if ($header === false) {
+        throw new RuntimeException('Failed to create Asherah FFI preload header');
+    }
+    $removeHeader = true;
 }
 
 $ffiLib = addcslashes($library, "\\\"");
@@ -36,7 +41,16 @@ CDEF
     . "\n";
 
 if (@file_put_contents($header, $contents) === false) {
+    if ($removeHeader) {
+        @unlink($header);
+    }
     throw new RuntimeException("Failed to write Asherah FFI preload header: {$header}");
 }
 
-FFI::load($header);
+try {
+    FFI::load($header);
+} finally {
+    if ($removeHeader) {
+        @unlink($header);
+    }
+}
