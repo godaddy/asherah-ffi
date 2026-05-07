@@ -32,12 +32,13 @@ $kmsConfig = match ($kms) {
     default => throw new InvalidArgumentException("unsupported PHP interop KMS: {$kms}"),
 };
 
-Asherah::setup(new AsherahConfig(
+$config = new AsherahConfig(
     getenv('SERVICE_NAME') ?: 'service',
     getenv('PRODUCT_ID') ?: 'product',
     $metastoreConfig,
     $kmsConfig
-)->withSessionCache(false));
+);
+Asherah::setup($config->withSessionCache(false));
 
 try {
     $payload = base64_decode($argv[3], true);

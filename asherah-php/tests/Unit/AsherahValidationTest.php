@@ -74,6 +74,30 @@ final class AsherahValidationTest extends TestCase
         Asherah::setup($this->config(['SessionCacheMaxSize' => 0]));
     }
 
+    public function testSetupRejectsInvalidSessionCacheDuration(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('SessionCacheDuration must be an integer >= 0');
+
+        Asherah::setup($this->config(['SessionCacheDuration' => '60']));
+    }
+
+    public function testSetupRejectsInvalidExpireAfter(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('ExpireAfter must be an integer >= 1');
+
+        Asherah::setup($this->config(['ExpireAfter' => 0]));
+    }
+
+    public function testSetupRejectsInvalidCheckInterval(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('CheckInterval must be an integer >= 1');
+
+        Asherah::setup($this->config(['CheckInterval' => false]));
+    }
+
     /**
      * @param array<string, mixed> $overrides
      * @return array<string, mixed>

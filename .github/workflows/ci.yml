@@ -711,6 +711,32 @@ jobs:
           BINDING_ARTIFACTS_DIR: ${{ github.workspace }}/ci-artifacts
         run: scripts/test.sh --bindings --binding=${{ matrix.binding }}
 
+  php-binding-supported-minors:
+    permissions:
+      contents: read
+    runs-on: ubuntu-22.04
+    needs: build-ffi-x86_64
+    strategy:
+      fail-fast: false
+      matrix:
+        php-image:
+          - php:8.1-cli
+          - php:8.2-cli
+          - php:8.3-cli
+          - php:8.4-cli
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Download x86_64 FFI artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: bindings-linux-x86_64-part-ffi
+          path: ${{ github.workspace }}/ci-artifacts
+      - name: Run PHP binding tests on ${{ matrix.php-image }}
+        env:
+          BINDING_ARTIFACTS_DIR: ${{ github.workspace }}/ci-artifacts
+          PHP_IMAGE_TAG: ${{ matrix.php-image }}
+        run: scripts/test.sh --bindings --binding=php
+
   interop-tests:
     runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
@@ -1738,12 +1764,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD":/work -w /work/asherah-php asherah-php-ffi-test sh -lc '
             set -e
-            rm -rf /tmp/asherah-php-dist
-            mkdir -p /tmp/asherah-php-dist
-            composer archive --format=zip --dir=/tmp/asherah-php-dist >/dev/null
-            unzip -l /tmp/asherah-php-dist/*.zip | tee /tmp/asherah-php-archive.txt
-            ! grep -E " vendor/| native/| composer.lock" /tmp/asherah-php-archive.txt
-            grep -q "src/Asherah.php" /tmp/asherah-php-archive.txt
+            /work/scripts/build-php-source-archive.sh /tmp/asherah-php-dist
           '
       - name: Consumer source install smoke
         run: |

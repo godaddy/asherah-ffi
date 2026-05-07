@@ -356,10 +356,15 @@ do_bindings() {
         if [ -d asherah-php ]; then
             if docker info >/dev/null 2>&1; then
                 local php_native_container="/work/target-php-linux/debug"
+                local php_image_tag="${PHP_IMAGE_TAG:-php:8.4-cli}"
                 if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then
                     php_native_container="/work/ci-artifacts/ffi"
                 fi
-                run_test "PHP Docker image" docker build -t asherah-php-ffi-test -f asherah-php/.Dockerfile.debian asherah-php
+                run_test "PHP Docker image ($php_image_tag)" docker build \
+                    --build-arg IMAGE_TAG="$php_image_tag" \
+                    -t asherah-php-ffi-test \
+                    -f asherah-php/.Dockerfile.debian \
+                    asherah-php
                 if [ -z "${BINDING_ARTIFACTS_DIR:-}" ]; then
                     run_test "PHP native FFI build (Docker)" docker run --rm \
                         -v "$ROOT_DIR:/work" -w /work \
@@ -399,6 +404,7 @@ do_bindings() {
                     -e ASHERAH_PHP_NATIVE="$php_native_container" \
                     asherah-php-ffi-test sh -c 'set -e; rm -rf /tmp/asherah-php-consumer; mkdir /tmp/asherah-php-consumer; cd /tmp/asherah-php-consumer; composer init --name asherah/consumer-smoke --no-interaction >/dev/null; composer config repositories.asherah path /work/asherah-php; composer config minimum-stability dev; composer config prefer-stable true; composer require godaddy/asherah:* --no-interaction --no-progress >/dev/null; php vendor/godaddy/asherah/tests/consumer_smoke.php'
                 run_test "PHP preload smoke" docker run --rm \
+                    --user "$(id -u):$(id -g)" \
                     -v "$ROOT_DIR:/work" -w /work/asherah-php \
                     -e ASHERAH_PHP_NATIVE="$php_native_container" \
                     asherah-php-ffi-test php -d ffi.enable=preload -d opcache.enable_cli=1 \

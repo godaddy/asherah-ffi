@@ -1,0 +1,71 @@
+name: Publish PHP Composer Package
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-php
+  cancel-in-progress: false
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag/ref to package (default: current ref)'
+        required: false
+        type: string
+      dry_run:
+        description: 'Dry run (build but do not publish)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  package-and-publish:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ github.event.inputs.tag || github.event.release.tag_name || github.ref }}
+      - name: Build PHP package image
+        run: docker build -t asherah-php-publish -f asherah-php/.Dockerfile.debian asherah-php
+      - name: Build source-only Composer archive
+        run: |
+          docker run --rm -v "$PWD":/work -w /work/asherah-php asherah-php-publish sh -lc '
+            set -e
+            ARCHIVE="$(/work/scripts/build-php-source-archive.sh /tmp/asherah-php-dist | tail -n 1)"
+            cp "$ARCHIVE" /work/asherah-php-source.zip
+          '
+      - name: Upload dry-run artifact
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: asherah-php-source
+          path: asherah-php-source.zip
+      - name: Attach source archive to GitHub Release
+        if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && github.event.inputs.tag != '') }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
+        run: gh release upload "$RELEASE_TAG" asherah-php-source.zip --clobber
+      - name: Notify Packagist
+        if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }}
+        env:
+          PACKAGIST_USERNAME: ${{ secrets.PACKAGIST_USERNAME }}
+          PACKAGIST_API_TOKEN: ${{ secrets.PACKAGIST_API_TOKEN }}
+          PACKAGE_REPOSITORY_URL: https://github.com/godaddy/asherah-ffi
+        run: |
+          if [ -z "$PACKAGIST_USERNAME" ] || [ -z "$PACKAGIST_API_TOKEN" ]; then
+            echo "Packagist credentials are not configured; source archive publication is complete."
+            exit 0
+          fi
+
+          curl --fail-with-body \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data "{\"repository\":{\"url\":\"${PACKAGE_REPOSITORY_URL}\"}}" \
+            "https://packagist.org/api/update-package?username=${PACKAGIST_USERNAME}&apiToken=${PACKAGIST_API_TOKEN}"

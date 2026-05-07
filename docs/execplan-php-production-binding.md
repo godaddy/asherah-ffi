@@ -80,13 +80,33 @@ interoperability coverage, and production docs are incomplete.
 - 2026-05-06: Expanded package documentation for native staging with GitHub
   tokens, explicit factory/session lifecycle, static session-cache lifecycle,
   source-only publishing, PHP plaintext caveats, and troubleshooting.
+- 2026-05-06: Re-audited the ExecPlan line by line and closed the remaining
+  implementation gaps:
+  - added Composer authors metadata;
+  - added PHP 8.1, 8.2, 8.3, and 8.4 binding-test CI coverage for the claimed
+    supported PHP versions;
+  - expanded native installer tests for unsupported platforms, missing checksum
+    entries, verify success, verify failure modes, and `--no-checksum`;
+  - added subprocess tests for missing FFI, missing native overrides, and
+    preload native-resolution diagnostics;
+  - expanded typed-config phpdoc array shapes, JSON shape tests, unknown-option
+    preservation tests, single-region KMS map coverage, RDBMS replica
+    consistency coverage, static KMS coverage, SQLite coverage, and additional
+    option type validation;
+  - added samples for explicit factory/session usage, PHP-FPM preload config,
+    and Docker native download staging;
+  - added a PHP source-package publish workflow that validates a source-only
+    Composer archive, attaches it to GitHub releases, and optionally notifies
+    Packagist when credentials are configured;
+  - added a manual `PHP AWS Integration` workflow that requires a two-region
+    KMS map and DynamoDB table inputs for release validation against real AWS;
+  - fixed PHP 8.1 compatibility in the interop CLI and preload smoke command.
 
 No known implementation gaps remain in this ExecPlan. Composer publication is
-source-only and registry/tag driven; the concrete registry decision
-(Packagist, GitHub Packages, or an internal Composer repository) is release
-policy, not package implementation. The merge gate implemented here is the
-source-only Composer archive dry-run plus glibc and musl native staging
-validation.
+source-only, the workflow supports GitHub Release source archive publication,
+and Packagist notification is enabled when release credentials are configured.
+Native binaries remain external release artifacts staged by
+`scripts/install_native.php` or an equivalent image-build artifact step.
 
 ## Non-Goals
 

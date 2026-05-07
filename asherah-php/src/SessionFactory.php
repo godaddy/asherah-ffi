@@ -7,12 +7,15 @@ namespace GoDaddy\Asherah;
 use FFI;
 use FFI\CData;
 
+/**
+ * @phpstan-import-type AsherahConfigArray from Asherah
+ */
 final class SessionFactory
 {
     private ?CData $handle;
 
     /**
-     * @param array<string, mixed>|AsherahConfig $config
+     * @param AsherahConfigArray|AsherahConfig $config
      */
     public static function fromConfig(array|AsherahConfig $config): self
     {

@@ -70,8 +70,9 @@ the configured GitHub release host.
 
 The source package can run anywhere PHP FFI can load the matching Asherah native
 library. CI validates Linux glibc x64 and Linux musl x64 source-package
-installation and runtime loading. Do not claim Windows support until DLL loading
-is tested in CI or a release dry-run.
+installation and runtime loading. The PHP binding test suite runs on PHP 8.1,
+8.2, 8.3, and 8.4. Do not claim Windows support until DLL loading is tested in
+CI or a release dry-run.
 
 ## Opt-In AWS Tests
 
@@ -85,6 +86,16 @@ To exercise DynamoDB metastore region handling, set
 Optional fields are `ASHERAH_PHP_AWS_DYNAMODB_SIGNING_REGION`,
 `ASHERAH_PHP_AWS_DYNAMODB_ENDPOINT`, and
 `ASHERAH_PHP_AWS_DYNAMODB_ENABLE_REGION_SUFFIX=1`.
+
+`AwsProfileName` is omitted from generated config unless it is explicitly set
+with a non-empty value. When present, PHP passes it through unchanged to the
+Rust core; PHP does not infer a profile from the process environment.
+
+For release validation, run the `PHP AWS Integration` workflow manually with a
+two-region KMS map and DynamoDB table/signing-region inputs. The workflow uses
+the repository AWS credential secrets and fails if the KMS map has fewer than
+two regions, so multi-region behavior cannot be accidentally validated with a
+single-region setup.
 
 ## Usage
 
@@ -173,6 +184,18 @@ opcache.preload=/path/to/vendor/godaddy/asherah/preload.php
 Runtime code first uses `FFI::scope('ASHERAH')` from preload mode and falls
 back to dynamic `FFI::cdef()` for CLI and development environments.
 
+See `samples/php/preload-fpm.ini` for the minimum PHP-FPM settings.
+
+## Samples
+
+- `samples/php/simple.php` uses the static API with memory metastore and
+  test-debug-static KMS.
+- `samples/php/factory.php` uses explicit `SessionFactory` and `Session`
+  lifecycle management.
+- `samples/php/preload-fpm.ini` shows PHP-FPM preload settings.
+- `samples/php/Dockerfile.native-download` shows source install plus native
+  artifact download during image build.
+
 ## Publishing Model
 
 The PHP package is source-only. Publish it through Packagist, GitHub Packages,
@@ -183,6 +206,12 @@ existing native release workflow and are staged into application images with
 
 This keeps Composer installs small and avoids Git LFS behavior that Composer
 does not handle reliably for large native assets.
+
+`.github/workflows/publish-php.yml` validates the Composer source archive,
+attaches the source archive to a GitHub release, and can notify Packagist when
+`PACKAGIST_USERNAME` and `PACKAGIST_API_TOKEN` repository secrets are present.
+Native libraries remain the existing release assets consumed by
+`scripts/install_native.php`.
 
 ## Security Notes
 

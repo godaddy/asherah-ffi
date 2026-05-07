@@ -6,6 +6,33 @@ namespace GoDaddy\Asherah;
 
 use JsonSerializable;
 
+/**
+ * @phpstan-type AsherahConfigArray array{
+ *   ServiceName: string,
+ *   ProductID: string,
+ *   Metastore: string,
+ *   KMS: string,
+ *   ConnectionString?: string,
+ *   SQLMetastoreDBType?: string,
+ *   ReplicaReadConsistency?: string,
+ *   DynamoDBTableName?: string,
+ *   DynamoDBRegion?: string,
+ *   DynamoDBSigningRegion?: string,
+ *   DynamoDBEndpoint?: string,
+ *   EnableRegionSuffix?: bool,
+ *   RegionMap?: array<string, string>,
+ *   PreferredRegion?: string,
+ *   KmsKeyId?: string,
+ *   StaticMasterKeyHex?: string,
+ *   AwsProfileName?: string,
+ *   EnableSessionCaching?: bool,
+ *   SessionCacheMaxSize?: int,
+ *   SessionCacheDuration?: int,
+ *   ExpireAfter?: int,
+ *   CheckInterval?: int,
+ *   ...<string, mixed>
+ * }
+ */
 final class AsherahConfig implements JsonSerializable
 {
     private string $serviceName;
@@ -95,7 +122,7 @@ final class AsherahConfig implements JsonSerializable
     }
 
     /**
-     * @return array<string, mixed>
+     * @return AsherahConfigArray
      */
     public function toArray(): array
     {
@@ -111,7 +138,7 @@ final class AsherahConfig implements JsonSerializable
     }
 
     /**
-     * @return array<string, mixed>
+     * @return AsherahConfigArray
      */
     public function jsonSerialize(): array
     {

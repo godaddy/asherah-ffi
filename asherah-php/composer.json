@@ -4,6 +4,11 @@
     "description": "PHP FFI bindings for Asherah envelope encryption.",
     "type": "library",
     "license": "Apache-2.0",
+    "authors": [
+        {
+            "name": "Jay Gowdy"
+        }
+    ],
     "homepage": "https://github.com/godaddy/asherah-ffi",
     "keywords": [
         "asherah",

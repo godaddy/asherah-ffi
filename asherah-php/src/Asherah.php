@@ -4,6 +4,33 @@ declare(strict_types=1);
 
 namespace GoDaddy\Asherah;
 
+/**
+ * @phpstan-type AsherahConfigArray array{
+ *   ServiceName?: string,
+ *   ProductID?: string,
+ *   Metastore?: string,
+ *   KMS?: string,
+ *   ConnectionString?: string,
+ *   SQLMetastoreDBType?: string,
+ *   ReplicaReadConsistency?: string,
+ *   DynamoDBTableName?: string,
+ *   DynamoDBRegion?: string,
+ *   DynamoDBSigningRegion?: string,
+ *   DynamoDBEndpoint?: string,
+ *   EnableRegionSuffix?: bool,
+ *   RegionMap?: array<string, string>,
+ *   PreferredRegion?: string,
+ *   KmsKeyId?: string,
+ *   StaticMasterKeyHex?: string,
+ *   AwsProfileName?: string,
+ *   EnableSessionCaching?: bool,
+ *   SessionCacheMaxSize?: int,
+ *   SessionCacheDuration?: int,
+ *   ExpireAfter?: int,
+ *   CheckInterval?: int,
+ *   ...<string, mixed>
+ * }
+ */
 final class Asherah
 {
     private static ?SessionFactory $factory = null;
@@ -13,7 +40,7 @@ final class Asherah
     private static bool $sessionCacheEnabled = true;
 
     /**
-     * @param array<string, mixed>|AsherahConfig $config
+     * @param AsherahConfigArray|AsherahConfig $config
      */
     public static function setup(array|AsherahConfig $config): void
     {
@@ -30,6 +57,9 @@ final class Asherah
 
         self::$sessionCacheEnabled = self::sessionCacheEnabled($config);
         self::$sessionCacheMaxSize = self::sessionCacheMaxSize($config);
+        self::validateIntegerOption($config, 'SessionCacheDuration', 0);
+        self::validateIntegerOption($config, 'ExpireAfter', 1);
+        self::validateIntegerOption($config, 'CheckInterval', 1);
         self::$factory = SessionFactory::fromConfig($config);
         self::$sessions = [];
     }
@@ -164,5 +194,18 @@ final class Asherah
         }
 
         return $config['SessionCacheMaxSize'];
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private static function validateIntegerOption(array $config, string $key, int $minimum): void
+    {
+        if (!array_key_exists($key, $config)) {
+            return;
+        }
+        if (!is_int($config[$key]) || $config[$key] < $minimum) {
+            throw new ConfigurationException("{$key} must be an integer >= {$minimum}");
+        }
     }
 }

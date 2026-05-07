@@ -52,6 +52,85 @@ final class ConfigShapeTest extends TestCase
         );
     }
 
+    public function testSingleRegionKmsMapIsPreservedWithoutPhpSideRewrite(): void
+    {
+        $regionMap = ['us-west-2' => 'arn:aws:kms:us-west-2:111122223333:key/west'];
+        $config = new AsherahConfig(
+            'svc',
+            'prod',
+            MetastoreConfig::memory(),
+            KmsConfig::aws(regionMap: $regionMap)
+        );
+
+        self::assertSame([
+            'ServiceName' => 'svc',
+            'ProductID' => 'prod',
+            'Metastore' => 'memory',
+            'KMS' => 'aws',
+            'RegionMap' => $regionMap,
+        ], $config->toArray());
+    }
+
+    public function testStaticKmsConfigShape(): void
+    {
+        $config = new AsherahConfig(
+            'svc',
+            'prod',
+            MetastoreConfig::memory(),
+            KmsConfig::static(str_repeat('a', 64))
+        );
+
+        self::assertSame([
+            'ServiceName' => 'svc',
+            'ProductID' => 'prod',
+            'Metastore' => 'memory',
+            'KMS' => 'static',
+            'StaticMasterKeyHex' => str_repeat('a', 64),
+        ], $config->toArray());
+    }
+
+    public function testSqliteMetastoreConfigShape(): void
+    {
+        $config = new AsherahConfig(
+            'svc',
+            'prod',
+            MetastoreConfig::sqlite('sqlite:///tmp/asherah.db'),
+            KmsConfig::testDebugStatic()
+        );
+
+        self::assertSame([
+            'ServiceName' => 'svc',
+            'ProductID' => 'prod',
+            'Metastore' => 'sqlite',
+            'ConnectionString' => 'sqlite:///tmp/asherah.db',
+            'KMS' => 'test-debug-static',
+        ], $config->toArray());
+    }
+
+    public function testRdbmsMetastoreConfigPreservesReplicaReadConsistency(): void
+    {
+        $config = new AsherahConfig(
+            'svc',
+            'prod',
+            MetastoreConfig::rdbms(
+                connectionString: 'postgres://user:pass@example.invalid/asherah',
+                sqlMetastoreDbType: 'postgres',
+                replicaReadConsistency: 'eventual'
+            ),
+            KmsConfig::testDebugStatic()
+        );
+
+        self::assertSame([
+            'ServiceName' => 'svc',
+            'ProductID' => 'prod',
+            'Metastore' => 'rdbms',
+            'ConnectionString' => 'postgres://user:pass@example.invalid/asherah',
+            'SQLMetastoreDBType' => 'postgres',
+            'ReplicaReadConsistency' => 'eventual',
+            'KMS' => 'test-debug-static',
+        ], $config->toArray());
+    }
+
     public function testDynamoDbRegionSensitiveFieldsArePreserved(): void
     {
         $config = (new AsherahConfig(
@@ -80,6 +159,50 @@ final class ConfigShapeTest extends TestCase
             'KmsKeyId' => 'alias/asherah',
             'AwsProfileName' => 'prod-profile',
         ], $config->toArray());
+    }
+
+    public function testAwsProfileNameIsExcludedWhenUnsetOrEmpty(): void
+    {
+        $config = (new AsherahConfig(
+            'svc',
+            'prod',
+            MetastoreConfig::dynamoDb(region: 'us-west-2'),
+            KmsConfig::aws(kmsKeyId: 'alias/asherah')
+        ))->withAwsProfileName('')->withAwsProfileName(null);
+
+        self::assertArrayNotHasKey('AwsProfileName', $config->toArray());
+    }
+
+    public function testTypedAndArrayConfigProduceEquivalentJson(): void
+    {
+        $typed = new AsherahConfig(
+            'svc',
+            'prod',
+            MetastoreConfig::memory(),
+            KmsConfig::testDebugStatic()
+        );
+        $array = [
+            'ServiceName' => 'svc',
+            'ProductID' => 'prod',
+            'Metastore' => 'memory',
+            'KMS' => 'test-debug-static',
+        ];
+
+        self::assertSame(
+            json_encode($array, JSON_THROW_ON_ERROR),
+            json_encode($typed, JSON_THROW_ON_ERROR)
+        );
+    }
+
+    public function testUnknownOptionsArePreserved(): void
+    {
+        $config = AsherahConfig::memoryTestDebugStatic('svc', 'prod')
+            ->withOption('FutureRustOption', ['enabled' => true]);
+
+        /** @var array<string, mixed> $array */
+        $array = $config->toArray();
+
+        self::assertSame(['enabled' => true], $array['FutureRustOption']);
     }
 
     public function testEmptyRegionMapIsRejected(): void

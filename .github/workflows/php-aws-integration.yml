@@ -1,0 +1,85 @@
+name: PHP AWS Integration
+
+permissions:
+  contents: read
+
+concurrency:
+  group: php-aws-integration-${{ github.ref }}
+  cancel-in-progress: false
+
+on:
+  workflow_dispatch:
+    inputs:
+      kms_region_map:
+        description: 'JSON object mapping AWS regions to KMS key ARNs'
+        required: true
+        type: string
+      kms_preferred_region:
+        description: 'Preferred KMS region'
+        required: false
+        type: string
+      dynamodb_table:
+        description: 'DynamoDB metastore table name'
+        required: true
+        type: string
+      dynamodb_region:
+        description: 'DynamoDB table region'
+        required: true
+        type: string
+      dynamodb_signing_region:
+        description: 'Optional DynamoDB signing region when different from table region'
+        required: false
+        type: string
+      dynamodb_endpoint:
+        description: 'Optional DynamoDB endpoint override'
+        required: false
+        type: string
+      dynamodb_enable_region_suffix:
+        description: 'Enable DynamoDB regional table suffix'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  php-aws-integration:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_REGION: ${{ inputs.kms_preferred_region || inputs.dynamodb_region }}
+      ASHERAH_PHP_AWS_KMS_REGION_MAP: ${{ inputs.kms_region_map }}
+      ASHERAH_PHP_AWS_KMS_PREFERRED_REGION: ${{ inputs.kms_preferred_region }}
+      ASHERAH_PHP_AWS_DYNAMODB_TABLE: ${{ inputs.dynamodb_table }}
+      ASHERAH_PHP_AWS_DYNAMODB_REGION: ${{ inputs.dynamodb_region }}
+      ASHERAH_PHP_AWS_DYNAMODB_SIGNING_REGION: ${{ inputs.dynamodb_signing_region }}
+      ASHERAH_PHP_AWS_DYNAMODB_ENDPOINT: ${{ inputs.dynamodb_endpoint }}
+      ASHERAH_PHP_AWS_DYNAMODB_ENABLE_REGION_SUFFIX: ${{ inputs.dynamodb_enable_region_suffix && '1' || '0' }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+      - name: Validate AWS integration inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$ASHERAH_PHP_AWS_KMS_REGION_MAP"
+          test -n "$ASHERAH_PHP_AWS_DYNAMODB_TABLE"
+          test -n "$ASHERAH_PHP_AWS_DYNAMODB_REGION"
+          python3 - <<'PY'
+          import json
+          import os
+
+          region_map = json.loads(os.environ["ASHERAH_PHP_AWS_KMS_REGION_MAP"])
+          if not isinstance(region_map, dict) or len(region_map) < 2:
+              raise SystemExit("kms_region_map must contain at least two region entries")
+          for region, arn in region_map.items():
+              if not isinstance(region, str) or not region:
+                  raise SystemExit("kms_region_map keys must be non-empty region strings")
+              if not isinstance(arn, str) or not arn.startswith("arn:aws:kms:"):
+                  raise SystemExit("kms_region_map values must be AWS KMS key ARNs")
+          PY
+      - name: Run PHP AWS integration tests
+        run: scripts/test.sh --bindings --binding=php
