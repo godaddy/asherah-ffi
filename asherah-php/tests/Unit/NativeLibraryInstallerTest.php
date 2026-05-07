@@ -133,6 +133,62 @@ final class NativeLibraryInstallerTest extends TestCase
         self::assertSame(hash('sha256', $payload) . "  libasherah_ffi.so\n", file_get_contents($installed . '.sha256'));
     }
 
+    public function testLargeNativeArtifactDownloadsUnderConstrainedMemoryLimit(): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            self::markTestSkipped('Subprocess command quoting for this memory-limit guard is Unix-specific');
+        }
+
+        $script = $this->tmpDir . '/large_download.php';
+        $autoload = dirname(__DIR__, 2) . '/vendor/autoload.php';
+        $package = $this->tmpDir . '/package';
+        $releaseRoot = $this->tmpDir . '/release';
+        $autoloadLiteral = var_export($autoload, true);
+        $packageLiteral = var_export($package, true);
+        $releaseRootLiteral = var_export($releaseRoot, true);
+        $code = <<<PHP
+<?php
+declare(strict_types=1);
+
+require {$autoloadLiteral};
+
+use GoDaddy\Asherah\NativeLibraryInstaller;
+
+\$tag = 'v9.9.9-test';
+\$releaseRoot = {$releaseRootLiteral};
+\$assetDir = \$releaseRoot . '/' . \$tag;
+mkdir(\$assetDir, 0755, true);
+\$asset = \$assetDir . '/libasherah-x64.so';
+\$out = fopen(\$asset, 'wb');
+\$hash = hash_init('sha256');
+\$chunk = str_repeat('z', 1024 * 1024);
+for (\$i = 0; \$i < 12; \$i++) {
+    fwrite(\$out, \$chunk);
+    hash_update(\$hash, \$chunk);
+}
+fclose(\$out);
+chmod(\$asset, 0755);
+\$digest = hash_final(\$hash);
+file_put_contents(\$assetDir . '/SHA256SUMS', \$digest . "  libasherah-x64.so\n");
+\$installer = new NativeLibraryInstaller({$packageLiteral});
+exit(\$installer->run([
+    '--platform=linux-x64',
+    '--version=' . \$tag,
+    '--release-base-url=file://' . \$releaseRoot,
+    '--quiet',
+]));
+PHP;
+        file_put_contents($script, $code);
+
+        $output = [];
+        exec(escapeshellarg(PHP_BINARY) . ' -d memory_limit=16M ' . escapeshellarg($script), $output, $exitCode);
+
+        $installed = $package . '/native/linux-x64/libasherah_ffi.so';
+        self::assertSame(0, $exitCode, implode("\n", $output));
+        self::assertFileExists($installed);
+        self::assertSame(12 * 1024 * 1024, filesize($installed));
+    }
+
     public function testInstallDirStagesOutsidePackageNativeDirectory(): void
     {
         $tag = 'v9.9.9-test';

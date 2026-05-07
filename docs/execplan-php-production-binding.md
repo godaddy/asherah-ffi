@@ -150,6 +150,13 @@ interoperability coverage, and production docs are incomplete.
     temporary copy;
   - added binding-test, CI dry-run, and publish guards that fail if source
     archive construction mutates `asherah-php/`.
+- 2026-05-06: Follow-up convergence sweep closed a native artifact download
+  scalability gap:
+  - changed `NativeLibraryInstaller` to stream release assets into the temporary
+    download file instead of materializing the whole native library in a PHP
+    string;
+  - added a subprocess regression test that installs a 12 MB native fixture
+    under a 16 MB PHP memory limit.
 
 No known implementation gaps remain in this ExecPlan. Composer publication is
 source-only, the workflow supports GitHub Release source archive publication,

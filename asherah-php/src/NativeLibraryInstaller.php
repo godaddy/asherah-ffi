@@ -276,16 +276,13 @@ final class NativeLibraryInstaller
             throw new NativeLibraryException('Failed to create temporary download file');
         }
 
-        $data = $this->downloadUrl($url);
-        if ($data === false) {
+        try {
+            $this->downloadUrlToFile($url, $tmp);
+        } catch (\Throwable $e) {
             unlink($tmp);
-            throw new NativeLibraryException("Failed to download {$url}");
+            throw $e;
         }
 
-        if (file_put_contents($tmp, $data) === false) {
-            unlink($tmp);
-            throw new NativeLibraryException('Failed to write temporary download file');
-        }
         return $tmp;
     }
 
@@ -374,6 +371,54 @@ final class NativeLibraryInstaller
             }
 
             return $contents;
+        }
+
+        throw new NativeLibraryException("Too many redirects while downloading {$url}");
+    }
+
+    private function downloadUrlToFile(string $url, string $destination): void
+    {
+        $currentUrl = $url;
+        for ($redirects = 0; $redirects < 5; $redirects++) {
+            $http_response_header = [];
+            $source = @fopen($currentUrl, 'rb', false, $this->streamContext($currentUrl));
+            $headers = $http_response_header;
+            if ($source === false) {
+                throw new NativeLibraryException("Failed to download {$currentUrl}");
+            }
+
+            try {
+                $status = $this->httpStatus($headers);
+                if ($status >= 300 && $status < 400) {
+                    $location = $this->redirectLocation($headers);
+                    if ($location === null) {
+                        throw new NativeLibraryException("Redirect without Location header: {$currentUrl}");
+                    }
+                    $currentUrl = $this->resolveRedirectUrl($currentUrl, $location);
+                    continue;
+                }
+
+                if ($status >= 400) {
+                    throw new NativeLibraryException("Failed to download {$currentUrl}: HTTP {$status}");
+                }
+
+                $target = @fopen($destination, 'wb');
+                if ($target === false) {
+                    throw new NativeLibraryException("Failed to open temporary download file: {$destination}");
+                }
+
+                try {
+                    if (@stream_copy_to_stream($source, $target) === false) {
+                        throw new NativeLibraryException("Failed to write temporary download file: {$destination}");
+                    }
+                } finally {
+                    fclose($target);
+                }
+
+                return;
+            } finally {
+                fclose($source);
+            }
         }
 
         throw new NativeLibraryException("Too many redirects while downloading {$url}");
