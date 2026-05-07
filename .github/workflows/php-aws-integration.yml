@@ -50,6 +50,7 @@ jobs:
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
       AWS_REGION: ${{ inputs.kms_preferred_region || inputs.dynamodb_region }}
+      ASHERAH_PHP_AWS_REQUIRE_INTEGRATION: "1"
       ASHERAH_PHP_AWS_KMS_REGION_MAP: ${{ inputs.kms_region_map }}
       ASHERAH_PHP_AWS_KMS_PREFERRED_REGION: ${{ inputs.kms_preferred_region }}
       ASHERAH_PHP_AWS_DYNAMODB_TABLE: ${{ inputs.dynamodb_table }}
@@ -68,6 +69,8 @@ jobs:
           test -n "$ASHERAH_PHP_AWS_KMS_REGION_MAP"
           test -n "$ASHERAH_PHP_AWS_DYNAMODB_TABLE"
           test -n "$ASHERAH_PHP_AWS_DYNAMODB_REGION"
+          test -n "$AWS_ACCESS_KEY_ID"
+          test -n "$AWS_SECRET_ACCESS_KEY"
           python3 - <<'PY'
           import json
           import os

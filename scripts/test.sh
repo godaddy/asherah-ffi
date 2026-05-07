@@ -357,6 +357,24 @@ do_bindings() {
             if docker info >/dev/null 2>&1; then
                 local php_native_container="/work/target-php-linux/debug"
                 local php_image_tag="${PHP_IMAGE_TAG:-php:8.4-cli}"
+                local php_aws_env=(
+                    -e AWS_ACCESS_KEY_ID
+                    -e AWS_SECRET_ACCESS_KEY
+                    -e AWS_SESSION_TOKEN
+                    -e AWS_REGION
+                    -e AWS_DEFAULT_REGION
+                    -e AWS_PROFILE
+                    -e AWS_SHARED_CREDENTIALS_FILE
+                    -e AWS_CONFIG_FILE
+                    -e ASHERAH_PHP_AWS_REQUIRE_INTEGRATION
+                    -e ASHERAH_PHP_AWS_KMS_REGION_MAP
+                    -e ASHERAH_PHP_AWS_KMS_PREFERRED_REGION
+                    -e ASHERAH_PHP_AWS_DYNAMODB_TABLE
+                    -e ASHERAH_PHP_AWS_DYNAMODB_REGION
+                    -e ASHERAH_PHP_AWS_DYNAMODB_SIGNING_REGION
+                    -e ASHERAH_PHP_AWS_DYNAMODB_ENDPOINT
+                    -e ASHERAH_PHP_AWS_DYNAMODB_ENABLE_REGION_SUFFIX
+                )
                 if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then
                     php_native_container="/work/ci-artifacts/ffi"
                 fi
@@ -388,6 +406,7 @@ do_bindings() {
                     asherah-php-ffi-test vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.php --dry-run --diff --allow-unsupported-php-version=yes
                 run_test "PHP PHPUnit" docker run --rm \
                     -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    "${php_aws_env[@]}" \
                     -e ASHERAH_PHP_NATIVE="$php_native_container" \
                     asherah-php-ffi-test vendor/bin/phpunit --no-coverage
                 run_test "PHP smoke" docker run --rm \

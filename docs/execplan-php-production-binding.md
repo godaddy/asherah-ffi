@@ -111,6 +111,17 @@ interoperability coverage, and production docs are incomplete.
     generated `composer.lock` files before dependency resolution, preventing a
     previous PHP 8.4 run from poisoning PHP 8.1 validation in the same
     worktree.
+- 2026-05-06: Additional test-depth sweep closed an AWS release-gate gap and
+  added package lifecycle assertions:
+  - passed AWS/KMS/DynamoDB environment variables through Dockerized PHP
+    PHPUnit runs so the manual AWS workflow exercises the same tests that local
+    CI uses;
+  - added required-integration mode so the manual AWS workflow fails instead of
+    silently skipping when multi-region KMS or DynamoDB inputs are missing;
+  - added PHPUnit coverage that proves required AWS mode fails instead of
+    skipping and that Composer metadata preserves the source-only package
+    lifecycle, explicit native staging commands, archive exclusions, runtime
+    requirements, and author metadata.
 
 No known implementation gaps remain in this ExecPlan. Composer publication is
 source-only, the workflow supports GitHub Release source archive publication,
