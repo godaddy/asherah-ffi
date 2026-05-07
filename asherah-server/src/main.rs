@@ -72,14 +72,21 @@ impl ReplicaReadConsistency {
     about = "gRPC sidecar server for Asherah envelope encryption"
 )]
 struct Cli {
-    /// The unix domain socket the server will listen on
-    #[arg(
-        short = 's',
-        long,
-        default_value = "/tmp/appencryption.sock",
-        env = "ASHERAH_SOCKET_FILE"
-    )]
-    socket_file: String,
+    /// The unix domain socket the server will listen on. Plain filesystem
+    /// path, matching the Go reference server's `--socket-file` flag.
+    #[arg(short = 's', long = "socket-file", env = "ASHERAH_SOCKET_FILE")]
+    socket_file: Option<String>,
+
+    /// Alias for `--socket-file` (env `ASHERAH_SOCKET`). Accepts the same
+    /// plain filesystem path; for caller convenience a leading `unix://`
+    /// URI prefix is stripped (gRPC dial URIs and bind paths are commonly
+    /// confused). When both `ASHERAH_SOCKET_FILE` and `ASHERAH_SOCKET` are
+    /// set, `ASHERAH_SOCKET_FILE` wins because it matches the canonical
+    /// Go reference convention. This alias is an asherah-ffi extension —
+    /// the Go reference server does not read either env var, only the
+    /// `--socket-file` flag.
+    #[arg(long = "socket", env = "ASHERAH_SOCKET")]
+    socket: Option<String>,
 
     /// File mode (octal) applied to the listening Unix socket after bind. The
     /// default `0660` restricts access to the owner and group; set explicitly
@@ -173,18 +180,22 @@ struct Cli {
     #[arg(long, env = "ASHERAH_ENABLE_REGION_SUFFIX")]
     enable_region_suffix: bool,
 
-    /// Enable verbose logging output.
+    /// Enable verbose logging output. When set, forces the log filter to
+    /// `info,asherah=debug,asherah_server=debug` regardless of `RUST_LOG`,
+    /// matching the Go reference server's posture that `ASHERAH_VERBOSE`
+    /// is the primary logging knob (the Go server has no `RUST_LOG`
+    /// equivalent). When unset, `RUST_LOG` is honored if present and the
+    /// default filter is `info`.
     ///
-    /// **Tenant identifier exposure:** verbose mode emits asherah-crate
-    /// debug logs that include intermediate-key IDs of the form
-    /// `_IK_<partition>_<service>_<product>`. The `<partition>`
-    /// component is the caller-supplied partition ID (typically a
-    /// user/tenant identifier). Do not enable verbose mode in
-    /// production environments where operator log access does not
-    /// already imply access to tenant identifiers; restrict to
-    /// developer reproductions and pre-production troubleshooting.
-    /// T-finding "verbose mode emits per-request partition ID logs;
-    /// tenant identifier exposure" in
+    /// **Blessed incompatibility with the Go reference:** the Go server
+    /// emits `handling encrypt|decrypt|get-session for <partition>` and
+    /// `closing session for <partition>` at info level *unconditionally*.
+    /// We deliberately downgrade those to debug — they appear only under
+    /// `--verbose` / `ASHERAH_VERBOSE=true`. The partition ID is a
+    /// caller-supplied tenant identifier and operators running this
+    /// sidecar at info should not inadvertently log per-request tenant
+    /// activity. T-finding "verbose mode emits per-request partition ID
+    /// logs; tenant identifier exposure" in
     /// `docs/review-2026-05-05-findings.md`.
     #[arg(short = 'v', long, env = "ASHERAH_VERBOSE")]
     verbose: bool,
@@ -202,6 +213,32 @@ struct Cli {
         env = "ASHERAH_SHUTDOWN_DRAIN_TIMEOUT"
     )]
     shutdown_drain_timeout: i64,
+}
+
+/// Default socket path, matching the Go reference server's
+/// `--socket-file` default. Used when neither `ASHERAH_SOCKET_FILE` nor
+/// `ASHERAH_SOCKET` is provided.
+const DEFAULT_SOCKET_PATH: &str = "/tmp/appencryption.sock";
+
+/// Resolve the listening socket path from the two compat env vars.
+/// `ASHERAH_SOCKET_FILE` wins over `ASHERAH_SOCKET` (the Go-reference name
+/// takes precedence over the asherah-ffi alias). A leading `unix://`
+/// prefix is stripped from either value — gRPC clients dial unix domain
+/// sockets via `unix://<path>` URIs and consumers commonly export the
+/// same value as a server bind variable. The Go reference server treats
+/// such a value as a literal filename and silently binds the wrong path,
+/// so we normalize instead.
+fn resolve_socket_path(socket_file: Option<&str>, socket: Option<&str>) -> String {
+    fn non_empty(opt: Option<&str>) -> Option<&str> {
+        opt.map(str::trim).filter(|s| !s.is_empty())
+    }
+    // An explicit-but-blank `ASHERAH_SOCKET_FILE=""` must not mask a real
+    // `ASHERAH_SOCKET` value — `clap` exposes it as `Some("")`, so we
+    // filter empties at each level before falling through.
+    let raw = non_empty(socket_file)
+        .or_else(|| non_empty(socket))
+        .unwrap_or(DEFAULT_SOCKET_PATH);
+    raw.strip_prefix("unix://").unwrap_or(raw).to_string()
 }
 
 /// Parse an octal file mode (e.g. `0660`, `660`, `0o660`) into a `u32` mode
@@ -295,10 +332,21 @@ fn cli_to_config(cli: &Cli) -> asherah_config::ConfigOptions {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or(if cli.verbose { "debug" } else { "info" }),
-    )
-    .init();
+    // Drop-in compatibility with the Go reference: ASHERAH_VERBOSE is the
+    // primary logging knob and the Go server has no RUST_LOG analog. When
+    // verbose is set we override RUST_LOG entirely so a consumer-supplied
+    // restrictive RUST_LOG can't silence the asherah-crate debug stream
+    // they explicitly asked for. When unset we keep RUST_LOG honored (a
+    // power-user knob beyond Go parity) with `info` as the default.
+    if cli.verbose {
+        env_logger::Builder::new()
+            .parse_filters("info,asherah=debug,asherah_server=debug")
+            .init();
+    } else {
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+    }
+
+    let socket_path = resolve_socket_path(cli.socket_file.as_deref(), cli.socket.as_deref());
 
     // Build the factory on the blocking pool. Construction may do DNS,
     // TLS handshakes, and KMS warm-up (synchronous AWS SDK init), all of
@@ -326,31 +374,24 @@ async fn main() -> Result<()> {
     let grpc_svc = proto::app_encryption_server::AppEncryptionServer::new(svc);
 
     // Remove stale socket file from previous run (only if it's a socket)
-    if let Ok(meta) = std::fs::symlink_metadata(&cli.socket_file) {
+    if let Ok(meta) = std::fs::symlink_metadata(&socket_path) {
         #[cfg(unix)]
         {
             use std::os::unix::fs::FileTypeExt;
             if meta.file_type().is_socket() {
-                if let Err(err) = std::fs::remove_file(&cli.socket_file) {
-                    log::warn!(
-                        "failed to remove stale socket file '{}': {}",
-                        cli.socket_file,
-                        err
-                    );
+                if let Err(err) = std::fs::remove_file(&socket_path) {
+                    log::warn!("failed to remove stale socket file '{socket_path}': {err}");
                 }
             } else {
-                anyhow::bail!(
-                    "socket path '{}' exists but is not a Unix socket",
-                    cli.socket_file
-                );
+                anyhow::bail!("socket path '{socket_path}' exists but is not a Unix socket");
             }
         }
         #[cfg(not(unix))]
-        drop(std::fs::remove_file(&cli.socket_file));
+        drop(std::fs::remove_file(&socket_path));
     }
 
     let listener =
-        tokio::net::UnixListener::bind(&cli.socket_file).context("failed to bind Unix socket")?;
+        tokio::net::UnixListener::bind(&socket_path).context("failed to bind Unix socket")?;
 
     // The socket inherits umask-dependent permissions (typically 0o666). For a
     // sidecar holding KMS access and decrypted plaintext, that lets any local
@@ -360,21 +401,17 @@ async fn main() -> Result<()> {
     {
         use std::os::unix::fs::PermissionsExt;
         let perms = std::fs::Permissions::from_mode(cli.socket_mode);
-        std::fs::set_permissions(&cli.socket_file, perms).with_context(|| {
+        std::fs::set_permissions(&socket_path, perms).with_context(|| {
             format!(
                 "failed to set socket mode {:o} on '{}'",
-                cli.socket_mode, cli.socket_file
+                cli.socket_mode, socket_path
             )
         })?;
     }
 
     let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener);
 
-    log::info!(
-        "listening on {} (mode {:#o})",
-        cli.socket_file,
-        cli.socket_mode
-    );
+    log::info!("listening on {} (mode {:#o})", socket_path, cli.socket_mode);
 
     // Spawn a task that listens for SIGTERM/SIGINT and broadcasts shutdown.
     // shutdown_signal returns a Result so signal-registration failures (a
@@ -497,21 +534,17 @@ async fn main() -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::FileTypeExt;
-        if std::fs::symlink_metadata(&cli.socket_file)
+        if std::fs::symlink_metadata(&socket_path)
             .map(|m| m.file_type().is_socket())
             .unwrap_or(false)
         {
-            if let Err(err) = std::fs::remove_file(&cli.socket_file) {
-                log::warn!(
-                    "failed to remove socket file '{}' during shutdown: {}",
-                    cli.socket_file,
-                    err
-                );
+            if let Err(err) = std::fs::remove_file(&socket_path) {
+                log::warn!("failed to remove socket file '{socket_path}' during shutdown: {err}");
             }
         }
     }
     #[cfg(not(unix))]
-    drop(std::fs::remove_file(&cli.socket_file));
+    drop(std::fs::remove_file(&socket_path));
 
     Ok(())
 }
@@ -562,5 +595,48 @@ mod tests {
     fn parse_octal_mode_rejects_overlarge_values() {
         assert!(parse_octal_mode("01000").is_err());
         assert!(parse_octal_mode("7777").is_err());
+    }
+
+    #[test]
+    fn resolve_socket_path_defaults_when_unset() {
+        assert_eq!(resolve_socket_path(None, None), DEFAULT_SOCKET_PATH);
+    }
+
+    #[test]
+    fn resolve_socket_path_prefers_socket_file_over_socket() {
+        assert_eq!(
+            resolve_socket_path(Some("/a/canonical.sock"), Some("/b/alias.sock")),
+            "/a/canonical.sock"
+        );
+    }
+
+    #[test]
+    fn resolve_socket_path_falls_back_to_socket_alias() {
+        assert_eq!(
+            resolve_socket_path(None, Some("/b/alias.sock")),
+            "/b/alias.sock"
+        );
+    }
+
+    #[test]
+    fn resolve_socket_path_strips_unix_uri_prefix() {
+        assert_eq!(
+            resolve_socket_path(None, Some("unix:///sock/asherah.sock")),
+            "/sock/asherah.sock"
+        );
+        assert_eq!(
+            resolve_socket_path(Some("unix:///tmp/foo.sock"), None),
+            "/tmp/foo.sock"
+        );
+    }
+
+    #[test]
+    fn resolve_socket_path_treats_empty_as_unset() {
+        assert_eq!(resolve_socket_path(Some(""), None), DEFAULT_SOCKET_PATH);
+        assert_eq!(resolve_socket_path(Some("   "), None), DEFAULT_SOCKET_PATH);
+        assert_eq!(
+            resolve_socket_path(Some(""), Some("/b/alias.sock")),
+            "/b/alias.sock"
+        );
     }
 }
