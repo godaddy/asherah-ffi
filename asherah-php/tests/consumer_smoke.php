@@ -6,6 +6,7 @@ use GoDaddy\Asherah\Asherah;
 use GoDaddy\Asherah\AsherahConfig;
 
 $autoloadCandidates = [
+    getcwd() . '/vendor/autoload.php',
     dirname(__DIR__, 3) . '/autoload.php',
     __DIR__ . '/../vendor/autoload.php',
 ];

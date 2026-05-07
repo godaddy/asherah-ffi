@@ -100,15 +100,17 @@ setup_ci_artifacts() {
 
     # Set up target directories matching what cargo would produce
     local release_dir="$ROOT_DIR/target/release"
+    local release_rel="target/release"
     if [ -n "$target_triple" ]; then
         release_dir="$ROOT_DIR/target/$target_triple/release"
+        release_rel="target/$target_triple/release"
     fi
     mkdir -p "$release_dir" "$ROOT_DIR/target/release" "$ROOT_DIR/target/debug"
 
     # Stage FFI shared library
-    for f in "$ad"/ffi/libasherah_ffi.*; do
-        [ -e "$f" ] && cp "$f" "$release_dir/"
-    done
+    while IFS= read -r -d '' f; do
+        cp "$f" "$release_dir/"
+    done < <(find "$ad" -path '*/ffi/libasherah_ffi.*' -type f -print0 2>/dev/null)
 
     # Stage Java JNI library
     for f in "$ad"/java/libasherah_java.*; do
@@ -140,6 +142,8 @@ setup_ci_artifacts() {
     export ASHERAH_DOTNET_NATIVE="$release_dir"
     export ASHERAH_RUBY_NATIVE="$release_dir"
     export ASHERAH_GO_NATIVE="$release_dir"
+    export ASHERAH_PHP_NATIVE="$release_dir"
+    export ASHERAH_PHP_NATIVE_CONTAINER="/work/$release_rel"
     export LD_LIBRARY_PATH="$release_dir:${LD_LIBRARY_PATH:-}"
 }
 
@@ -376,7 +380,7 @@ do_bindings() {
                     -e ASHERAH_PHP_AWS_DYNAMODB_ENABLE_REGION_SUFFIX
                 )
                 if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then
-                    php_native_container="/work/ci-artifacts/ffi"
+                    php_native_container="${ASHERAH_PHP_NATIVE_CONTAINER:-/work/target/release}"
                 fi
                 run_test "PHP Docker image ($php_image_tag)" docker build \
                     --build-arg IMAGE_TAG="$php_image_tag" \
