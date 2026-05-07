@@ -31,6 +31,30 @@ The branch is still exploratory because release integration, CI integration,
 typed config ergonomics, multi-region coverage, session-cache parity,
 interoperability coverage, and production docs are incomplete.
 
+## Progress Log
+
+- 2026-05-06: Added the initial Composer/FFI exploration package, native
+  installer, preload entrypoint, Docker PHP test images, PHPUnit/PHPStan/
+  PHP-CS-Fixer configuration, smoke tests, and draft PR.
+- 2026-05-06: Rebasing after the large mainline PR left this branch as PHP-only
+  on top of `origin/main`.
+- 2026-05-06: Began production hardening from this ExecPlan:
+  - added typed config value objects (`AsherahConfig`, `MetastoreConfig`,
+    `KmsConfig`);
+  - added JSON-shape tests for memory/static, multi-region KMS, and
+    DynamoDB region/signing-region fields;
+  - added typed config support to `Asherah::setup()` and
+    `SessionFactory::fromConfig()`;
+  - hardened the native installer with `--install-dir`, checksum mismatch, and
+    force-replace coverage;
+  - added `samples/php/simple.php`;
+  - added PHP to `scripts/test.sh --bindings --binding=php`;
+  - added PHP to the x86_64 binding-test CI matrix.
+
+Remaining major gaps before production merge are release/publish workflow
+integration, real AWS opt-in integration tests, cross-language interop tests,
+expanded docs, and final platform support decisions.
+
 ## Non-Goals
 
 Do not build these for the first production merge:

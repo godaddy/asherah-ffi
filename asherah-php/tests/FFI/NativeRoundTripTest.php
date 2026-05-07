@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace GoDaddy\Asherah\Tests\FFI;
 
 use GoDaddy\Asherah\Asherah;
+use GoDaddy\Asherah\AsherahConfig;
 use GoDaddy\Asherah\AsherahException;
 use GoDaddy\Asherah\SessionFactory;
 use InvalidArgumentException;
@@ -63,6 +64,18 @@ final class NativeRoundTripTest extends TestCase
         } finally {
             $factory->close();
         }
+    }
+
+    public function testTypedConfigRoundTrip(): void
+    {
+        Asherah::setup(
+            AsherahConfig::memoryTestDebugStatic('php-test-service', 'php-test-product')
+                ->withSessionCache(true, 2)
+        );
+
+        $ciphertext = Asherah::encryptBytes('tenant-typed', 'typed-payload');
+
+        self::assertSame('typed-payload', Asherah::decryptBytes('tenant-typed', $ciphertext));
     }
 
     public function testEmptyPartitionIsRejected(): void

@@ -27,6 +27,7 @@ final class NativeLibraryInstaller
     ];
 
     private string $baseDir;
+    private ?string $installDir = null;
     private bool $quiet = false;
     private bool $verbose = false;
 
@@ -50,6 +51,7 @@ final class NativeLibraryInstaller
                 $this->printHelp();
                 return 0;
             }
+            $this->installDir = $options['installDir'];
 
             $artifact = self::artifactForPlatform($platform);
             $destination = $this->libraryPath($platform, $artifact['library']);
@@ -131,7 +133,8 @@ final class NativeLibraryInstaller
 
     public function libraryPath(string $platform, string $libraryName): string
     {
-        return $this->baseDir . "/native/{$platform}/{$libraryName}";
+        $root = $this->installDir ?? $this->baseDir . '/native';
+        return rtrim($root, DIRECTORY_SEPARATOR) . "/{$platform}/{$libraryName}";
     }
 
     /**
@@ -141,6 +144,7 @@ final class NativeLibraryInstaller
      *   checksum: bool,
      *   force: bool,
      *   help: bool,
+     *   installDir: ?string,
      *   platform: ?string,
      *   quiet: bool,
      *   releaseBaseUrl: string,
@@ -155,6 +159,7 @@ final class NativeLibraryInstaller
             'checksum' => true,
             'force' => false,
             'help' => false,
+            'installDir' => null,
             'platform' => null,
             'quiet' => false,
             'releaseBaseUrl' => rtrim((string) (getenv('ASHERAH_PHP_RELEASE_BASE_URL') ?: self::DEFAULT_RELEASE_BASE_URL), '/'),
@@ -176,6 +181,12 @@ final class NativeLibraryInstaller
                 $options['verbose'] = true;
             } elseif ($arg === '--verify') {
                 $options['verify'] = true;
+            } elseif (str_starts_with($arg, '--install-dir=')) {
+                $installDir = substr($arg, strlen('--install-dir='));
+                if ($installDir === '') {
+                    throw new AsherahException('--install-dir must not be empty');
+                }
+                $options['installDir'] = $installDir;
             } elseif (str_starts_with($arg, '--platform=')) {
                 $options['platform'] = substr($arg, strlen('--platform='));
             } elseif (str_starts_with($arg, '--release-base-url=')) {
@@ -370,6 +381,7 @@ Options:
   --version=<tag>            Asherah release tag to download.
   --platform=<platform>      Override detected platform.
   --release-base-url=<url>   Override GitHub release download base URL.
+  --install-dir=<dir>        Stage native libraries under this directory.
   --force                   Redownload even when a native library exists.
   --verify                  Verify the installed native library only.
   --no-checksum             Skip SHA256SUMS verification.

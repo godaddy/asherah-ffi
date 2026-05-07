@@ -15,7 +15,7 @@ Usage: $(basename "$0") <mode> [options]
 Modes:
   --unit          Rust unit tests (cargo test --workspace)
   --integration   Integration tests with MySQL, Postgres, DynamoDB (Docker required)
-  --bindings      All language binding tests (Python, Node, Bun, Ruby, Go, Java, .NET)
+  --bindings      All language binding tests (Python, Node, Bun, Ruby, Go, Java, .NET, PHP)
   --interop       Cross-language interop tests
   --fuzz          Fuzz tests (requires cargo-fuzz + nightly; time-intensive)
   --sanitizers    Miri + AddressSanitizer + Valgrind
@@ -24,7 +24,7 @@ Modes:
   --all           Run everything (unit + integration + bindings + interop + fuzz + lint; includes time-intensive fuzz)
 
 Options:
-  --binding=NAME    Run only a specific binding test (python, node, bun, ruby, go, java, dotnet)
+  --binding=NAME    Run only a specific binding test (python, node, bun, ruby, go, java, dotnet, php)
   --platform=ARCH   Target platform: x64, arm64 (default: auto-detect from uname -m)
   --fuzz-time=N     Fuzz duration per target in seconds (default: 30)
 
@@ -348,6 +348,67 @@ do_bindings() {
             run_test ".NET (xUnit)" dotnet test asherah-dotnet/GoDaddy.Asherah.Encryption.slnx --nologo -p:RestoreLockedMode=true
         else
             skip ".NET tests (dotnet not installed)"
+        fi
+    fi
+
+    # PHP
+    if [ "$binding" = "all" ] || [ "$binding" = "php" ]; then
+        if [ -d asherah-php ]; then
+            if docker info >/dev/null 2>&1; then
+                local php_native_container="/work/target-php-linux/debug"
+                if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then
+                    php_native_container="/work/ci-artifacts/ffi"
+                fi
+                run_test "PHP Docker image" docker build -t asherah-php-ffi-test -f asherah-php/.Dockerfile.debian asherah-php
+                if [ -z "${BINDING_ARTIFACTS_DIR:-}" ]; then
+                    run_test "PHP native FFI build (Docker)" docker run --rm \
+                        -v "$ROOT_DIR:/work" -w /work \
+                        -e CARGO_TARGET_DIR=/work/target-php-linux \
+                        rust:1.91-bookworm cargo build -p asherah-ffi
+                fi
+                run_test "PHP Composer install" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    asherah-php-ffi-test composer install --prefer-dist --no-progress
+                run_test "PHP composer validate" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    asherah-php-ffi-test composer validate --strict
+                run_test "PHP syntax" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    asherah-php-ffi-test sh -c 'for f in src/*.php scripts/*.php tests/*.php tests/*/*.php preload.php; do php -l "$f" || exit 1; done'
+                run_test "PHPStan" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    asherah-php-ffi-test vendor/bin/phpstan analyse --memory-limit=256M
+                run_test "PHP-CS-Fixer" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    asherah-php-ffi-test vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.php --dry-run --diff --allow-unsupported-php-version=yes
+                run_test "PHP PHPUnit" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    -e ASHERAH_PHP_NATIVE="$php_native_container" \
+                    asherah-php-ffi-test vendor/bin/phpunit --no-coverage
+                run_test "PHP smoke" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    -e ASHERAH_PHP_NATIVE="$php_native_container" \
+                    asherah-php-ffi-test php tests/smoke.php
+                run_test "PHP preload smoke" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    -e ASHERAH_PHP_NATIVE="$php_native_container" \
+                    asherah-php-ffi-test php -d ffi.enable=preload -d opcache.enable_cli=1 \
+                    -d opcache.preload=/work/asherah-php/preload.php \
+                    -r 'require "vendor/autoload.php"; GoDaddy\Asherah\Native::ffi();'
+            elif command -v php >/dev/null 2>&1 && command -v composer >/dev/null 2>&1; then
+                local php_native="${ASHERAH_PHP_NATIVE:-$ROOT_DIR/target/release}"
+                run_test "PHP Composer install" bash -c "cd asherah-php && composer install --prefer-dist --no-progress"
+                run_test "PHP composer validate" bash -c "cd asherah-php && composer validate --strict"
+                run_test "PHP syntax" bash -c "cd asherah-php && for f in src/*.php scripts/*.php tests/*.php tests/*/*.php preload.php; do php -l \"\$f\" || exit 1; done"
+                run_test "PHPStan" bash -c "cd asherah-php && vendor/bin/phpstan analyse --memory-limit=256M"
+                run_test "PHP-CS-Fixer" bash -c "cd asherah-php && vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.php --dry-run --diff --allow-unsupported-php-version=yes"
+                run_test "PHP PHPUnit" bash -c "cd asherah-php && ASHERAH_PHP_NATIVE=\"$php_native\" vendor/bin/phpunit --no-coverage"
+                run_test "PHP smoke" bash -c "cd asherah-php && ASHERAH_PHP_NATIVE=\"$php_native\" php tests/smoke.php"
+            else
+                skip "PHP tests (php/composer unavailable and Docker not running)"
+            fi
+        else
+            skip "PHP tests (asherah-php not present)"
         fi
     fi
 }

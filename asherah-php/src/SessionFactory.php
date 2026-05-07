@@ -12,10 +12,11 @@ final class SessionFactory
     private ?CData $handle;
 
     /**
-     * @param array<string, mixed> $config
+     * @param array<string, mixed>|AsherahConfig $config
      */
-    public static function fromConfig(array $config): self
+    public static function fromConfig(array|AsherahConfig $config): self
     {
+        $config = $config instanceof AsherahConfig ? $config->toArray() : $config;
         $json = json_encode($config, JSON_THROW_ON_ERROR);
         $handle = Native::ffi()->asherah_factory_new_with_config($json);
         return new self($handle, 'factory creation failed');

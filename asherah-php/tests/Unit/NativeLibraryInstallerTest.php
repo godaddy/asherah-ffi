@@ -33,19 +33,9 @@ final class NativeLibraryInstallerTest extends TestCase
 
     public function testDownloadsAndVerifiesCurrentPlatformArtifact(): void
     {
-        $releaseRoot = $this->tmpDir . '/release';
         $tag = 'v9.9.9-test';
-        $assetDir = $releaseRoot . '/' . $tag;
-        mkdir($assetDir, 0o755, true);
-
         $payload = str_repeat('a', 1024 * 1024 + 1);
-        $asset = $assetDir . '/libasherah-x64.so';
-        file_put_contents($asset, $payload);
-        chmod($asset, 0o755);
-        file_put_contents(
-            $assetDir . '/SHA256SUMS',
-            hash('sha256', $payload) . "  libasherah-x64.so\n"
-        );
+        $releaseRoot = $this->createReleaseFixture($tag, $payload);
 
         $installRoot = $this->tmpDir . '/package';
         $installer = new NativeLibraryInstaller($installRoot);
@@ -66,6 +56,75 @@ final class NativeLibraryInstallerTest extends TestCase
         self::assertFileExists($installed . '.sha256');
     }
 
+    public function testInstallDirStagesOutsidePackageNativeDirectory(): void
+    {
+        $tag = 'v9.9.9-test';
+        $payload = str_repeat('b', 1024 * 1024 + 1);
+        $releaseRoot = $this->createReleaseFixture($tag, $payload);
+        $installDir = $this->tmpDir . '/external-native';
+        $installer = new NativeLibraryInstaller($this->tmpDir . '/package');
+
+        ob_start();
+        $code = $installer->run([
+            '--platform=linux-x64',
+            '--version=' . $tag,
+            '--release-base-url=file://' . $releaseRoot,
+            '--install-dir=' . $installDir,
+            '--quiet',
+        ]);
+        ob_end_clean();
+
+        self::assertSame(0, $code);
+        self::assertFileExists($installDir . '/linux-x64/libasherah_ffi.so');
+        self::assertFileDoesNotExist($this->tmpDir . '/package/native/linux-x64/libasherah_ffi.so');
+    }
+
+    public function testChecksumMismatchFails(): void
+    {
+        $tag = 'v9.9.9-test';
+        $releaseRoot = $this->createReleaseFixture($tag, str_repeat('c', 1024 * 1024 + 1), '00');
+        $installer = new NativeLibraryInstaller($this->tmpDir . '/package');
+
+        ob_start();
+        $code = $installer->run([
+            '--platform=linux-x64',
+            '--version=' . $tag,
+            '--release-base-url=file://' . $releaseRoot,
+            '--quiet',
+        ]);
+        ob_end_clean();
+
+        self::assertSame(1, $code);
+        self::assertFileDoesNotExist($this->tmpDir . '/package/native/linux-x64/libasherah_ffi.so');
+    }
+
+    public function testForceReplacesExistingNativeLibrary(): void
+    {
+        $tag = 'v9.9.9-test';
+        $oldPayload = str_repeat('d', 1024 * 1024 + 1);
+        $newPayload = str_repeat('e', 1024 * 1024 + 1);
+        $releaseRoot = $this->createReleaseFixture($tag, $newPayload);
+        $installRoot = $this->tmpDir . '/package';
+        $installed = $installRoot . '/native/linux-x64/libasherah_ffi.so';
+        mkdir(dirname($installed), 0o755, true);
+        file_put_contents($installed, $oldPayload);
+        chmod($installed, 0o755);
+
+        $installer = new NativeLibraryInstaller($installRoot);
+        ob_start();
+        $code = $installer->run([
+            '--platform=linux-x64',
+            '--version=' . $tag,
+            '--release-base-url=file://' . $releaseRoot,
+            '--force',
+            '--quiet',
+        ]);
+        ob_end_clean();
+
+        self::assertSame(0, $code);
+        self::assertSame(hash('sha256', $newPayload), hash_file('sha256', $installed));
+    }
+
     public function testVerifyFailsWhenNativeLibraryIsMissing(): void
     {
         $installer = new NativeLibraryInstaller($this->tmpDir . '/package');
@@ -75,6 +134,23 @@ final class NativeLibraryInstallerTest extends TestCase
         ob_end_clean();
 
         self::assertSame(1, $code);
+    }
+
+    private function createReleaseFixture(string $tag, string $payload, ?string $checksum = null): string
+    {
+        $releaseRoot = $this->tmpDir . '/release_' . bin2hex(random_bytes(4));
+        $assetDir = $releaseRoot . '/' . $tag;
+        mkdir($assetDir, 0o755, true);
+
+        $asset = $assetDir . '/libasherah-x64.so';
+        file_put_contents($asset, $payload);
+        chmod($asset, 0o755);
+        file_put_contents(
+            $assetDir . '/SHA256SUMS',
+            ($checksum ?? hash('sha256', $payload)) . "  libasherah-x64.so\n"
+        );
+
+        return $releaseRoot;
     }
 
     private function removeTree(string $path): void

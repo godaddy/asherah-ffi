@@ -13,14 +13,15 @@ final class Asherah
     private static bool $sessionCacheEnabled = true;
 
     /**
-     * @param array<string, mixed> $config
+     * @param array<string, mixed>|AsherahConfig $config
      */
-    public static function setup(array $config): void
+    public static function setup(array|AsherahConfig $config): void
     {
         if (self::$factory !== null) {
             throw new AsherahException('already initialized');
         }
 
+        $config = self::normalizeConfig($config);
         foreach (['ServiceName', 'ProductID', 'Metastore'] as $key) {
             if (!isset($config[$key]) || trim((string) $config[$key]) === '') {
                 throw new \InvalidArgumentException("$key is required");
@@ -57,6 +58,11 @@ final class Asherah
         return self::cachedSession($partitionId)->encryptBytes($payload);
     }
 
+    public static function encryptBytes(string $partitionId, string $payload): string
+    {
+        return self::encrypt($partitionId, $payload);
+    }
+
     public static function decrypt(string $partitionId, string $dataRowRecord): string
     {
         if (!self::$sessionCacheEnabled) {
@@ -69,6 +75,11 @@ final class Asherah
         }
 
         return self::cachedSession($partitionId)->decryptBytes($dataRowRecord);
+    }
+
+    public static function decryptBytes(string $partitionId, string $dataRowRecord): string
+    {
+        return self::decrypt($partitionId, $dataRowRecord);
     }
 
     public static function encryptString(string $partitionId, string $payload): string
@@ -114,5 +125,14 @@ final class Asherah
         }
 
         return self::$factory->getSession($partitionId);
+    }
+
+    /**
+     * @param array<string, mixed>|AsherahConfig $config
+     * @return array<string, mixed>
+     */
+    private static function normalizeConfig(array|AsherahConfig $config): array
+    {
+        return $config instanceof AsherahConfig ? $config->toArray() : $config;
     }
 }
