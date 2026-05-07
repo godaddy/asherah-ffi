@@ -157,6 +157,12 @@ interoperability coverage, and production docs are incomplete.
     string;
   - added a subprocess regression test that installs a 12 MB native fixture
     under a 16 MB PHP memory limit.
+- 2026-05-06: Follow-up convergence sweep closed a consumer package entrypoint
+  gap:
+  - fixed `scripts/install_native.php` and `preload.php` to locate the Composer
+    root autoloader when the package is installed under `vendor/godaddy/asherah`;
+  - added consumer-layout regression tests for native installation help output
+    and preload autoload resolution without a package-local `vendor/`.
 
 No known implementation gaps remain in this ExecPlan. Composer publication is
 source-only, the workflow supports GitHub Release source archive publication,
