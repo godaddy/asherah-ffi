@@ -98,6 +98,11 @@ impl AppEncryption for AppEncryptionService {
 
         let task = async move {
             let mut session: Option<Session> = None;
+            // Partition ID stashed at GetSession so subsequent
+            // encrypt/decrypt and the close path can name the tenant in
+            // their per-request debug logs without re-validating it from
+            // the request payload. Held only as long as `session`.
+            let mut partition_id: Option<String> = None;
 
             loop {
                 tokio::select! {
@@ -130,7 +135,8 @@ impl AppEncryption for AppEncryptionService {
                                 break;
                             }
                         };
-                        let response = process_request(&factory, &mut session, req).await;
+                        let response =
+                            process_request(&factory, &mut session, &mut partition_id, req).await;
                         if tx.send(Ok(response)).await.is_err() {
                             break;
                         }
@@ -145,6 +151,14 @@ impl AppEncryption for AppEncryptionService {
             drop(tx);
 
             if let Some(s) = session.take() {
+                // Mirrors the Go reference's `closing session for <partition>`
+                // log line, kept at debug to preserve the blessed
+                // info-level happy-path silence (T-finding "verbose mode
+                // emits per-request partition ID logs; tenant identifier
+                // exposure" in `docs/review-2026-05-05-findings.md`).
+                if let Some(pid) = partition_id.as_deref() {
+                    log::debug!("closing session for {pid}");
+                }
                 // PublicSession::close walks IK and session caches, frees
                 // memguard-locked pages (munlock syscalls), and acquires
                 // parking_lot locks under the hood. Running it directly on
@@ -204,8 +218,18 @@ fn sanitize_error(op: &str, err: &anyhow::Error) -> String {
 async fn process_request(
     factory: &Factory,
     session: &mut Option<Session>,
+    partition_id: &mut Option<String>,
     req: proto::SessionRequest,
 ) -> proto::SessionResponse {
+    // Per-request log lines mirror the Go reference server's
+    // `handling <op> for <partition>` wording but live at debug instead
+    // of info. The Go reference emits these at info unconditionally; we
+    // bless the incompatibility because the partition ID is a tenant
+    // identifier and operators running this sidecar at default verbosity
+    // should not inadvertently log per-tenant request activity. Set
+    // `--verbose` / `ASHERAH_VERBOSE=true` to see them. T-finding
+    // "verbose mode emits per-request partition ID logs; tenant
+    // identifier exposure" in `docs/review-2026-05-05-findings.md`.
     match req.request {
         Some(proto::session_request::Request::GetSession(get)) => {
             if session.is_some() {
@@ -214,6 +238,8 @@ async fn process_request(
             if let Err(reason) = validate_partition_id(&get.partition_id) {
                 return error_response(reason);
             }
+            log::debug!("handling get-session for {}", get.partition_id);
+            *partition_id = Some(get.partition_id.clone());
             *session = Some(factory.get_session(&get.partition_id));
             // GetSession success returns empty response (matching Go behavior)
             proto::SessionResponse { response: None }
@@ -222,6 +248,11 @@ async fn process_request(
             let Some(s) = session.as_ref() else {
                 return error_response("session not yet initialized");
             };
+            // partition_id is set in lockstep with `session` at GetSession,
+            // so this branch is only reachable when both are populated.
+            if let Some(pid) = partition_id.as_deref() {
+                log::debug!("handling encrypt for {pid}");
+            }
             match s.encrypt_async(&enc.data).await {
                 Ok(drr) => proto::SessionResponse {
                     response: Some(proto::session_response::Response::EncryptResponse(
@@ -237,6 +268,9 @@ async fn process_request(
             let Some(s) = session.as_ref() else {
                 return error_response("session not yet initialized");
             };
+            if let Some(pid) = partition_id.as_deref() {
+                log::debug!("handling decrypt for {pid}");
+            }
             match dec.data_row_record {
                 Some(proto_drr) => {
                     let drr = proto_to_drr(proto_drr);
