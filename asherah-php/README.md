@@ -69,6 +69,19 @@ library. CI currently validates Linux glibc x64. Linux musl x64 is the next
 required production target. Do not claim Windows support until DLL loading is
 tested in CI or a release dry-run.
 
+## Opt-In AWS Tests
+
+Normal CI does not require AWS credentials. To exercise PHP against real
+multi-region KMS, set `ASHERAH_PHP_AWS_KMS_REGION_MAP` to a JSON object mapping
+regions to key ARNs, and optionally set
+`ASHERAH_PHP_AWS_KMS_PREFERRED_REGION`.
+
+To exercise DynamoDB metastore region handling, set
+`ASHERAH_PHP_AWS_DYNAMODB_TABLE` and `ASHERAH_PHP_AWS_DYNAMODB_REGION`.
+Optional fields are `ASHERAH_PHP_AWS_DYNAMODB_SIGNING_REGION`,
+`ASHERAH_PHP_AWS_DYNAMODB_ENDPOINT`, and
+`ASHERAH_PHP_AWS_DYNAMODB_ENABLE_REGION_SUFFIX=1`.
+
 ## Usage
 
 Prefer the typed config API for application code:

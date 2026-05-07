@@ -67,10 +67,14 @@ interoperability coverage, and production docs are incomplete.
     `SessionCacheMaxSize`;
   - changed configuration validation failures to use `ConfigurationException`
     while preserving `InvalidArgumentException` catch compatibility.
+- 2026-05-06: Added opt-in AWS FFI integration tests for multi-region KMS and
+  DynamoDB region/signing-region round trips. These skip by default and run when
+  the documented `ASHERAH_PHP_AWS_*` environment variables and AWS credentials
+  are present.
 
 Remaining major gaps before production merge are release/publish workflow
-integration, real AWS opt-in integration tests, cross-language interop tests,
-expanded docs, and final platform support decisions.
+integration, cross-language interop tests, expanded docs, and final platform
+support decisions.
 
 ## Non-Goals
 
