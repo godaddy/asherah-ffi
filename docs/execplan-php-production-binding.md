@@ -173,10 +173,9 @@ interoperability coverage, and production docs are incomplete.
 
 No known implementation gaps remain in this ExecPlan. Composer publication is
 source-only, the workflow supports GitHub Release source archive publication,
-and manual non-dry-run publication requires an explicit release tag. Direct
-Packagist notification is intentionally not wired from this monorepo because
-Packagist reads `composer.json` from a repository root; use a subtree split or
-internal Composer repository if Packagist-style indexing is required. Native
+and manual non-dry-run publication requires an explicit release tag. The
+monorepo root now has `composer.json`, so Packagist can index
+`https://github.com/godaddy/asherah-ffi` directly as `godaddy/asherah`; native
 binaries remain external release artifacts staged by `scripts/install_native.php`
 or an equivalent image-build artifact step.
 
@@ -228,9 +227,12 @@ Validation:
 
 Acceptance criteria:
 
-- Package metadata is complete enough for source-only GitHub Release or
-  internal Composer/artifact repository publication, or for a future subtree
-  split if Packagist indexing is required.
+- Package metadata is complete enough for source-only GitHub Release,
+  internal Composer/artifact repository publication, and Packagist indexing
+  from the monorepo root.
+- Before Packagist is configured, a consumer can install from the Git repository
+  via Composer's VCS repository support and still use the explicit native
+  staging helper.
 - A clean consumer project can `composer require` the package from a local path
   and instantiate `GoDaddy\Asherah\Asherah`.
 
@@ -538,7 +540,7 @@ Implementation steps:
 2. Decide publishing target:
    - GitHub Release source archive
    - internal Composer/artifact repository
-   - Packagist only through a subtree split or separate package repository
+   - Packagist indexing of the monorepo root package
 3. Ensure release versioning maps cleanly to Asherah release tags.
 4. Add publish dry-run jobs that exactly mirror publish behavior.
 5. Ensure native staging helper can fetch assets from the same release produced

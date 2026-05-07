@@ -251,6 +251,11 @@ Recommended release model:
 
 1. Publish `godaddy/asherah` as the Composer package for PHP source,
    autoloading, tests, docs, and native-loader code.
+   The monorepo root `composer.json` lets Packagist index the main repository
+   directly while `.gitattributes` keeps Composer dist archives source-only.
+   Before Packagist is configured, consumers can point Composer at this Git
+   repository as a VCS repository and require `godaddy/asherah` from `dev-main`
+   or a tagged release that contains the root manifest.
 2. Keep PHP-supported native libraries in the same GitHub release assets
    produced by `release-cobhan.yml`. Do not create an independent Rust build
    path for PHP.

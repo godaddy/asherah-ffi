@@ -6,7 +6,9 @@ use GoDaddy\Asherah\Native;
 
 $autoloadCandidates = [
     __DIR__ . '/vendor/autoload.php',
+    dirname(__DIR__) . '/vendor/autoload.php',
     dirname(__DIR__, 2) . '/autoload.php',
+    dirname(__DIR__, 3) . '/autoload.php',
 ];
 
 foreach ($autoloadCandidates as $autoload) {

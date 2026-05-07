@@ -30,6 +30,7 @@ record.
 | Java     | `com.godaddy.asherah:appencryption` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages)   | [README](asherah-java/)   |
 | Ruby     | `asherah` on [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages)                             | [README](asherah-ruby/)   |
 | Go       | [`github.com/godaddy/asherah-ffi/asherah-go`](https://pkg.go.dev/github.com/godaddy/asherah-ffi/asherah-go) | [README](asherah-go/)     |
+| PHP      | `godaddy/asherah` on Composer                                                                               | [README](asherah-php/)    |
 
 
 ## Platform Support

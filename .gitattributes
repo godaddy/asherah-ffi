@@ -9,3 +9,61 @@
 
 # Preserve tab-indented makefiles
 Makefile linguist-language=Makefile
+
+# Keep Packagist/Composer dist archives source-only for the PHP binding. The
+# package is indexed from the monorepo root, but consumers only need root
+# package metadata plus asherah-php runtime sources and native staging helpers.
+/.cargo/** export-ignore
+/.claude/** export-ignore
+/.dockerignore export-ignore
+/.editorconfig export-ignore
+/.git export-ignore
+/.github/** export-ignore
+/.gitignore export-ignore
+/.pre-commit-config.yaml export-ignore
+/AGENTS.md export-ignore
+/BUILD_RULES.md export-ignore
+/CLAUDE.md export-ignore
+/Cargo.lock export-ignore
+/Cargo.toml export-ignore
+/PUBLISHING.md export-ignore
+/RELEASING.md export-ignore
+/asherah/** export-ignore
+/asherah-cobhan/** export-ignore
+/asherah-config/** export-ignore
+/asherah-dotnet/** export-ignore
+/asherah-ffi/** export-ignore
+/asherah-go/** export-ignore
+/asherah-java/** export-ignore
+/asherah-node/** export-ignore
+/asherah-py/** export-ignore
+/asherah-ruby/** export-ignore
+/asherah-server/** export-ignore
+/benchmarks/** export-ignore
+/docker/** export-ignore
+/docs/** export-ignore
+/e2e/** export-ignore
+/fuzz/** export-ignore
+/global.json export-ignore
+/interop/** export-ignore
+/interop-grpc/** export-ignore
+/rust-toolchain.toml export-ignore
+/samples/** export-ignore
+/scripts/** export-ignore
+/src/** export-ignore
+/target/** export-ignore
+/target-*/** export-ignore
+/valgrind.supp export-ignore
+
+/asherah-php/.Dockerfile.alpine export-ignore
+/asherah-php/.Dockerfile.debian export-ignore
+/asherah-php/.gitignore export-ignore
+/asherah-php/.php-cs-fixer.php export-ignore
+/asherah-php/.php-cs-fixer.cache export-ignore
+/asherah-php/.phpunit.cache export-ignore
+/asherah-php/composer.lock export-ignore
+/asherah-php/native/** export-ignore
+/asherah-php/phpstan.neon export-ignore
+/asherah-php/phpunit.xml export-ignore
+/asherah-php/tests/** export-ignore
+/asherah-php/vendor/** export-ignore
