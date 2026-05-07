@@ -34,6 +34,19 @@ final class PackageEntrypointTest extends TestCase
         self::assertStringContainsString('Usage: php scripts/install_native.php [options]', $result['output']);
     }
 
+    public function testInstallNativeScriptFindsRootPackageConsumerAutoload(): void
+    {
+        $consumer = $this->createConsumerPackageLayout(monorepoRootPackage: true);
+
+        $result = $this->runPhp([
+            $consumer . '/vendor/godaddy/asherah/asherah-php/scripts/install_native.php',
+            '--help',
+        ], cwd: $consumer);
+
+        self::assertSame(0, $result['exitCode'], $result['output']);
+        self::assertStringContainsString('Usage: php scripts/install_native.php [options]', $result['output']);
+    }
+
     public function testPreloadFindsConsumerRootAutoloadBeforeResolvingNativeLibrary(): void
     {
         $consumer = $this->createConsumerPackageLayout();
@@ -43,6 +56,24 @@ final class PackageEntrypointTest extends TestCase
             'ffi.enable=1',
             '-r',
             'try { require "vendor/godaddy/asherah/preload.php"; } catch (Throwable $e) { echo $e->getMessage(); exit(0); } exit(1);',
+        ], [
+            'ASHERAH_PHP_NATIVE' => $consumer . '/missing-native',
+        ], $consumer);
+
+        self::assertSame(0, $result['exitCode'], $result['output']);
+        self::assertStringContainsString('ASHERAH_PHP_NATIVE does not point to a readable native library', $result['output']);
+        self::assertStringNotContainsString('autoload', strtolower($result['output']));
+    }
+
+    public function testPreloadFindsRootPackageConsumerAutoloadBeforeResolvingNativeLibrary(): void
+    {
+        $consumer = $this->createConsumerPackageLayout(monorepoRootPackage: true);
+
+        $result = $this->runPhp([
+            '-d',
+            'ffi.enable=1',
+            '-r',
+            'try { require "vendor/godaddy/asherah/asherah-php/preload.php"; } catch (Throwable $e) { echo $e->getMessage(); exit(0); } exit(1);',
         ], [
             'ASHERAH_PHP_NATIVE' => $consumer . '/missing-native',
         ], $consumer);
@@ -76,16 +107,17 @@ final class PackageEntrypointTest extends TestCase
         self::assertSame([], glob($this->tmpDir . '/asherah_ffi_*'));
     }
 
-    private function createConsumerPackageLayout(): string
+    private function createConsumerPackageLayout(bool $monorepoRootPackage = false): string
     {
         $consumer = $this->tmpDir . '/consumer';
-        $package = $consumer . '/vendor/godaddy/asherah';
+        $package = $consumer . '/vendor/godaddy/asherah' . ($monorepoRootPackage ? '/asherah-php' : '');
         mkdir($package, 0o755, true);
         $this->copyTree(dirname(__DIR__, 2), $package);
         $this->removeTree($package . '/vendor');
         @unlink($package . '/composer.lock');
 
         $vendor = $consumer . '/vendor';
+        $sourcePrefix = $monorepoRootPackage ? 'godaddy/asherah/asherah-php/src/' : 'godaddy/asherah/src/';
         $autoload = <<<'PHP'
 <?php
 spl_autoload_register(static function (string $class): void {
@@ -94,12 +126,13 @@ spl_autoload_register(static function (string $class): void {
         return;
     }
     $relative = substr($class, strlen($prefix));
-    $file = __DIR__ . '/godaddy/asherah/src/' . str_replace('\\', '/', $relative) . '.php';
+    $file = __DIR__ . '/__SOURCE_PREFIX__' . str_replace('\\', '/', $relative) . '.php';
     if (is_file($file)) {
         require $file;
     }
 });
 PHP;
+        $autoload = str_replace('__SOURCE_PREFIX__', $sourcePrefix, $autoload);
         file_put_contents($vendor . '/autoload.php', $autoload);
 
         return $consumer;

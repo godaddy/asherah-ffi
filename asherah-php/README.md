@@ -15,15 +15,45 @@ The Composer package is source-only. It does not bundle native binaries and it
 does not rely on Git LFS or Composer dependency scripts to make native libraries
 appear during install.
 
-After configuring Composer to use the published source archive, an internal
-Composer repository, or a subtree-split package repository, install the PHP
-source with Composer and stage the one native library your image or host needs
-from an Asherah release:
+After configuring Composer to use the published source archive, Packagist, or
+an internal Composer repository, install the PHP source with Composer and stage
+the one native library your image or host needs from an Asherah release:
 
 ```bash
 composer require godaddy/asherah
-php vendor/godaddy/asherah/scripts/install_native.php --version=v0.6.64
+php vendor/godaddy/asherah/asherah-php/scripts/install_native.php --version=v0.6.64
 ```
+
+Until the package is published on Packagist, consumers can install it directly
+from the Git repository by adding a Composer VCS repository in their application
+root:
+
+```json
+{
+  "repositories": [
+    {
+      "type": "vcs",
+      "url": "https://github.com/godaddy/asherah-ffi"
+    }
+  ],
+  "require": {
+    "godaddy/asherah": "dev-main"
+  }
+}
+```
+
+Use a release tag instead of `dev-main` once tags include the root
+`composer.json`. For local testing before this branch is merged, require the
+branch explicitly:
+
+```bash
+composer require godaddy/asherah:dev-fix/php-root-composer-package
+```
+
+The VCS path is a bootstrap distribution model, not a native-binary transport.
+It still requires the explicit native staging step below. Source installs may
+clone the full monorepo; Packagist/dist installs are the preferred long-term
+consumer path once publishing is configured.
 
 The native installer downloads one platform artifact from the GitHub release,
 verifies it against `SHA256SUMS`, and stages it under `native/<platform>/`.
@@ -34,7 +64,7 @@ Recommended container pattern:
 
 ```dockerfile
 RUN composer install --no-dev --optimize-autoloader
-RUN php vendor/godaddy/asherah/scripts/install_native.php --version=v0.6.64
+RUN php vendor/godaddy/asherah/asherah-php/scripts/install_native.php --version=v0.6.64
 ENV ASHERAH_PHP_NATIVE=/app/vendor/godaddy/asherah/native/linux-x64
 ```
 
@@ -47,10 +77,10 @@ production path:
 {
   "scripts": {
     "post-install-cmd": [
-      "@php vendor/godaddy/asherah/scripts/install_native.php"
+      "@php vendor/godaddy/asherah/asherah-php/scripts/install_native.php"
     ],
     "post-update-cmd": [
-      "@php vendor/godaddy/asherah/scripts/install_native.php"
+      "@php vendor/godaddy/asherah/asherah-php/scripts/install_native.php"
     ]
   }
 }
@@ -181,7 +211,7 @@ this package's `preload.php`:
 
 ```ini
 ffi.enable=preload
-opcache.preload=/path/to/vendor/godaddy/asherah/preload.php
+opcache.preload=/path/to/vendor/godaddy/asherah/asherah-php/preload.php
 ```
 
 Runtime code first uses `FFI::scope('ASHERAH')` from preload mode and falls
@@ -211,14 +241,26 @@ with `scripts/install_native.php` or an equivalent artifact-copy step.
 This keeps Composer installs small and avoids Git LFS behavior that Composer
 does not handle reliably for large native assets.
 
-`.github/workflows/publish-php.yml` validates the Composer source archive,
+The repository root `composer.json` exposes `godaddy/asherah` for Packagist
+indexing without moving files out of the monorepo. `.gitattributes` keeps
+Composer dist archives source-only by exporting the root package metadata and
+the `asherah-php` runtime files while excluding unrelated Rust crates, other
+bindings, generated artifacts, tests, and native binaries.
+
+To publish on Packagist, register or sign in to Packagist, submit
+`https://github.com/godaddy/asherah-ffi`, and configure the GitHub integration
+or webhook so Packagist refreshes when release tags are pushed. The package name
+comes from the root `composer.json`: `godaddy/asherah`.
+
+Before Packagist is configured, applications can use Composer's VCS repository
+support to consume this Git repository directly. That is expected to work with
+the root `composer.json`, but it is heavier than Packagist/dist installs and
+does not change the source-only package model.
+
+`.github/workflows/publish-php.yml` also validates the Composer source archive,
 attaches the source archive to a GitHub release, and requires an explicit tag
-when manually run in non-dry-run mode. A direct Packagist notify is intentionally
-not wired here because Packagist reads `composer.json` from a repository root,
-while this package lives under `asherah-php/` in a monorepo. Use a subtree split
-or internal Composer repository if Packagist-style indexing is required.
-Native libraries remain the existing release assets consumed by
-`scripts/install_native.php`.
+when manually run in non-dry-run mode. Native libraries remain the existing
+release assets consumed by `scripts/install_native.php`.
 
 ## Security Notes
 
