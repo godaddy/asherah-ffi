@@ -374,7 +374,7 @@ do_bindings() {
                     asherah-php-ffi-test composer validate --strict
                 run_test "PHP syntax" docker run --rm \
                     -v "$ROOT_DIR:/work" -w /work/asherah-php \
-                    asherah-php-ffi-test sh -c 'for f in src/*.php scripts/*.php tests/*.php tests/*/*.php preload.php; do php -l "$f" || exit 1; done'
+                    asherah-php-ffi-test sh -c 'for f in src/*.php scripts/*.php tests/*.php tests/*/*.php preload.php ../interop/php/*.php; do php -l "$f" || exit 1; done'
                 run_test "PHPStan" docker run --rm \
                     -v "$ROOT_DIR:/work" -w /work/asherah-php \
                     asherah-php-ffi-test vendor/bin/phpstan analyse --memory-limit=256M
@@ -408,7 +408,7 @@ do_bindings() {
                 local php_native="${ASHERAH_PHP_NATIVE:-$ROOT_DIR/target/release}"
                 run_test "PHP Composer install" bash -c "cd asherah-php && composer install --prefer-dist --no-progress"
                 run_test "PHP composer validate" bash -c "cd asherah-php && composer validate --strict"
-                run_test "PHP syntax" bash -c "cd asherah-php && for f in src/*.php scripts/*.php tests/*.php tests/*/*.php preload.php; do php -l \"\$f\" || exit 1; done"
+                run_test "PHP syntax" bash -c "cd asherah-php && for f in src/*.php scripts/*.php tests/*.php tests/*/*.php preload.php ../interop/php/*.php; do php -l \"\$f\" || exit 1; done"
                 run_test "PHPStan" bash -c "cd asherah-php && vendor/bin/phpstan analyse --memory-limit=256M"
                 run_test "PHP-CS-Fixer" bash -c "cd asherah-php && vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.php --dry-run --diff --allow-unsupported-php-version=yes"
                 run_test "PHP PHPUnit" bash -c "cd asherah-php && ASHERAH_PHP_NATIVE=\"$php_native\" vendor/bin/phpunit --no-coverage"
