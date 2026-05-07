@@ -88,18 +88,26 @@ struct Cli {
     #[arg(long = "socket", env = "ASHERAH_SOCKET")]
     socket: Option<String>,
 
-    /// File mode (octal) applied to the listening Unix socket after bind. The
-    /// default `0660` restricts access to the owner and group; set explicitly
-    /// to a wider mode (e.g. `0666`) only when you understand the local
-    /// trust model. Any local UID with read/write on this socket can ask the
+    /// File mode (octal) applied to the listening Unix socket after bind.
+    /// When unset, the socket inherits the process umask (typically
+    /// `0o666`), matching the Go reference server which does not call
+    /// `chmod` on its socket. Operators on multi-tenant hosts who want
+    /// the socket restricted should set this explicitly (e.g. `0660`)
+    /// — any local UID with read/write on this socket can ask the
     /// sidecar to encrypt or decrypt arbitrary records.
+    ///
+    /// Drop-in compatibility: the previous default of `0660` was a
+    /// security hardening from the 2026-05-05 review that broke
+    /// deployments where the sidecar runs under a different UID than
+    /// the client (e.g. asherah-server under one supervisord-owned
+    /// uid, Apache PHP under `APACHE_RUN_USER`). The Go reference
+    /// did not tighten, so the hardening was a unilateral divergence.
     #[arg(
         long,
-        default_value = "0660",
         value_parser = parse_octal_mode,
         env = "ASHERAH_SOCKET_MODE"
     )]
-    socket_mode: u32,
+    socket_mode: Option<u32>,
 
     /// The name of this service
     #[arg(long, env = "ASHERAH_SERVICE_NAME")]
@@ -393,25 +401,28 @@ async fn main() -> Result<()> {
     let listener =
         tokio::net::UnixListener::bind(&socket_path).context("failed to bind Unix socket")?;
 
-    // The socket inherits umask-dependent permissions (typically 0o666). For a
-    // sidecar holding KMS access and decrypted plaintext, that lets any local
-    // UID encrypt/decrypt. Tighten to the configured mode immediately after
-    // bind. Permission tightening is best-effort on non-Unix targets.
+    // Only tighten permissions when the operator explicitly opts in via
+    // `--socket-mode` / `ASHERAH_SOCKET_MODE`. The Go reference server
+    // does not chmod its socket (it inherits umask-default permissions,
+    // typically 0o666); tightening unconditionally broke drop-in
+    // deployments where the sidecar runs under a different UID than the
+    // gRPC client (e.g. supervisord-managed asherah-server vs Apache PHP
+    // under APACHE_RUN_USER). Operators on multi-tenant hosts who want
+    // the socket restricted should set the mode explicitly.
     #[cfg(unix)]
-    {
+    if let Some(mode) = cli.socket_mode {
         use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(cli.socket_mode);
-        std::fs::set_permissions(&socket_path, perms).with_context(|| {
-            format!(
-                "failed to set socket mode {:o} on '{}'",
-                cli.socket_mode, socket_path
-            )
-        })?;
+        let perms = std::fs::Permissions::from_mode(mode);
+        std::fs::set_permissions(&socket_path, perms)
+            .with_context(|| format!("failed to set socket mode {mode:o} on '{socket_path}'"))?;
     }
 
     let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener);
 
-    log::info!("listening on {} (mode {:#o})", socket_path, cli.socket_mode);
+    match cli.socket_mode {
+        Some(mode) => log::info!("listening on {socket_path} (mode {mode:#o})"),
+        None => log::info!("listening on {socket_path} (mode inherited from umask)"),
+    }
 
     // Spawn a task that listens for SIGTERM/SIGINT and broadcasts shutdown.
     // shutdown_signal returns a Result so signal-registration failures (a
