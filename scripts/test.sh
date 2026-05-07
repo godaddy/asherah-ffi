@@ -15,7 +15,7 @@ Usage: $(basename "$0") <mode> [options]
 Modes:
   --unit          Rust unit tests (cargo test --workspace)
   --integration   Integration tests with MySQL, Postgres, DynamoDB (Docker required)
-  --bindings      All language binding tests (Python, Node, Bun, Ruby, Go, Java, .NET)
+  --bindings      All language binding tests (Python, Node, Bun, Ruby, Go, Java, .NET, PHP)
   --interop       Cross-language interop tests
   --fuzz          Fuzz tests (requires cargo-fuzz + nightly; time-intensive)
   --sanitizers    Miri + AddressSanitizer + Valgrind
@@ -24,7 +24,7 @@ Modes:
   --all           Run everything (unit + integration + bindings + interop + fuzz + lint; includes time-intensive fuzz)
 
 Options:
-  --binding=NAME    Run only a specific binding test (python, node, bun, ruby, go, java, dotnet)
+  --binding=NAME    Run only a specific binding test (python, node, bun, ruby, go, java, dotnet, php)
   --platform=ARCH   Target platform: x64, arm64 (default: auto-detect from uname -m)
   --fuzz-time=N     Fuzz duration per target in seconds (default: 30)
 
@@ -65,6 +65,15 @@ run_test() {
     fi
 }
 
+container_path_for_work_mount() {
+    local path="$1"
+    case "$path" in
+        "$ROOT_DIR"/*) printf '/work/%s\n' "${path#"$ROOT_DIR"/}" ;;
+        "$ROOT_DIR")   printf '/work\n' ;;
+        *)             return 1 ;;
+    esac
+}
+
 summary() {
     echo ""
     echo "========================================"
@@ -100,15 +109,17 @@ setup_ci_artifacts() {
 
     # Set up target directories matching what cargo would produce
     local release_dir="$ROOT_DIR/target/release"
+    local release_rel="target/release"
     if [ -n "$target_triple" ]; then
         release_dir="$ROOT_DIR/target/$target_triple/release"
+        release_rel="target/$target_triple/release"
     fi
     mkdir -p "$release_dir" "$ROOT_DIR/target/release" "$ROOT_DIR/target/debug"
 
     # Stage FFI shared library
-    for f in "$ad"/ffi/libasherah_ffi.*; do
-        [ -e "$f" ] && cp "$f" "$release_dir/"
-    done
+    while IFS= read -r -d '' f; do
+        cp "$f" "$release_dir/"
+    done < <(find "$ad" \( -type f -o -type l \) -name 'libasherah_ffi.*' ! -path '*/deps/*' -print0 2>/dev/null)
 
     # Stage Java JNI library
     for f in "$ad"/java/libasherah_java.*; do
@@ -140,6 +151,8 @@ setup_ci_artifacts() {
     export ASHERAH_DOTNET_NATIVE="$release_dir"
     export ASHERAH_RUBY_NATIVE="$release_dir"
     export ASHERAH_GO_NATIVE="$release_dir"
+    export ASHERAH_PHP_NATIVE="$release_dir"
+    export ASHERAH_PHP_NATIVE_CONTAINER="/work/$release_rel"
     export LD_LIBRARY_PATH="$release_dir:${LD_LIBRARY_PATH:-}"
 }
 
@@ -348,6 +361,137 @@ do_bindings() {
             run_test ".NET (xUnit)" dotnet test asherah-dotnet/GoDaddy.Asherah.Encryption.slnx --nologo -p:RestoreLockedMode=true
         else
             skip ".NET tests (dotnet not installed)"
+        fi
+    fi
+
+    # PHP
+    if [ "$binding" = "all" ] || [ "$binding" = "php" ]; then
+        if [ -d asherah-php ]; then
+            if docker info >/dev/null 2>&1; then
+                local php_native_container="/work/target-php-linux/debug"
+                local php_image_tag="${PHP_IMAGE_TAG:-php:8.4-cli}"
+                local php_aws_env=(
+                    -e AWS_ACCESS_KEY_ID
+                    -e AWS_SECRET_ACCESS_KEY
+                    -e AWS_SESSION_TOKEN
+                    -e AWS_REGION
+                    -e AWS_DEFAULT_REGION
+                    -e AWS_PROFILE
+                    -e AWS_SHARED_CREDENTIALS_FILE
+                    -e AWS_CONFIG_FILE
+                    -e ASHERAH_PHP_AWS_REQUIRE_INTEGRATION
+                    -e ASHERAH_PHP_AWS_KMS_REGION_MAP
+                    -e ASHERAH_PHP_AWS_KMS_PREFERRED_REGION
+                    -e ASHERAH_PHP_AWS_DYNAMODB_TABLE
+                    -e ASHERAH_PHP_AWS_DYNAMODB_REGION
+                    -e ASHERAH_PHP_AWS_DYNAMODB_SIGNING_REGION
+                    -e ASHERAH_PHP_AWS_DYNAMODB_ENDPOINT
+                    -e ASHERAH_PHP_AWS_DYNAMODB_ENABLE_REGION_SUFFIX
+                )
+                if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then
+                    local php_native_host=""
+                    for candidate in \
+                        "$BINDING_ARTIFACTS_DIR/ffi/libasherah_ffi.so" \
+                        "$BINDING_ARTIFACTS_DIR/libasherah_ffi.so" \
+                        "$ASHERAH_PHP_NATIVE/libasherah_ffi.so"
+                    do
+                        if [ -r "$candidate" ]; then
+                            php_native_host="$candidate"
+                            break
+                        fi
+                    done
+                    if [ -z "$php_native_host" ]; then
+                        php_native_host=$(find "$BINDING_ARTIFACTS_DIR" \( -type f -o -type l \) -name 'libasherah_ffi.so' -path '*/ffi/*' -print -quit 2>/dev/null || true)
+                    fi
+                    if [ -z "$php_native_host" ]; then
+                        php_native_host=$(find "$BINDING_ARTIFACTS_DIR" \( -type f -o -type l \) -name 'libasherah_ffi.so' ! -path '*/deps/*' -print -quit 2>/dev/null || true)
+                    fi
+                    if [ -n "$php_native_host" ]; then
+                        chmod +x "$php_native_host" 2>/dev/null || true
+                    fi
+                    if [ -n "$php_native_host" ] && container_path_for_work_mount "$php_native_host" >/dev/null; then
+                        php_native_container="$(container_path_for_work_mount "$php_native_host")"
+                    else
+                        php_native_container="${ASHERAH_PHP_NATIVE_CONTAINER:-/work/target/release}/libasherah_ffi.so"
+                    fi
+                    log "Using PHP native library at $php_native_container"
+                fi
+                run_test "PHP Docker image ($php_image_tag)" docker build \
+                    --build-arg IMAGE_TAG="$php_image_tag" \
+                    -t asherah-php-ffi-test \
+                    -f asherah-php/.Dockerfile.debian \
+                    asherah-php
+                if [ -z "${BINDING_ARTIFACTS_DIR:-}" ]; then
+                    run_test "PHP native FFI build (Docker)" docker run --rm \
+                        -v "$ROOT_DIR:/work" -w /work \
+                        -e CARGO_TARGET_DIR=/work/target-php-linux \
+                        rust:1.91-bookworm cargo build -p asherah-ffi
+                fi
+                run_test "PHP no-vendor smoke" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work \
+                    -e ASHERAH_PHP_NATIVE="$php_native_container" \
+                    asherah-php-ffi-test sh -c 'set -e; rm -rf /tmp/asherah-php-no-vendor; cp -a /work/asherah-php /tmp/asherah-php-no-vendor; rm -rf /tmp/asherah-php-no-vendor/vendor /tmp/asherah-php-no-vendor/composer.lock; cd /tmp/asherah-php-no-vendor; php tests/smoke.php'
+                run_test "PHP source archive lifecycle" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work \
+                    asherah-php-ffi-test sh -c 'set -e; before="$(find /work/asherah-php -maxdepth 1 \( -name composer.lock -o -name vendor -o -name native \) -print | sort)"; /work/scripts/build-php-source-archive.sh /tmp/asherah-php-dist >/tmp/asherah-php-archive.log; after="$(find /work/asherah-php -maxdepth 1 \( -name composer.lock -o -name vendor -o -name native \) -print | sort)"; test "$before" = "$after"'
+                run_test "PHP Composer install" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    asherah-php-ffi-test sh -c 'rm -f composer.lock && composer install --prefer-dist --no-progress'
+                run_test "PHP composer validate" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    asherah-php-ffi-test composer validate --strict
+                run_test "PHP syntax" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    asherah-php-ffi-test sh -c 'for f in src/*.php scripts/*.php tests/*.php tests/*/*.php preload.php ../interop/php/*.php; do php -l "$f" || exit 1; done'
+                run_test "PHPStan" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    asherah-php-ffi-test vendor/bin/phpstan analyse --memory-limit=256M
+                run_test "PHP-CS-Fixer" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    asherah-php-ffi-test vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.php --dry-run --diff --allow-unsupported-php-version=yes
+                run_test "PHP PHPUnit" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    "${php_aws_env[@]}" \
+                    -e ASHERAH_PHP_NATIVE="$php_native_container" \
+                    asherah-php-ffi-test vendor/bin/phpunit --no-coverage
+                run_test "PHP smoke" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    -e ASHERAH_PHP_NATIVE="$php_native_container" \
+                    asherah-php-ffi-test php tests/smoke.php
+                run_test "PHP interop probes" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work \
+                    -e ASHERAH_PHP_NATIVE="$php_native_container" \
+                    -e ASHERAH_PHP_INTEROP_SQLITE=/tmp/asherah-php-interop.db \
+                    asherah-php-ffi-test sh -c 'set -e; rm -f /tmp/asherah-php-interop.db; cd /work/asherah-php; rm -f composer.lock; composer install --prefer-dist --no-progress >/dev/null; cd /work; DRR=$(php interop/php/encrypt.php tenant-interop php-interop-payload); OUT=$(php interop/php/decrypt.php tenant-interop "$DRR"); test "$OUT" = php-interop-payload'
+                run_test "PHP consumer smoke" docker run --rm \
+                    -v "$ROOT_DIR:/work" -w /work \
+                    -e ASHERAH_PHP_NATIVE="$php_native_container" \
+                    asherah-php-ffi-test sh -c 'set -e; rm -rf /tmp/asherah-php-consumer; mkdir /tmp/asherah-php-consumer; cd /tmp/asherah-php-consumer; composer init --name asherah/consumer-smoke --no-interaction >/dev/null; composer config repositories.asherah path /work/asherah-php; composer config minimum-stability dev; composer config prefer-stable true; composer require godaddy/asherah:* --no-interaction --no-progress >/dev/null; php vendor/godaddy/asherah/tests/consumer_smoke.php'
+                run_test "PHP preload smoke" docker run --rm \
+                    --user "$(id -u):$(id -g)" \
+                    -v "$ROOT_DIR:/work" -w /work/asherah-php \
+                    -e ASHERAH_PHP_NATIVE="$php_native_container" \
+                    asherah-php-ffi-test php -d ffi.enable=preload -d opcache.enable_cli=1 \
+                    -d opcache.preload=/work/asherah-php/preload.php \
+                    -r 'require "vendor/autoload.php"; GoDaddy\Asherah\Native::ffi();'
+            elif command -v php >/dev/null 2>&1 && command -v composer >/dev/null 2>&1; then
+                local php_native="${ASHERAH_PHP_NATIVE:-$ROOT_DIR/target/release}"
+                run_test "PHP no-vendor smoke" bash -c "rm -rf /tmp/asherah-php-no-vendor && cp -a \"$ROOT_DIR/asherah-php\" /tmp/asherah-php-no-vendor && rm -rf /tmp/asherah-php-no-vendor/vendor /tmp/asherah-php-no-vendor/composer.lock && cd /tmp/asherah-php-no-vendor && ASHERAH_PHP_NATIVE=\"$php_native\" php tests/smoke.php"
+                run_test "PHP source archive lifecycle" bash -c "before=\$(find \"$ROOT_DIR/asherah-php\" -maxdepth 1 \\( -name composer.lock -o -name vendor -o -name native \\) -print | sort) && \"$ROOT_DIR/scripts/build-php-source-archive.sh\" /tmp/asherah-php-dist >/tmp/asherah-php-archive.log && after=\$(find \"$ROOT_DIR/asherah-php\" -maxdepth 1 \\( -name composer.lock -o -name vendor -o -name native \\) -print | sort) && test \"\$before\" = \"\$after\""
+                run_test "PHP Composer install" bash -c "cd asherah-php && rm -f composer.lock && composer install --prefer-dist --no-progress"
+                run_test "PHP composer validate" bash -c "cd asherah-php && composer validate --strict"
+                run_test "PHP syntax" bash -c "cd asherah-php && for f in src/*.php scripts/*.php tests/*.php tests/*/*.php preload.php ../interop/php/*.php; do php -l \"\$f\" || exit 1; done"
+                run_test "PHPStan" bash -c "cd asherah-php && vendor/bin/phpstan analyse --memory-limit=256M"
+                run_test "PHP-CS-Fixer" bash -c "cd asherah-php && vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.php --dry-run --diff --allow-unsupported-php-version=yes"
+                run_test "PHP PHPUnit" bash -c "cd asherah-php && ASHERAH_PHP_NATIVE=\"$php_native\" vendor/bin/phpunit --no-coverage"
+                run_test "PHP smoke" bash -c "cd asherah-php && ASHERAH_PHP_NATIVE=\"$php_native\" php tests/smoke.php"
+                run_test "PHP interop probes" bash -c "rm -f /tmp/asherah-php-interop.db && cd asherah-php && rm -f composer.lock && composer install --prefer-dist --no-progress >/dev/null && cd \"$ROOT_DIR\" && DRR=\$(ASHERAH_PHP_NATIVE=\"$php_native\" ASHERAH_PHP_INTEROP_SQLITE=/tmp/asherah-php-interop.db php interop/php/encrypt.php tenant-interop php-interop-payload) && OUT=\$(ASHERAH_PHP_NATIVE=\"$php_native\" ASHERAH_PHP_INTEROP_SQLITE=/tmp/asherah-php-interop.db php interop/php/decrypt.php tenant-interop \"\$DRR\") && test \"\$OUT\" = php-interop-payload"
+                run_test "PHP consumer smoke" bash -c "rm -rf /tmp/asherah-php-consumer && mkdir /tmp/asherah-php-consumer && cd /tmp/asherah-php-consumer && composer init --name asherah/consumer-smoke --no-interaction >/dev/null && composer config repositories.asherah path \"$ROOT_DIR/asherah-php\" && composer config minimum-stability dev && composer config prefer-stable true && composer require godaddy/asherah:* --no-interaction --no-progress >/dev/null && ASHERAH_PHP_NATIVE=\"$php_native\" php vendor/godaddy/asherah/tests/consumer_smoke.php"
+            else
+                skip "PHP tests (php/composer unavailable and Docker not running)"
+            fi
+        else
+            skip "PHP tests (asherah-php not present)"
         fi
     fi
 }

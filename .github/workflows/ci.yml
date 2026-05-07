@@ -674,7 +674,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        binding: [python, node, bun, ruby, go, java, dotnet]
+        binding: [python, node, bun, ruby, go, java, dotnet, php]
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Download all x86_64 binding artifacts
@@ -710,6 +710,32 @@ jobs:
         env:
           BINDING_ARTIFACTS_DIR: ${{ github.workspace }}/ci-artifacts
         run: scripts/test.sh --bindings --binding=${{ matrix.binding }}
+
+  php-binding-supported-minors:
+    permissions:
+      contents: read
+    runs-on: ubuntu-22.04
+    needs: build-ffi-x86_64
+    strategy:
+      fail-fast: false
+      matrix:
+        php-image:
+          - php:8.1-cli
+          - php:8.2-cli
+          - php:8.3-cli
+          - php:8.4-cli
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Download x86_64 FFI artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: bindings-linux-x86_64-part-ffi
+          path: ${{ github.workspace }}/ci-artifacts
+      - name: Run PHP binding tests on ${{ matrix.php-image }}
+        env:
+          BINDING_ARTIFACTS_DIR: ${{ github.workspace }}/ci-artifacts
+          PHP_IMAGE_TAG: ${{ matrix.php-image }}
+        run: scripts/test.sh --bindings --binding=php
 
   interop-tests:
     runs-on: ubuntu-22.04
@@ -1695,6 +1721,88 @@ jobs:
           done
           ls /tmp/*.gem | grep -q 'x86_64-linux\.gem'      || { echo "ERROR: glibc gem missing"; exit 1; }
           ls /tmp/*.gem | grep -q 'x86_64-linux-musl\.gem' || { echo "ERROR: musl gem missing";  exit 1; }
+
+  publish-dry-run-php-source:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    needs: build-ffi-x86_64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        with:
+          targets: x86_64-unknown-linux-musl
+      - name: Download x86_64 FFI artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: bindings-linux-x86_64-part-ffi
+          path: ci-artifacts
+      - name: Normalize FFI artifact permissions
+        run: chmod +x ci-artifacts/ffi/libasherah_ffi.so
+      - name: Install Zig (with retries)
+        shell: bash
+        run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
+      - uses: taiki-e/install-action@481c34c1cf3a84c68b5e46f4eccfc82af798415a # v2
+        with:
+          tool: cargo-zigbuild
+      - name: Setup musl OpenSSL
+        shell: bash
+        run: |
+          ARCH=x86_64 source "$GITHUB_WORKSPACE/scripts/download-musl-openssl.sh"
+          {
+            echo "OPENSSL_DIR=$OPENSSL_DIR"
+            echo "OPENSSL_STATIC=$OPENSSL_STATIC"
+            echo "OPENSSL_NO_VENDOR=$OPENSSL_NO_VENDOR"
+          } >> "$GITHUB_ENV"
+      - name: Build PHP test image
+        run: docker build -t asherah-php-ffi-test -f asherah-php/.Dockerfile.debian asherah-php
+      - name: Build PHP Alpine test image
+        run: docker build -t asherah-php-ffi-test-alpine -f asherah-php/.Dockerfile.alpine asherah-php
+      - name: Build musl FFI for PHP Alpine smoke
+        env:
+          RUSTFLAGS: "-C target-feature=-crt-static"
+        run: cargo zigbuild --release -p asherah-ffi --target x86_64-unknown-linux-musl
+      - name: Build source-only Composer archive
+        run: |
+          docker run --rm -v "$PWD":/work -w /work/asherah-php asherah-php-ffi-test sh -lc '
+            set -e
+            /work/scripts/build-php-source-archive.sh /tmp/asherah-php-dist
+            test ! -e /work/asherah-php/composer.lock
+            test ! -d /work/asherah-php/vendor
+            test ! -d /work/asherah-php/native
+          '
+      - name: Consumer source install smoke
+        run: |
+          docker run --rm -v "$PWD":/work -w /work \
+            -e ASHERAH_PHP_NATIVE=/work/ci-artifacts/ffi \
+            asherah-php-ffi-test sh -lc '
+              set -e
+              rm -rf /tmp/asherah-php-consumer
+              mkdir /tmp/asherah-php-consumer
+              cd /tmp/asherah-php-consumer
+              composer init --name asherah/consumer-smoke --no-interaction >/dev/null
+              composer config repositories.asherah path /work/asherah-php
+              composer config minimum-stability dev
+              composer config prefer-stable true
+              composer require godaddy/asherah:* --no-interaction --no-progress >/dev/null
+              php vendor/godaddy/asherah/tests/consumer_smoke.php
+            '
+      - name: Consumer source install smoke (musl)
+        run: |
+          docker run --rm -v "$PWD":/work -w /work \
+            -e ASHERAH_PHP_NATIVE=/work/target/x86_64-unknown-linux-musl/release \
+            asherah-php-ffi-test-alpine sh -lc '
+              set -e
+              rm -rf /tmp/asherah-php-consumer
+              mkdir /tmp/asherah-php-consumer
+              cd /tmp/asherah-php-consumer
+              composer init --name asherah/consumer-smoke --no-interaction >/dev/null
+              composer config repositories.asherah path /work/asherah-php
+              composer config minimum-stability dev
+              composer config prefer-stable true
+              composer require godaddy/asherah:* --no-interaction --no-progress >/dev/null
+              php vendor/godaddy/asherah/tests/consumer_smoke.php
+            '
 
   publish-dry-run-java-jar:
     runs-on: ubuntu-latest

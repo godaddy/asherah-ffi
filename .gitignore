@@ -22,6 +22,7 @@ benchmarks/grpc-bench/grpc-bench
 
 # Build outputs
 /target/
+/target-php-linux/
 **/target/
 artifacts/
 .cache/

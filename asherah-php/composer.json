@@ -1,0 +1,68 @@
+{
+    "$schema": "https://getcomposer.org/schema.json",
+    "name": "godaddy/asherah",
+    "description": "PHP FFI bindings for Asherah envelope encryption.",
+    "type": "library",
+    "license": "Apache-2.0",
+    "authors": [
+        {
+            "name": "Jay Gowdy"
+        }
+    ],
+    "homepage": "https://github.com/godaddy/asherah-ffi",
+    "keywords": [
+        "asherah",
+        "encryption",
+        "envelope-encryption",
+        "ffi",
+        "kms"
+    ],
+    "support": {
+        "issues": "https://github.com/godaddy/asherah-ffi/issues",
+        "source": "https://github.com/godaddy/asherah-ffi"
+    },
+    "require": {
+        "php": ">=8.1",
+        "ext-ffi": "*",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.40",
+        "phpstan/phpstan": "^1.10",
+        "phpunit/phpunit": "^10.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "GoDaddy\\Asherah\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "GoDaddy\\Asherah\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "download-native": "php scripts/install_native.php",
+        "verify-native": "php scripts/install_native.php --verify",
+        "test": "vendor/bin/phpunit",
+        "test:smoke": "php tests/smoke.php",
+        "phpstan": "vendor/bin/phpstan analyse --memory-limit=256M",
+        "cs-check": "vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.php --dry-run --diff --allow-unsupported-php-version=yes",
+        "cs-fix": "vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.php --diff --allow-unsupported-php-version=yes"
+    },
+    "config": {
+        "sort-packages": true,
+        "optimize-autoloader": true
+    },
+    "archive": {
+        "exclude": [
+            "/.php-cs-fixer.cache",
+            "/.phpunit.cache",
+            "/composer.lock",
+            "/native",
+            "/vendor"
+        ]
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

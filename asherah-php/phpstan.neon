@@ -1,0 +1,9 @@
+parameters:
+    level: 6
+    paths:
+        - src
+        - tests
+    treatPhpDocTypesAsCertain: false
+    ignoreErrors:
+        - '#Access to an undefined property FFI\\CData::\$[a-zA-Z_]+#'
+        - '#Call to an undefined method FFI::[a-zA-Z_]+\(\)#'
