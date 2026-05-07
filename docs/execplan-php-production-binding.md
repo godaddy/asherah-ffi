@@ -121,6 +121,16 @@ interoperability coverage, and production docs are incomplete.
     skipping and that Composer metadata preserves the source-only package
     lifecycle, explicit native staging commands, archive exclusions, runtime
     requirements, and author metadata.
+- 2026-05-06: Additional convergence sweep closed installer and typed-config
+  edge cases:
+  - disabled automatic PHP HTTP redirects in the native installer and now
+    re-evaluates token eligibility on each redirect target;
+  - added coverage that GitHub release redirect asset hosts do not receive the
+    installer token;
+  - made typed KMS region maps reject non-string key ARN values with
+    `ConfigurationException`;
+  - made the FFI-unavailable negative test skip only when the local PHP binary
+    still exposes FFI under `php -n`.
 
 No known implementation gaps remain in this ExecPlan. Composer publication is
 source-only, the workflow supports GitHub Release source archive publication,

@@ -197,6 +197,24 @@ final class AsherahValidationTest extends TestCase
         );
     }
 
+    public function testTypedKmsRegionMapRejectsNonStringKeyArns(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('RegionMap entry for us-west-2 must be a string');
+
+        $decoded = json_decode('{"us-west-2":123}', true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($decoded);
+        /** @var array<string, string> $regionMap */
+        $regionMap = $decoded;
+
+        new AsherahConfig(
+            'service',
+            'product',
+            MetastoreConfig::memory(),
+            KmsConfig::aws(regionMap: $regionMap)
+        );
+    }
+
     /**
      * @param array<string, mixed> $overrides
      * @return array<string, mixed>

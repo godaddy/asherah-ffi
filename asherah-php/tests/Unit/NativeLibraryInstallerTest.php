@@ -87,6 +87,26 @@ final class NativeLibraryInstallerTest extends TestCase
         }
     }
 
+    public function testGitHubTokenIsNotSentToRedirectAssetHosts(): void
+    {
+        $restore = $this->setEnv(['GITHUB_TOKEN' => 'secret-token']);
+        try {
+            $headers = $this->headersForUrl('https://objects.githubusercontent.com/github-production-release-asset/foo');
+
+            self::assertStringNotContainsString('Authorization:', $headers);
+        } finally {
+            $restore();
+        }
+    }
+
+    public function testAutomaticRedirectsAreDisabledSoRedirectHostsAreReevaluated(): void
+    {
+        $options = $this->contextOptionsForUrl('https://github.com/godaddy/asherah-ffi/releases/download/v1/libasherah-x64.so');
+
+        self::assertSame(0, $options['http']['follow_location']);
+        self::assertSame(0, $options['http']['max_redirects']);
+    }
+
     public function testDownloadsAndVerifiesCurrentPlatformArtifact(): void
     {
         $tag = 'v9.9.9-test';
@@ -337,14 +357,24 @@ final class NativeLibraryInstallerTest extends TestCase
 
     private function headersForUrl(string $url): string
     {
+        $options = $this->contextOptionsForUrl($url);
+        self::assertIsString($options['http']['header']);
+        return $options['http']['header'];
+    }
+
+    /**
+     * @return array{http: array<string, mixed>}
+     */
+    private function contextOptionsForUrl(string $url): array
+    {
         $installer = new NativeLibraryInstaller($this->tmpDir . '/package');
         $method = new \ReflectionMethod(NativeLibraryInstaller::class, 'streamContext');
         $context = $method->invoke($installer, $url);
         self::assertIsResource($context);
 
         $options = stream_context_get_options($context);
-        self::assertIsString($options['http']['header']);
-        return $options['http']['header'];
+        self::assertIsArray($options['http']);
+        return $options;
     }
 
     /**

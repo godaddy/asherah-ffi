@@ -51,6 +51,9 @@ final class KmsConfig
                     throw new ConfigurationException('RegionMap regions must be strings');
                 }
                 AsherahConfig::requireNonEmpty($mapRegion, 'RegionMap region');
+                if (!is_string($keyArn)) {
+                    throw new ConfigurationException("RegionMap entry for {$mapRegion} must be a string");
+                }
                 AsherahConfig::requireNonEmpty($keyArn, "RegionMap entry for {$mapRegion}");
             }
             $values['RegionMap'] = $regionMap;

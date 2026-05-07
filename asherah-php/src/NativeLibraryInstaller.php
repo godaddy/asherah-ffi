@@ -258,7 +258,7 @@ final class NativeLibraryInstaller
 
     private function downloadString(string $url): string
     {
-        $contents = @file_get_contents($url, false, $this->streamContext($url));
+        $contents = $this->downloadUrl($url);
         if ($contents === false || $contents === '') {
             throw new NativeLibraryException("Failed to download {$url}");
         }
@@ -273,7 +273,7 @@ final class NativeLibraryInstaller
             throw new NativeLibraryException('Failed to create temporary download file');
         }
 
-        $data = @file_get_contents($url, false, $this->streamContext($url));
+        $data = $this->downloadUrl($url);
         if ($data === false) {
             unlink($tmp);
             throw new NativeLibraryException("Failed to download {$url}");
@@ -342,6 +342,37 @@ final class NativeLibraryInstaller
         }
     }
 
+    private function downloadUrl(string $url): string|false
+    {
+        $currentUrl = $url;
+        for ($redirects = 0; $redirects < 5; $redirects++) {
+            $http_response_header = [];
+            $contents = @file_get_contents($currentUrl, false, $this->streamContext($currentUrl));
+            $headers = $http_response_header;
+            if ($contents === false) {
+                return false;
+            }
+
+            $status = $this->httpStatus($headers);
+            if ($status >= 300 && $status < 400) {
+                $location = $this->redirectLocation($headers);
+                if ($location === null) {
+                    throw new NativeLibraryException("Redirect without Location header: {$currentUrl}");
+                }
+                $currentUrl = $this->resolveRedirectUrl($currentUrl, $location);
+                continue;
+            }
+
+            if ($status >= 400) {
+                throw new NativeLibraryException("Failed to download {$currentUrl}: HTTP {$status}");
+            }
+
+            return $contents;
+        }
+
+        throw new NativeLibraryException("Too many redirects while downloading {$url}");
+    }
+
     /**
      * @return resource
      */
@@ -355,11 +386,73 @@ final class NativeLibraryInstaller
 
         return stream_context_create([
             'http' => [
-                'follow_location' => 1,
+                'follow_location' => 0,
                 'header' => implode("\r\n", $headers),
+                'ignore_errors' => true,
+                'max_redirects' => 0,
                 'timeout' => self::TIMEOUT_SECONDS,
             ],
         ]);
+    }
+
+    /**
+     * @param list<string> $headers
+     */
+    private function httpStatus(array $headers): int
+    {
+        foreach ($headers as $header) {
+            if (preg_match('/^HTTP\/\S+\s+(\d{3})\b/i', $header, $matches) === 1) {
+                return (int) $matches[1];
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * @param list<string> $headers
+     */
+    private function redirectLocation(array $headers): ?string
+    {
+        foreach ($headers as $header) {
+            if (stripos($header, 'Location:') === 0) {
+                $location = trim(substr($header, strlen('Location:')));
+                return $location === '' ? null : $location;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveRedirectUrl(string $baseUrl, string $location): string
+    {
+        if (preg_match('/^[a-z][a-z0-9+.-]*:\/\//i', $location) === 1) {
+            return $location;
+        }
+
+        $scheme = parse_url($baseUrl, PHP_URL_SCHEME);
+        if (!is_string($scheme) || $scheme === '') {
+            throw new NativeLibraryException("Cannot resolve redirect for {$baseUrl}");
+        }
+
+        if (str_starts_with($location, '//')) {
+            return $scheme . ':' . $location;
+        }
+
+        $host = parse_url($baseUrl, PHP_URL_HOST);
+        if (!is_string($host) || $host === '') {
+            throw new NativeLibraryException("Cannot resolve redirect for {$baseUrl}");
+        }
+
+        $port = parse_url($baseUrl, PHP_URL_PORT);
+        $authority = $host . (is_int($port) ? ':' . $port : '');
+        if (str_starts_with($location, '/')) {
+            return "{$scheme}://{$authority}{$location}";
+        }
+
+        $basePath = parse_url($baseUrl, PHP_URL_PATH);
+        $baseDir = is_string($basePath) && $basePath !== '' ? rtrim(dirname($basePath), '/') : '';
+        return "{$scheme}://{$authority}{$baseDir}/{$location}";
     }
 
     private function shouldSendAuthorization(string $url): bool

@@ -10,6 +10,15 @@ final class NativeFailureTest extends TestCase
 {
     public function testRuntimeFailsClearlyWhenFfiExtensionIsUnavailable(): void
     {
+        $precheck = $this->runPhp([
+            '-n',
+            '-r',
+            'echo extension_loaded("ffi") || class_exists("FFI") ? "ffi-present" : "ffi-missing";',
+        ]);
+        if (str_contains($precheck['output'], 'ffi-present')) {
+            self::markTestSkipped('Current PHP binary still exposes FFI under php -n');
+        }
+
         $result = $this->runPhp([
             '-n',
             '-d',
