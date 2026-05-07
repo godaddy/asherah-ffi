@@ -591,12 +591,21 @@ fn test_static_kms_without_key_falls_back_to_test_key() {
     let (resolved, _applied) = cfg
         .resolve()
         .expect("KMS=static must fall back to the canonical test key");
-    match resolved.kms {
-        KmsConfig::Static { key_hex } => assert_eq!(
+    // Avoid `{other:?}` for the non-Static fallthrough — `KmsConfig::Static`
+    // carries the master key hex, so debug-formatting the enum on the
+    // failure path would leak key material into the test's panic message
+    // and CodeQL (rule rust/cleartext-logging) flags it as cleartext
+    // logging. Asserting the variant via `matches!` keeps the payload
+    // out of the failure output.
+    assert!(
+        matches!(resolved.kms, KmsConfig::Static { .. }),
+        "expected KmsConfig::Static fallback variant"
+    );
+    if let KmsConfig::Static { key_hex } = resolved.kms {
+        assert_eq!(
             key_hex, TEST_DEBUG_STATIC_MASTER_KEY_HEX,
             "fallback key must equal canonical Asherah test key hex"
-        ),
-        other => panic!("expected KmsConfig::Static, got {other:?}"),
+        );
     }
 }
 
