@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace GoDaddy\Asherah\Tests\Unit;
 
 use GoDaddy\Asherah\Asherah;
+use GoDaddy\Asherah\SessionFactory;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 
@@ -64,6 +65,52 @@ final class AsherahValidationTest extends TestCase
         $this->expectExceptionMessage('EnableSessionCaching must be boolean');
 
         Asherah::setup($this->config(['EnableSessionCaching' => 'false']));
+    }
+
+    public function testSetupRejectsNonStringRequiredFieldsBeforeFfi(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('ServiceName is required');
+
+        Asherah::setup($this->config(['ServiceName' => ['not-a-string']]));
+    }
+
+    public function testSetupRejectsInvalidOptionalStringFieldsBeforeFfi(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('DynamoDBRegion must be a non-empty string');
+
+        Asherah::setup($this->config([
+            'Metastore' => 'dynamodb',
+            'DynamoDBRegion' => false,
+        ]));
+    }
+
+    public function testSetupRejectsInvalidEnableRegionSuffixBeforeFfi(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('EnableRegionSuffix must be boolean');
+
+        Asherah::setup($this->config(['EnableRegionSuffix' => 'true']));
+    }
+
+    public function testSetupRejectsInvalidArrayRegionMapBeforeFfi(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('RegionMap entry for us-west-2 must be a non-empty string');
+
+        Asherah::setup($this->config([
+            'KMS' => 'aws',
+            'RegionMap' => ['us-west-2' => ''],
+        ]));
+    }
+
+    public function testSessionFactoryRejectsInvalidArrayConfigBeforeFfi(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('KMS is required');
+
+        SessionFactory::fromConfig($this->config(['KMS' => false]));
     }
 
     public function testSetupRejectsInvalidSessionCacheMaxSize(): void

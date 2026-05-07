@@ -101,6 +101,16 @@ interoperability coverage, and production docs are incomplete.
   - added a manual `PHP AWS Integration` workflow that requires a two-region
     KMS map and DynamoDB table inputs for release validation against real AWS;
   - fixed PHP 8.1 compatibility in the interop CLI and preload smoke command.
+- 2026-05-06: Additional audit found and closed two production-readiness gaps:
+  - centralized PHP config validation so both `Asherah::setup()` and
+    `SessionFactory::fromConfig()` reject malformed array configs before
+    crossing the FFI boundary, including invalid required strings,
+    region-sensitive strings, booleans, integer options, and `RegionMap`
+    entries;
+  - fixed the PHP binding test runner and source archive builder to remove
+    generated `composer.lock` files before dependency resolution, preventing a
+    previous PHP 8.4 run from poisoning PHP 8.1 validation in the same
+    worktree.
 
 No known implementation gaps remain in this ExecPlan. Composer publication is
 source-only, the workflow supports GitHub Release source archive publication,

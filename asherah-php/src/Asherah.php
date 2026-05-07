@@ -48,18 +48,9 @@ final class Asherah
             throw new LifecycleException('already initialized');
         }
 
-        $config = self::normalizeConfig($config);
-        foreach (['ServiceName', 'ProductID', 'Metastore', 'KMS'] as $key) {
-            if (!isset($config[$key]) || trim((string) $config[$key]) === '') {
-                throw new ConfigurationException("$key is required");
-            }
-        }
-
-        self::$sessionCacheEnabled = self::sessionCacheEnabled($config);
-        self::$sessionCacheMaxSize = self::sessionCacheMaxSize($config);
-        self::validateIntegerOption($config, 'SessionCacheDuration', 0);
-        self::validateIntegerOption($config, 'ExpireAfter', 1);
-        self::validateIntegerOption($config, 'CheckInterval', 1);
+        $config = ConfigValidator::normalize($config);
+        self::$sessionCacheEnabled = ConfigValidator::sessionCacheEnabled($config);
+        self::$sessionCacheMaxSize = ConfigValidator::sessionCacheMaxSize($config);
         self::$factory = SessionFactory::fromConfig($config);
         self::$sessions = [];
     }
@@ -157,55 +148,4 @@ final class Asherah
         return self::$factory->getSession($partitionId);
     }
 
-    /**
-     * @param array<string, mixed>|AsherahConfig $config
-     * @return array<string, mixed>
-     */
-    private static function normalizeConfig(array|AsherahConfig $config): array
-    {
-        return $config instanceof AsherahConfig ? $config->toArray() : $config;
-    }
-
-    /**
-     * @param array<string, mixed> $config
-     */
-    private static function sessionCacheEnabled(array $config): bool
-    {
-        if (!array_key_exists('EnableSessionCaching', $config)) {
-            return true;
-        }
-        if (!is_bool($config['EnableSessionCaching'])) {
-            throw new ConfigurationException('EnableSessionCaching must be boolean');
-        }
-
-        return $config['EnableSessionCaching'];
-    }
-
-    /**
-     * @param array<string, mixed> $config
-     */
-    private static function sessionCacheMaxSize(array $config): int
-    {
-        if (!array_key_exists('SessionCacheMaxSize', $config)) {
-            return 1000;
-        }
-        if (!is_int($config['SessionCacheMaxSize']) || $config['SessionCacheMaxSize'] < 1) {
-            throw new ConfigurationException('SessionCacheMaxSize must be an integer >= 1');
-        }
-
-        return $config['SessionCacheMaxSize'];
-    }
-
-    /**
-     * @param array<string, mixed> $config
-     */
-    private static function validateIntegerOption(array $config, string $key, int $minimum): void
-    {
-        if (!array_key_exists($key, $config)) {
-            return;
-        }
-        if (!is_int($config[$key]) || $config[$key] < $minimum) {
-            throw new ConfigurationException("{$key} must be an integer >= {$minimum}");
-        }
-    }
 }

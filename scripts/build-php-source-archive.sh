@@ -5,6 +5,7 @@ OUT_DIR="${1:-/tmp/asherah-php-dist}"
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
+rm -f composer.lock
 composer install --prefer-dist --no-progress
 composer validate --strict
 composer archive --format=zip --dir="$OUT_DIR" >/dev/null
