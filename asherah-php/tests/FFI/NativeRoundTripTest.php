@@ -7,6 +7,7 @@ namespace GoDaddy\Asherah\Tests\FFI;
 use GoDaddy\Asherah\Asherah;
 use GoDaddy\Asherah\AsherahConfig;
 use GoDaddy\Asherah\AsherahException;
+use GoDaddy\Asherah\LifecycleException;
 use GoDaddy\Asherah\SessionFactory;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
@@ -49,6 +50,16 @@ final class NativeRoundTripTest extends TestCase
         self::assertSame('payload', Asherah::decryptString('tenant-no-cache', $ciphertext));
     }
 
+    public function testDoubleSetupFailsWithLifecycleException(): void
+    {
+        Asherah::setup($this->config());
+
+        $this->expectException(LifecycleException::class);
+        $this->expectExceptionMessage('already initialized');
+
+        Asherah::setup($this->config());
+    }
+
     public function testExplicitFactoryAndSessionRoundTrip(): void
     {
         $factory = SessionFactory::fromConfig($this->config());
@@ -57,7 +68,7 @@ final class NativeRoundTripTest extends TestCase
             try {
                 $ciphertext = $session->encryptBytes('factory-payload');
 
-                self::assertSame('factory-payload', $session->decryptBytes($ciphertext));
+                self::assertSame('factory-payload', $session->decryptString($ciphertext));
             } finally {
                 $session->close();
             }
@@ -76,6 +87,33 @@ final class NativeRoundTripTest extends TestCase
         $ciphertext = Asherah::encryptBytes('tenant-typed', 'typed-payload');
 
         self::assertSame('typed-payload', Asherah::decryptBytes('tenant-typed', $ciphertext));
+    }
+
+    public function testClosedSessionRejectsOperations(): void
+    {
+        $factory = SessionFactory::fromConfig($this->config());
+        try {
+            $session = $factory->getSession('tenant-closed');
+            $session->close();
+
+            $this->expectException(LifecycleException::class);
+            $this->expectExceptionMessage('session is closed');
+
+            $session->encryptString('payload');
+        } finally {
+            $factory->close();
+        }
+    }
+
+    public function testClosedFactoryRejectsGetSession(): void
+    {
+        $factory = SessionFactory::fromConfig($this->config());
+        $factory->close();
+
+        $this->expectException(LifecycleException::class);
+        $this->expectExceptionMessage('factory is closed');
+
+        $factory->getSession('tenant-after-close');
     }
 
     public function testEmptyPartitionIsRejected(): void

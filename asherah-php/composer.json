@@ -49,6 +49,15 @@
         "sort-packages": true,
         "optimize-autoloader": true
     },
+    "archive": {
+        "exclude": [
+            "/.php-cs-fixer.cache",
+            "/.phpunit.cache",
+            "/composer.lock",
+            "/native",
+            "/vendor"
+        ]
+    },
     "minimum-stability": "stable",
     "prefer-stable": true
 }

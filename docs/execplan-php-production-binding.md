@@ -50,6 +50,16 @@ interoperability coverage, and production docs are incomplete.
   - added `samples/php/simple.php`;
   - added PHP to `scripts/test.sh --bindings --binding=php`;
   - added PHP to the x86_64 binding-test CI matrix.
+- 2026-05-06: Continued source-only production work:
+  - added specific exception subclasses for native library, native operation,
+    and lifecycle failures;
+  - added `Session::encryptString()` and `Session::decryptString()` aliases;
+  - added close-after-use and not-initialized lifecycle tests;
+  - added source-only Composer archive exclusions for `vendor`, `native`, and
+    `composer.lock`;
+  - added PHP source-package publish dry-run in CI;
+  - added consumer install smoke test for source-only path repository usage;
+  - added PHP interop probe scripts for future cross-language interop wiring.
 
 Remaining major gaps before production merge are release/publish workflow
 integration, real AWS opt-in integration tests, cross-language interop tests,

@@ -31,7 +31,7 @@ final class SessionFactory
     private function __construct(?CData $handle, string $message)
     {
         if ($handle === null || FFI::isNull($handle)) {
-            throw new AsherahException($message . ': ' . Native::lastError());
+            throw new NativeOperationException($message . ': ' . Native::lastError());
         }
         $this->handle = $handle;
     }
@@ -65,7 +65,7 @@ final class SessionFactory
     private function assertOpen(): void
     {
         if ($this->handle === null) {
-            throw new AsherahException('factory is closed');
+            throw new LifecycleException('factory is closed');
         }
     }
 }

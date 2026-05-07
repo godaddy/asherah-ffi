@@ -18,7 +18,7 @@ final class Asherah
     public static function setup(array|AsherahConfig $config): void
     {
         if (self::$factory !== null) {
-            throw new AsherahException('already initialized');
+            throw new LifecycleException('already initialized');
         }
 
         $config = self::normalizeConfig($config);
@@ -121,7 +121,7 @@ final class Asherah
             throw new \InvalidArgumentException('partition_id cannot be empty');
         }
         if (self::$factory === null) {
-            throw new AsherahException('not initialized');
+            throw new LifecycleException('not initialized');
         }
 
         return self::$factory->getSession($partitionId);

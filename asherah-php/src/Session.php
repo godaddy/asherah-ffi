@@ -14,7 +14,7 @@ final class Session
     public function __construct(?CData $handle)
     {
         if ($handle === null || FFI::isNull($handle)) {
-            throw new AsherahException('get_session failed: ' . Native::lastError());
+            throw new NativeOperationException('get_session failed: ' . Native::lastError());
         }
         $this->handle = $handle;
     }
@@ -26,10 +26,15 @@ final class Session
         $out = Native::newOutputBuffer();
         $rc = Native::ffi()->asherah_encrypt_to_json($this->handle, $input, strlen($payload), FFI::addr($out));
         if ($rc !== 0) {
-            throw new AsherahException('encrypt failed: ' . Native::lastError());
+            throw new NativeOperationException('encrypt failed: ' . Native::lastError());
         }
 
         return Native::readAndFree($out);
+    }
+
+    public function encryptString(string $payload): string
+    {
+        return $this->encryptBytes($payload);
     }
 
     public function decryptBytes(string $dataRowRecord): string
@@ -39,10 +44,15 @@ final class Session
         $out = Native::newOutputBuffer();
         $rc = Native::ffi()->asherah_decrypt_from_json($this->handle, $input, strlen($dataRowRecord), FFI::addr($out));
         if ($rc !== 0) {
-            throw new AsherahException('decrypt failed: ' . Native::lastError());
+            throw new NativeOperationException('decrypt failed: ' . Native::lastError());
         }
 
         return Native::readAndFree($out);
+    }
+
+    public function decryptString(string $dataRowRecord): string
+    {
+        return $this->decryptBytes($dataRowRecord);
     }
 
     public function close(): void
@@ -63,7 +73,7 @@ final class Session
     private function assertOpen(): void
     {
         if ($this->handle === null) {
-            throw new AsherahException('session is closed');
+            throw new LifecycleException('session is closed');
         }
     }
 }

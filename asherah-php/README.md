@@ -62,6 +62,13 @@ library instead of the default `native/` staging directory.
 Use `--install-dir=<dir>` when building container images that stage native
 libraries outside the Composer package tree.
 
+## Supported Platforms
+
+The source package can run anywhere PHP FFI can load the matching Asherah native
+library. CI currently validates Linux glibc x64. Linux musl x64 is the next
+required production target. Do not claim Windows support until DLL loading is
+tested in CI or a release dry-run.
+
 ## Usage
 
 Prefer the typed config API for application code:

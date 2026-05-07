@@ -1696,6 +1696,48 @@ jobs:
           ls /tmp/*.gem | grep -q 'x86_64-linux\.gem'      || { echo "ERROR: glibc gem missing"; exit 1; }
           ls /tmp/*.gem | grep -q 'x86_64-linux-musl\.gem' || { echo "ERROR: musl gem missing";  exit 1; }
 
+  publish-dry-run-php-source:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    needs: build-ffi-x86_64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Download x86_64 FFI artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: bindings-linux-x86_64-part-ffi
+          path: ci-artifacts
+      - name: Build PHP test image
+        run: docker build -t asherah-php-ffi-test -f asherah-php/.Dockerfile.debian asherah-php
+      - name: Build source-only Composer archive
+        run: |
+          docker run --rm -v "$PWD":/work -w /work/asherah-php asherah-php-ffi-test sh -lc '
+            set -e
+            rm -rf /tmp/asherah-php-dist
+            mkdir -p /tmp/asherah-php-dist
+            composer archive --format=zip --dir=/tmp/asherah-php-dist >/dev/null
+            unzip -l /tmp/asherah-php-dist/*.zip | tee /tmp/asherah-php-archive.txt
+            ! grep -E " vendor/| native/| composer.lock" /tmp/asherah-php-archive.txt
+            grep -q "src/Asherah.php" /tmp/asherah-php-archive.txt
+          '
+      - name: Consumer source install smoke
+        run: |
+          docker run --rm -v "$PWD":/work -w /work \
+            -e ASHERAH_PHP_NATIVE=/work/ci-artifacts/ffi \
+            asherah-php-ffi-test sh -lc '
+              set -e
+              rm -rf /tmp/asherah-php-consumer
+              mkdir /tmp/asherah-php-consumer
+              cd /tmp/asherah-php-consumer
+              composer init --name asherah/consumer-smoke --no-interaction >/dev/null
+              composer config repositories.asherah path /work/asherah-php
+              composer config minimum-stability dev
+              composer config prefer-stable true
+              composer require godaddy/asherah:* --no-interaction --no-progress >/dev/null
+              php vendor/godaddy/asherah/tests/consumer_smoke.php
+            '
+
   publish-dry-run-java-jar:
     runs-on: ubuntu-latest
     permissions:

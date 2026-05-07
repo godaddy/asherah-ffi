@@ -38,7 +38,7 @@ CDEF;
         }
 
         if (!extension_loaded('ffi') || !class_exists(FFI::class)) {
-            throw new AsherahException('PHP FFI extension is not enabled');
+            throw new NativeLibraryException('PHP FFI extension is not enabled');
         }
 
         try {
@@ -52,7 +52,7 @@ CDEF;
         try {
             self::$ffi = FFI::cdef(self::CDEF, $library);
         } catch (\Throwable $e) {
-            throw new AsherahException(
+            throw new NativeLibraryException(
                 'failed to initialize Asherah FFI; check ffi.enable, opcache preload, and ASHERAH_PHP_NATIVE: '
                 . $e->getMessage(),
                 previous: $e
@@ -165,7 +165,7 @@ CDEF;
             }
         }
 
-        throw new AsherahException(
+        throw new NativeLibraryException(
             'ASHERAH_PHP_NATIVE does not point to a readable native library; searched: '
             . implode(', ', $candidates)
         );

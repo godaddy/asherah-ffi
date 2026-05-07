@@ -128,7 +128,7 @@ final class NativeLibraryInstaller
     public static function artifactForPlatform(string $platform): array
     {
         return self::ARTIFACTS[$platform]
-            ?? throw new AsherahException("Unsupported native platform: {$platform}");
+            ?? throw new NativeLibraryException("Unsupported native platform: {$platform}");
     }
 
     public function libraryPath(string $platform, string $libraryName): string
@@ -184,7 +184,7 @@ final class NativeLibraryInstaller
             } elseif (str_starts_with($arg, '--install-dir=')) {
                 $installDir = substr($arg, strlen('--install-dir='));
                 if ($installDir === '') {
-                    throw new AsherahException('--install-dir must not be empty');
+                    throw new NativeLibraryException('--install-dir must not be empty');
                 }
                 $options['installDir'] = $installDir;
             } elseif (str_starts_with($arg, '--platform=')) {
@@ -194,7 +194,7 @@ final class NativeLibraryInstaller
             } elseif (str_starts_with($arg, '--version=')) {
                 $options['version'] = substr($arg, strlen('--version='));
             } else {
-                throw new AsherahException("Unknown option: {$arg}");
+                throw new NativeLibraryException("Unknown option: {$arg}");
             }
         }
 
@@ -218,7 +218,7 @@ final class NativeLibraryInstaller
             }
         }
 
-        throw new AsherahException(
+        throw new NativeLibraryException(
             'Unable to determine release tag; pass --version=<tag> or set ASHERAH_PHP_NATIVE_VERSION'
         );
     }
@@ -243,14 +243,14 @@ final class NativeLibraryInstaller
             }
         }
 
-        throw new AsherahException("SHA256SUMS does not contain checksum for {$asset}");
+        throw new NativeLibraryException("SHA256SUMS does not contain checksum for {$asset}");
     }
 
     private function downloadString(string $url): string
     {
         $contents = @file_get_contents($url, false, $this->streamContext());
         if ($contents === false || $contents === '') {
-            throw new AsherahException("Failed to download {$url}");
+            throw new NativeLibraryException("Failed to download {$url}");
         }
 
         return $contents;
@@ -260,13 +260,13 @@ final class NativeLibraryInstaller
     {
         $tmp = tempnam(sys_get_temp_dir(), 'asherah_php_native_');
         if ($tmp === false) {
-            throw new AsherahException('Failed to create temporary download file');
+            throw new NativeLibraryException('Failed to create temporary download file');
         }
 
         $data = @file_get_contents($url, false, $this->streamContext());
         if ($data === false) {
             unlink($tmp);
-            throw new AsherahException("Failed to download {$url}");
+            throw new NativeLibraryException("Failed to download {$url}");
         }
 
         file_put_contents($tmp, $data);
@@ -276,22 +276,22 @@ final class NativeLibraryInstaller
     private function verifyDownloadedLibrary(string $path, ?string $expectedSha256): void
     {
         if (!is_file($path)) {
-            throw new AsherahException("Downloaded native library does not exist: {$path}");
+            throw new NativeLibraryException("Downloaded native library does not exist: {$path}");
         }
 
         $size = filesize($path);
         if ($size === false || $size < self::MIN_LIBRARY_SIZE) {
-            throw new AsherahException("Downloaded native library is missing or too small: {$path}");
+            throw new NativeLibraryException("Downloaded native library is missing or too small: {$path}");
         }
 
         if (!is_readable($path)) {
-            throw new AsherahException("Downloaded native library is not readable: {$path}");
+            throw new NativeLibraryException("Downloaded native library is not readable: {$path}");
         }
 
         if ($expectedSha256 !== null) {
             $actual = strtolower((string) hash_file('sha256', $path));
             if (!hash_equals($expectedSha256, $actual)) {
-                throw new AsherahException("Checksum mismatch: expected {$expectedSha256}, got {$actual}");
+                throw new NativeLibraryException("Checksum mismatch: expected {$expectedSha256}, got {$actual}");
             }
         }
     }
@@ -299,20 +299,20 @@ final class NativeLibraryInstaller
     private function verifyInstalledLibrary(string $path): void
     {
         if (!is_file($path)) {
-            throw new AsherahException("Native library does not exist: {$path}");
+            throw new NativeLibraryException("Native library does not exist: {$path}");
         }
 
         $size = filesize($path);
         if ($size === false || $size < self::MIN_LIBRARY_SIZE) {
-            throw new AsherahException("Native library is missing or too small: {$path}");
+            throw new NativeLibraryException("Native library is missing or too small: {$path}");
         }
 
         if (!is_readable($path)) {
-            throw new AsherahException("Native library is not readable: {$path}");
+            throw new NativeLibraryException("Native library is not readable: {$path}");
         }
 
         if (PHP_OS_FAMILY !== 'Windows' && !is_executable($path)) {
-            throw new AsherahException("Native library is not executable: {$path}");
+            throw new NativeLibraryException("Native library is not executable: {$path}");
         }
     }
 
@@ -320,11 +320,11 @@ final class NativeLibraryInstaller
     {
         $dir = dirname($destination);
         if (!is_dir($dir) && !mkdir($dir, 0o755, true) && !is_dir($dir)) {
-            throw new AsherahException("Failed to create native directory: {$dir}");
+            throw new NativeLibraryException("Failed to create native directory: {$dir}");
         }
 
         if (!rename($tmp, $destination)) {
-            throw new AsherahException("Failed to move native library to {$destination}");
+            throw new NativeLibraryException("Failed to move native library to {$destination}");
         }
 
         if (PHP_OS_FAMILY !== 'Windows') {
