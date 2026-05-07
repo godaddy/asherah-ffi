@@ -77,22 +77,15 @@ asherah-php/
     Native.php
     Session.php
     SessionFactory.php
-  native/
+  native/                 # optional image-build/deploy staging location
     linux-x64/libasherah_ffi.so
-    linux-arm64/libasherah_ffi.so
-    linux-musl-x64/libasherah_ffi.so
-    linux-musl-arm64/libasherah_ffi.so
-    darwin-x64/libasherah_ffi.dylib
-    darwin-arm64/libasherah_ffi.dylib
-    win-x64/asherah_ffi.dll
-    win-arm64/asherah_ffi.dll
   tests/
 ```
 
 `Native.php` should resolve the library in this order:
 
 1. `ASHERAH_PHP_NATIVE`, either a file path or directory.
-2. bundled platform-specific native library under `native/`.
+2. image-build/deploy staged native library under `native/`.
 3. development workspace `target/{release,debug}`.
 4. system loader fallback by library name.
 
@@ -243,34 +236,43 @@ Integration tests:
 ## Release Work
 
 Composer packaging is simpler than RubyGems/NuGet/npm for pure PHP code, but
-native library distribution still has to line up with `release-cobhan.yml`.
+Composer is not the right transport for Asherah native binaries. The PHP package
+should be source-only: PHP code, autoloading, docs, tests, loader code, and
+native staging helpers. Native libraries should remain release artifacts from
+`release-cobhan.yml` and be copied or downloaded during image build/deploy.
+
+This avoids Git LFS and Composer distribution pitfalls for large native
+binaries. Composer dist archives can produce LFS pointer files instead of real
+binary content, fat packages bloat every install with unused platforms, and
+dependency package scripts are not automatically executed for consuming
+applications anyway.
 
 Recommended release model:
 
 1. Publish `godaddy/asherah` as the Composer package for PHP source,
    autoloading, tests, docs, and native-loader code.
-2. Stage PHP-supported native libraries from the same `release-cobhan.yml`
-   build outputs used by the other FFI bindings. Do not create an independent
-   Rust build path for PHP.
+2. Keep PHP-supported native libraries in the same GitHub release assets
+   produced by `release-cobhan.yml`. Do not create an independent Rust build
+   path for PHP.
 3. Ship a `scripts/install_native.php` helper that downloads exactly one native
    library for the current platform from the matching Asherah release, verifies
-   size/checksum metadata, and writes it under `native/<platform>/`.
+   size/checksum metadata, and writes it under `native/<platform>/` or a caller
+   supplied image staging directory.
 4. Expose Composer script aliases such as `download-native` and
    `verify-native`, but document that Composer does not automatically run
    scripts from dependency packages during a consuming application's install.
-   Consumers must either run the helper explicitly, add a root `post-install`
-   / `post-update` hook, or use a prebuilt internal distribution artifact that
-   already contains `native/<platform>/`.
+   Consumers should run the helper explicitly during image build or copy the
+   release artifact from their normal artifact pipeline. Root Composer hooks
+   are optional, not the primary production path.
 5. Add CI dry-run jobs that install the Composer package from a staged artifact,
    run the native download/verify path, and execute PHP tests on Linux glibc
    and musl at minimum.
 
-So yes, release download scripting needs to be solved before a real PHP release
-unless we deliberately choose a fat Composer artifact containing every native
-binary. A fat artifact gives the easiest install, but it bloats every deploy and
-does not fit well with Composer installs from a monorepo source checkout. The
-download helper matches `gd-auth-lib`'s practical approach while keeping
-Asherah's native binaries tied to the existing release assets.
+Do not pursue a fat Composer artifact as the first production model. It gives
+the easiest apparent install, but it bloats every deploy, couples Composer to
+large binary payloads, and does not fit well with container builds that need
+only one target platform. The source-only package plus explicit native staging
+is the production model.
 
 Windows support is feasible because PHP FFI can load DLLs, but it should be
 validated explicitly before claiming support.
@@ -284,8 +286,9 @@ validated explicitly before claiming support.
   callback strategy per SAPI.
 - PHP plaintext copies cannot be deterministically wiped.
 - Long-lived workers need bounded session caching and explicit shutdown hooks.
-- Composer users expect simple installs; native library failures must produce
-  precise, actionable diagnostics.
+- Composer users expect simple installs, but native binary staging is explicit
+  by design. Native library failures must produce precise, actionable
+  diagnostics.
 
 ## Prototype Scope
 

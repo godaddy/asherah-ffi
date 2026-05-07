@@ -65,6 +65,9 @@ Do not build these for the first production merge:
 - Cobhan-style caller-owned PHP output buffers.
 - Attempts to reliably zeroize PHP strings after plaintext is copied into PHP
   memory.
+- Bundling native binaries in Composer packages, including fat all-platform
+  packages or Git LFS-backed Composer installs.
+- A Composer plugin for native installation.
 
 These may be revisited after the sync binding is stable and shipped.
 
@@ -88,7 +91,8 @@ Implementation steps:
    - Current prototype uses `php >=8.1`.
    - Run CI on every supported minor version that is claimed.
 5. Keep `vendor/`, caches, downloaded native libraries, and lockfiles out of
-   source unless an explicit release decision changes that.
+   source. Native binaries are release artifacts and image-build/deploy inputs,
+   not Composer package contents.
 
 Validation:
 
@@ -99,7 +103,8 @@ Validation:
 
 Acceptance criteria:
 
-- Package metadata is complete enough for Packagist or GitHub Packages.
+- Package metadata is complete enough for source-only Packagist or GitHub
+  Packages publication.
 - A clean consumer project can `composer require` the package from a local path
   and instantiate `GoDaddy\Asherah\Asherah`.
 
@@ -132,9 +137,10 @@ Implementation steps:
 5. Fail closed on missing, empty, too-small, unreadable, non-executable, or
    checksum-mismatched native libraries.
 6. Document that Composer dependency scripts do not run automatically for
-   consuming applications.
-7. Provide root Composer hook examples for applications that want automatic
-   download on `composer install` / `composer update`.
+   consuming applications, and do not depend on them for production installs.
+7. Document explicit image-build/deploy staging as the primary native
+   installation path. Root Composer hooks can be shown as optional, but not as
+   the preferred model.
 8. Support `GITHUB_TOKEN` / `GH_TOKEN` for private or rate-limited release
    downloads.
 
@@ -154,9 +160,9 @@ Tests:
 
 Acceptance criteria:
 
-- A clean container can install the Composer package, run the native installer
-  against a staged release fixture, and load the resulting library through the
-  PHP binding.
+- A clean container can install the source-only Composer package, explicitly
+  stage one native release artifact during image build, and load that library
+  through the PHP binding.
 
 ## Milestone 3: PHP-FPM Preload Support
 
@@ -402,25 +408,25 @@ Acceptance criteria:
 
 Implementation steps:
 
-1. Add a PHP publish workflow.
+1. Add a PHP source-package publish workflow.
 2. Decide publishing target:
    - Packagist
    - GitHub Packages Composer
    - internal Composer repository
 3. Ensure release versioning maps cleanly to Asherah release tags.
 4. Add publish dry-run jobs that exactly mirror publish behavior.
-5. Ensure native download helper can fetch assets from the same release produced
+5. Ensure native staging helper can fetch assets from the same release produced
    by `release-cobhan.yml`.
 6. Add documentation for internal/private GitHub token usage if release assets
    require authentication.
-7. Decide whether any internal prebuilt distribution artifact should include a
-   native library to avoid Composer hook friction.
+7. Do not publish native binaries through Composer. If an internal prebuilt
+   distribution is needed, publish it as an image/artifact outside Composer.
 
 Acceptance criteria:
 
-- A tagged release can publish PHP source.
-- A clean consumer can install the published package and download the matching
-  native artifact.
+- A tagged release can publish PHP source without native binaries.
+- A clean consumer can install the published source package and explicitly stage
+  the matching native artifact during image build/deploy.
 - Dry-run CI catches the same classes of failure as the publish workflow.
 
 ## Milestone 11: Documentation
@@ -475,7 +481,8 @@ Acceptance criteria:
 The PHP binding is merge-worthy when all of the following are true:
 
 - CI validates PHP on every PR.
-- Native installer is tested, documented, and tied to existing release assets.
+- Native staging helper is tested, documented, and tied to existing release
+  assets.
 - PHP-FPM preload mode is tested.
 - Typed config API exists and covers common metastore/KMS setups.
 - Multi-region KMS and DynamoDB config preservation is covered by tests.

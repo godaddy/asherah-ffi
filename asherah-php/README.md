@@ -9,22 +9,37 @@ PHP FFI bindings for Asherah envelope encryption.
 - `ext-json`
 - An Asherah native FFI library for the current platform
 
-## Native Library Install
+## Native Library Staging
 
-Install the PHP package with Composer, then download the matching native
-library from an Asherah release:
+The Composer package is source-only. It does not bundle native binaries and it
+does not rely on Git LFS or Composer dependency scripts to make native libraries
+appear during install.
+
+Install the PHP source with Composer, then stage the one native library your
+image or host needs from an Asherah release:
 
 ```bash
 composer require godaddy/asherah
-composer run download-native -- --version=v0.6.64
+php vendor/godaddy/asherah/scripts/install_native.php --version=v0.6.64
 ```
 
 The native installer downloads one platform artifact from the GitHub release,
 verifies it against `SHA256SUMS`, and stages it under `native/<platform>/`.
+You can also skip the helper and copy the native artifact into your image from
+your normal artifact pipeline.
 
-Composer does not run scripts from dependency packages during the consuming
-application's install. Applications that want automatic native installation
-must add a root Composer hook:
+Recommended container pattern:
+
+```dockerfile
+RUN composer install --no-dev --optimize-autoloader
+RUN php vendor/godaddy/asherah/scripts/install_native.php --version=v0.6.64
+ENV ASHERAH_PHP_NATIVE=/app/vendor/godaddy/asherah/native/linux-x64
+```
+
+Composer does not run scripts from dependency packages during a consuming
+application's install, and that is intentional here. Applications that still
+want a root Composer hook can add one, but image-build staging is the preferred
+production path:
 
 ```json
 {
@@ -42,7 +57,7 @@ must add a root Composer hook:
 Set `ASHERAH_PHP_NATIVE_VERSION` when the package version does not directly
 match the Asherah release tag, or pass `--version=<tag>` to the script. Set
 `ASHERAH_PHP_NATIVE` to a file or directory to use an existing local native
-library instead of the packaged `native/` directory.
+library instead of the default `native/` staging directory.
 
 Use `--install-dir=<dir>` when building container images that stage native
 libraries outside the Composer package tree.
