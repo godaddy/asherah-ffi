@@ -65,6 +65,15 @@ run_test() {
     fi
 }
 
+container_path_for_work_mount() {
+    local path="$1"
+    case "$path" in
+        "$ROOT_DIR"/*) printf '/work/%s\n' "${path#"$ROOT_DIR"/}" ;;
+        "$ROOT_DIR")   printf '/work\n' ;;
+        *)             return 1 ;;
+    esac
+}
+
 summary() {
     echo ""
     echo "========================================"
@@ -110,7 +119,7 @@ setup_ci_artifacts() {
     # Stage FFI shared library
     while IFS= read -r -d '' f; do
         cp "$f" "$release_dir/"
-    done < <(find "$ad" -path '*/ffi/libasherah_ffi.*' -type f -print0 2>/dev/null)
+    done < <(find "$ad" \( -type f -o -type l \) -name 'libasherah_ffi.*' ! -path '*/deps/*' -print0 2>/dev/null)
 
     # Stage Java JNI library
     for f in "$ad"/java/libasherah_java.*; do
@@ -380,7 +389,14 @@ do_bindings() {
                     -e ASHERAH_PHP_AWS_DYNAMODB_ENABLE_REGION_SUFFIX
                 )
                 if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then
-                    php_native_container="${ASHERAH_PHP_NATIVE_CONTAINER:-/work/target/release}"
+                    local php_native_host=""
+                    php_native_host=$(find "$BINDING_ARTIFACTS_DIR" \( -type f -o -type l \) -name 'libasherah_ffi.so' ! -path '*/deps/*' -print -quit 2>/dev/null || true)
+                    if [ -n "$php_native_host" ] && container_path_for_work_mount "$php_native_host" >/dev/null; then
+                        php_native_container="$(container_path_for_work_mount "$php_native_host")"
+                    else
+                        php_native_container="${ASHERAH_PHP_NATIVE_CONTAINER:-/work/target/release}/libasherah_ffi.so"
+                    fi
+                    log "Using PHP native library at $php_native_container"
                 fi
                 run_test "PHP Docker image ($php_image_tag)" docker build \
                     --build-arg IMAGE_TAG="$php_image_tag" \
