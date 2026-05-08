@@ -57,11 +57,12 @@
   "scripts": {
     "build": "napi build",
     "build:release": "napi build --release",
-    "test": "node test/roundtrip.js && node test/e2e-consumer.js",
-    "test:unit": "node test/roundtrip.js",
+    "test": "node test/roundtrip.js && node test/rotation.js && node test/e2e-consumer.js",
+    "test:unit": "node test/roundtrip.js && node test/rotation.js",
+    "test:rotation": "node test/rotation.js",
     "test:e2e": "node test/e2e-consumer.js",
     "test:e2e-aws": "node test/e2e-aws.js",
-    "test:bun": "bun test/roundtrip.js && bun test/e2e-consumer.js && bun test/bun-compat.js"
+    "test:bun": "bun test/roundtrip.js && bun test/rotation.js && bun test/e2e-consumer.js && bun test/bun-compat.js"
   },
   "devDependencies": {
     "@napi-rs/cli": "^2.18.0"

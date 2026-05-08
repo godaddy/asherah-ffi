@@ -305,9 +305,26 @@ impl ConfigOptions {
             }
         };
 
+        // Clamp `create_date_precision_s` to `expire_after` when the
+        // operator picks a short expiry. The default precision is 60s
+        // (set in asherah's CryptoPolicy::default), but when
+        // `expire_after < 60` the engine cannot rotate within a
+        // precision window and `encrypt` fails with "failed to create
+        // or load intermediate key after retry" the second time it's
+        // called inside one window after the IK has aged past
+        // `expire_after`. This footgun is invisible to language-binding
+        // users because no binding exposes `create_date_precision_s`.
+        // Auto-clamping is the simplest non-breaking fix: short-expiry
+        // configs become functional, longer-expiry configs keep the
+        // default precision. T-finding "expire_smaller_than_precision_fails_closed"
+        // in `asherah/tests/rotation_timing_edges.rs`.
+        let create_date_precision_s = match self.expire_after {
+            Some(e) if e > 0 && e < 60 => Some(e),
+            _ => None,
+        };
         let policy = PolicyConfig {
             expire_key_after_s: self.expire_after,
-            create_date_precision_s: None,
+            create_date_precision_s,
             revoke_check_interval_s: self.check_interval,
             session_cache_max_size: self.session_cache_max_size.map(|v| v as usize),
             session_cache_ttl_s: self.session_cache_duration,
