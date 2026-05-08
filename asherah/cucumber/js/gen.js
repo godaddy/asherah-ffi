@@ -31,7 +31,7 @@ function loadAsherah(masterHex) {
   return asherah;
 }
 
-async function encrypt(service, product, partition, masterHex, payloadB64) {
+async function encrypt(service, product, partition, masterHex, payloadB64, expireAfter) {
   // Configure Node Asherah to use shared RDBMS metastore and StaticKMS with provided master key
   const pg = process.env.POSTGRES_URL;
   const my = process.env.MYSQL_URL;
@@ -41,6 +41,11 @@ async function encrypt(service, product, partition, masterHex, payloadB64) {
     const host = u.hostname; const port = u.port || '3306'; const user = u.username; const pass = u.password; const db = u.pathname.replace(/^\//, '') || '';
     connection = `${user}:${pass}@tcp(${host}:${port})/${db}`;
   } else { console.error('Set POSTGRES_URL or MYSQL_URL for shared metastore'); process.exit(4); }
+  // expireAfter is passed in as a string (CLI arg) or undefined; coerce
+  // to int seconds. `ExpireAfter < 60` is the rotation-parity case.
+  const expireAfterSecs = (expireAfter && expireAfter !== 'null' && expireAfter !== 'undefined')
+    ? Math.max(1, parseInt(expireAfter, 10))
+    : null;
   const config = {
     KMS: 'test-debug-static',
     Metastore: 'rdbms',
@@ -48,8 +53,8 @@ async function encrypt(service, product, partition, masterHex, payloadB64) {
     ProductID: product,
     Verbose: false,
     EnableSessionCaching: true,
-    ExpireAfter: null,
-    CheckInterval: null,
+    ExpireAfter: expireAfterSecs,
+    CheckInterval: expireAfterSecs,
     ConnectionString: connection,
     ReplicaReadConsistency: null,
     DynamoDBEndpoint: null,
@@ -117,9 +122,9 @@ async function decrypt(service, product, partition, masterHex) {
 }
 
 (async () => {
-  const [cmd, service, product, partition, masterHex, payloadB64] = process.argv.slice(2);
+  const [cmd, service, product, partition, masterHex, payloadB64, expireAfter] = process.argv.slice(2);
   if (cmd === 'encrypt') {
-    await encrypt(service, product, partition, masterHex, payloadB64);
+    await encrypt(service, product, partition, masterHex, payloadB64, expireAfter);
   } else if (cmd === 'decrypt') {
     await decrypt(service, product, partition, masterHex);
   } else {

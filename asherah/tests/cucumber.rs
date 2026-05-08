@@ -24,6 +24,10 @@ struct World {
     partition: String,
     node_blob: Option<String>,
     rust_blob: Option<String>,
+    // Rotation-parity scenarios: capture pre/post DRRs separately so we
+    // can decrypt each and compare IK timestamps.
+    pre_blob: Option<String>,
+    post_blob: Option<String>,
 }
 
 #[given(regex = "a StaticKMS master key \"([0-9a-fA-F]{64})\"")]
@@ -137,6 +141,192 @@ fn rust_encrypt(w: &mut World, payload: String) {
     .join()
     .expect("thread panicked");
     w.rust_blob = Some(blob);
+}
+
+// ──────────── Rotation parity step impls ────────────
+
+#[when(regex = "Node encrypts payload \"([^\"]+)\" with expire_after ([0-9]+)")]
+fn node_encrypt_with_expire(w: &mut World, payload: String, expire_s: String) {
+    assert!(
+        have_node(),
+        "Install Node deps: cd cucumber/js && npm install"
+    );
+    let script = "cucumber/js/gen.js";
+    let master = &w.master_hex;
+    let out = Command::new("node")
+        .arg(script)
+        .arg("encrypt")
+        .arg(&w.service)
+        .arg(&w.product)
+        .arg(&w.partition)
+        .arg(master)
+        .arg(STANDARD.encode(payload.as_bytes()))
+        .arg(&expire_s)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("node run");
+    assert!(
+        out.status.success(),
+        "node encrypt with expire failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let blob = String::from_utf8(out.stdout).unwrap();
+    if w.pre_blob.is_none() {
+        w.pre_blob = Some(blob);
+    } else {
+        w.post_blob = Some(blob);
+    }
+}
+
+#[when(regex = "Rust encrypts payload \"([^\"]+)\" with expire_after ([0-9]+)")]
+fn rust_encrypt_with_expire(w: &mut World, payload: String, expire_s: String) {
+    let master_hex = w.master_hex.clone();
+    let service = w.service.clone();
+    let product = w.product.clone();
+    let partition = w.partition.clone();
+    let expire: i64 = expire_s.parse().expect("expire seconds");
+    let blob = std::thread::spawn(move || {
+        let store = create_store();
+        let crypto = Arc::new(ael::aead::AES256GCM::new());
+        let kms =
+            Arc::new(ael::kms::StaticKMS::new(crypto.clone(), hex_to_bytes(&master_hex)).unwrap());
+        let mut cfg = ael::Config::new(&service, &product);
+        cfg.policy.expire_key_after_s = expire;
+        cfg.policy.create_date_precision_s = expire.max(1);
+        cfg.policy.revoke_check_interval_s = expire.max(1);
+        let f = ael::api::new_session_factory(cfg, store, kms, crypto);
+        let s = f.get_session(&partition);
+        let drr = s.encrypt(payload.as_bytes()).expect("encrypt");
+        let bundle = NodeBundle {
+            metastore: vec![],
+            drr,
+        };
+        serde_json::to_string(&bundle).unwrap()
+    })
+    .join()
+    .expect("thread panicked");
+    if w.pre_blob.is_none() {
+        w.pre_blob = Some(blob);
+    } else {
+        w.post_blob = Some(blob);
+    }
+}
+
+#[when(regex = "we wait ([0-9]+) seconds for IK rotation")]
+fn wait_for_rotation(_w: &mut World, secs: String) {
+    let s: u64 = secs.parse().expect("seconds");
+    std::thread::sleep(std::time::Duration::from_secs(s));
+}
+
+#[then(regex = "Rust decrypts the pre payload and plaintext equals \"([^\"]+)\"")]
+fn rust_decrypts_pre(w: &mut World, expect: String) {
+    let blob = w.pre_blob.as_ref().expect("pre blob").clone();
+    rust_decrypt_blob(w, &blob, &expect);
+}
+
+#[then(regex = "Rust decrypts the post payload and plaintext equals \"([^\"]+)\"")]
+fn rust_decrypts_post(w: &mut World, expect: String) {
+    let blob = w.post_blob.as_ref().expect("post blob").clone();
+    rust_decrypt_blob(w, &blob, &expect);
+}
+
+fn rust_decrypt_blob(w: &World, blob: &str, expect: &str) {
+    let blob = blob.to_string();
+    let master_hex = w.master_hex.clone();
+    let service = w.service.clone();
+    let product = w.product.clone();
+    let partition = w.partition.clone();
+    let result = std::thread::spawn(move || {
+        let bundle: NodeBundle = serde_json::from_str(&blob).expect("bundle json");
+        let store = create_store();
+        let crypto = Arc::new(ael::aead::AES256GCM::new());
+        let kms =
+            Arc::new(ael::kms::StaticKMS::new(crypto.clone(), hex_to_bytes(&master_hex)).unwrap());
+        let cfg = ael::Config::new(&service, &product);
+        let f = ael::api::new_session_factory(cfg, store, kms, crypto);
+        let s = f.get_session(&partition);
+        s.decrypt(bundle.drr).expect("decrypt")
+    })
+    .join()
+    .expect("thread panicked");
+    assert_eq!(result, expect.as_bytes());
+}
+
+#[then(regex = "Node decrypts the pre payload and plaintext equals \"([^\"]+)\"")]
+fn node_decrypts_pre(w: &mut World, expect: String) {
+    let blob = w.pre_blob.as_ref().expect("pre blob").clone();
+    node_decrypt_blob(w, &blob, &expect);
+}
+
+#[then(regex = "Node decrypts the post payload and plaintext equals \"([^\"]+)\"")]
+fn node_decrypts_post(w: &mut World, expect: String) {
+    let blob = w.post_blob.as_ref().expect("post blob").clone();
+    node_decrypt_blob(w, &blob, &expect);
+}
+
+fn node_decrypt_blob(w: &World, blob: &str, expect: &str) {
+    assert!(
+        have_node(),
+        "Install Node deps: cd cucumber/js && npm install"
+    );
+    let script = "cucumber/js/gen.js";
+    let mut child = Command::new("node")
+        .arg(script)
+        .arg("decrypt")
+        .arg(&w.service)
+        .arg(&w.product)
+        .arg(&w.partition)
+        .arg(&w.master_hex)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn node");
+    {
+        use std::io::Write;
+        child
+            .stdin
+            .as_mut()
+            .expect("child stdin")
+            .write_all(blob.as_bytes())
+            .unwrap();
+    }
+    let output = child.wait_with_output().expect("wait");
+    assert!(
+        output.status.success(),
+        "node decrypt failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let pt_b64 = String::from_utf8(output.stdout).unwrap();
+    let pt = STANDARD.decode(pt_b64.trim()).unwrap();
+    assert_eq!(pt, expect.as_bytes());
+}
+
+#[then(regex = "the post DRR's IK created is strictly newer than the pre DRR's")]
+fn assert_rotation_advanced(w: &mut World) {
+    let pre = w.pre_blob.as_ref().expect("pre blob");
+    let post = w.post_blob.as_ref().expect("post blob");
+    let pre_bundle: NodeBundle = serde_json::from_str(pre).expect("pre json");
+    let post_bundle: NodeBundle = serde_json::from_str(post).expect("post json");
+    let pre_ik = pre_bundle
+        .drr
+        .key
+        .as_ref()
+        .and_then(|k| k.parent_key_meta.as_ref())
+        .map(|m| m.created)
+        .expect("pre IK created");
+    let post_ik = post_bundle
+        .drr
+        .key
+        .as_ref()
+        .and_then(|k| k.parent_key_meta.as_ref())
+        .map(|m| m.created)
+        .expect("post IK created");
+    assert!(
+        post_ik > pre_ik,
+        "rotation must advance IK: post={post_ik} should be > pre={pre_ik}"
+    );
 }
 
 #[then(regex = "Node decrypts it successfully and plaintext equals \"([^\"]+)\"")]
