@@ -88,13 +88,34 @@ async function testSyncRotation() {
   // CI runners.
   setupShortExpiry('sync');
   try {
+    const t0 = Math.floor(Date.now() / 1000);
     const drr1 = addon.encrypt('p1', Buffer.from('before'));
     const ik1 = ikCreated(drr1);
+    const lag1 = t0 - ik1;
+    console.error(
+      `[diag] sync setup: t0=${t0} ik1=${ik1} lag=${lag1}s (precision=${
+        lag1 === 0 ? '1 (clamp working)' : `~${lag1 + 1} (clamp NOT applied — default 60 likely)`
+      })`,
+    );
 
+    const sleepStart = Date.now();
     await sleep(3000);
+    const sleepActual = Date.now() - sleepStart;
+    console.error(`[diag] sync sleep: requested 3000ms actual ${sleepActual}ms`);
 
-    const drr2 = addon.encrypt('p1', Buffer.from('after'));
+    const t1 = Math.floor(Date.now() / 1000);
+    let drr2;
+    try {
+      drr2 = addon.encrypt('p1', Buffer.from('after'));
+    } catch (e) {
+      console.error(
+        `[diag] sync second encrypt FAILED: t0=${t0} t1=${t1} elapsed=${t1 - t0}s ik1=${ik1} ` +
+          `t0_sec_in_min=${t0 % 60} t1_sec_in_min=${t1 % 60} ik1_at_min_boundary=${ik1 % 60 === 0}`,
+      );
+      throw e;
+    }
     const ik2 = ikCreated(drr2);
+    console.error(`[diag] sync after: t1=${t1} ik2=${ik2} ik2-ik1=${ik2 - ik1}`);
 
     assert.ok(
       ik2 > ik1,
