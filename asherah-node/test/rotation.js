@@ -91,7 +91,7 @@ async function testSyncRotation() {
     const drr1 = addon.encrypt('p1', Buffer.from('before'));
     const ik1 = ikCreated(drr1);
 
-    await sleep(1500);
+    await sleep(3000);
 
     const drr2 = addon.encrypt('p1', Buffer.from('after'));
     const ik2 = ikCreated(drr2);
@@ -116,7 +116,7 @@ async function testAsyncRotation() {
     const drr1 = await addon.encryptAsync('p1', Buffer.from('before-async'));
     const ik1 = ikCreated(drr1);
 
-    await sleep(1500);
+    await sleep(3000);
 
     const drr2 = await addon.encryptAsync('p1', Buffer.from('after-async'));
     const ik2 = ikCreated(drr2);
@@ -147,7 +147,7 @@ async function testSyncAsyncInteropAfterRotation() {
     const drrSyncPre = addon.encrypt('p1', Buffer.from('sync-pre'));
     const drrAsyncPre = await addon.encryptAsync('p1', Buffer.from('async-pre'));
 
-    await sleep(1500);
+    await sleep(3000);
 
     const drrSyncPost = addon.encrypt('p1', Buffer.from('sync-post'));
     const drrAsyncPost = await addon.encryptAsync('p1', Buffer.from('async-post'));
@@ -196,7 +196,7 @@ async function testMultipleRotationCycles() {
       const payload = `cycle-${i}`;
       const drr = await addon.encryptAsync('p1', Buffer.from(payload));
       history.push({ drr, payload, ik: ikCreated(drr) });
-      await sleep(1500);
+      await sleep(3000);
     }
     // Each cycle's IK must be strictly newer than the previous.
     for (let i = 1; i < history.length; i += 1) {
