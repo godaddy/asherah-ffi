@@ -25,23 +25,29 @@ if (targetDir) {
     path.resolve(targetDir, 'release', binaryName),
   );
 }
-// Prefer the freshly-built `../index.node` over `../npm/index.js`
-// because npm/index.js falls back to npm/<platform>/ binaries which
-// are stale during local development. CI builds populate
-// `npm/<platform>/` from artifacts, so the npm/index.js candidate
-// remains last for that path.
+// Load the addon binary DIRECTLY from a known path. Do NOT go through
+// `npm/index.js`, which tries `require('asherah-linux-x64-gnu')` first
+// and auto-installs the published package via bun — that bypasses our
+// CI-staged `npm/asherah.node` (built from this branch) and runs the
+// stale published binary instead. Diagnosed in commit 9035e0f when CI
+// printed `[diag] addon loaded from: asherah-linux-x64-gnu`.
 candidates.push(
+  // Freshly-built napi outputs (local dev or napi build target).
   path.resolve(__dirname, '../target/debug', binaryName),
   path.resolve(__dirname, '../target/release', binaryName),
   path.resolve(__dirname, '../../target/debug', binaryName),
   path.resolve(__dirname, '../../target/release', binaryName),
+  // Top-level `index.node` from `napi build`.
   path.resolve(__dirname, '../index.node'),
-  path.resolve(__dirname, '../npm/index.js'),
+  // Platform-bundled binaries (CI artifact stages these).
+  path.resolve(__dirname, `../npm/index.${process.platform}-${process.arch}.node`),
+  path.resolve(__dirname, '../npm/asherah.node'),
 );
 for (const candidate of candidates) {
   if (!fs.existsSync(candidate)) continue;
   try {
     addon = require(candidate);
+    addon.__binary = candidate;
     break;
   } catch (err) {
     if (err.code === 'MODULE_NOT_FOUND' || err.code === 'ERR_MODULE_NOT_FOUND' || err.code === 'ERR_DLOPEN_FAILED') continue;
