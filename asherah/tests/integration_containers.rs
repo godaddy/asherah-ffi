@@ -5037,3 +5037,255 @@ async fn kms_envelope_decrypt_fallback_on_preferred_api_error() {
     .await
     .unwrap();
 }
+
+// ════════════════════════════════════════════════════════════════
+// Revocation against real backends
+// ════════════════════════════════════════════════════════════════
+//
+// `tests/revocation.rs` exercises revocation against `InMemoryMetastore`.
+// `tests/integration_containers.rs` had rotation parity for Postgres,
+// MySQL, and DynamoDB but no revocation parity. These tests close that
+// gap: revoke an IK in the real backend (raw SQL / DDB UpdateItem
+// because production metastore impls don't expose `mark_revoked`),
+// wait past `revoke_check_interval_s`, and assert encrypt rotates to a
+// new IK while pre-revocation DRRs still decrypt.
+
+/// Mark an IK row revoked in Postgres by JSONB-patching `Revoked`.
+fn pg_mark_revoked(url: &str, id: &str, created: i64) {
+    let mut cli = postgres::Client::connect(url, postgres::NoTls).unwrap();
+    let created_f = created as f64;
+    let n = cli
+        .execute(
+            "UPDATE encryption_key \
+             SET key_record = jsonb_set(key_record, '{Revoked}', 'true'::jsonb) \
+             WHERE id=$1 AND created=to_timestamp($2)",
+            &[&id, &created_f],
+        )
+        .unwrap();
+    assert_eq!(n, 1, "expected to revoke exactly one row, updated {n}");
+}
+
+/// Mark an IK row revoked in MySQL by JSON_SET-patching `Revoked`.
+fn mysql_mark_revoked(url: &str, id: &str, created: i64) {
+    use mysql::prelude::Queryable;
+    let pool = mysql::Pool::new(mysql::Opts::try_from(url).unwrap()).unwrap();
+    let mut conn = pool.get_conn().unwrap();
+    // Force UTC so FROM_UNIXTIME interprets the bound epoch the same way
+    // the metastore's `epoch_to_utc_datetime` produces it.
+    conn.query_drop("SET time_zone = '+00:00'").unwrap();
+    conn.exec_drop(
+        "UPDATE encryption_key \
+         SET key_record = JSON_SET(key_record, '$.Revoked', true) \
+         WHERE id=? AND created=FROM_UNIXTIME(?)",
+        (id, created),
+    )
+    .unwrap();
+    let n = conn.affected_rows();
+    assert!(n >= 1, "expected to revoke at least one row, updated {n}");
+}
+
+/// Mark an IK row revoked in DynamoDB by UpdateItem on KeyRecord.Revoked.
+async fn ddb_mark_revoked(endpoint: &str, table: &str, id: &str, created: i64) {
+    use aws_sdk_dynamodb::types::AttributeValue;
+
+    let config = aws_config::defaults(aws_config::BehaviorVersion::latest())
+        .region(aws_config::meta::region::RegionProviderChain::first_try(
+            aws_sdk_dynamodb::config::Region::new("us-east-1"),
+        ))
+        .load()
+        .await;
+    let ddb_config = aws_sdk_dynamodb::config::Builder::from(&config)
+        .endpoint_url(endpoint)
+        .build();
+    let client = aws_sdk_dynamodb::Client::from_conf(ddb_config);
+
+    client
+        .update_item()
+        .table_name(table)
+        .key("Id", AttributeValue::S(id.to_string()))
+        .key("Created", AttributeValue::N(created.to_string()))
+        .update_expression("SET KeyRecord.Revoked = :r")
+        .expression_attribute_values(":r", AttributeValue::Bool(true))
+        .send()
+        .await
+        .unwrap();
+}
+
+/// Postgres revocation parity: revoke IK in JSONB → next encrypt
+/// rotates → both DRRs decrypt.
+#[tokio::test]
+async fn postgres_key_revocation() {
+    let url = match shared_postgres().await {
+        Some(v) => v,
+        None => return,
+    };
+
+    let url_clone = url.clone();
+    tokio::task::spawn_blocking(move || {
+        let store = asherah::metastore_postgres::PostgresMetastore::connect(&url_clone).unwrap();
+        let crypto = Arc::new(asherah::aead::AES256GCM::new());
+        let kms = Arc::new(asherah::kms::StaticKMS::new(crypto.clone(), vec![41_u8; 32]).unwrap());
+        let mut cfg = asherah::Config::new("pg-rev-svc", "pg-rev-prod");
+        // Long policy expiry — revocation must drive rotation.
+        cfg.policy.expire_key_after_s = 24 * 60 * 60;
+        cfg.policy.create_date_precision_s = 1;
+        cfg.policy.revoke_check_interval_s = 1;
+        let factory = asherah::api::new_session_factory(cfg, Arc::new(store), kms, crypto);
+        let session = factory.get_session("pg-rev");
+
+        let drr1 = session.encrypt(b"pre-revoke").unwrap();
+        let pkm = drr1.key.as_ref().unwrap().parent_key_meta.as_ref().unwrap();
+        let ik_id = pkm.id.clone();
+        let ik_created = pkm.created;
+
+        pg_mark_revoked(&url_clone, &ik_id, ik_created);
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+
+        let drr2 = session.encrypt(b"post-revoke").unwrap();
+        let ik_created_2 = drr2
+            .key
+            .as_ref()
+            .unwrap()
+            .parent_key_meta
+            .as_ref()
+            .unwrap()
+            .created;
+        assert!(
+            ik_created_2 > ik_created,
+            "expected new IK after revocation: {ik_created_2} > {ik_created}"
+        );
+
+        // Both DRRs decrypt — pre-revoke uses the revoked IK by exact (id, created).
+        assert_eq!(session.decrypt(drr1).unwrap(), b"pre-revoke");
+        assert_eq!(session.decrypt(drr2).unwrap(), b"post-revoke");
+    })
+    .await
+    .unwrap();
+}
+
+/// MySQL revocation parity.
+#[tokio::test]
+async fn mysql_key_revocation() {
+    let url = match shared_mysql().await {
+        Some(v) => v,
+        None => return,
+    };
+
+    let url_clone = url.clone();
+    tokio::task::spawn_blocking(move || {
+        let store = connect_mysql_with_retries(&url_clone);
+        let crypto = Arc::new(asherah::aead::AES256GCM::new());
+        let kms = Arc::new(asherah::kms::StaticKMS::new(crypto.clone(), vec![43_u8; 32]).unwrap());
+        let mut cfg = asherah::Config::new("mysql-rev-svc", "mysql-rev-prod");
+        cfg.policy.expire_key_after_s = 24 * 60 * 60;
+        cfg.policy.create_date_precision_s = 1;
+        cfg.policy.revoke_check_interval_s = 1;
+        let factory = asherah::api::new_session_factory(cfg, Arc::new(store), kms, crypto);
+        let session = factory.get_session("mysql-rev");
+
+        let drr1 = session.encrypt(b"pre-revoke").unwrap();
+        let pkm = drr1.key.as_ref().unwrap().parent_key_meta.as_ref().unwrap();
+        let ik_id = pkm.id.clone();
+        let ik_created = pkm.created;
+
+        mysql_mark_revoked(&url_clone, &ik_id, ik_created);
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+
+        let drr2 = session.encrypt(b"post-revoke").unwrap();
+        let ik_created_2 = drr2
+            .key
+            .as_ref()
+            .unwrap()
+            .parent_key_meta
+            .as_ref()
+            .unwrap()
+            .created;
+        assert!(
+            ik_created_2 > ik_created,
+            "expected new IK after revocation: {ik_created_2} > {ik_created}"
+        );
+
+        assert_eq!(session.decrypt(drr1).unwrap(), b"pre-revoke");
+        assert_eq!(session.decrypt(drr2).unwrap(), b"post-revoke");
+    })
+    .await
+    .unwrap();
+}
+
+/// DynamoDB revocation parity.
+#[tokio::test]
+async fn dynamodb_key_revocation() {
+    let endpoint = match shared_localstack().await {
+        Some(v) => v,
+        None => return,
+    };
+    let table = "EncryptionKeyRevocation";
+    create_dynamodb_table(&endpoint, table).await;
+
+    // Phase 1 (blocking): factory + first encrypt.
+    let endpoint_clone = endpoint.clone();
+    let (drr1, ik_id, ik_created, factory) = tokio::task::spawn_blocking(move || {
+        let (store, kms, crypto) = with_endpoint(&endpoint_clone, || {
+            let crypto = Arc::new(asherah::aead::AES256GCM::new());
+            let kms =
+                Arc::new(asherah::kms::StaticKMS::new(crypto.clone(), vec![47_u8; 32]).unwrap());
+            let store = Arc::new(
+                asherah::metastore_dynamodb::DynamoDbMetastore::new(
+                    table,
+                    Some("us-east-1".into()),
+                )
+                .unwrap(),
+            );
+            (store, kms, crypto)
+        });
+        let mut cfg = asherah::Config::new("ddb-rev-svc", "ddb-rev-prod");
+        cfg.policy.expire_key_after_s = 24 * 60 * 60;
+        cfg.policy.create_date_precision_s = 1;
+        cfg.policy.revoke_check_interval_s = 1;
+        let factory = asherah::api::new_session_factory(cfg, store, kms, crypto);
+        let session = factory.get_session("ddb-rev");
+
+        let drr1 = session.encrypt(b"pre-revoke").unwrap();
+        let (id, created) = {
+            let pkm = drr1.key.as_ref().unwrap().parent_key_meta.as_ref().unwrap();
+            (pkm.id.clone(), pkm.created)
+        };
+        (drr1, id, created, factory)
+    })
+    .await
+    .unwrap();
+
+    // Phase 2 (async): mark the IK row revoked in DynamoDB.
+    ddb_mark_revoked(&endpoint, table, &ik_id, ik_created).await;
+
+    // Phase 3 (blocking): wait past TTL, encrypt again, verify rotation
+    // and historical decrypt.
+    let endpoint_clone = endpoint.clone();
+    tokio::task::spawn_blocking(move || {
+        // `with_endpoint` was only needed for client construction; the
+        // factory captured the endpoint at construction time. The
+        // `revoke_check_interval_s = 1` cache TTL is the same TTL used
+        // by `tests/revocation.rs`.
+        drop(endpoint_clone);
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let session = factory.get_session("ddb-rev");
+        let drr2 = session.encrypt(b"post-revoke").unwrap();
+        let ik_created_2 = drr2
+            .key
+            .as_ref()
+            .unwrap()
+            .parent_key_meta
+            .as_ref()
+            .unwrap()
+            .created;
+        assert!(
+            ik_created_2 > ik_created,
+            "expected new IK after revocation: {ik_created_2} > {ik_created}"
+        );
+
+        assert_eq!(session.decrypt(drr1).unwrap(), b"pre-revoke");
+        assert_eq!(session.decrypt(drr2).unwrap(), b"post-revoke");
+    })
+    .await
+    .unwrap();
+}
