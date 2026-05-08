@@ -50,6 +50,12 @@ for (const candidate of candidates) {
 }
 if (!addon) throw new Error('Could not locate compiled asherah-node addon. Run `npm run build` first.');
 
+// Diagnostic: print where the addon was actually loaded from. The
+// npm/index.js module sets `__binary` after a successful require().
+console.error(
+  `[diag] addon loaded from: ${addon.__binary || '(no __binary attr — direct require)'}`,
+);
+
 // Pull `Key.ParentKeyMeta.Created` out of a DRR JSON string. The
 // Rust core uses Pascal-cased JSON field names for cross-language
 // compatibility with the Go reference.
