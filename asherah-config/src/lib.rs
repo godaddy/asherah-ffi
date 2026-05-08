@@ -305,9 +305,26 @@ impl ConfigOptions {
             }
         };
 
+        // Clamp `create_date_precision_s` to `expire_after` when the
+        // operator picks a short expiry. The default precision is 60s
+        // (set in asherah's CryptoPolicy::default), but when
+        // `expire_after < 60` the engine cannot rotate within a
+        // precision window and `encrypt` fails with "failed to create
+        // or load intermediate key after retry" the second time it's
+        // called inside one window after the IK has aged past
+        // `expire_after`. This footgun is invisible to language-binding
+        // users because no binding exposes `create_date_precision_s`.
+        // Auto-clamping is the simplest non-breaking fix: short-expiry
+        // configs become functional, longer-expiry configs keep the
+        // default precision. T-finding "expire_smaller_than_precision_fails_closed"
+        // in `asherah/tests/rotation_timing_edges.rs`.
+        let create_date_precision_s = match self.expire_after {
+            Some(e) if e > 0 && e < 60 => Some(e),
+            _ => None,
+        };
         let policy = PolicyConfig {
             expire_key_after_s: self.expire_after,
-            create_date_precision_s: None,
+            create_date_precision_s,
             revoke_check_interval_s: self.check_interval,
             session_cache_max_size: self.session_cache_max_size.map(|v| v as usize),
             session_cache_ttl_s: self.session_cache_duration,
@@ -596,6 +613,100 @@ mod tests {
         assert_eq!(
             dynamodb_endpoint_for_region("us-isob-east-1"),
             "https://dynamodb.us-isob-east-1.sc2s.sgov.gov"
+        );
+    }
+
+    fn base_memory() -> ConfigOptions {
+        ConfigOptions {
+            service_name: Some("svc".into()),
+            product_id: Some("prod".into()),
+            metastore: Some("memory".into()),
+            kms: Some("static".into()),
+            static_master_key_hex: Some("00".repeat(32)),
+            ..Default::default()
+        }
+    }
+
+    fn precision(cfg: ConfigOptions) -> Option<i64> {
+        let (resolved, _) = cfg.resolve().expect("resolve");
+        resolved.policy.create_date_precision_s
+    }
+
+    #[test]
+    fn precision_clamped_when_expire_is_short() {
+        // expire=1 → precision=1 (clamped down from default 60)
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: Some(1),
+                ..base_memory()
+            }),
+            Some(1),
+            "expire_after=1 must clamp precision to 1"
+        );
+        // expire=30 → precision=30
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: Some(30),
+                ..base_memory()
+            }),
+            Some(30)
+        );
+        // expire=59 → precision=59 (just under default)
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: Some(59),
+                ..base_memory()
+            }),
+            Some(59)
+        );
+    }
+
+    #[test]
+    fn precision_default_when_expire_is_long() {
+        // expire=60 → precision=None (default 60 wins)
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: Some(60),
+                ..base_memory()
+            }),
+            None,
+            "expire_after >= 60 keeps default precision"
+        );
+        // expire=86400 → precision=None
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: Some(86400),
+                ..base_memory()
+            }),
+            None
+        );
+        // expire=null → precision=None
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: None,
+                ..base_memory()
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn precision_default_for_zero_or_negative_expire() {
+        // expire=0 → precision=None (don't clamp; 0 is its own degenerate case)
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: Some(0),
+                ..base_memory()
+            }),
+            None
+        );
+        // expire=-1 → precision=None
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: Some(-1),
+                ..base_memory()
+            }),
+            None
         );
     }
 }
