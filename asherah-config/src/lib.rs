@@ -615,4 +615,98 @@ mod tests {
             "https://dynamodb.us-isob-east-1.sc2s.sgov.gov"
         );
     }
+
+    fn base_memory() -> ConfigOptions {
+        ConfigOptions {
+            service_name: Some("svc".into()),
+            product_id: Some("prod".into()),
+            metastore: Some("memory".into()),
+            kms: Some("static".into()),
+            static_master_key_hex: Some("00".repeat(32)),
+            ..Default::default()
+        }
+    }
+
+    fn precision(cfg: ConfigOptions) -> Option<i64> {
+        let (resolved, _) = cfg.resolve().expect("resolve");
+        resolved.policy.create_date_precision_s
+    }
+
+    #[test]
+    fn precision_clamped_when_expire_is_short() {
+        // expire=1 → precision=1 (clamped down from default 60)
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: Some(1),
+                ..base_memory()
+            }),
+            Some(1),
+            "expire_after=1 must clamp precision to 1"
+        );
+        // expire=30 → precision=30
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: Some(30),
+                ..base_memory()
+            }),
+            Some(30)
+        );
+        // expire=59 → precision=59 (just under default)
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: Some(59),
+                ..base_memory()
+            }),
+            Some(59)
+        );
+    }
+
+    #[test]
+    fn precision_default_when_expire_is_long() {
+        // expire=60 → precision=None (default 60 wins)
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: Some(60),
+                ..base_memory()
+            }),
+            None,
+            "expire_after >= 60 keeps default precision"
+        );
+        // expire=86400 → precision=None
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: Some(86400),
+                ..base_memory()
+            }),
+            None
+        );
+        // expire=null → precision=None
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: None,
+                ..base_memory()
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn precision_default_for_zero_or_negative_expire() {
+        // expire=0 → precision=None (don't clamp; 0 is its own degenerate case)
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: Some(0),
+                ..base_memory()
+            }),
+            None
+        );
+        // expire=-1 → precision=None
+        assert_eq!(
+            precision(ConfigOptions {
+                expire_after: Some(-1),
+                ..base_memory()
+            }),
+            None
+        );
+    }
 }

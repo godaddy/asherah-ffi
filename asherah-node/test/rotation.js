@@ -80,18 +80,18 @@ function setupShortExpiry(suffix) {
 
 // ──────────── Sync rotation ────────────
 
-function testSyncRotation() {
+async function testSyncRotation() {
+  // "sync rotation" refers to the sync encrypt/decrypt API; the wait
+  // between encrypts uses an async sleep so the event loop yields and
+  // CI timing is deterministic. Earlier versions used a busy-wait,
+  // which made first/second encrypt timestamps unstable on slow Linux
+  // CI runners.
   setupShortExpiry('sync');
   try {
     const drr1 = addon.encrypt('p1', Buffer.from('before'));
     const ik1 = ikCreated(drr1);
 
-    // Sleep blocks the event loop briefly, but this is a sync path test
-    // and the addon is sync. No async work runs during the wait.
-    const start = Date.now();
-    while (Date.now() - start < 1200) {
-      // busy-wait keeps the test deterministic without Promise jitter
-    }
+    await sleep(1500);
 
     const drr2 = addon.encrypt('p1', Buffer.from('after'));
     const ik2 = ikCreated(drr2);
@@ -116,7 +116,7 @@ async function testAsyncRotation() {
     const drr1 = await addon.encryptAsync('p1', Buffer.from('before-async'));
     const ik1 = ikCreated(drr1);
 
-    await sleep(1200);
+    await sleep(1500);
 
     const drr2 = await addon.encryptAsync('p1', Buffer.from('after-async'));
     const ik2 = ikCreated(drr2);
@@ -147,7 +147,7 @@ async function testSyncAsyncInteropAfterRotation() {
     const drrSyncPre = addon.encrypt('p1', Buffer.from('sync-pre'));
     const drrAsyncPre = await addon.encryptAsync('p1', Buffer.from('async-pre'));
 
-    await sleep(1200);
+    await sleep(1500);
 
     const drrSyncPost = addon.encrypt('p1', Buffer.from('sync-post'));
     const drrAsyncPost = await addon.encryptAsync('p1', Buffer.from('async-post'));
@@ -196,7 +196,7 @@ async function testMultipleRotationCycles() {
       const payload = `cycle-${i}`;
       const drr = await addon.encryptAsync('p1', Buffer.from(payload));
       history.push({ drr, payload, ik: ikCreated(drr) });
-      await sleep(1200);
+      await sleep(1500);
     }
     // Each cycle's IK must be strictly newer than the previous.
     for (let i = 1; i < history.length; i += 1) {
@@ -219,7 +219,7 @@ async function testMultipleRotationCycles() {
 }
 
 async function main() {
-  testSyncRotation();
+  await testSyncRotation();
   await testAsyncRotation();
   await testSyncAsyncInteropAfterRotation();
   await testMultipleRotationCycles();
