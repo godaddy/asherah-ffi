@@ -633,6 +633,20 @@ do_sanitizers() {
             "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo -Zbuild-std test -p asherah --lib --target $asan_target -- --test-threads=1"
         run_test "AddressSanitizer (cobhan)" bash -c \
             "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo -Zbuild-std test -p asherah-cobhan --lib --target $asan_target -- --test-threads=1"
+        # Rotation integration tests: sleep-based + multithreaded.
+        # ASAN catches use-after-free in the CryptoKey enclave / wipe
+        # paths and any cache eviction UAF. Keep --test-threads=1
+        # so tests don't compete for the second-resolution wall clock.
+        run_test "AddressSanitizer (rotation integration tests)" bash -c \
+            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo -Zbuild-std test -p asherah --target $asan_target \
+              --test concurrent_rotation \
+              --test swr_loader_failure \
+              --test rotation_expiration \
+              --test rotation_timing_edges \
+              --test sk_revocation \
+              --test revocation \
+              --test async_rotation \
+              -- --test-threads=1"
     elif docker info >/dev/null 2>&1; then
         ensure_sanitizer_image
         # --target must be explicit so cargo separates host (proc-macro) from
@@ -645,8 +659,34 @@ do_sanitizers() {
         run_test "AddressSanitizer (cobhan, via Docker)" \
             run_in_sanitizer_container \
             'TARGET=$(rustc +nightly -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly -Zbuild-std test -p asherah-cobhan --lib --target "$TARGET" -- --test-threads=1'
+        run_test "AddressSanitizer (rotation integration tests, via Docker)" \
+            run_in_sanitizer_container \
+            'TARGET=$(rustc +nightly -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly -Zbuild-std test -p asherah --target "$TARGET" --test concurrent_rotation --test swr_loader_failure --test rotation_expiration --test rotation_timing_edges --test sk_revocation --test revocation --test async_rotation -- --test-threads=1'
     else
         skip "AddressSanitizer (requires Linux or Docker)"
+    fi
+
+    # ThreadSanitizer — high-value coverage for the rotation tests
+    # because the engine's hot paths use atomics + single-flight CAS in
+    # SimpleKeyCache::try_claim_reload_*. TSAN catches data races that
+    # ASAN cannot. Same Linux + nightly requirement as ASAN; same
+    # per-thread serialization (--test-threads=1) so wall-clock-driven
+    # rotation expectations don't race each other.
+    if [ "$(uname)" = "Linux" ] && [ "$has_nightly" = true ]; then
+        local tsan_target="${platform}-unknown-linux-gnu"
+        run_test "ThreadSanitizer (concurrent rotation + SWR)" bash -c \
+            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=thread\" cargo -Zbuild-std test -p asherah --target $tsan_target \
+              --test concurrent_rotation \
+              --test swr_loader_failure \
+              --test cache_concurrent \
+              -- --test-threads=1"
+    elif docker info >/dev/null 2>&1; then
+        ensure_sanitizer_image
+        run_test "ThreadSanitizer (concurrent rotation + SWR, via Docker)" \
+            run_in_sanitizer_container \
+            'TARGET=$(rustc +nightly -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=thread" cargo +nightly -Zbuild-std test -p asherah --target "$TARGET" --test concurrent_rotation --test swr_loader_failure --test cache_concurrent -- --test-threads=1'
+    else
+        skip "ThreadSanitizer (requires Linux or Docker)"
     fi
 
     # Valgrind — needs Linux. Use Docker on macOS.
