@@ -88,13 +88,30 @@ async function testSyncRotation() {
   // CI runners.
   setupShortExpiry('sync');
   try {
+    const t0 = Math.floor(Date.now() / 1000);
     const drr1 = addon.encrypt('p1', Buffer.from('before'));
     const ik1 = ikCreated(drr1);
+    // Diagnostic: detect when the asherah-config precision clamp is
+    // not in effect. If `ik1` is rounded to a 60-second boundary
+    // while `t0` is well inside that boundary, the runtime is using
+    // the default 60s precision (clamp didn't apply). Surface that
+    // up front instead of failing later in a misleading "create-or-
+    // load IK" error.
+    if (t0 - ik1 > 5) {
+      console.error(
+        `[diagnostic] sync: IK created (${ik1}) lags now (${t0}) by ${t0 - ik1}s — ` +
+          `precision clamp may not have applied (default 60s precision suspected)`,
+      );
+    }
 
     await sleep(1500);
 
+    const t1 = Math.floor(Date.now() / 1000);
     const drr2 = addon.encrypt('p1', Buffer.from('after'));
     const ik2 = ikCreated(drr2);
+    console.error(
+      `[diagnostic] sync: t0=${t0} ik1=${ik1} t1=${t1} ik2=${ik2} (precision=${ik2 - ik1 || 'same-bucket'})`,
+    );
 
     assert.ok(
       ik2 > ik1,
