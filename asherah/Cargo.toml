@@ -117,6 +117,7 @@ serde_json = "1.0"
 which = "8"
 testcontainers = "0.27"
 testcontainers-modules = { version = "0.15", features = ["postgres", "mysql", "localstack"] }
+proptest = { version = "1.5", default-features = false, features = ["std", "fork", "timeout"] }
 
 [[test]]
 name = "integration_containers"
