@@ -155,3 +155,71 @@ pub fn new_crypto_policy(opts: &[PolicyOption]) -> CryptoPolicy {
     }
     p
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    fn policy_with(expire_s: i64, precision_s: i64) -> CryptoPolicy {
+        CryptoPolicy {
+            expire_key_after_s: expire_s,
+            create_date_precision_s: precision_s,
+            ..CryptoPolicy::default()
+        }
+    }
+
+    /// `enforce_minimums` clamps `create_date_precision_s` so it never
+    /// exceeds `expire_key_after_s` (when expire is positive). This is
+    /// the defense-in-depth runtime clamp that protects every binding
+    /// from the precision-window collision footgun.
+    ///
+    /// If this test ever fails, the runtime clamp isn't compiled in
+    /// and bindings will hit `failed to create or load IK after retry`
+    /// when an operator sets `expireAfter` < default precision.
+    #[test]
+    fn enforce_minimums_clamps_precision_to_expire() {
+        let mut p = policy_with(1, 60);
+        p.enforce_minimums();
+        assert_eq!(
+            p.create_date_precision_s, 1,
+            "enforce_minimums must clamp precision to expire_key_after_s",
+        );
+    }
+
+    /// When precision is already smaller than expire, the clamp leaves
+    /// it alone.
+    #[test]
+    fn enforce_minimums_preserves_smaller_precision() {
+        let mut p = policy_with(3600, 60);
+        p.enforce_minimums();
+        assert_eq!(p.create_date_precision_s, 60);
+    }
+
+    /// When precision equals expire, the clamp leaves it alone.
+    #[test]
+    fn enforce_minimums_preserves_equal_precision() {
+        let mut p = policy_with(60, 60);
+        p.enforce_minimums();
+        assert_eq!(p.create_date_precision_s, 60);
+    }
+
+    /// Zero and negative `expire_key_after_s` are degenerate
+    /// configurations; the clamp is a no-op.
+    #[test]
+    fn enforce_minimums_zero_or_negative_expire_no_op() {
+        let mut p = policy_with(0, 60);
+        p.enforce_minimums();
+        assert_eq!(
+            p.create_date_precision_s, 60,
+            "expire=0 leaves precision alone"
+        );
+
+        let mut p = policy_with(-1, 60);
+        p.enforce_minimums();
+        assert_eq!(
+            p.create_date_precision_s, 60,
+            "expire=-1 leaves precision alone"
+        );
+    }
+}
