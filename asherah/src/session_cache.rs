@@ -49,7 +49,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> Ses
         create: impl FnOnce() -> PublicSession<A, K, M>,
     ) -> Arc<PublicSession<A, K, M>> {
         // read() takes a shared lock — atomics let us update metadata without exclusive access
-        if let Some(Some((sess, promote))) = self.map.read(id, |_, entry| {
+        if let Some(Some((sess, promote))) = self.map.read_sync(id, |_, entry| {
             if self.ttl != Duration::from_secs(0) && entry.ts.elapsed() < self.ttl {
                 entry
                     .last_access
@@ -86,13 +86,13 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> Ses
         // only the second cached (T-finding "Non-atomic remove+insert
         // race produces two distinct sessions for same id" in
         // docs/review-2026-05-05-findings.md).
-        drop(self.map.upsert(id.to_string(), entry));
+        drop(self.map.upsert_sync(id.to_string(), entry));
         self.evict_if_needed();
         s
     }
 
     pub fn close(&self) {
-        self.map.retain(|_, _| false);
+        self.map.retain_sync(|_, _| false);
     }
 
     fn next_access(&self) -> u64 {
@@ -112,7 +112,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> Ses
         match self.policy {
             CachePolicy::Lru => {
                 let mut victim: Option<(String, u64)> = None;
-                self.map.scan(|k, v| {
+                self.map.iter_sync(|k, v| {
                     let access = v.last_access.load(Ordering::Relaxed);
                     let dominated = match &victim {
                         None => true,
@@ -121,14 +121,15 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> Ses
                     if dominated {
                         victim = Some((k.clone(), access));
                     }
+                    true
                 });
                 if let Some((k, _)) = victim {
-                    self.map.remove(&k);
+                    self.map.remove_sync(&k);
                 }
             }
             CachePolicy::Lfu => {
                 let mut victim: Option<(String, (u64, u64))> = None;
-                self.map.scan(|k, v| {
+                self.map.iter_sync(|k, v| {
                     let score = (
                         v.freq.load(Ordering::Relaxed),
                         v.last_access.load(Ordering::Relaxed),
@@ -140,15 +141,16 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> Ses
                     if dominated {
                         victim = Some((k.clone(), score));
                     }
+                    true
                 });
                 if let Some((k, _)) = victim {
-                    self.map.remove(&k);
+                    self.map.remove_sync(&k);
                 }
             }
             CachePolicy::TinyLfu => {
                 self.decay_if_needed();
                 let mut victim: Option<(String, (u64, u64))> = None;
-                self.map.scan(|k, v| {
+                self.map.iter_sync(|k, v| {
                     let score = (
                         v.freq.load(Ordering::Relaxed),
                         v.last_access.load(Ordering::Relaxed),
@@ -160,15 +162,16 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> Ses
                     if dominated {
                         victim = Some((k.clone(), score));
                     }
+                    true
                 });
                 if let Some((k, _)) = victim {
-                    self.map.remove(&k);
+                    self.map.remove_sync(&k);
                 }
             }
             CachePolicy::Slru => {
                 self.slru_rebalance();
                 let mut victim: Option<(String, u64)> = None;
-                self.map.scan(|k, v| {
+                self.map.iter_sync(|k, v| {
                     if v.segment.load(Ordering::Relaxed) == SEG_PROBATIONARY {
                         let access = v.last_access.load(Ordering::Relaxed);
                         let dominated = match &victim {
@@ -179,13 +182,14 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> Ses
                             victim = Some((k.clone(), access));
                         }
                     }
+                    true
                 });
                 if let Some((k, _)) = victim {
-                    self.map.remove(&k);
+                    self.map.remove_sync(&k);
                     return;
                 }
                 let mut victim: Option<(String, u64)> = None;
-                self.map.scan(|k, v| {
+                self.map.iter_sync(|k, v| {
                     if v.segment.load(Ordering::Relaxed) == SEG_PROTECTED {
                         let access = v.last_access.load(Ordering::Relaxed);
                         let dominated = match &victim {
@@ -196,9 +200,10 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> Ses
                             victim = Some((k.clone(), access));
                         }
                     }
+                    true
                 });
                 if let Some((k, _)) = victim {
-                    self.map.remove(&k);
+                    self.map.remove_sync(&k);
                 }
             }
             CachePolicy::Simple => {}
@@ -212,7 +217,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> Ses
         let protected_cap = std::cmp::max(1, self.max / 2);
         let mut protected_count = 0_usize;
         let mut victim: Option<(String, u64)> = None;
-        self.map.scan(|k, v| {
+        self.map.iter_sync(|k, v| {
             if v.segment.load(Ordering::Relaxed) == SEG_PROTECTED {
                 protected_count += 1;
                 let access = v.last_access.load(Ordering::Relaxed);
@@ -224,10 +229,11 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> Ses
                     victim = Some((k.clone(), access));
                 }
             }
+            true
         });
         if protected_count > protected_cap {
             if let Some((k, _)) = victim {
-                self.map.read(&k, |_, v| {
+                self.map.read_sync(&k, |_, v| {
                     v.segment.store(SEG_PROBATIONARY, Ordering::Relaxed);
                 });
             }
@@ -242,9 +248,10 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone> Ses
         let n = self.decay_ctr.fetch_add(1, Ordering::Relaxed) + 1;
         #[allow(clippy::manual_is_multiple_of)]
         if n % threshold == 0 {
-            self.map.scan(|_, v| {
+            self.map.iter_sync(|_, v| {
                 let old = v.freq.load(Ordering::Relaxed);
                 v.freq.store(std::cmp::max(1, old / 2), Ordering::Relaxed);
+                true
             });
         }
     }

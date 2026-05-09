@@ -30,7 +30,7 @@ impl InMemoryMetastore {
 
     pub fn mark_revoked(&self, id: &str, created: i64) {
         let key: Arc<str> = Arc::from(id);
-        self.by_key.update(&(key, created), |_, rec| {
+        self.by_key.update_sync(&(key, created), |_, rec| {
             rec.revoked = Some(true);
         });
     }
@@ -46,15 +46,17 @@ impl Default for InMemoryMetastore {
 impl Metastore for InMemoryMetastore {
     fn load(&self, id: &str, created: i64) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         let key: Arc<str> = Arc::from(id);
-        Ok(self.by_key.read(&(key, created), |_, v| v.clone()))
+        Ok(self.by_key.read_sync(&(key, created), |_, v| v.clone()))
     }
     fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error> {
         let interned: Arc<str> = Arc::from(id);
-        let created = match self.latest.read(&interned, |_, &v| v) {
+        let created = match self.latest.read_sync(&interned, |_, &v| v) {
             Some(c) => c,
             None => return Ok(None),
         };
-        Ok(self.by_key.read(&(interned, created), |_, v| v.clone()))
+        Ok(self
+            .by_key
+            .read_sync(&(interned, created), |_, v| v.clone()))
     }
     fn store(
         &self,
@@ -83,7 +85,7 @@ impl Metastore for InMemoryMetastore {
         //   T1: update latest[k] = 100
         //   T2: load_latest(k): read latest[k] → 100
         //   T2: load(k, 100): lookup by_key[(k,100)] → Some(...) ✓
-        let insert_result = self.by_key.insert(key, ekr.clone());
+        let insert_result = self.by_key.insert_sync(key, ekr.clone());
 
         // Atomically advance the latest pointer for `id` to `created`,
         // but only when it's an actual advance. The previous read+upsert
@@ -92,15 +94,15 @@ impl Metastore for InMemoryMetastore {
         // "InMemoryMetastore::store race on latest pointer" in
         // docs/review-2026-05-05-findings.md).
         //
-        // `scc::HashMap::update` runs the closure under the bucket lock,
+        // `scc::HashMap::update_sync` runs the closure under the bucket lock,
         // so the conditional advance is atomic. If the entry is missing
-        // we try `insert` (which fails if someone else just inserted)
+        // we try `insert_sync` (which fails if someone else just inserted)
         // and retry the update path on collision. The loop terminates
-        // because either an `update` succeeds or an `insert` succeeds.
+        // because either an `update_sync` succeeds or an `insert_sync` succeeds.
         loop {
             if self
                 .latest
-                .update(&interned, |_, existing| {
+                .update_sync(&interned, |_, existing| {
                     if *existing < created {
                         *existing = created;
                     }
@@ -109,7 +111,7 @@ impl Metastore for InMemoryMetastore {
             {
                 break;
             }
-            if self.latest.insert(interned.clone(), created).is_ok() {
+            if self.latest.insert_sync(interned.clone(), created).is_ok() {
                 break;
             }
             // Another writer raced ahead of our insert; loop to update.
