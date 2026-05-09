@@ -64,6 +64,27 @@ impl Metastore for InMemoryMetastore {
     ) -> Result<bool, anyhow::Error> {
         let interned: Arc<str> = Arc::from(id);
         let key = (interned.clone(), created);
+
+        // Insert into by_key FIRST, before updating latest. This ensures
+        // that load_latest() can never observe a `created` timestamp in
+        // the `latest` map that doesn't yet exist in `by_key`. The original
+        // order (latest-then-by_key) created a data race where concurrent
+        // load_latest could read the new timestamp but fail to find the
+        // corresponding key.
+        //
+        // Race scenario with wrong order (latest-first):
+        //   T1: store(k, 100): update latest[k] = 100
+        //   T2: load_latest(k): read latest[k] → 100
+        //   T2: load(k, 100): lookup by_key[(k,100)] → None (not inserted yet!)
+        //   T1: insert by_key[(k,100)] ← too late
+        //
+        // Correct order (by_key-first):
+        //   T1: insert by_key[(k,100)]
+        //   T1: update latest[k] = 100
+        //   T2: load_latest(k): read latest[k] → 100
+        //   T2: load(k, 100): lookup by_key[(k,100)] → Some(...) ✓
+        let insert_result = self.by_key.insert(key, ekr.clone());
+
         // Atomically advance the latest pointer for `id` to `created`,
         // but only when it's an actual advance. The previous read+upsert
         // pattern was racy: a slower writer with a smaller `created`
@@ -93,7 +114,8 @@ impl Metastore for InMemoryMetastore {
             }
             // Another writer raced ahead of our insert; loop to update.
         }
-        match self.by_key.insert(key, ekr.clone()) {
+
+        match insert_result {
             Ok(_) => Ok(true),
             Err(_) => Ok(false), // Key already exists
         }
