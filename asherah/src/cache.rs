@@ -262,29 +262,31 @@ impl SimpleKeyCache {
 
     fn get_latest_if_fresh(&self, id: &str) -> Option<(Arc<CryptoKey>, bool, bool)> {
         // read() takes a shared lock on the bucket, not exclusive
-        let (interned_id, created) = self.latest.read(id, |k, &v| (k.clone(), v))?;
+        let (interned_id, created) = self.latest.read_sync(id, |k, &v| (k.clone(), v))?;
 
-        let result = self.by_meta.read(&(interned_id, created), |_, entry| {
-            // Acquire to synchronize with `try_claim_reload_*`'s
-            // Release-side CAS — without an Acquire load here a thread
-            // can observe the bumped `loaded_at_ms` from another thread's
-            // claim without seeing any subsequent metadata writes that
-            // claim might have published. T-finding "Mixed Relaxed reads
-            // + AcqRel CAS" in `docs/review-2026-05-05-findings.md`.
-            let loaded = entry.loaded_at_ms.load(Ordering::Acquire);
-            let expired = self.is_expired(loaded, entry.ttl_jitter_ms);
-            let invalid = self.is_invalid(&entry.key);
-            entry
-                .last_access
-                .store(self.next_access(), Ordering::Relaxed);
-            entry.freq.fetch_add(1, Ordering::Relaxed);
-            let seg = entry.segment.load(Ordering::Relaxed);
-            let promote = self.policy == CachePolicy::Slru && seg == SEG_PROBATIONARY;
-            if promote {
-                entry.segment.store(SEG_PROTECTED, Ordering::Relaxed);
-            }
-            (entry.key.clone(), expired, invalid, promote)
-        })?;
+        let result = self
+            .by_meta
+            .read_sync(&(interned_id, created), |_, entry| {
+                // Acquire to synchronize with `try_claim_reload_*`'s
+                // Release-side CAS — without an Acquire load here a thread
+                // can observe the bumped `loaded_at_ms` from another thread's
+                // claim without seeing any subsequent metadata writes that
+                // claim might have published. T-finding "Mixed Relaxed reads
+                // + AcqRel CAS" in `docs/review-2026-05-05-findings.md`.
+                let loaded = entry.loaded_at_ms.load(Ordering::Acquire);
+                let expired = self.is_expired(loaded, entry.ttl_jitter_ms);
+                let invalid = self.is_invalid(&entry.key);
+                entry
+                    .last_access
+                    .store(self.next_access(), Ordering::Relaxed);
+                entry.freq.fetch_add(1, Ordering::Relaxed);
+                let seg = entry.segment.load(Ordering::Relaxed);
+                let promote = self.policy == CachePolicy::Slru && seg == SEG_PROBATIONARY;
+                if promote {
+                    entry.segment.store(SEG_PROTECTED, Ordering::Relaxed);
+                }
+                (entry.key.clone(), expired, invalid, promote)
+            })?;
         let (key_ref, expired, invalid, promote) = result;
         if promote {
             self.slru_rebalance();
@@ -294,7 +296,7 @@ impl SimpleKeyCache {
 
     fn get_meta_if_fresh(&self, meta: &KeyMeta) -> Option<(Arc<CryptoKey>, bool)> {
         let cache_key = (Arc::<str>::from(meta.id.as_str()), meta.created);
-        let result = self.by_meta.read(&cache_key, |_, entry| {
+        let result = self.by_meta.read_sync(&cache_key, |_, entry| {
             // Acquire — see the matching note in `get_latest_if_fresh`.
             let loaded = entry.loaded_at_ms.load(Ordering::Acquire);
             let mut expired = self.is_expired(loaded, entry.ttl_jitter_ms);
@@ -349,14 +351,14 @@ impl SimpleKeyCache {
         };
         // upsert replaces existing entries — scc::HashMap::insert does NOT,
         // which would leave stale entries with old loaded_at forever.
-        self.by_meta.upsert(cache_key, entry);
+        self.by_meta.upsert_sync(cache_key, entry);
         // Update latest pointer
         let should_update = self
             .latest
-            .read(&interned_id, |_, &existing| existing < meta.created)
+            .read_sync(&interned_id, |_, &existing| existing < meta.created)
             .unwrap_or(true);
         if should_update {
-            let _ = self.latest.upsert(interned_id, meta.created);
+            let _ = self.latest.upsert_sync(interned_id, meta.created);
         }
         self.evict_if_needed();
     }
@@ -374,7 +376,7 @@ impl SimpleKeyCache {
         match self.policy {
             CachePolicy::Lru => {
                 let mut victim: Option<(CacheKey, u64)> = None;
-                self.by_meta.scan(|k, v| {
+                self.by_meta.iter_sync(|k, v| {
                     let access = v.last_access.load(Ordering::Relaxed);
                     let dominated = match &victim {
                         None => true,
@@ -383,14 +385,15 @@ impl SimpleKeyCache {
                     if dominated {
                         victim = Some((k.clone(), access));
                     }
+                    true
                 });
                 if let Some((k, _)) = victim {
-                    self.by_meta.remove(&k);
+                    self.by_meta.remove_sync(&k);
                 }
             }
             CachePolicy::Lfu => {
                 let mut victim: Option<(CacheKey, (u64, u64))> = None;
-                self.by_meta.scan(|k, v| {
+                self.by_meta.iter_sync(|k, v| {
                     let score = (
                         v.freq.load(Ordering::Relaxed),
                         v.last_access.load(Ordering::Relaxed),
@@ -402,15 +405,16 @@ impl SimpleKeyCache {
                     if dominated {
                         victim = Some((k.clone(), score));
                     }
+                    true
                 });
                 if let Some((k, _)) = victim {
-                    self.by_meta.remove(&k);
+                    self.by_meta.remove_sync(&k);
                 }
             }
             CachePolicy::TinyLfu => {
                 self.decay_if_needed();
                 let mut victim: Option<(CacheKey, (u64, u64))> = None;
-                self.by_meta.scan(|k, v| {
+                self.by_meta.iter_sync(|k, v| {
                     let score = (
                         v.freq.load(Ordering::Relaxed),
                         v.last_access.load(Ordering::Relaxed),
@@ -422,15 +426,16 @@ impl SimpleKeyCache {
                     if dominated {
                         victim = Some((k.clone(), score));
                     }
+                    true
                 });
                 if let Some((k, _)) = victim {
-                    self.by_meta.remove(&k);
+                    self.by_meta.remove_sync(&k);
                 }
             }
             CachePolicy::Slru => {
                 self.slru_rebalance();
                 let mut victim: Option<(CacheKey, u64)> = None;
-                self.by_meta.scan(|k, v| {
+                self.by_meta.iter_sync(|k, v| {
                     if v.segment.load(Ordering::Relaxed) == SEG_PROBATIONARY {
                         let access = v.last_access.load(Ordering::Relaxed);
                         let dominated = match &victim {
@@ -441,13 +446,14 @@ impl SimpleKeyCache {
                             victim = Some((k.clone(), access));
                         }
                     }
+                    true
                 });
                 if let Some((k, _)) = victim {
-                    self.by_meta.remove(&k);
+                    self.by_meta.remove_sync(&k);
                     return;
                 }
                 let mut victim: Option<(CacheKey, u64)> = None;
-                self.by_meta.scan(|k, v| {
+                self.by_meta.iter_sync(|k, v| {
                     if v.segment.load(Ordering::Relaxed) == SEG_PROTECTED {
                         let access = v.last_access.load(Ordering::Relaxed);
                         let dominated = match &victim {
@@ -458,9 +464,10 @@ impl SimpleKeyCache {
                             victim = Some((k.clone(), access));
                         }
                     }
+                    true
                 });
                 if let Some((k, _)) = victim {
-                    self.by_meta.remove(&k);
+                    self.by_meta.remove_sync(&k);
                 }
             }
             CachePolicy::Simple => {}
@@ -474,7 +481,7 @@ impl SimpleKeyCache {
         let protected_cap = std::cmp::max(1, self.max / 2);
         let mut protected_count = 0_usize;
         let mut victim: Option<(CacheKey, u64)> = None;
-        self.by_meta.scan(|k, v| {
+        self.by_meta.iter_sync(|k, v| {
             if v.segment.load(Ordering::Relaxed) == SEG_PROTECTED {
                 protected_count += 1;
                 let access = v.last_access.load(Ordering::Relaxed);
@@ -486,10 +493,11 @@ impl SimpleKeyCache {
                     victim = Some((k.clone(), access));
                 }
             }
+            true
         });
         if protected_count > protected_cap {
             if let Some((k, _)) = victim {
-                self.by_meta.read(&k, |_, v| {
+                self.by_meta.read_sync(&k, |_, v| {
                     v.segment.store(SEG_PROBATIONARY, Ordering::Relaxed);
                 });
             }
@@ -504,9 +512,10 @@ impl SimpleKeyCache {
         let n = self.decay_ctr.fetch_add(1, Ordering::Relaxed) + 1;
         #[allow(clippy::manual_is_multiple_of)]
         if n % threshold == 0 {
-            self.by_meta.scan(|_, v| {
+            self.by_meta.iter_sync(|_, v| {
                 let old = v.freq.load(Ordering::Relaxed);
                 v.freq.store(std::cmp::max(1, old / 2), Ordering::Relaxed);
+                true
             });
         }
     }
@@ -519,12 +528,12 @@ impl SimpleKeyCache {
             // No TTL means no reload — see `is_expired`.
             return false;
         }
-        let Some((interned_id, created)) = self.latest.read(id, |k, &v| (k.clone(), v)) else {
+        let Some((interned_id, created)) = self.latest.read_sync(id, |k, &v| (k.clone(), v)) else {
             return false;
         };
         let fresh = now_ms();
         let mut claimed = false;
-        self.by_meta.read(&(interned_id, created), |_, entry| {
+        self.by_meta.read_sync(&(interned_id, created), |_, entry| {
             // Acquire load + AcqRel-success / Acquire-failure CAS so the
             // post-CAS reader's freshness signal is fully synchronized
             // with this thread's claim. T-finding "Mixed Relaxed reads +
@@ -548,7 +557,7 @@ impl SimpleKeyCache {
         let cache_key = (Arc::<str>::from(meta.id.as_str()), meta.created);
         let fresh = now_ms();
         let mut claimed = false;
-        self.by_meta.read(&cache_key, |_, entry| {
+        self.by_meta.read_sync(&cache_key, |_, entry| {
             // Acquire load + AcqRel-success / Acquire-failure CAS so the
             // post-CAS reader's freshness signal is fully synchronized
             // with this thread's claim. T-finding "Mixed Relaxed reads +
