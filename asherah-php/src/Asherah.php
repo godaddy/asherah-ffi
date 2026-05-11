@@ -65,7 +65,18 @@ final class Asherah
         self::$factory = null;
     }
 
-    public static function encrypt(string $partitionId, string $payload): string
+    public static function encrypt(string $partitionId, string $payload): DataRowRecord
+    {
+        $json = self::encryptBytes($partitionId, $payload);
+        return DataRowRecord::fromJson($json);
+    }
+
+    public static function decrypt(string $partitionId, DataRowRecord $dataRowRecord): string
+    {
+        return self::decryptBytes($partitionId, $dataRowRecord->toJson());
+    }
+
+    public static function encryptBytes(string $partitionId, string $payload): string
     {
         if (!self::$sessionCacheEnabled) {
             $session = self::newSession($partitionId);
@@ -79,12 +90,7 @@ final class Asherah
         return self::cachedSession($partitionId)->encryptBytes($payload);
     }
 
-    public static function encryptBytes(string $partitionId, string $payload): string
-    {
-        return self::encrypt($partitionId, $payload);
-    }
-
-    public static function decrypt(string $partitionId, string $dataRowRecord): string
+    public static function decryptBytes(string $partitionId, string $dataRowRecord): string
     {
         if (!self::$sessionCacheEnabled) {
             $session = self::newSession($partitionId);
@@ -98,19 +104,14 @@ final class Asherah
         return self::cachedSession($partitionId)->decryptBytes($dataRowRecord);
     }
 
-    public static function decryptBytes(string $partitionId, string $dataRowRecord): string
-    {
-        return self::decrypt($partitionId, $dataRowRecord);
-    }
-
     public static function encryptString(string $partitionId, string $payload): string
     {
-        return self::encrypt($partitionId, $payload);
+        return self::encryptBytes($partitionId, $payload);
     }
 
     public static function decryptString(string $partitionId, string $dataRowRecord): string
     {
-        return self::decrypt($partitionId, $dataRowRecord);
+        return self::decryptBytes($partitionId, $dataRowRecord);
     }
 
     private static function cachedSession(string $partitionId): Session

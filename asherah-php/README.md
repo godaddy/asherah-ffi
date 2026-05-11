@@ -141,7 +141,9 @@ single-region setup.
 
 ## Usage
 
-Prefer the typed config API for application code:
+### Quick Start (String API)
+
+For simple use cases, work directly with JSON strings:
 
 ```php
 use GoDaddy\Asherah\Asherah;
@@ -157,6 +159,46 @@ $plaintext = Asherah::decryptString('tenant-123', $ciphertext);
 
 Asherah::shutdown();
 ```
+
+### Typed API (DataRowRecord)
+
+For applications that need to inspect key metadata or prefer strong types:
+
+```php
+use GoDaddy\Asherah\Asherah;
+use GoDaddy\Asherah\AsherahConfig;
+use GoDaddy\Asherah\DataRowRecord;
+
+Asherah::setup(
+    AsherahConfig::memoryTestDebugStatic('my-service', 'my-product')
+        ->withSessionCache(true, 100)
+);
+
+$drr = Asherah::encrypt('tenant-123', 'secret');
+$plaintext = Asherah::decrypt('tenant-123', $drr);
+
+Asherah::shutdown();
+```
+
+The `DataRowRecord` class provides metadata accessors and JSON serialization:
+
+```php
+// Serialize for storage
+$json = $drr->toJson();  // or (string) $drr
+
+// Deserialize from storage
+$drr = DataRowRecord::fromJson($json);
+$plaintext = Asherah::decrypt('tenant-123', $drr);
+
+// Inspect key metadata
+if ($drr->hasKey()) {
+    $keyTimestamp = $drr->getKeyCreated();
+    $parentKeyId = $drr->getParentKeyId();
+}
+```
+
+Both APIs are fully supported. Use the string API for simplicity, or the typed
+API when you need metadata inspection or prefer explicit types.
 
 Multi-region KMS and DynamoDB options are preserved exactly as PascalCase JSON
 fields and passed through to the Rust core:
@@ -188,6 +230,8 @@ $config = (new AsherahConfig(
 Array configs are still accepted for compatibility, but typed configs provide
 better IDE completion and static-analysis coverage.
 
+### Explicit Lifecycle Control
+
 For explicit lifecycle control, use a factory and session directly:
 
 ```php
@@ -197,8 +241,13 @@ $factory = SessionFactory::fromConfig($config);
 $session = $factory->getSession('tenant-123');
 
 try {
+    // String API
     $ciphertext = $session->encryptString('secret');
     $plaintext = $session->decryptString($ciphertext);
+
+    // Or typed API
+    $drr = $session->encrypt('secret');
+    $plaintext = $session->decrypt($drr);
 } finally {
     $session->close();
     $factory->close();

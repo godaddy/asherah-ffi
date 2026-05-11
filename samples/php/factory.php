@@ -15,14 +15,17 @@ $session = $factory->getSession('tenant-123');
 
 try {
     $plaintext = "binary\0payload";
-    $dataRowRecord = $session->encryptBytes($plaintext);
-    $roundTrip = $session->decryptBytes($dataRowRecord);
+    $dataRowRecord = $session->encrypt($plaintext);
+    $roundTrip = $session->decrypt($dataRowRecord);
 
     if ($roundTrip !== $plaintext) {
         throw new RuntimeException('round trip failed');
     }
 
     echo "asherah php factory sample OK\n";
+    if ($dataRowRecord->hasKey()) {
+        echo "Key created: " . $dataRowRecord->getKeyCreated() . "\n";
+    }
 } finally {
     $session->close();
     $factory->close();

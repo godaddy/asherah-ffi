@@ -19,6 +19,17 @@ final class Session
         $this->handle = $handle;
     }
 
+    public function encrypt(string $payload): DataRowRecord
+    {
+        $json = $this->encryptBytes($payload);
+        return DataRowRecord::fromJson($json);
+    }
+
+    public function decrypt(DataRowRecord $dataRowRecord): string
+    {
+        return $this->decryptBytes($dataRowRecord->toJson());
+    }
+
     public function encryptBytes(string $payload): string
     {
         $this->assertOpen();
