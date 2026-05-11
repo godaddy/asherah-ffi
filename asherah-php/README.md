@@ -9,24 +9,33 @@ PHP FFI bindings for Asherah envelope encryption.
 - `ext-json`
 - An Asherah native FFI library for the current platform
 
-## Native Library Staging
+## Installation
 
-The Composer package is source-only. It does not bundle native binaries and it
-does not rely on Git LFS or Composer dependency scripts to make native libraries
-appear during install.
-
-After configuring Composer to use the published source archive, Packagist, or
-an internal Composer repository, install the PHP source with Composer and stage
-the one native library your image or host needs from an Asherah release:
+Install the PHP package from Packagist:
 
 ```bash
 composer require godaddy/asherah
-php vendor/godaddy/asherah/asherah-php/scripts/install_native.php --version=v0.6.64
 ```
 
-Until the package is published on Packagist, consumers can install it directly
-from the Git repository by adding a Composer VCS repository in their application
-root:
+The Composer package is source-only and does not bundle native binaries. After
+installing via Composer, download the platform-specific native FFI library:
+
+```bash
+php vendor/godaddy/asherah/asherah-php/scripts/install_native.php
+```
+
+The installer automatically detects the latest release version from the Composer
+package and downloads the matching native library for your platform. For
+production builds or when the package version doesn't match the release tag,
+specify the version explicitly:
+
+```bash
+php vendor/godaddy/asherah/asherah-php/scripts/install_native.php --version=v0.6.98
+```
+
+### Alternative: VCS Installation
+
+For development or pre-release testing, install directly from the Git repository:
 
 ```json
 {
@@ -42,36 +51,33 @@ root:
 }
 ```
 
-Use a release tag instead of `dev-main` once tags include the root
-`composer.json`. For local testing before this branch is merged, require the
-branch explicitly:
+VCS installs still require the native library staging step and may clone the
+full monorepo. Packagist installs are preferred for production use.
 
-```bash
-composer require godaddy/asherah:dev-fix/php-root-composer-package
-```
+### Container Deployment
 
-The VCS path is a bootstrap distribution model, not a native-binary transport.
-It still requires the explicit native staging step below. Source installs may
-clone the full monorepo; Packagist/dist installs are the preferred long-term
-consumer path once publishing is configured.
-
-The native installer downloads one platform artifact from the GitHub release,
-verifies it against `SHA256SUMS`, and stages it under `native/<platform>/`.
-You can also skip the helper and copy the native artifact into your image from
-your normal artifact pipeline.
-
-Recommended container pattern:
+Recommended Dockerfile pattern for production:
 
 ```dockerfile
+# Install PHP source from Packagist
 RUN composer install --no-dev --optimize-autoloader
-RUN php vendor/godaddy/asherah/asherah-php/scripts/install_native.php --version=v0.6.64
-ENV ASHERAH_PHP_NATIVE=/app/vendor/godaddy/asherah/native/linux-x64
+
+# Download platform-specific native library
+RUN php vendor/godaddy/asherah/asherah-php/scripts/install_native.php
+
+# Optional: Set explicit path to native library
+ENV ASHERAH_PHP_NATIVE=/app/vendor/godaddy/asherah/asherah-php/native/linux-x64
 ```
 
-Composer does not run scripts from dependency packages during a consuming
-application's install, and that is intentional here. Applications that still
-want a root Composer hook can add one, but image-build staging is the preferred
-production path:
+The native installer downloads one platform artifact from the GitHub release,
+verifies it against `SHA256SUMS`, and stages it under
+`vendor/godaddy/asherah/asherah-php/native/<platform>/`. You can also skip the
+installer and copy the native artifact from your artifact pipeline.
+
+### Optional: Composer Hook for Local Development
+
+For local development, you can automate native library downloads with Composer
+hooks in your application's root `composer.json`:
 
 ```json
 {
@@ -86,18 +92,21 @@ production path:
 }
 ```
 
-Set `ASHERAH_PHP_NATIVE_VERSION` when the package version does not directly
-match the Asherah release tag, or pass `--version=<tag>` to the script. Set
-`ASHERAH_PHP_NATIVE` to a file or directory to use an existing local native
-library instead of the default `native/` staging directory.
+For production container builds, explicit native staging in the Dockerfile is
+preferred over Composer hooks.
 
-Use `--install-dir=<dir>` when building container images that stage native
-libraries outside the Composer package tree.
+### Configuration Options
 
-For private repositories or rate-limited release downloads, set `GITHUB_TOKEN`
-or `GH_TOKEN` in the image build environment. The helper sends the token only
-when downloading from `github.com` or a `*.github.com` host, not to arbitrary
-custom `--release-base-url` hosts.
+**Environment Variables:**
+- `ASHERAH_PHP_NATIVE_VERSION` — Override the release version (default: auto-detected from package version)
+- `ASHERAH_PHP_NATIVE` — Use an existing native library file or directory instead of downloading
+- `GITHUB_TOKEN` or `GH_TOKEN` — Authenticate for private repositories or rate-limit avoidance (only sent to `github.com` hosts)
+
+**Installer Script Options:**
+- `--version=<tag>` — Specify the release tag (e.g., `v0.6.98`)
+- `--install-dir=<dir>` — Stage native libraries outside the Composer package tree
+- `--verify` — Verify existing installation without downloading
+- `--release-base-url=<url>` — Use a custom release artifact host
 
 ## Supported Platforms
 
@@ -231,36 +240,26 @@ See `samples/php/preload-fpm.ini` for the minimum PHP-FPM settings.
 
 ## Publishing Model
 
-The PHP package is source-only. Publish it as PHP source through the GitHub
-release archive produced by `.github/workflows/publish-php.yml` or through an
-internal Composer/artifact repository that consumes that archive, not as a fat
-package with native binaries. Native libraries remain release artifacts produced
-by the existing native release workflow and are staged into application images
-with `scripts/install_native.php` or an equivalent artifact-copy step.
+The PHP package is published to Packagist as a source-only distribution. The
+Composer package does not bundle native binaries — native FFI libraries remain
+separate GitHub release artifacts that are downloaded on-demand via
+`scripts/install_native.php`.
 
-This keeps Composer installs small and avoids Git LFS behavior that Composer
-does not handle reliably for large native assets.
+This design:
+- Keeps Packagist installs small (~172KB)
+- Avoids platform-specific fat packages
+- Eliminates Git LFS dependencies
+- Allows applications to download only the native library for their platform
 
 The repository root `composer.json` exposes `godaddy/asherah` for Packagist
 indexing without moving files out of the monorepo. `.gitattributes` keeps
 Composer dist archives source-only by exporting the root package metadata and
-the `asherah-php` runtime files while excluding unrelated Rust crates, other
-bindings, generated artifacts, tests, and native binaries.
+the `asherah-php` runtime files while excluding Rust crates, other language
+bindings, tests, and native binaries.
 
-To publish on Packagist, register or sign in to Packagist, submit
-`https://github.com/godaddy/asherah-ffi`, and configure the GitHub integration
-or webhook so Packagist refreshes when release tags are pushed. The package name
-comes from the root `composer.json`: `godaddy/asherah`.
-
-Before Packagist is configured, applications can use Composer's VCS repository
-support to consume this Git repository directly. That is expected to work with
-the root `composer.json`, but it is heavier than Packagist/dist installs and
-does not change the source-only package model.
-
-`.github/workflows/publish-php.yml` also validates the Composer source archive,
-attaches the source archive to a GitHub release, and requires an explicit tag
-when manually run in non-dry-run mode. Native libraries remain the existing
-release assets consumed by `scripts/install_native.php`.
+Packagist automatically syncs with GitHub releases via webhook. When a new
+release tag is pushed, Packagist indexes the source archive and consumers can
+install it immediately via `composer require godaddy/asherah`.
 
 ## Security Notes
 
