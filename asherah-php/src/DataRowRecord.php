@@ -25,11 +25,11 @@ final class DataRowRecord
         try {
             $parsed = json_decode($json, true, flags: JSON_THROW_ON_ERROR);
         } catch (JsonException $e) {
-            throw new \InvalidArgumentException("Invalid DataRowRecord JSON: " . $e->getMessage(), 0, $e);
+            throw new \InvalidArgumentException('Invalid DataRowRecord JSON: ' . $e->getMessage(), 0, $e);
         }
 
         if (!is_array($parsed) || array_is_list($parsed)) {
-            throw new \InvalidArgumentException("DataRowRecord must be a JSON object");
+            throw new \InvalidArgumentException('DataRowRecord must be a JSON object');
         }
 
         if (!isset($parsed['Data']) || !is_string($parsed['Data'])) {
