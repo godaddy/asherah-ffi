@@ -16,14 +16,15 @@ try {
     $partitionId = 'tenant-123';
     $plaintext = 'hello from php';
 
-    $dataRowRecord = Asherah::encryptString($partitionId, $plaintext);
-    $roundTrip = Asherah::decryptString($partitionId, $dataRowRecord);
+    $dataRowRecord = Asherah::encrypt($partitionId, $plaintext);
+    $roundTrip = Asherah::decrypt($partitionId, $dataRowRecord);
 
     if ($roundTrip !== $plaintext) {
         throw new RuntimeException('round trip failed');
     }
 
     echo "asherah php sample OK\n";
+    echo "DRR has embedded key: " . ($dataRowRecord->hasKey() ? "yes" : "no") . "\n";
 } finally {
     Asherah::shutdown();
 }
