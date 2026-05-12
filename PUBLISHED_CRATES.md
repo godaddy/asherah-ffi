@@ -10,8 +10,8 @@
 - **asherah-cobhan** - Cobhan-compatible C ABI (drop-in replacement for Go asherah-cobhan)
 - **asherah-config** - Shared configuration types used by FFI layers
 
-### Language Binding Implementation (not for direct consumption)
-These crates are build artifacts for language-specific packages. End users consume via:
+### Language Bindings (NOT published to crates.io)
+Language-specific packages are consumed through their native package managers:
 - Node.js: npm `@godaddy/asherah`
 - Python: PyPI `asherah`
 - Java: Maven `com.godaddy:asherah`
@@ -19,24 +19,23 @@ These crates are build artifacts for language-specific packages. End users consu
 - Go: Go module `github.com/godaddy/asherah-ffi/asherah-go`
 - .NET: NuGet `GoDaddy.Asherah`
 
-## Published (2026-05-12)
+The Rust crates (asherah-node, asherah-py, asherah-java) are build artifacts only, not intended for crates.io.
+
+## Published to crates.io (2026-05-12)
 
 - **asherah** v0.1.1 - Main Rust library
-- **asherah-config** v0.1.1 - Configuration types
-- **asherah-cobhan** v0.5.1 - Cobhan C ABI for FFI
+- **asherah-config** v0.1.1 - Configuration types  
 - **asherah-ffi** v0.1.0 - C ABI for language bindings
+- **asherah-cobhan** v0.5.1 - Cobhan C ABI for FFI
 
-## Pending (rate limited until 19:24 GMT)
+## Namespace Protection Candidates
 
-- **asherah-node** v0.1.0 - Node.js native addon (napi-rs)
-- **asherah-py** v0.1.0 - Python extension module (PyO3)
-- **asherah-java** v0.1.0 - JNI bindings
-
-## Namespace Reservation Candidates
-
-These names are available for claiming to protect the asherah namespace:
+Optional placeholder crates to prevent namespace squatting:
 
 - **asherah-server** - gRPC sidecar (currently `publish = false`)
+- **asherah-node** - Node.js bindings (build artifact, but could claim namespace)
+- **asherah-py** - Python bindings (build artifact, but could claim namespace)
+- **asherah-java** - Java bindings (build artifact, but could claim namespace)
 - **asherah-ruby** - Ruby bindings (no Rust crate yet)
 - **asherah-go** - Go bindings (no Rust crate yet)
 - **asherah-dotnet** - .NET bindings (no Rust crate yet)
@@ -47,6 +46,6 @@ All crates owned by: jgowdy-godaddy (jgowdy@godaddy.com)
 
 ## Changes Made
 
-All published and pending crates had their `Cargo.toml` updated to:
+Published crates had their `Cargo.toml` updated to:
 1. Add version requirements for internal dependencies (e.g., `asherah = { version = "0.1.1", path = "../asherah" }`)
 2. Replace invalid category `"ffi"` with `"api-bindings"`
