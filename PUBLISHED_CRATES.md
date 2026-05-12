@@ -24,7 +24,7 @@ The Rust crates (asherah-node, asherah-py, asherah-java) are build artifacts onl
 ## Published to crates.io (2026-05-12)
 
 - **asherah** v0.1.1 - Main Rust library
-- **asherah-config** v0.1.1 - Configuration types  
+- **asherah-config** v0.1.1 - Configuration types
 - **asherah-ffi** v0.1.0 - C ABI for language bindings
 - **asherah-cobhan** v0.5.1 - Cobhan C ABI for FFI
 
