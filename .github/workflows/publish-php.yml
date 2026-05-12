@@ -36,6 +36,59 @@ jobs:
         run: |
           echo "::error::Manual non-dry-run PHP publication requires a release tag input."
           exit 1
+      - name: Resolve release tag
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true' }}
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          RELEASE_EVENT_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            RELEASE_TAG="$INPUT_TAG"
+          elif [ -n "$RELEASE_EVENT_TAG" ]; then
+            RELEASE_TAG="$RELEASE_EVENT_TAG"
+          else
+            echo "::error::Unable to determine release tag for PHP publication."
+            exit 1
+          fi
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
+          echo "Publishing PHP archive for ${RELEASE_TAG}"
+      - name: Wait for native release assets
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          required_assets=(
+            libasherah-x64.so \
+            libasherah-arm64.so \
+            libasherah-x64-musl.so \
+            libasherah-arm64-musl.so \
+            libasherah-x64.dylib \
+            libasherah-arm64.dylib \
+            libasherah-x64.dll \
+            libasherah-arm64.dll \
+            SHA256SUMS
+          )
+
+          for attempt in $(seq 1 60); do
+            mapfile -t assets < <(gh release view "$RELEASE_TAG" --json assets --jq '.assets[].name')
+            missing=()
+            for asset in "${required_assets[@]}"; do
+              if ! printf '%s\n' "${assets[@]}" | grep -Fxq "$asset"; then
+                missing+=("$asset")
+              fi
+            done
+
+            if [ "${#missing[@]}" -eq 0 ]; then
+              echo "All required native assets are present for ${RELEASE_TAG}."
+              exit 0
+            fi
+
+            echo "Waiting for native assets on ${RELEASE_TAG} (attempt ${attempt}/60): ${missing[*]}"
+            sleep 60
+          done
+
+          echo "::error::Timed out waiting for native assets on ${RELEASE_TAG}."
+          exit 1
       - name: Build PHP package image
         run: docker build -t asherah-php-publish -f asherah-php/.Dockerfile.debian asherah-php
       - name: Build source-only Composer archive
@@ -55,8 +108,7 @@ jobs:
           name: asherah-php-source
           path: asherah-php-source.zip
       - name: Attach source archive to GitHub Release
-        if: ${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && github.event.inputs.tag != '') }}
+        if: ${{ github.event_name != 'workflow_dispatch' || (github.event.inputs.dry_run != 'true' && github.event.inputs.tag != '') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_TAG: ${{ github.event.release.tag_name || github.event.inputs.tag }}
         run: gh release upload "$RELEASE_TAG" asherah-php-source.zip --clobber
