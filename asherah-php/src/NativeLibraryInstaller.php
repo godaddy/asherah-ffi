@@ -80,12 +80,11 @@ final class NativeLibraryInstaller
             if ($this->verbose) {
                 $this->log("Asset URL: {$assetUrl}");
             }
-            $checksum = $options['checksum']
-                ? $this->downloadExpectedChecksum($checksumsUrl, $artifact['asset'])
-                : null;
-
             $tmp = $this->downloadToTempFile($assetUrl);
             try {
+                $checksum = $options['checksum']
+                    ? $this->downloadExpectedChecksum($checksumsUrl, $artifact['asset'])
+                    : null;
                 $this->verifyDownloadedLibrary($tmp, $checksum);
                 $this->installFile($tmp, $destination);
                 $this->verifyInstalledLibrary($destination);
