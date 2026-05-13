@@ -64,20 +64,6 @@ jobs:
           server-username: GITHUB_ACTOR
           server-password: GITHUB_TOKEN
 
-      - name: Configure Maven Central credentials
-        if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both') }}
-        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
-        env:
-          CENTRAL_TOKEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
-          CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
-        with:
-          java-version: '11'
-          distribution: 'temurin'
-          overwrite-settings: false
-          server-id: central
-          server-username: CENTRAL_TOKEN_USERNAME
-          server-password: CENTRAL_TOKEN_PASSWORD
-
       - name: Validate Maven Central secrets
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both') }}
         env:
@@ -199,6 +185,20 @@ jobs:
             echo "ERROR: Missing MAVEN_GPG_PASSPHRASE secret"
             exit 1
           fi
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml <<EOF
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+            <servers>
+              <server>
+                <id>central</id>
+                <username>${{ secrets.CENTRAL_TOKEN_USERNAME }}</username>
+                <password>${{ secrets.CENTRAL_TOKEN_PASSWORD }}</password>
+              </server>
+            </servers>
+          </settings>
+          EOF
           mvn -B -f asherah-java/java/pom.xml \
             -Pcentral \
             -Dnative.build.skip=true \
