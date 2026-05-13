@@ -1,4 +1,4 @@
-name: Publish to GitHub Packages (Maven)
+name: Publish Java Packages (Maven)
 
 # Top-level read-only token; jobs that need to push packages escalate
 # the relevant scopes (`packages: write`, etc.) explicitly. Without
@@ -21,6 +21,20 @@ on:
         description: 'Version to publish (e.g. 0.1.0)'
         required: true
         type: string
+      publish_target:
+        description: 'Where to publish'
+        required: false
+        default: github
+        type: choice
+        options:
+          - github
+          - central
+          - both
+      central_auto_publish:
+        description: 'Auto-publish validated deployment on Maven Central'
+        required: false
+        default: false
+        type: boolean
       dry_run:
         description: 'Dry run (build but do not publish)'
         required: false
@@ -49,6 +63,31 @@ jobs:
           server-id: github
           server-username: GITHUB_ACTOR
           server-password: GITHUB_TOKEN
+
+      - name: Configure Maven Central credentials
+        if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both') }}
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+        env:
+          CENTRAL_TOKEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
+          CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+          overwrite-settings: false
+          server-id: central
+          server-username: CENTRAL_TOKEN_USERNAME
+          server-password: CENTRAL_TOKEN_PASSWORD
+
+      - name: Validate Maven Central secrets
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both') }}
+        env:
+          CENTRAL_TOKEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
+          CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
+        run: |
+          if [ -z "${CENTRAL_TOKEN_USERNAME}" ] || [ -z "${CENTRAL_TOKEN_PASSWORD}" ]; then
+            echo "ERROR: Missing CENTRAL_TOKEN_USERNAME or CENTRAL_TOKEN_PASSWORD secret"
+            exit 1
+          fi
 
       - name: Download native libraries from release
         env:
@@ -128,7 +167,7 @@ jobs:
           echo "$COUNT native libraries bundled"
 
       - name: Deploy to GitHub Packages
-        if: ${{ github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }}
+        if: ${{ github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'github' || github.event.inputs.publish_target == 'both')) }}
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -138,10 +177,41 @@ jobs:
             -DskipTests \
             deploy
 
+      - name: Import GPG key for Maven Central
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both') }}
+        env:
+          MAVEN_GPG_PRIVATE_KEY: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
+        run: |
+          if [ -z "${MAVEN_GPG_PRIVATE_KEY}" ]; then
+            echo "ERROR: Missing MAVEN_GPG_PRIVATE_KEY secret"
+            exit 1
+          fi
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+          printf '%s' "${MAVEN_GPG_PRIVATE_KEY}" | gpg --batch --import
+
+      - name: Deploy to Maven Central
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both') }}
+        env:
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+        run: |
+          if [ -z "${MAVEN_GPG_PASSPHRASE}" ]; then
+            echo "ERROR: Missing MAVEN_GPG_PASSPHRASE secret"
+            exit 1
+          fi
+          mvn -B -f asherah-java/java/pom.xml \
+            -Pcentral \
+            -Dnative.build.skip=true \
+            -DskipTests \
+            -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" \
+            -Dcentral.autoPublish=${{ github.event.inputs.central_auto_publish }} \
+            deploy
+
       - name: Dry run
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
         run: |
           echo "Dry run complete. Would publish:"
           ls -lh asherah-java/java/target/*.jar
           echo ""
-          echo "Package: com.godaddy.asherah:appencryption:${MAVEN_VERSION}"
+          echo "Package: com.godaddy.asherah.encryption:appencryption:${MAVEN_VERSION}"
+          echo "Target: ${{ github.event.inputs.publish_target }}"
