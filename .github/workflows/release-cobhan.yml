@@ -75,11 +75,59 @@ jobs:
           echo "::error::CI did not complete within ${MAX_WAIT}s on ${SHA}."
           exit 1
 
+  ensure-go-module-tag:
+    permissions:
+      contents: write
+    needs: [verify-ci]
+    if: ${{ github.event_name == 'release' && needs.verify-ci.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - name: Ensure asherah-go module tag exists for this release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RELEASE_TAG="${{ github.event.release.tag_name }}"
+          RELEASE_SHA="${{ github.sha }}"
+          GO_TAG="asherah-go/${RELEASE_TAG}"
+
+          if [[ -z "${RELEASE_TAG}" ]]; then
+            echo "::error::Release tag is empty."
+            exit 1
+          fi
+
+          # For annotated tags, refs/tags/<tag> points at a tag object and
+          # refs/tags/<tag>^{} points at the peeled commit.
+          REMOTE_TAG_OBJECT_SHA="$(git ls-remote --tags origin "refs/tags/${GO_TAG}" | awk '{print $1}')"
+          REMOTE_PEELED_SHA="$(git ls-remote --tags origin "refs/tags/${GO_TAG}^{}" | awk '{print $1}')"
+          REMOTE_EFFECTIVE_SHA="${REMOTE_PEELED_SHA:-$REMOTE_TAG_OBJECT_SHA}"
+
+          if [[ -n "${REMOTE_EFFECTIVE_SHA}" ]]; then
+            echo "Found existing ${GO_TAG} -> ${REMOTE_EFFECTIVE_SHA}"
+            if [[ "${REMOTE_EFFECTIVE_SHA}" != "${RELEASE_SHA}" ]]; then
+              echo "::error::Tag ${GO_TAG} already exists on ${REMOTE_EFFECTIVE_SHA}, expected ${RELEASE_SHA}."
+              exit 1
+            fi
+            echo "Tag already points at this release commit; nothing to do."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "${GO_TAG}" "${RELEASE_SHA}" -m "Release ${GO_TAG}"
+          git push origin "refs/tags/${GO_TAG}"
+          echo "Created and pushed ${GO_TAG} -> ${RELEASE_SHA}"
+
   build:
     permissions:
       contents: read
-    needs: [verify-ci]
-    if: ${{ always() && (needs.verify-ci.result == 'success' || needs.verify-ci.result == 'skipped') }}
+    needs: [verify-ci, ensure-go-module-tag]
+    if: ${{ always() && (needs.verify-ci.result == 'success' || needs.verify-ci.result == 'skipped') && (needs.ensure-go-module-tag.result == 'success' || needs.ensure-go-module-tag.result == 'skipped') }}
     strategy:
       fail-fast: false
       matrix:
@@ -499,4 +547,3 @@ jobs:
           echo "  https://github.com/${REPO}/releases/download/${TAG}/libasherah-all-platforms.tar.gz"
           echo ""
           echo "=============================================="
-
