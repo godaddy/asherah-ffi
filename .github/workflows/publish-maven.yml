@@ -188,15 +188,17 @@ jobs:
           fi
 
           echo "Using GPG key fingerprint: ${KEY_FINGERPRINT}"
-          gpg --batch --armor --export "${KEY_FINGERPRINT}" > /tmp/maven-central-public-key.asc
-
           SENT=0
-          for KEYSERVER in keyserver.ubuntu.com keys.openpgp.org pgp.mit.edu; do
-            echo "Sending public key to ${KEYSERVER}"
-            if gpg --batch --keyserver "hkps://${KEYSERVER}" --send-keys "${KEY_FINGERPRINT}"; then
+          for KEYSERVER_URI in \
+            hkp://keyserver.ubuntu.com:80 \
+            hkps://keyserver.ubuntu.com \
+            hkps://keys.openpgp.org \
+            hkp://pgp.mit.edu:11371; do
+            echo "Sending public key to ${KEYSERVER_URI}"
+            if timeout 30s gpg --batch --keyserver "${KEYSERVER_URI}" --send-keys "${KEY_FINGERPRINT}"; then
               SENT=1
             else
-              echo "WARN: Failed to send key to ${KEYSERVER}; continuing"
+              echo "WARN: Failed to send key to ${KEYSERVER_URI}; continuing"
             fi
           done
 
@@ -210,7 +212,7 @@ jobs:
           for ATTEMPT in 1 2 3 4 5; do
             TMP_GNUPGHOME="$(mktemp -d)"
             chmod 700 "${TMP_GNUPGHOME}"
-            if GNUPGHOME="${TMP_GNUPGHOME}" gpg --batch --keyserver hkps://keyserver.ubuntu.com --recv-keys "${KEY_FINGERPRINT}"; then
+            if GNUPGHOME="${TMP_GNUPGHOME}" timeout 20s gpg --batch --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys "${KEY_FINGERPRINT}"; then
               VERIFIED=1
               rm -rf "${TMP_GNUPGHOME}"
               break
