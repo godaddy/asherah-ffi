@@ -64,20 +64,6 @@ jobs:
           server-username: GITHUB_ACTOR
           server-password: GITHUB_TOKEN
 
-      - name: Configure Maven Central credentials
-        if: ${{ github.event_name == 'workflow_dispatch' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both') }}
-        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
-        env:
-          CENTRAL_TOKEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
-          CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
-        with:
-          java-version: '11'
-          distribution: 'temurin'
-          overwrite-settings: false
-          server-id: central
-          server-username: CENTRAL_TOKEN_USERNAME
-          server-password: CENTRAL_TOKEN_PASSWORD
-
       - name: Validate Maven Central secrets
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both') }}
         env:
@@ -190,6 +176,57 @@ jobs:
           chmod 700 ~/.gnupg
           printf '%s' "${MAVEN_GPG_PRIVATE_KEY}" | gpg --batch --import
 
+      - name: Publish GPG public key to keyservers
+        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both') }}
+        run: |
+          set -euo pipefail
+
+          KEY_FINGERPRINT="$(gpg --batch --list-secret-keys --with-colons | awk -F: '/^fpr:/ {print $10; exit}')"
+          if [ -z "${KEY_FINGERPRINT}" ]; then
+            echo "ERROR: Unable to determine imported GPG key fingerprint"
+            exit 1
+          fi
+
+          echo "Using GPG key fingerprint: ${KEY_FINGERPRINT}"
+          SENT=0
+          for KEYSERVER_URI in \
+            hkp://keyserver.ubuntu.com:80 \
+            hkps://keyserver.ubuntu.com \
+            hkps://keys.openpgp.org \
+            hkp://pgp.mit.edu:11371; do
+            echo "Sending public key to ${KEYSERVER_URI}"
+            if timeout 30s gpg --batch --keyserver "${KEYSERVER_URI}" --send-keys "${KEY_FINGERPRINT}"; then
+              SENT=1
+            else
+              echo "WARN: Failed to send key to ${KEYSERVER_URI}; continuing"
+            fi
+          done
+
+          if [ "${SENT}" -ne 1 ]; then
+            echo "ERROR: Unable to publish GPG public key to any supported keyserver"
+            exit 1
+          fi
+
+          # Verify discoverability from a fresh keyring to avoid local cache false positives.
+          VERIFIED=0
+          for ATTEMPT in 1 2 3 4 5; do
+            TMP_GNUPGHOME="$(mktemp -d)"
+            chmod 700 "${TMP_GNUPGHOME}"
+            if GNUPGHOME="${TMP_GNUPGHOME}" timeout 20s gpg --batch --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys "${KEY_FINGERPRINT}"; then
+              VERIFIED=1
+              rm -rf "${TMP_GNUPGHOME}"
+              break
+            fi
+            rm -rf "${TMP_GNUPGHOME}"
+            echo "Key not yet visible on keyserver.ubuntu.com (attempt ${ATTEMPT}/5); waiting 20s..."
+            sleep 20
+          done
+
+          if [ "${VERIFIED}" -ne 1 ]; then
+            echo "ERROR: GPG key is not yet discoverable on keyserver.ubuntu.com"
+            exit 1
+          fi
+
       - name: Deploy to Maven Central
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both') }}
         env:
@@ -199,6 +236,20 @@ jobs:
             echo "ERROR: Missing MAVEN_GPG_PASSPHRASE secret"
             exit 1
           fi
+          mkdir -p ~/.m2
+          cat > ~/.m2/settings.xml <<EOF
+          <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+                    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+            <servers>
+              <server>
+                <id>central</id>
+                <username>${{ secrets.CENTRAL_TOKEN_USERNAME }}</username>
+                <password>${{ secrets.CENTRAL_TOKEN_PASSWORD }}</password>
+              </server>
+            </servers>
+          </settings>
+          EOF
           mvn -B -f asherah-java/java/pom.xml \
             -Pcentral \
             -Dnative.build.skip=true \
