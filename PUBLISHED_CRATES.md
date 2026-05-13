@@ -49,3 +49,4 @@ All crates owned by: jgowdy-godaddy (jgowdy@godaddy.com)
 Published crates had their `Cargo.toml` updated to:
 1. Add version requirements for internal dependencies (e.g., `asherah = { version = "0.1.1", path = "../asherah" }`)
 2. Replace invalid category `"ffi"` with `"api-bindings"`
+3. Mark language-binding build crates as `publish = false`

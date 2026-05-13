@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Python bindings for the Asherah Rust library"
+publish = false
 homepage = "https://github.com/godaddy/asherah-ffi"
 repository = "https://github.com/godaddy/asherah-ffi"
 readme = "README.md"
