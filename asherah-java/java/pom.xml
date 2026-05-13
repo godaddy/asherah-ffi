@@ -3,13 +3,17 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>com.godaddy.asherah</groupId>
+  <groupId>com.godaddy.asherah.encryption</groupId>
   <artifactId>appencryption</artifactId>
   <version>0.50.0</version>
-  <name>appencryption</name>
-  <description>Asherah application-layer encryption for Java with automatic key rotation, powered by the native Rust implementation.</description>
+  <name>Asherah AppEncryption for Java</name>
+  <description>Application-layer envelope encryption for Java with automatic key rotation and integrated native runtime support from Asherah.</description>
   <url>https://github.com/godaddy/asherah-ffi</url>
   <packaging>jar</packaging>
+  <organization>
+    <name>GoDaddy</name>
+    <url>https://www.godaddy.com</url>
+  </organization>
 
   <licenses>
     <license>
@@ -21,7 +25,18 @@
   <scm>
     <url>https://github.com/godaddy/asherah-ffi</url>
     <connection>scm:git:https://github.com/godaddy/asherah-ffi.git</connection>
+    <developerConnection>scm:git:git@github.com:godaddy/asherah-ffi.git</developerConnection>
   </scm>
+
+  <issueManagement>
+    <system>GitHub Issues</system>
+    <url>https://github.com/godaddy/asherah-ffi/issues</url>
+  </issueManagement>
+
+  <ciManagement>
+    <system>GitHub Actions</system>
+    <url>https://github.com/godaddy/asherah-ffi/actions</url>
+  </ciManagement>
 
   <developers>
     <developer>
@@ -183,5 +198,50 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <profile>
+      <id>central</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-gpg-plugin</artifactId>
+            <version>3.2.8</version>
+            <executions>
+              <execution>
+                <id>sign-artifacts</id>
+                <phase>verify</phase>
+                <goals>
+                  <goal>sign</goal>
+                </goals>
+                <configuration>
+                  <gpgArguments>
+                    <arg>--pinentry-mode</arg>
+                    <arg>loopback</arg>
+                  </gpgArguments>
+                  <passphrase>${gpg.passphrase}</passphrase>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+
+          <plugin>
+            <groupId>org.sonatype.central</groupId>
+            <artifactId>central-publishing-maven-plugin</artifactId>
+            <version>0.10.0</version>
+            <extensions>true</extensions>
+            <configuration>
+              <publishingServerId>central</publishingServerId>
+              <autoPublish>${central.autoPublish}</autoPublish>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+      <properties>
+        <central.autoPublish>false</central.autoPublish>
+      </properties>
+    </profile>
+  </profiles>
 
 </project>
