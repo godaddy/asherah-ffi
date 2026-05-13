@@ -18,30 +18,21 @@ encrypt/decrypt. After this guide, see:
 
 ```xml
 <dependency>
-  <groupId>com.godaddy.asherah</groupId>
+  <groupId>com.godaddy.asherah.encryption</groupId>
   <artifactId>appencryption</artifactId>
-  <version>0.6.64</version>
+  <version>0.50.0</version>
 </dependency>
-
-<repositories>
-  <repository>
-    <id>github</id>
-    <url>https://maven.pkg.github.com/godaddy/asherah-ffi</url>
-  </repository>
-</repositories>
 ```
 
 ### Gradle
 
 ```groovy
-repositories {
-    maven { url = uri("https://maven.pkg.github.com/godaddy/asherah-ffi") }
-}
-
 dependencies {
-    implementation("com.godaddy.asherah:appencryption:0.6.64")
+    implementation("com.godaddy.asherah.encryption:appencryption:0.50.0")
 }
 ```
+
+No extra repository configuration is required when resolving from Maven Central.
 
 The published artifact bundles native libraries (JNI) for Linux
 (x64/aarch64, glibc and musl), macOS (x64/arm64), and Windows

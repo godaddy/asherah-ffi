@@ -65,7 +65,7 @@ jobs:
           server-password: GITHUB_TOKEN
 
       - name: Validate Maven Central secrets
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both') }}
+        if: ${{ github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both')) }}
         env:
           CENTRAL_TOKEN_USERNAME: ${{ secrets.CENTRAL_TOKEN_USERNAME }}
           CENTRAL_TOKEN_PASSWORD: ${{ secrets.CENTRAL_TOKEN_PASSWORD }}
@@ -164,7 +164,7 @@ jobs:
             deploy
 
       - name: Import GPG key for Maven Central
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both') }}
+        if: ${{ github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both')) }}
         env:
           MAVEN_GPG_PRIVATE_KEY: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
         run: |
@@ -177,7 +177,7 @@ jobs:
           printf '%s' "${MAVEN_GPG_PRIVATE_KEY}" | gpg --batch --import
 
       - name: Publish GPG public key to keyservers
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both') }}
+        if: ${{ github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both')) }}
         run: |
           set -euo pipefail
 
@@ -228,13 +228,18 @@ jobs:
           fi
 
       - name: Deploy to Maven Central
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both') }}
+        if: ${{ github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both')) }}
         env:
           MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
         run: |
           if [ -z "${MAVEN_GPG_PASSPHRASE}" ]; then
             echo "ERROR: Missing MAVEN_GPG_PASSPHRASE secret"
             exit 1
+          fi
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            CENTRAL_AUTO_PUBLISH=true
+          else
+            CENTRAL_AUTO_PUBLISH=${{ github.event.inputs.central_auto_publish }}
           fi
           mkdir -p ~/.m2
           cat > ~/.m2/settings.xml <<EOF
@@ -255,7 +260,7 @@ jobs:
             -Dnative.build.skip=true \
             -DskipTests \
             -Dgpg.passphrase="${MAVEN_GPG_PASSPHRASE}" \
-            -Dcentral.autoPublish=${{ github.event.inputs.central_auto_publish }} \
+            -Dcentral.autoPublish="${CENTRAL_AUTO_PUBLISH}" \
             deploy
 
       - name: Dry run

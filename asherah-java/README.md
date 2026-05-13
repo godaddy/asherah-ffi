@@ -1,6 +1,6 @@
 # asherah-java
 
-Java bindings (JNI) for [Asherah](https://github.com/godaddy/asherah-ffi) envelope encryption with automatic key rotation. Published to GitHub Packages Maven.
+Java bindings (JNI) for [Asherah](https://github.com/godaddy/asherah-ffi) envelope encryption with automatic key rotation. Published to Maven Central.
 
 ## Installation
 
@@ -8,34 +8,19 @@ Java bindings (JNI) for [Asherah](https://github.com/godaddy/asherah-ffi) envelo
 
 ```xml
 <dependency>
-  <groupId>com.godaddy.asherah</groupId>
+  <groupId>com.godaddy.asherah.encryption</groupId>
   <artifactId>appencryption</artifactId>
-  <version>0.6.64</version>
+  <version>0.50.0</version>
 </dependency>
 ```
 
-Add the GitHub Packages repository:
-
-```xml
-<repositories>
-  <repository>
-    <id>github</id>
-    <url>https://maven.pkg.github.com/godaddy/asherah-ffi</url>
-  </repository>
-</repositories>
-```
+No extra Maven repository configuration is required when using Maven Central.
 
 ### Gradle
 
 ```groovy
-repositories {
-    maven {
-        url = uri("https://maven.pkg.github.com/godaddy/asherah-ffi")
-    }
-}
-
 dependencies {
-    implementation 'com.godaddy.asherah:appencryption:0.6.64'
+    implementation 'com.godaddy.asherah.encryption:appencryption:0.50.0'
 }
 ```
 
@@ -196,8 +181,8 @@ Key differences:
 | Async support | None | `CompletableFuture` |
 
 Migration steps:
-1. Update the `com.godaddy.asherah:appencryption` version to this implementation (same coordinates)
-2. Update the repository URL to `https://maven.pkg.github.com/godaddy/asherah-ffi`
+1. Update dependency coordinates to `com.godaddy.asherah.encryption:appencryption`
+2. Use a current version (for example `0.50.0` or newer)
 3. Replace `AppEncryptionSessionFactory` with `AsherahFactory` or the static `Asherah` API
 4. Both read the same metastore tables -- no data migration required
 
