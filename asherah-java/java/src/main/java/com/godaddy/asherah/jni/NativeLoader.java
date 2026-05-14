@@ -13,10 +13,15 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Locale;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 final class NativeLoader {
   private static final AtomicBoolean LOADED = new AtomicBoolean(false);
+  private static final String EXTRACT_DIR_PROP = "asherah.java.nativeExtractDir";
+  private static final String EXTRACT_DIR_ENV = "ASHERAH_JAVA_NATIVE_EXTRACT_DIR";
 
   private NativeLoader() {}
 
@@ -61,18 +66,32 @@ final class NativeLoader {
     }
 
     // 2. Extract bundled JAR resource for the detected platform.
-    Path extracted = null;
-    Throwable extractError = null;
-    try {
-      extracted = extractFromResources();
-    } catch (IOException | RuntimeException e) {
-      extractError = e;
-    }
-    if (extracted != null) {
+    Throwable extractOrLoadError = null;
+    StringBuilder attempted = new StringBuilder();
+    for (Path baseDir : extractionBaseDirs()) {
+      Path extracted = null;
+      try {
+        extracted = extractFromResources(baseDir);
+      } catch (IOException | RuntimeException e) {
+        extractOrLoadError = e;
+      }
+      if (extracted == null) {
+        continue;
+      }
+      if (attempted.length() > 0) {
+        attempted.append(", ");
+      }
+      attempted.append(extracted);
       try {
         System.load(extracted.toString());
         return;
       } catch (UnsatisfiedLinkError e) {
+        extractOrLoadError = e;
+        if (isPermissionStyleLoadFailure(e)) {
+          // Common on SELinux/noexec mounts (for example /tmp on hardened RHEL).
+          // Continue trying alternate extraction directories before falling back.
+          continue;
+        }
         throw new IllegalStateException(
             "Failed to load Asherah native library extracted from JAR at " + extracted, e);
       }
@@ -83,9 +102,12 @@ final class NativeLoader {
       System.loadLibrary("asherah_java");
     } catch (UnsatisfiedLinkError e) {
       String msg = "Failed to load Asherah native library. Tried: bundled JAR resource"
-          + (extractError != null ? " (" + extractError.getMessage() + ")" : "")
+          + (attempted.length() > 0 ? " at [" + attempted + "]" : "")
+          + (extractOrLoadError != null ? " (" + extractOrLoadError.getMessage() + ")" : "")
           + ", java.library.path. Set ASHERAH_JAVA_NATIVE or "
-          + "-Dasherah.java.nativeLibraryPath=<path> to override.";
+          + "-Dasherah.java.nativeLibraryPath=<path> to override. "
+          + "For SELinux/noexec environments, set "
+          + "-D" + EXTRACT_DIR_PROP + "=<exec-allowed-dir>.";
       throw new IllegalStateException(msg, e);
     }
   }
@@ -159,6 +181,10 @@ final class NativeLoader {
    * a separate directory automatically.
    */
   static Path extractFromResources() throws IOException {
+    return extractFromResources(Paths.get(System.getProperty("java.io.tmpdir")));
+  }
+
+  static Path extractFromResources(Path baseDir) throws IOException {
     String rid = detectRid();
     if (rid == null) {
       return null;
@@ -175,7 +201,7 @@ final class NativeLoader {
     }
 
     String hashHex = sha256Hex(contents);
-    Path cacheDir = Paths.get(System.getProperty("java.io.tmpdir"))
+    Path cacheDir = baseDir
         .resolve("asherah-jni-" + hashHex);
     Path target = cacheDir.resolve(libName);
 
@@ -231,5 +257,58 @@ final class NativeLoader {
       sb.append(Character.forDigit(b & 0xF, 16));
     }
     return sb.toString();
+  }
+  static boolean isPermissionStyleLoadFailure(Throwable t) {
+    String msg = t == null ? "" : String.valueOf(t.getMessage());
+    String lower = msg.toLowerCase(Locale.ROOT);
+    return lower.contains("permission denied")
+        || lower.contains("operation not permitted")
+        || lower.contains("failed to map segment from shared object")
+        || lower.contains("cannot restore segment prot after reloc")
+        || lower.contains("selinux");
+  }
+
+  static List<Path> extractionBaseDirs() {
+    return extractionBaseDirs(
+        firstNonBlank(System.getProperty(EXTRACT_DIR_PROP), System.getenv(EXTRACT_DIR_ENV)),
+        System.getProperty("java.io.tmpdir"),
+        System.getProperty("user.home"),
+        System.getProperty("user.dir"));
+  }
+
+  static List<Path> extractionBaseDirs(
+      String explicitExtractDir, String javaTmpDir, String userHome, String userDir) {
+    LinkedHashSet<Path> ordered = new LinkedHashSet<>();
+    addBaseDir(ordered, explicitExtractDir);
+    addBaseDir(ordered, javaTmpDir);
+    if (userHome != null && !userHome.isBlank()) {
+      addBaseDir(ordered, Paths.get(userHome).resolve(".cache").resolve("asherah-jni").toString());
+      addBaseDir(ordered, Paths.get(userHome).resolve(".asherah-jni").toString());
+    }
+    if (userDir != null && !userDir.isBlank()) {
+      addBaseDir(ordered, Paths.get(userDir).resolve(".asherah-jni").toString());
+    }
+    return new ArrayList<>(ordered);
+  }
+
+  private static void addBaseDir(LinkedHashSet<Path> ordered, String rawPath) {
+    if (rawPath == null || rawPath.isBlank()) {
+      return;
+    }
+    try {
+      ordered.add(Paths.get(rawPath).toAbsolutePath().normalize());
+    } catch (InvalidPathException ignored) {
+      // Invalid candidate path is ignored; other candidates still apply.
+    }
+  }
+
+  private static String firstNonBlank(String a, String b) {
+    if (a != null && !a.isBlank()) {
+      return a;
+    }
+    if (b != null && !b.isBlank()) {
+      return b;
+    }
+    return null;
   }
 }
