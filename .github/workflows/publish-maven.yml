@@ -127,7 +127,19 @@ jobs:
             VERSION="$INPUT_VERSION"
           else
             TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
-            VERSION="${TAG#v}"
+            RELEASE_VERSION="${TAG#v}"
+
+            # Keep Java artifact versioning on the 0.50.x track.
+            # We derive x from the release tag patch so Java versions
+            # remain monotonic while still mapping deterministically to
+            # each repo release.
+            PATCH="${RELEASE_VERSION##*.}"
+            if [[ "$PATCH" =~ ^[0-9]+$ ]]; then
+              VERSION="0.50.${PATCH}"
+            else
+              echo "ERROR: Unable to derive Java patch version from tag '${TAG}'"
+              exit 1
+            fi
           fi
           echo "Publishing version: ${VERSION}"
           mvn -B -f asherah-java/java/pom.xml versions:set -DnewVersion="${VERSION}"
