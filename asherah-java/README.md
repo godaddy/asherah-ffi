@@ -45,6 +45,23 @@ Task-oriented walkthroughs under [`docs/`](./docs/):
 | [Testing](./docs/testing.md) | JUnit 5 fixtures, Spring Boot tests, Mockito patterns, Testcontainers. |
 | [Troubleshooting](./docs/troubleshooting.md) | Common errors with what to check first. |
 
+## API Options: Compat vs New
+
+This artifact intentionally supports two Java API styles:
+
+- Compat API (legacy shape): `com.godaddy.asherah.appencryption.*`
+- New JNI API (recommended): `com.godaddy.asherah.jni.*`
+
+Both are backed by the same native Rust core and write the same metastore
+records. The compat API exists for drop-in migration from canonical
+`godaddy/asherah-java` codebases, while the JNI API is the preferred surface
+for new development.
+
+| Goal | Use this API |
+|---|---|
+| Minimize application code changes from canonical SDK | `com.godaddy.asherah.appencryption.*` |
+| Explicit lifecycle, clearer config, richer async/logging/metrics hooks | `com.godaddy.asherah.jni.*` |
+
 ## Quick Start
 
 The simplest way to use Asherah is the static API on the `Asherah` class. Call `setup()` once at startup and `shutdown()` on exit:
@@ -185,6 +202,39 @@ Migration steps:
 2. Use a current version (for example `0.50.0` or newer)
 3. Replace `AppEncryptionSessionFactory` with `AsherahFactory` or the static `Asherah` API
 4. Both read the same metastore tables -- no data migration required
+
+### API Mapping (Old -> New)
+
+If you choose to move from compat classes to the JNI API, use this mapping:
+
+| Compat API | New JNI API |
+|---|---|
+| `SessionFactory.newBuilder(product, service)` | `AsherahConfig.builder().productId(...).serviceName(...)` + `Asherah.factoryFromConfig(config)` |
+| `SessionFactory#getSessionJson(...)` / `#getSessionBytes(...)` | `AsherahFactory#getSession(...)` returning `AsherahSession` |
+| `Session#encrypt(...)` / `Session#decrypt(...)` | `AsherahSession#encryptBytes|encryptString` / `decryptBytes|decryptString` |
+| `JdbcMetastoreImpl` / `DynamoDbMetastoreImpl` / `InMemoryMetastoreImpl` | `AsherahConfig.metastore("rdbms"|"dynamodb"|"memory")` + related config fields |
+| `withStaticKeyManagementService(...)` / `withKeyManagementService(...)` | `AsherahConfig.kms("static"|"aws"|...)` + KMS-specific fields |
+| `withCryptoPolicy(...)` | `AsherahConfig` key/session policy fields (`expireAfter`, `checkInterval`, `sessionCache*`, etc.) |
+
+For teams that want minimal change now, staying on the compat API is supported.
+For teams that want the clearest long-term path, migrate toward `com.godaddy.asherah.jni.*`.
+
+### JDBC Pool Hint Compatibility (Compat API)
+
+When you use the compat API (`com.godaddy.asherah.appencryption.*`) with
+`JdbcMetastoreImpl`, database operations still execute in the native Rust layer.
+To preserve practical drop-in behavior, JDBC pool hints from compat usage are
+mapped into native pool configuration:
+
+| Compat input | Native config field |
+|---|---|
+| `withPoolMaxOpen(...)` or DataSource max-open style getter | `PoolMaxOpen` |
+| `withPoolMaxIdle(...)` or DataSource idle-size style getter | `PoolMaxIdle` |
+| `withPoolMaxLifetime(...)` (seconds) or DataSource max-lifetime (ms) | `PoolMaxLifetime` (seconds) |
+| `withPoolMaxIdleTime(...)` (seconds) or DataSource idle-timeout (ms) | `PoolMaxIdleTime` (seconds) |
+
+`jdbc:` URLs are also normalized before being passed to native config. For
+example, `jdbc:mysql://...` is mapped to `mysql://...`.
 
 ## Performance
 
