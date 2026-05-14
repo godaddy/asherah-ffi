@@ -30,8 +30,19 @@ The package includes prebuilt native JNI libraries for Linux x64/ARM64 (glibc an
 
 1. `-Dasherah.java.nativeLibraryPath=<file-or-dir>` system property — if set, this exact path (or directory) is used and the JAR-bundled binaries are ignored.
 2. `ASHERAH_JAVA_NATIVE=<file-or-dir>` environment variable — same as above, lower precedence than the system property.
-3. Bundled JAR resource for the detected platform RID (`linux-{x86_64,aarch64}`, `linux-musl-{x86_64,aarch64}`, `darwin-{x86_64,aarch64}`, `windows-{x86_64,aarch64}`) extracted to a content-addressed directory under `${java.io.tmpdir}/asherah-jni-<sha256>/`. Concurrent JVMs share the cache; version upgrades land in a fresh directory.
+3. Bundled JAR resource for the detected platform RID (`linux-{x86_64,aarch64}`, `linux-musl-{x86_64,aarch64}`, `darwin-{x86_64,aarch64}`, `windows-{x86_64,aarch64}`) extracted to a content-addressed directory. Extraction base-dir search order:
+   - `-Dasherah.java.nativeExtractDir=<dir>` (or `ASHERAH_JAVA_NATIVE_EXTRACT_DIR`)
+   - `${java.io.tmpdir}`
+   - `${user.home}/.cache/asherah-jni`
+   - `${user.home}/.asherah-jni`
+   - `${user.dir}/.asherah-jni`
+   Concurrent JVMs share the same content-addressed cache path; version upgrades land in a fresh directory.
 4. `System.loadLibrary("asherah_java")` — falls back to the JVM's `java.library.path`.
+
+On SELinux-enforcing/noexec environments (common on hardened RHEL), loading from
+`/tmp` may fail even when extraction succeeds. The loader automatically retries
+alternate directories above. You can force an exec-allowed location via:
+`-Dasherah.java.nativeExtractDir=/opt/app/lib`.
 
 ## Documentation
 

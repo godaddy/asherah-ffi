@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.DisabledOnOs;
@@ -85,6 +86,44 @@ class NativeLoaderTest {
     assertTrue(
         rid.startsWith("linux-") || rid.startsWith("darwin-") || rid.startsWith("windows-"),
         "Unexpected RID: " + rid);
+  }
+
+  @Test
+  void detectPermissionStyleLoadFailureMessages() {
+    assertTrue(NativeLoader.isPermissionStyleLoadFailure(
+        new UnsatisfiedLinkError("Permission denied")));
+    assertTrue(NativeLoader.isPermissionStyleLoadFailure(
+        new UnsatisfiedLinkError("failed to map segment from shared object")));
+    assertTrue(NativeLoader.isPermissionStyleLoadFailure(
+        new UnsatisfiedLinkError("cannot restore segment prot after reloc")));
+    assertTrue(NativeLoader.isPermissionStyleLoadFailure(
+        new UnsatisfiedLinkError("SELinux policy denied execution")));
+    assertTrue(NativeLoader.isPermissionStyleLoadFailure(
+        new UnsatisfiedLinkError("Operation not permitted")));
+    assertTrue(!NativeLoader.isPermissionStyleLoadFailure(
+        new UnsatisfiedLinkError("ELFCLASS64 mismatch")));
+  }
+
+  @Test
+  void extractionBaseDirsOrderAndDedupe() {
+    List<Path> dirs = NativeLoader.extractionBaseDirs(
+        "/opt/app/lib",
+        "/tmp",
+        "/home/svc",
+        "/srv/app");
+
+    assertEquals(Paths.get("/opt/app/lib").toAbsolutePath().normalize(), dirs.get(0));
+    assertEquals(Paths.get("/tmp").toAbsolutePath().normalize(), dirs.get(1));
+    assertEquals(Paths.get("/home/svc/.cache/asherah-jni").toAbsolutePath().normalize(), dirs.get(2));
+    assertEquals(Paths.get("/home/svc/.asherah-jni").toAbsolutePath().normalize(), dirs.get(3));
+    assertEquals(Paths.get("/srv/app/.asherah-jni").toAbsolutePath().normalize(), dirs.get(4));
+  }
+
+  @Test
+  void extractionBaseDirsSkipsInvalidAndBlank() {
+    List<Path> dirs = NativeLoader.extractionBaseDirs(" ", "", null, "/srv/app");
+    assertEquals(1, dirs.size());
+    assertEquals(Paths.get("/srv/app/.asherah-jni").toAbsolutePath().normalize(), dirs.get(0));
   }
 
   @Test
