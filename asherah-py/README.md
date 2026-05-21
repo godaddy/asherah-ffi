@@ -299,7 +299,9 @@ behavior in an asyncio application.
 | Member | Description |
 |---|---|
 | `SessionFactory()` | Construct from environment variables. |
+| `SessionFactory(config)` | Construct from an explicit config dict. |
 | `SessionFactory.from_env()` | Same as `SessionFactory()` — provided for SDK parity. |
+| `SessionFactory.from_config(config)` | Construct from an explicit config dict. |
 | `factory.get_session(partition_id)` | Get a per-partition `Session`. Raises on null/empty partition. |
 | `factory.close()` | Release native resources. |
 | `with SessionFactory() as factory:` | Context manager — `close()` runs on exit. |

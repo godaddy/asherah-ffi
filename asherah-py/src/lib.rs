@@ -39,14 +39,24 @@ fn json_parse_err(err: impl std::fmt::Display) -> PyErr {
     PyRuntimeError::new_err(format!("invalid DataRowRecord JSON: {err}"))
 }
 
-#[pyfunction]
-fn setup(config_obj: &Bound<'_, PyAny>) -> PyResult<()> {
+fn config_options_from_py(config_obj: &Bound<'_, PyAny>) -> PyResult<config::ConfigOptions> {
     let py = config_obj.py();
     let json_module = py.import("json")?;
     let json_config: String = json_module
         .call_method1("dumps", (config_obj,))?
         .extract()?;
-    let cfg = config::ConfigOptions::from_json(&json_config).map_err(anyhow_to_py)?;
+    config::ConfigOptions::from_json(&json_config).map_err(anyhow_to_py)
+}
+
+fn factory_from_py_config(config_obj: &Bound<'_, PyAny>) -> PyResult<Factory> {
+    let cfg = config_options_from_py(config_obj)?;
+    let (factory, _applied) = config::factory_from_config(&cfg).map_err(anyhow_to_py)?;
+    Ok(factory.with_metrics(true))
+}
+
+#[pyfunction]
+fn setup(config_obj: &Bound<'_, PyAny>) -> PyResult<()> {
+    let cfg = config_options_from_py(config_obj)?;
     let (factory, applied) = config::factory_from_config(&cfg).map_err(anyhow_to_py)?;
     // Always enable per-factory metrics so an installed metrics hook
     // actually fires for encrypt/decrypt/store/load events. The cost is
@@ -304,15 +314,26 @@ pub struct PySessionFactory {
 #[pymethods]
 impl PySessionFactory {
     #[new]
-    pub fn new() -> PyResult<Self> {
-        let inner = ael::builders::factory_from_env().map_err(anyhow_to_py)?;
-        let inner = inner.with_metrics(true);
+    #[pyo3(signature = (config_obj=None))]
+    pub fn new(config_obj: Option<&Bound<'_, PyAny>>) -> PyResult<Self> {
+        let inner = match config_obj {
+            Some(config_obj) => factory_from_py_config(config_obj)?,
+            None => ael::builders::factory_from_env()
+                .map(|factory| factory.with_metrics(true))
+                .map_err(anyhow_to_py)?,
+        };
         Ok(Self { inner })
     }
 
     #[staticmethod]
     pub fn from_env() -> PyResult<Self> {
-        Self::new()
+        Self::new(None)
+    }
+
+    #[staticmethod]
+    pub fn from_config(config_obj: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let inner = factory_from_py_config(config_obj)?;
+        Ok(Self { inner })
     }
 
     pub fn get_session(&self, partition_id: &str) -> PyResult<PySession> {
