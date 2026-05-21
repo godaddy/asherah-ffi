@@ -1,4 +1,5 @@
 require_relative "test_helper"
+require "tmpdir"
 
 class RoundTripTest < Minitest::Test
   def setup
@@ -191,9 +192,22 @@ class FactorySessionTest < Minitest::Test
     "Verbose" => false
   }.freeze
 
-  def make_factory
-    pointer = Asherah::Native.asherah_factory_new_with_config(JSON.generate(CONFIG))
+  def make_factory(config = CONFIG)
+    pointer = Asherah::Native.asherah_factory_new_with_config(JSON.generate(config))
     Asherah::SessionFactory.new(pointer)
+  end
+
+  def shared_sqlite_config
+    dir = Dir.mktmpdir("asherah-ruby-foreign-")
+    CONFIG.merge(
+      "ServiceName" => "foreign-factory-test",
+      "ProductID" => "prod",
+      "Metastore" => "sqlite",
+      "ConnectionString" => File.join(dir, "keys.db"),
+      "KMS" => "static",
+      "StaticMasterKeyHex" => "22" * 32,
+      "EnableSessionCaching" => false
+    )
   end
 
   def test_factory_session_round_trip
@@ -239,6 +253,59 @@ class FactorySessionTest < Minitest::Test
       end
     ensure
       factory.close
+    end
+  end
+
+  def test_factory_session_decrypts_static_api_drr
+    config = shared_sqlite_config
+    partition = "foreign-static"
+
+    Asherah.setup(config)
+    begin
+      json = Asherah.encrypt(partition, "static-produced".b)
+    ensure
+      Asherah.shutdown
+    end
+
+    factory = make_factory(config)
+    begin
+      session = factory.get_session(partition)
+      begin
+        assert_equal "static-produced".b, session.decrypt_bytes(json)
+      ensure
+        session.close
+      end
+    ensure
+      factory.close
+    end
+  end
+
+  def test_factory_session_decrypts_foreign_factory_drr
+    config = shared_sqlite_config
+    partition = "foreign-factory"
+
+    producer_factory = make_factory(config)
+    begin
+      producer = producer_factory.get_session(partition)
+      begin
+        json = producer.encrypt_bytes("factory-a-produced".b)
+      ensure
+        producer.close
+      end
+    ensure
+      producer_factory.close
+    end
+
+    consumer_factory = make_factory(config)
+    begin
+      consumer = consumer_factory.get_session(partition)
+      begin
+        assert_equal "factory-a-produced".b, consumer.decrypt_bytes(json)
+      ensure
+        consumer.close
+      end
+    ensure
+      consumer_factory.close
     end
   end
 
