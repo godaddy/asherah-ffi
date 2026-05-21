@@ -325,6 +325,22 @@ func newTestFactory(t *testing.T) *asherah.Factory {
 	return factory
 }
 
+func newSharedSqliteConfig(t *testing.T) asherah.Config {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "keys.db")
+	return asherah.Config{
+		ServiceName:          "foreign-factory-test",
+		ProductID:            "prod",
+		Metastore:            "sqlite",
+		ConnectionString:     &dbPath,
+		KMS:                  "test-debug-static",
+		EnableSessionCaching: boolPtr(false),
+		StaticMasterKeyHex:   stringPtr(strings.Repeat("22", 32)),
+	}
+}
+
+func stringPtr(s string) *string { return &s }
+
 // --- Factory / Session API Tests ---
 
 func TestFactorySessionRoundTrip(t *testing.T) {
@@ -404,6 +420,83 @@ func TestFactoryMultipleSessions(t *testing.T) {
 	_, err = sessB.Decrypt(ctA)
 	if err == nil {
 		t.Fatal("expected error decrypting partition-a ciphertext with partition-b session")
+	}
+}
+
+func TestFactorySessionDecryptsGlobalApiDrr(t *testing.T) {
+	ensureNativeLibrary(t)
+	cfg := newSharedSqliteConfig(t)
+	partition := "foreign-global"
+
+	if err := asherah.Setup(cfg); err != nil {
+		t.Fatalf("Setup failed: %v", err)
+	}
+	ct, err := asherah.EncryptString(partition, "global-produced")
+	if err != nil {
+		asherah.Shutdown()
+		t.Fatalf("EncryptString failed: %v", err)
+	}
+	asherah.Shutdown()
+
+	factory, err := asherah.NewFactory(cfg)
+	if err != nil {
+		t.Fatalf("NewFactory failed: %v", err)
+	}
+	defer factory.Close()
+
+	session, err := factory.GetSession(partition)
+	if err != nil {
+		t.Fatalf("GetSession failed: %v", err)
+	}
+	defer session.Close()
+
+	recovered, err := session.DecryptString(ct)
+	if err != nil {
+		t.Fatalf("DecryptString failed: %v", err)
+	}
+	if recovered != "global-produced" {
+		t.Fatalf("expected %q, got %q", "global-produced", recovered)
+	}
+}
+
+func TestFactorySessionDecryptsForeignFactoryDrr(t *testing.T) {
+	ensureNativeLibrary(t)
+	cfg := newSharedSqliteConfig(t)
+	partition := "foreign-factory"
+
+	producerFactory, err := asherah.NewFactory(cfg)
+	if err != nil {
+		t.Fatalf("producer NewFactory failed: %v", err)
+	}
+	producer, err := producerFactory.GetSession(partition)
+	if err != nil {
+		producerFactory.Close()
+		t.Fatalf("producer GetSession failed: %v", err)
+	}
+	ct, err := producer.EncryptString("factory-a-produced")
+	producer.Close()
+	producerFactory.Close()
+	if err != nil {
+		t.Fatalf("producer EncryptString failed: %v", err)
+	}
+
+	consumerFactory, err := asherah.NewFactory(cfg)
+	if err != nil {
+		t.Fatalf("consumer NewFactory failed: %v", err)
+	}
+	defer consumerFactory.Close()
+	consumer, err := consumerFactory.GetSession(partition)
+	if err != nil {
+		t.Fatalf("consumer GetSession failed: %v", err)
+	}
+	defer consumer.Close()
+
+	recovered, err := consumer.DecryptString(ct)
+	if err != nil {
+		t.Fatalf("consumer DecryptString failed: %v", err)
+	}
+	if recovered != "factory-a-produced" {
+		t.Fatalf("expected %q, got %q", "factory-a-produced", recovered)
 	}
 }
 
