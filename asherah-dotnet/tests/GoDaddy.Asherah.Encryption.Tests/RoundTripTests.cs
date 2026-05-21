@@ -51,6 +51,21 @@ public class RoundTripTests
             .Build();
     }
 
+    private AsherahConfig CreateSharedSqliteConfig()
+    {
+        var dir = Path.Join(Path.GetTempPath(), $"asherah-dotnet-foreign-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        return AsherahConfig.CreateBuilder()
+            .WithServiceName("foreign-factory-test")
+            .WithProductId("prod")
+            .WithMetastore(MetastoreKind.Sqlite)
+            .WithConnectionString(Path.Join(dir, "keys.db"))
+            .WithKms(KmsKind.Static)
+            .WithStaticMasterKeyHex(new string('2', 64))
+            .WithEnableSessionCaching(false)
+            .Build();
+    }
+
     private static AsherahFactory CreateFactoryFromEnv()
     {
         Environment.SetEnvironmentVariable("SERVICE_NAME", "svc");
@@ -120,6 +135,43 @@ public class RoundTripTests
 
         Assert.ThrowsAny<Exception>(() => sessionB.DecryptString(ctA));
         Assert.ThrowsAny<Exception>(() => sessionA.DecryptString(ctB));
+    }
+
+    [Fact]
+    public void FactorySession_DecryptsStaticApiDrr()
+    {
+        var config = CreateSharedSqliteConfig();
+        const string partition = "foreign-static";
+        string ciphertext;
+
+        AsherahApi.Setup(config);
+        try
+        {
+            ciphertext = AsherahApi.EncryptString(partition, "static-produced");
+        }
+        finally { AsherahApi.Shutdown(); }
+
+        using var factory = AsherahFactory.FromConfig(config);
+        using var session = factory.GetSession(partition);
+        Assert.Equal("static-produced", session.DecryptString(ciphertext));
+    }
+
+    [Fact]
+    public async Task FactorySession_DecryptsForeignFactoryDrrAsync()
+    {
+        var config = CreateSharedSqliteConfig();
+        const string partition = "foreign-factory-async";
+        string ciphertext;
+
+        using (var producerFactory = AsherahFactory.FromConfig(config))
+        using (var producer = producerFactory.GetSession(partition))
+        {
+            ciphertext = await producer.EncryptStringAsync("factory-a-produced");
+        }
+
+        using var consumerFactory = AsherahFactory.FromConfig(config);
+        using var consumer = consumerFactory.GetSession(partition);
+        Assert.Equal("factory-a-produced", await consumer.DecryptStringAsync(ciphertext));
     }
 
     [Fact]
