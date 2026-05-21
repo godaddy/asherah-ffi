@@ -147,17 +147,21 @@ class SessionFactory:
     :func:`setup` / :func:`shutdown` repeatedly, and makes session
     isolation explicit in code.
 
-    Constructed without arguments — reads configuration from the
+    Constructed without arguments, reads configuration from the
     standard environment variables (``SERVICE_NAME``, ``PRODUCT_ID``,
-    ``KMS``, ``Metastore``, ``STATIC_MASTER_KEY_HEX``, etc.). Use
-    :func:`setenv` first if you need to set them programmatically.
+    ``KMS``, ``Metastore``, ``STATIC_MASTER_KEY_HEX``, etc.). Pass a
+    config dict or use :meth:`from_config` for explicit configuration.
     """
 
-    def __init__(self) -> None: ...
+    def __init__(self, config: Any = ...) -> None: ...
     @staticmethod
     def from_env() -> "SessionFactory":
         """Same as the no-argument constructor — provided for parity
         with the canonical Go SDK's ``FromEnv``."""
+    @staticmethod
+    def from_config(config: Any) -> "SessionFactory":
+        """Construct from a config dict using PascalCase keys such as
+        ``ServiceName``, ``ProductID``, ``Metastore``, and ``KMS``."""
     def get_session(self, partition_id: str) -> "Session":
         """Get a session for the given partition. Sessions returned for
         the same partition share the underlying intermediate key;

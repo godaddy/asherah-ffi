@@ -134,6 +134,18 @@ def _setup_module_api():
     return asherah
 
 
+def _sqlite_config(tmp_path, service="svc-explicit", product="prod-explicit"):
+    return {
+        "ServiceName": service,
+        "ProductID": product,
+        "Metastore": "sqlite",
+        "ConnectionString": str(tmp_path / "keys.db"),
+        "KMS": "static",
+        "StaticMasterKeyHex": "22" * 32,
+        "EnableSessionCaching": True,
+    }
+
+
 def test_unicode_cjk():
     asherah = _setup_module_api()
     try:
@@ -445,6 +457,101 @@ def test_factory_multiple_sessions():
             session_b.decrypt_bytes(ct_a)
     finally:
         factory.close()
+
+
+def test_session_factory_from_config_decrypts_module_level_drr(tmp_path):
+    pytest.importorskip("asherah")
+    import asherah
+
+    config = _sqlite_config(tmp_path)
+    partition = "issue-301"
+    payload = b"foreign producer payload"
+
+    asherah.setup(config)
+    try:
+        ct = asherah.encrypt_bytes(partition, payload)
+    finally:
+        asherah.shutdown()
+
+    factory = asherah.SessionFactory.from_config(config)
+    try:
+        session = factory.get_session(partition)
+        assert session.decrypt_bytes(ct) == payload
+    finally:
+        factory.close()
+
+
+@pytest.mark.asyncio
+async def test_session_factory_from_config_decrypts_foreign_session_drr_async(tmp_path):
+    pytest.importorskip("asherah")
+    import asherah
+
+    config = _sqlite_config(tmp_path)
+    partition = "issue-301-async"
+    payload = b"foreign async payload"
+
+    producer_factory = asherah.SessionFactory.from_config(config)
+    try:
+        producer = producer_factory.get_session(partition)
+        ct = await producer.encrypt_bytes_async(payload)
+    finally:
+        producer_factory.close()
+
+    consumer_factory = asherah.SessionFactory.from_config(config)
+    try:
+        consumer = consumer_factory.get_session(partition)
+        assert await consumer.decrypt_bytes_async(ct) == payload
+    finally:
+        consumer_factory.close()
+
+
+def test_session_factory_constructor_accepts_config(tmp_path):
+    pytest.importorskip("asherah")
+    import asherah
+
+    config = _sqlite_config(tmp_path)
+    factory = asherah.SessionFactory(config)
+    try:
+        session = factory.get_session("constructor-config")
+        ct = session.encrypt_bytes(b"constructor payload")
+        assert session.decrypt_bytes(ct) == b"constructor payload"
+    finally:
+        factory.close()
+
+
+def test_session_factory_without_config_does_not_inherit_setup_config(tmp_path, monkeypatch):
+    pytest.importorskip("asherah")
+    import asherah
+
+    for name in (
+        "SERVICE_NAME",
+        "PRODUCT_ID",
+        "REGION_SUFFIX",
+        "Metastore",
+        "SQLITE_PATH",
+        "POSTGRES_URL",
+        "MYSQL_URL",
+        "DDB_TABLE",
+        "STATIC_MASTER_KEY_HEX",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("STATIC_MASTER_KEY_HEX", "33" * 32)
+
+    config = _sqlite_config(tmp_path, service="configured-svc", product="configured-prod")
+    partition = "setup-does-not-configure-factory"
+
+    asherah.setup(config)
+    try:
+        ct = asherah.encrypt_bytes(partition, b"configured payload")
+        factory = asherah.SessionFactory()
+        try:
+            session = factory.get_session(partition)
+            with pytest.raises(Exception, match="invalid IK id"):
+                session.decrypt_bytes(ct)
+        finally:
+            factory.close()
+    finally:
+        asherah.shutdown()
 
 
 def test_factory_context_manager():
