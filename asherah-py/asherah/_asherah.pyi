@@ -155,14 +155,15 @@ class SessionFactory:
     need to set them programmatically.
     """
 
-    def __init__(self, config: Optional[Any] = ...) -> None: ...
+    def __init__(self, config: Any = ...) -> None: ...
     @staticmethod
     def from_env() -> "SessionFactory":
         """Same as the no-argument constructor — provided for parity
         with the canonical Go SDK's ``FromEnv``."""
     @staticmethod
     def from_config(config: Any) -> "SessionFactory":
-        """Construct a factory from an explicit config object."""
+        """Construct from a config dict using PascalCase keys such as
+        ``ServiceName``, ``ProductID``, ``Metastore``, and ``KMS``."""
     def get_session(self, partition_id: str) -> "Session":
         """Get a session for the given partition. Sessions returned for
         the same partition share the underlying intermediate key;
