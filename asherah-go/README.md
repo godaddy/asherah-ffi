@@ -166,6 +166,12 @@ if err != nil {
 
 The `CompatSession` returns `*DataRowRecord` structs matching the canonical type, accepting `context.Context` parameters for API compatibility (the context is not used for cancellation).
 
+The native `Factory` / `Session` API returns DataRowRecord JSON bytes
+directly from `Session.Encrypt(data)`, so callers using that API do not need a
+separate `json.Marshal` step. The compatibility API intentionally keeps the
+canonical `Encrypt(ctx, data) -> *DataRowRecord` and `Decrypt(ctx, drr)`
+contract and performs the JSON conversion internally.
+
 ## No Async API
 
 Go's goroutine model makes a dedicated async API unnecessary. Goroutines are cheap and multiplexed onto OS threads by the Go runtime, so blocking sync calls are fine:
@@ -230,6 +236,13 @@ Migration steps:
    - Use the new `Factory`/`Session` API directly, or
    - Use `SessionFactory`/`CompatSession` for a drop-in compatible API
 4. Both read the same metastore tables -- no data migration required
+
+Static KMS key configuration differs by API:
+
+- Native config uses `StaticMasterKeyHex`, a 64-character hex string encoding
+  32 bytes.
+- The compatibility helper `NewStaticKMS("...")` accepts the legacy raw key
+  string and converts it to hex before passing it to the native core.
 
 ## Performance
 

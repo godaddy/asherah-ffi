@@ -29,6 +29,50 @@ def test_encrypt_decrypt_roundtrip():
     factory.close()
 
 
+def test_session_factory_from_explicit_config():
+    pytest.importorskip("asherah")
+    import asherah
+
+    config = {
+        "ServiceName": "svc",
+        "ProductID": "prod",
+        "Metastore": "memory",
+        "KMS": "static",
+        "StaticMasterKeyHex": "22" * 32,
+    }
+
+    factory = asherah.SessionFactory(config)
+    try:
+        session = factory.get_session("pytest-explicit-config")
+        payload = b"explicit config payload"
+        ciphertext = session.encrypt_bytes(payload)
+        assert session.decrypt_bytes(ciphertext) == payload
+    finally:
+        factory.close()
+
+
+def test_session_factory_from_config_static_method():
+    pytest.importorskip("asherah")
+    import asherah
+
+    factory = asherah.SessionFactory.from_config(
+        {
+            "ServiceName": "svc",
+            "ProductID": "prod",
+            "Metastore": "memory",
+            "KMS": "static",
+            "StaticMasterKeyHex": "22" * 32,
+        }
+    )
+    try:
+        session = factory.get_session("pytest-from-config")
+        payload = b"from_config payload"
+        ciphertext = session.encrypt_bytes(payload)
+        assert session.decrypt_bytes(ciphertext) == payload
+    finally:
+        factory.close()
+
+
 def test_text_helpers():
     pytest.importorskip("asherah")
     import asherah

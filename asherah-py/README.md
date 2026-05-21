@@ -66,15 +66,26 @@ asherah.shutdown()
 ```python
 import asherah
 
-with asherah.SessionFactory() as factory:
+config = {
+    "ServiceName": "my-service",
+    "ProductID":   "my-product",
+    "Metastore":   "memory",
+    "KMS":         "static",
+    "StaticMasterKeyHex": "22" * 32,
+}
+
+with asherah.SessionFactory(config) as factory:
     with factory.get_session("user-42") as session:
         ct = session.encrypt_text("secret")
         pt = session.decrypt_text(ct)
         assert pt == "secret"
 ```
 
-`SessionFactory` reads its config from environment variables. Set them with
-`asherah.setenv({...})` or via `os.environ` before constructing the factory.
+`SessionFactory(config)` and `SessionFactory.from_config(config)` construct
+from an explicit config dict. `SessionFactory()` and
+`SessionFactory.from_env()` read config from environment variables; set them
+with `asherah.setenv({...})` or via `os.environ` before constructing the
+factory.
 
 ## Async API
 

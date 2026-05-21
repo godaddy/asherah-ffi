@@ -147,10 +147,12 @@ class SessionFactory:
     :func:`setup` / :func:`shutdown` repeatedly, and makes session
     isolation explicit in code.
 
-    Constructed without arguments, reads configuration from the
-    standard environment variables (``SERVICE_NAME``, ``PRODUCT_ID``,
-    ``KMS``, ``Metastore``, ``STATIC_MASTER_KEY_HEX``, etc.). Pass a
-    config dict or use :meth:`from_config` for explicit configuration.
+    ``SessionFactory(config)`` and :meth:`from_config` construct from an
+    explicit JSON-serializable config object. The no-argument constructor
+    reads configuration from the standard environment variables
+    (``SERVICE_NAME``, ``PRODUCT_ID``, ``KMS``, ``Metastore``,
+    ``STATIC_MASTER_KEY_HEX``, etc.). Use :func:`setenv` first if you
+    need to set them programmatically.
     """
 
     def __init__(self, config: Any = ...) -> None: ...

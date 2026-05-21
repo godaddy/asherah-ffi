@@ -12,7 +12,10 @@ Two API styles, both fully supported and producing the same wire format:
    :class:`SessionFactory`, get one or more :class:`Session` instances per
    partition, and call ``encrypt_bytes`` / ``decrypt_bytes`` on the session.
    Avoids the hidden-singleton lifecycle of the static API and makes
-   per-partition isolation explicit.
+   per-partition isolation explicit. Use ``SessionFactory(config)`` /
+   ``SessionFactory.from_config(config)`` for explicit configuration, or
+   ``SessionFactory()`` / ``SessionFactory.from_env()`` for environment
+   configuration.
 
 Observability hooks are also exposed:
 

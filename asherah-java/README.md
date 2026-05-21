@@ -211,7 +211,9 @@ Key differences:
 Migration steps:
 1. Update dependency coordinates to `com.godaddy.asherah.encryption:appencryption`
 2. Use a current version (for example `0.50.0` or newer)
-3. Replace `AppEncryptionSessionFactory` with `AsherahFactory` or the static `Asherah` API
+3. Choose either the native JNI API or the bundled compatibility classes:
+   - Use `com.godaddy.asherah.jni.AsherahFactory` / `AsherahSession` for new code.
+   - Keep `com.godaddy.asherah.appencryption.SessionFactory` for a lower-change migration.
 4. Both read the same metastore tables -- no data migration required
 
 ### API Mapping (Old -> New)
@@ -229,6 +231,12 @@ If you choose to move from compat classes to the JNI API, use this mapping:
 
 For teams that want minimal change now, staying on the compat API is supported.
 For teams that want the clearest long-term path, migrate toward `com.godaddy.asherah.jni.*`.
+
+Static KMS key configuration differs by API. The native
+`AsherahConfig.staticMasterKeyHex(...)` field expects a 64-character hex
+string encoding 32 bytes. The compat
+`withStaticKeyManagementService(String)` path accepts the legacy raw key string
+and converts it to hex before passing it to the native core.
 
 ### JDBC Pool Hint Compatibility (Compat API)
 
