@@ -1,6 +1,7 @@
 const assert = require('assert');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 let addon;
 const binaryName = 'asherah_node.node';
 const targetDir = process.env.NAPI_RS_CARGO_TARGET_DIR || process.env.CARGO_TARGET_DIR;
@@ -414,6 +415,57 @@ function testFactorySessionApi() {
     sessionB.close();
     factory.close();
     console.log('asherah-node Factory/Session partition isolation OK');
+  }
+
+  // --- DRRs from another API surface/factory decrypt through Session API ---
+  {
+    const sqliteDir = fs.mkdtempSync(path.join(os.tmpdir(), 'asherah-node-foreign-'));
+    const sharedCfg = {
+      serviceName: 'foreign-svc',
+      productId: 'foreign-prod',
+      metastore: 'sqlite',
+      connectionString: path.join(sqliteDir, 'keys.db'),
+      kms: 'test-debug-static',
+      enableSessionCaching: false,
+    };
+    const partition = 'foreign-session-p';
+
+    addon.setup(sharedCfg);
+    let moduleDrr;
+    try {
+      moduleDrr = addon.encrypt(partition, Buffer.from('module-produced'));
+    } finally {
+      addon.shutdown();
+    }
+
+    let factory = new addon.SessionFactory(sharedCfg);
+    let session = factory.getSession(partition);
+    try {
+      assert.strictEqual(session.decrypt(moduleDrr).toString(), 'module-produced');
+    } finally {
+      session.close();
+      factory.close();
+    }
+
+    const producerFactory = new addon.SessionFactory(sharedCfg);
+    const producer = producerFactory.getSession(partition);
+    let factoryDrr;
+    try {
+      factoryDrr = producer.encrypt(Buffer.from('factory-a-produced'));
+    } finally {
+      producer.close();
+      producerFactory.close();
+    }
+
+    factory = new addon.SessionFactory(sharedCfg);
+    session = factory.getSession(partition);
+    try {
+      assert.strictEqual(session.decrypt(factoryDrr).toString(), 'factory-a-produced');
+    } finally {
+      session.close();
+      factory.close();
+    }
+    console.log('asherah-node Session decrypts foreign same-partition DRRs OK');
   }
 
   // --- Session close prevents further use (should throw) ---
