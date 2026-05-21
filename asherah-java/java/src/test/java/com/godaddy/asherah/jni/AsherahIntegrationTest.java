@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -199,6 +200,19 @@ class AsherahIntegrationTest {
         .build();
   }
 
+  private AsherahConfig sharedSqliteConfig() throws Exception {
+    Path dbPath = Files.createTempDirectory("asherah-java-foreign-").resolve("keys.db");
+    return AsherahConfig.builder()
+        .serviceName("foreign-factory-test")
+        .productId("prod")
+        .metastore("sqlite")
+        .connectionString(dbPath.toString())
+        .kms("static")
+        .staticMasterKeyHex(repeat("22", 32))
+        .enableSessionCaching(Boolean.FALSE)
+        .build();
+  }
+
   @Test
   void factorySessionRoundTrip() {
     try (AsherahFactory factory = Asherah.factoryFromConfig(factoryConfig());
@@ -229,6 +243,42 @@ class AsherahIntegrationTest {
       String json = sessionA.encryptString("secret-a");
       // session B with a different partition should fail to decrypt
       assertThrows(Exception.class, () -> sessionB.decryptString(json));
+    }
+  }
+
+  @Test
+  void factorySessionDecryptsStaticApiDrr() throws Exception {
+    AsherahConfig config = sharedSqliteConfig();
+    String partition = "foreign-static";
+    String ciphertext;
+
+    Asherah.setup(config);
+    try {
+      ciphertext = Asherah.encryptString(partition, "static-produced");
+    } finally {
+      Asherah.shutdown();
+    }
+
+    try (AsherahFactory factory = Asherah.factoryFromConfig(config);
+        AsherahSession session = factory.getSession(partition)) {
+      assertEquals("static-produced", session.decryptString(ciphertext));
+    }
+  }
+
+  @Test
+  void factorySessionDecryptsForeignFactoryDrrAsync() throws Exception {
+    AsherahConfig config = sharedSqliteConfig();
+    String partition = "foreign-factory-async";
+    String ciphertext;
+
+    try (AsherahFactory producerFactory = Asherah.factoryFromConfig(config);
+        AsherahSession producer = producerFactory.getSession(partition)) {
+      ciphertext = producer.encryptStringAsync("factory-a-produced").get();
+    }
+
+    try (AsherahFactory consumerFactory = Asherah.factoryFromConfig(config);
+        AsherahSession consumer = consumerFactory.getSession(partition)) {
+      assertEquals("factory-a-produced", consumer.decryptStringAsync(ciphertext).get());
     }
   }
 
