@@ -13,6 +13,9 @@ dotnet add package GoDaddy.Asherah.Encryption
 ```
 
 Targets `net8.0` and `net10.0`. Namespace: `GoDaddy.Asherah.Encryption`.
+The package is currently on the `0.50.x-beta` track; pin the exact beta version
+you validate in your application instead of relying on floating prerelease
+resolution.
 
 For drop-in compatibility with the canonical pure-C# `GoDaddy.Asherah.AppEncryption`
 SDK (the `SessionFactory.NewBuilder()` style), install the companion compat
@@ -336,6 +339,12 @@ the single-shot `AsherahApi` or the factory/session pattern above.
 | Null partition | Silently accepted, persists `_IK__service_product` | `ArgumentNullException` (intentional hardening) |
 | Newtonsoft.Json / LanguageExt | Required | Not required (only the `Compat` package transitively pulls them) |
 
+The native package deliberately drops the canonical AWS SDK, `Newtonsoft.Json`,
+and database-driver dependencies because metastore and KMS work runs inside the
+Rust core. The companion `GoDaddy.Asherah.Encryption.Compat` package is the
+exception: it keeps canonical-style JSON and option types for source-level
+migration and therefore still depends on `Newtonsoft.Json`.
+
 ### Earlier preview namespace `GoDaddy.Asherah`
 
 Earlier preview builds exposed the singleton-style API as a static class
@@ -458,6 +467,11 @@ and wire semantics, prefer the XML docs on each member (IntelliSense).
 |---|---|
 | `STATIC_MASTER_KEY_HEX` | 64 hex chars (32 bytes) for static KMS. **Testing only.** |
 | `ASHERAH_DOTNET_NATIVE` | Override the native binary search path (used by tests). |
+
+`WithStaticMasterKeyHex(...)` and `STATIC_MASTER_KEY_HEX` use the native
+64-character hex form. The compatibility package's canonical-style static KMS
+helper accepts the legacy raw key string and converts it before building native
+config.
 
 ### AWS credentials
 
