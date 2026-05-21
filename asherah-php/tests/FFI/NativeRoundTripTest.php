@@ -114,6 +114,61 @@ final class NativeRoundTripTest extends TestCase
         }
     }
 
+    public function testFactorySessionDecryptsStaticApiDrr(): void
+    {
+        $config = $this->sharedSqliteConfig();
+        $partition = 'foreign-static';
+
+        Asherah::setup($config);
+        try {
+            $ciphertext = Asherah::encryptBytes($partition, 'static-produced');
+        } finally {
+            Asherah::shutdown();
+        }
+
+        $factory = SessionFactory::fromConfig($config);
+        try {
+            $session = $factory->getSession($partition);
+            try {
+                self::assertSame('static-produced', $session->decryptBytes($ciphertext));
+            } finally {
+                $session->close();
+            }
+        } finally {
+            $factory->close();
+        }
+    }
+
+    public function testFactorySessionDecryptsForeignFactoryDrr(): void
+    {
+        $config = $this->sharedSqliteConfig();
+        $partition = 'foreign-factory';
+
+        $producerFactory = SessionFactory::fromConfig($config);
+        try {
+            $producer = $producerFactory->getSession($partition);
+            try {
+                $ciphertext = $producer->encryptBytes('factory-a-produced');
+            } finally {
+                $producer->close();
+            }
+        } finally {
+            $producerFactory->close();
+        }
+
+        $consumerFactory = SessionFactory::fromConfig($config);
+        try {
+            $consumer = $consumerFactory->getSession($partition);
+            try {
+                self::assertSame('factory-a-produced', $consumer->decryptBytes($ciphertext));
+            } finally {
+                $consumer->close();
+            }
+        } finally {
+            $consumerFactory->close();
+        }
+    }
+
     public function testTypedConfigRoundTrip(): void
     {
         Asherah::setup(
@@ -194,6 +249,27 @@ final class NativeRoundTripTest extends TestCase
             'KMS' => 'test-debug-static',
             'SessionCacheMaxSize' => 2,
         ], $overrides);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function sharedSqliteConfig(): array
+    {
+        $dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'asherah-php-foreign-' . bin2hex(random_bytes(8));
+        if (!mkdir($dir) && !is_dir($dir)) {
+            throw new \RuntimeException(sprintf('failed to create temp directory: %s', $dir));
+        }
+
+        return $this->config([
+            'ServiceName' => 'foreign-factory-test',
+            'ProductID' => 'prod',
+            'Metastore' => 'sqlite',
+            'ConnectionString' => $dir . DIRECTORY_SEPARATOR . 'keys.db',
+            'KMS' => 'static',
+            'StaticMasterKeyHex' => str_repeat('22', 32),
+            'EnableSessionCaching' => false,
+        ]);
     }
 
     /**

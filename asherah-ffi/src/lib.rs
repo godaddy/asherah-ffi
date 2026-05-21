@@ -675,7 +675,9 @@ pub unsafe extern "C" fn asherah_decrypt_from_json_async(
 mod tests {
     use super::*;
     use std::ffi::CString;
+    use std::fs;
     use std::ptr::null;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn null_factory_free_does_not_crash() {
@@ -745,6 +747,44 @@ mod tests {
         let session = unsafe { asherah_factory_get_session(factory, pid.as_ptr()) };
         assert!(!session.is_null(), "session creation failed");
         (factory, session)
+    }
+
+    fn make_factory_and_session_with_config(
+        config_json: &str,
+        partition_id: &str,
+    ) -> (*mut AsherahFactory, *mut SharedSession) {
+        let cfg = CString::new(config_json).unwrap();
+        let factory = unsafe { asherah_factory_new_with_config(cfg.as_ptr()) };
+        assert!(!factory.is_null(), "factory creation failed");
+        let pid = CString::new(partition_id).unwrap();
+        let session = unsafe { asherah_factory_get_session(factory, pid.as_ptr()) };
+        assert!(!session.is_null(), "session creation failed");
+        (factory, session)
+    }
+
+    fn shared_sqlite_config_json() -> (String, std::path::PathBuf) {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "asherah-ffi-foreign-{}-{unique}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("keys.db");
+        let config = serde_json::json!({
+            "ServiceName": "foreign-factory-test",
+            "ProductID": "prod",
+            "Metastore": "sqlite",
+            "ConnectionString": db_path,
+            "KMS": "static",
+            "StaticMasterKeyHex": "2222222222222222222222222222222222222222222222222222222222222222",
+            "EnableSessionCaching": false
+        })
+        .to_string();
+
+        (config, dir)
     }
 
     fn free_factory_and_session(factory: *mut AsherahFactory, session: *mut SharedSession) {
@@ -824,5 +864,37 @@ mod tests {
             asherah_buffer_free(&mut pt);
         }
         free_factory_and_session(factory, session);
+    }
+
+    #[test]
+    fn foreign_factory_session_decrypts_drr_with_shared_metastore() {
+        let (config, dir) = shared_sqlite_config_json();
+        let partition = "foreign-factory";
+
+        let (producer_factory, producer_session) =
+            make_factory_and_session_with_config(&config, partition);
+        let payload = b"factory-a-produced";
+        let mut ct = empty_buffer();
+        let rc = unsafe {
+            asherah_encrypt_to_json(producer_session, payload.as_ptr(), payload.len(), &mut ct)
+        };
+        assert_eq!(rc, 0, "producer encrypt failed");
+        assert!(ct.len > 0, "encrypted JSON should be non-empty");
+        free_factory_and_session(producer_factory, producer_session);
+
+        let (consumer_factory, consumer_session) =
+            make_factory_and_session_with_config(&config, partition);
+        let mut pt = empty_buffer();
+        let rc = unsafe { asherah_decrypt_from_json(consumer_session, ct.data, ct.len, &mut pt) };
+        assert_eq!(rc, 0, "consumer decrypt failed");
+        let plaintext = unsafe { std::slice::from_raw_parts(pt.data, pt.len) };
+        assert_eq!(plaintext, payload);
+
+        unsafe {
+            asherah_buffer_free(&mut ct);
+            asherah_buffer_free(&mut pt);
+        }
+        free_factory_and_session(consumer_factory, consumer_session);
+        drop(fs::remove_dir_all(dir));
     }
 }
