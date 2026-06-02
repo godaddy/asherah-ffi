@@ -1,0 +1,102 @@
+name: Publish to crates.io
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-crates
+  cancel-in-progress: false
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (cargo publish --dry-run, do not publish)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        # Respect rust-toolchain.toml (channel 1.91.1). `rustup show` in the
+        # repo root activates and installs the pinned toolchain.
+        run: rustup show
+
+      # Publish the workspace crates IN DEPENDENCY ORDER. A crate must be
+      # published after every workspace crate it depends on, because
+      # crates.io verifies each upload against the published versions of its
+      # path/version dependencies.
+      #
+      # Dependency edges (from each crate's [dependencies] in its Cargo.toml):
+      #   asherah         -> (no internal workspace deps)
+      #   asherah-config  -> asherah
+      #   asherah-cobhan  -> asherah, asherah-config
+      #   asherah-ffi     -> asherah, asherah-cobhan, asherah-config
+      #
+      # Resulting topological order:
+      #   1. asherah
+      #   2. asherah-config
+      #   3. asherah-cobhan
+      #   4. asherah-ffi
+      #
+      # NOTE: This workflow is intended for NEW version bumps. crates.io
+      # rejects re-publishing a version that already exists, so a step will
+      # fail if its crate's version in Cargo.toml is already on crates.io.
+      # That failure is expected when nothing was bumped; bump the version
+      # before running a real publish. (Do NOT add --no-verify.)
+      #
+      # `sleep 30` between crates lets the crates.io index update so the next
+      # dependent crate can resolve the freshly published version.
+
+      - name: Publish asherah (dry run)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: cargo publish --dry-run -p asherah
+
+      - name: Publish asherah-config (dry run)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: cargo publish --dry-run -p asherah-config
+
+      - name: Publish asherah-cobhan (dry run)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: cargo publish --dry-run -p asherah-cobhan
+
+      - name: Publish asherah-ffi (dry run)
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        run: cargo publish --dry-run -p asherah-ffi
+
+      - name: Publish asherah
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        run: cargo publish -p asherah --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for crates.io index
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        run: sleep 30
+
+      - name: Publish asherah-config
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        run: cargo publish -p asherah-config --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for crates.io index
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        run: sleep 30
+
+      - name: Publish asherah-cobhan
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        run: cargo publish -p asherah-cobhan --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for crates.io index
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        run: sleep 30
+
+      - name: Publish asherah-ffi
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        run: cargo publish -p asherah-ffi --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
