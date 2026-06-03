@@ -1382,4 +1382,78 @@ impl<
         }
         Ok(pt)
     }
+
+    /// Async counterpart to [`Self::store`]: encrypt `payload` via
+    /// [`Self::encrypt_async`] (async metastore/KMS) and hand the resulting
+    /// [`crate::types::DataRowRecord`] to an async [`crate::traits::StorerAsync`].
+    /// Nothing blocks the executor.
+    pub async fn store_async<T: crate::traits::StorerAsync>(
+        &self,
+        payload: &[u8],
+        storer: &T,
+    ) -> anyhow::Result<serde_json::Value> {
+        self.ensure_valid_partition()?;
+        // Record the store-wrapper timing, mirroring the sync `Session::store`
+        // path so the async path has the same observability.
+        let start = if metrics::is_enabled() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
+        let drr = self.encrypt_async(payload).await?;
+        let res = storer.store_async(&drr).await;
+        if let Some(start) = start {
+            metrics::record_store(start);
+        }
+        res
+    }
+
+    /// Async counterpart to [`Self::load`]: fetch the record via an async
+    /// [`crate::traits::LoaderAsync`], then decrypt it with
+    /// [`Self::decrypt_async`].
+    pub async fn load_async<T: crate::traits::LoaderAsync>(
+        &self,
+        key: &serde_json::Value,
+        loader: &T,
+    ) -> anyhow::Result<Vec<u8>> {
+        self.ensure_valid_partition()?;
+        let start = if metrics::is_enabled() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
+        let drr = loader.load_async(key).await?.ok_or_else(|| {
+            anyhow::anyhow!("record not found in persistence store for the given key")
+        })?;
+        let res = self.decrypt_async(drr).await;
+        if let Some(start) = start {
+            metrics::record_load(start);
+        }
+        res
+    }
+
+    /// Async counterpart to [`Self::store_ctx`]. The context is an unused
+    /// placeholder that mirrors Go's signatures.
+    pub async fn store_ctx_async<T: crate::traits::StorerCtxAsync>(
+        &self,
+        ctx: &(),
+        payload: &[u8],
+        storer: &T,
+    ) -> anyhow::Result<serde_json::Value> {
+        let drr = self.encrypt_async(payload).await?;
+        storer.store_ctx_async(ctx, &drr).await
+    }
+
+    /// Async counterpart to [`Self::load_ctx`].
+    pub async fn load_ctx_async<T: crate::traits::LoaderCtxAsync>(
+        &self,
+        ctx: &(),
+        key: &serde_json::Value,
+        loader: &T,
+    ) -> anyhow::Result<Vec<u8>> {
+        let drr = loader.load_ctx_async(ctx, key).await?.ok_or_else(|| {
+            anyhow::anyhow!("record not found in persistence store for the given key")
+        })?;
+        self.decrypt_async(drr).await
+    }
 }
