@@ -93,3 +93,51 @@ pub trait StorerCtx {
         d: &crate::types::DataRowRecord,
     ) -> Result<serde_json::Value, anyhow::Error>;
 }
+
+/// Async counterpart to [`Storer`]: persist a [`DataRowRecord`] without
+/// blocking the calling executor. Use with
+/// [`crate::session::PublicSession::store_async`].
+///
+/// The `Send + Sync` supertrait lets the returned future cross `.await`
+/// points in a multi-threaded runtime (e.g. an axum handler), matching the
+/// async metastore/KMS paths.
+#[async_trait]
+pub trait StorerAsync: Send + Sync {
+    async fn store_async(
+        &self,
+        d: &crate::types::DataRowRecord,
+    ) -> Result<serde_json::Value, anyhow::Error>;
+}
+
+/// Async counterpart to [`Loader`]. Use with
+/// [`crate::session::PublicSession::load_async`].
+#[async_trait]
+pub trait LoaderAsync: Send + Sync {
+    async fn load_async(
+        &self,
+        key: &serde_json::Value,
+    ) -> Result<Option<crate::types::DataRowRecord>, anyhow::Error>;
+}
+
+/// Async counterpart to [`StorerCtx`] (the context is an unused placeholder
+/// that mirrors Go's signatures). Use with
+/// [`crate::session::PublicSession::store_ctx_async`].
+#[async_trait]
+pub trait StorerCtxAsync: Send + Sync {
+    async fn store_ctx_async(
+        &self,
+        _ctx: &(),
+        d: &crate::types::DataRowRecord,
+    ) -> Result<serde_json::Value, anyhow::Error>;
+}
+
+/// Async counterpart to [`LoaderCtx`]. Use with
+/// [`crate::session::PublicSession::load_ctx_async`].
+#[async_trait]
+pub trait LoaderCtxAsync: Send + Sync {
+    async fn load_ctx_async(
+        &self,
+        _ctx: &(),
+        key: &serde_json::Value,
+    ) -> Result<Option<crate::types::DataRowRecord>, anyhow::Error>;
+}
