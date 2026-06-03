@@ -1,13 +1,16 @@
-use crate::memguard::{wipe_bytes, Buffer, Enclave, SLOT_SIZE};
-// LessSafeKey: safe in our usage — encryption always uses a fresh random nonce
-// per operation (see aead.rs). The cached key schedule is a performance
-// optimization that avoids re-expanding the AES key on every encrypt/decrypt.
+use hardware_enclave::{pool_release, MemoryEnclave, SecureBuffer};
+use zeroize::Zeroize as _;
+
+const SLOT_SIZE: usize = 32; // AES-256 key size (matches hardware_enclave pool slot size)
+                             // LessSafeKey: safe in our usage — encryption always uses a fresh random nonce
+                             // per operation (see aead.rs). The cached key schedule is a performance
+                             // optimization that avoids re-expanding the AES key on every encrypt/decrypt.
 use ring::aead::{LessSafeKey, UnboundKey, AES_256_GCM};
 
 pub struct CryptoKey {
     created: i64,
     revoked: bool,
-    secret: Enclave,
+    secret: MemoryEnclave,
     /// Pre-expanded AES-256-GCM key schedule (avoids re-expansion on every use).
     /// See aead.rs for nonce safety documentation.
     cached_lsk: Option<LessSafeKey>,
@@ -57,12 +60,12 @@ impl CryptoKey {
             // allocating a page-locked Buffer. The Enclave immediately encrypts
             // the key and stores it in the SLAB hot cache. This avoids 6 syscalls
             // (mmap, mlock, 2× mprotect, munlock, munmap) per key.
-            let enc = Enclave::seal_bytes(&bytes)
+            let enc = MemoryEnclave::seal(&bytes)
                 .map_err(|e| anyhow::anyhow!("failed to seal key into enclave: {:?}", e))?;
-            wipe_bytes(&mut bytes);
+            bytes.zeroize();
             enc
         } else {
-            let mut buf = Buffer::new(bytes.len()).map_err(|e| {
+            let mut buf = SecureBuffer::new(bytes.len()).map_err(|e| {
                 anyhow::anyhow!(
                     "failed to allocate secure buffer ({} bytes): {:?}",
                     bytes.len(),
@@ -70,8 +73,8 @@ impl CryptoKey {
                 )
             })?;
             buf.bytes().copy_from_slice(&bytes);
-            wipe_bytes(&mut bytes);
-            Enclave::new_from(&mut buf)
+            bytes.zeroize();
+            MemoryEnclave::seal_buffer(&mut buf)
                 .map_err(|e| anyhow::anyhow!("failed to seal key into enclave: {:?}", e))?
         };
         Ok(Self {
@@ -107,8 +110,11 @@ impl CryptoKey {
         // whether to bubble or recover. T-finding "with_key_func
         // lacks panic guard; closure panic leaks buffer from pool"
         // in `docs/review-2026-05-05-findings.md`.
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(buf.as_slice())));
-        crate::memguard::pool_release(buf);
+        let key_len = self.secret.plaintext_len();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            f(&buf.as_slice()[..key_len])
+        }));
+        pool_release(buf);
         match result {
             Ok(r) => Ok(r),
             Err(payload) => {

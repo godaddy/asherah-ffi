@@ -10,6 +10,7 @@ use crate::traits::{KeyManagementService, Metastore, Partition, AEAD};
 use crate::types::{EnvelopeKeyRecord, KeyMeta};
 use anyhow::Context;
 use std::sync::Arc;
+use zeroize::Zeroize as _;
 
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
@@ -682,7 +683,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             c.close();
         }
         // Surface IK-cache close failures rather than silently dropping them
-        // — the caller has no other channel for noticing memguard/munlock
+        // — the caller has no other channel for noticing zeroize/unlock
         // errors. T-finding "PublicFactory::close swallows c.close() errors
         // via drop(...)" in docs/review-2026-05-05-findings.md.
         if let Some(c) = &self.shared_ik_cache {
@@ -889,7 +890,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         struct DrkGuard([u8; 32]);
         impl Drop for DrkGuard {
             fn drop(&mut self) {
-                crate::memguard::wipe_bytes(&mut self.0);
+                self.0.zeroize();
             }
         }
         let mut drk = DrkGuard([0_u8; 32]);
@@ -982,7 +983,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         let drk_lsk = crate::aead::make_lsk(&drk).context("decrypt: failed to create DRK key")?;
         let pt = crate::aead::decrypt_with_lsk(&drr.data, &drk_lsk)
             .context("decrypt: failed to decrypt data with DRK")?;
-        crate::memguard::wipe_bytes(&mut drk);
+        drk.zeroize();
         if let Some(start) = start {
             metrics::record_decrypt(start);
         }
@@ -1277,7 +1278,7 @@ impl<
         struct DrkGuard([u8; 32]);
         impl Drop for DrkGuard {
             fn drop(&mut self) {
-                crate::memguard::wipe_bytes(&mut self.0);
+                self.0.zeroize();
             }
         }
         let mut drk = DrkGuard([0_u8; 32]);
@@ -1376,7 +1377,7 @@ impl<
             crate::aead::make_lsk(&drk).context("decrypt_async: failed to create DRK key")?;
         let pt = crate::aead::decrypt_with_lsk(&drr.data, &drk_lsk)
             .context("decrypt_async: failed to decrypt data with DRK")?;
-        crate::memguard::wipe_bytes(&mut drk);
+        drk.zeroize();
         if let Some(start) = start {
             metrics::record_decrypt(start);
         }
