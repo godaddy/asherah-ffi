@@ -2031,6 +2031,8 @@ dependencies = [
 [[package]]
 name = "hardware-enclave"
 version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1b5d62e3d75a75ca3ae182facc6d55d355fa63d17b156939bed4fa63fe64b39"
 dependencies = [
  "aes-gcm",
  "libc",

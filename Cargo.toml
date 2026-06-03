@@ -83,6 +83,3 @@ unneeded_field_pattern = "warn"
 unseparated_literal_suffix = "warn"
 used_underscore_binding = "warn"
 
-[patch.crates-io]
-# Temporary: use local hardware-enclave 0.1.5 before it's published.
-hardware-enclave = { path = "/Users/jgowdy/enclaveapps/libenclaveapp/crates/hardware-enclave" }
