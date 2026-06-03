@@ -1,6 +1,6 @@
 [package]
 name = "asherah-ffi"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "Apache-2.0"
 description = "C ABI (Cobhan buffer format) for the Asherah encryption library, used by .NET, Ruby, and Go bindings."
@@ -14,9 +14,9 @@ categories = ["cryptography", "memory-management", "api-bindings"]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-asherah = { version = "0.1.1", path = "../asherah", features = ["sqlite", "mysql", "postgres", "dynamodb"] }
-asherah-cobhan = { version = "0.5.1", path = "../asherah-cobhan" }
-asherah-config = { version = "0.1.1", path = "../asherah-config" }
+asherah = { version = "0.1.2", path = "../asherah", features = ["sqlite", "mysql", "postgres", "dynamodb"] }
+asherah-cobhan = { version = "0.5.2", path = "../asherah-cobhan" }
+asherah-config = { version = "0.1.2", path = "../asherah-config" }
 serde_json = "1.0"
 anyhow = "1.0"
 tokio = { version = "1", features = ["rt-multi-thread"] }
