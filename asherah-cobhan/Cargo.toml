@@ -1,6 +1,6 @@
 [package]
 name = "asherah-cobhan"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 license = "Apache-2.0"
 description = "Cobhan-compatible C ABI for Asherah, drop-in replacement for the Go asherah-cobhan library."
@@ -17,8 +17,8 @@ default = []
 test-helpers = []
 
 [dependencies]
-asherah = { version = "0.1.1", path = "../asherah", features = ["sqlite", "mysql", "postgres", "dynamodb"] }
-asherah-config = { version = "0.1.1", path = "../asherah-config" }
+asherah = { version = "0.1.2", path = "../asherah", features = ["sqlite", "mysql", "postgres", "dynamodb"] }
+asherah-config = { version = "0.1.2", path = "../asherah-config" }
 log = "0.4"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
