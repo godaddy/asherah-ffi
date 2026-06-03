@@ -250,6 +250,26 @@ async fn async_load_missing_key_errors() {
 }
 
 #[tokio::test]
+async fn async_store_load_futures_are_send() {
+    // The whole point of the async surface is consumption from a multi-threaded
+    // async server (axum), where futures held across `.await` must be `Send`.
+    // Assert it at compile time so a future regression (e.g. a non-Send capture)
+    // is caught here rather than at a downstream `tokio::spawn` site.
+    fn assert_send<T: Send>(_: &T) {}
+    let factory = make_factory();
+    let session = factory.get_session("p-send");
+    let store = InMemoryAsyncStore::default();
+
+    let store_fut = session.store_async(b"x", &store);
+    assert_send(&store_fut);
+    let key = store_fut.await.unwrap();
+
+    let load_fut = session.load_async(&key, &store);
+    assert_send(&load_fut);
+    assert_eq!(load_fut.await.unwrap(), b"x");
+}
+
+#[tokio::test]
 async fn async_store_load_interops_with_sync_store_load() {
     // A record stored via the async path decrypts to the same plaintext the
     // sync load path recovers, and vice versa — the DRR shape is identical.

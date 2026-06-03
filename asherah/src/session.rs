@@ -1393,8 +1393,19 @@ impl<
         storer: &T,
     ) -> anyhow::Result<serde_json::Value> {
         self.ensure_valid_partition()?;
+        // Record the store-wrapper timing, mirroring the sync `Session::store`
+        // path so the async path has the same observability.
+        let start = if metrics::is_enabled() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let drr = self.encrypt_async(payload).await?;
-        storer.store_async(&drr).await
+        let res = storer.store_async(&drr).await;
+        if let Some(start) = start {
+            metrics::record_store(start);
+        }
+        res
     }
 
     /// Async counterpart to [`Self::load`]: fetch the record via an async
@@ -1406,10 +1417,19 @@ impl<
         loader: &T,
     ) -> anyhow::Result<Vec<u8>> {
         self.ensure_valid_partition()?;
+        let start = if metrics::is_enabled() {
+            Some(std::time::Instant::now())
+        } else {
+            None
+        };
         let drr = loader.load_async(key).await?.ok_or_else(|| {
             anyhow::anyhow!("record not found in persistence store for the given key")
         })?;
-        self.decrypt_async(drr).await
+        let res = self.decrypt_async(drr).await;
+        if let Some(start) = start {
+            metrics::record_load(start);
+        }
+        res
     }
 
     /// Async counterpart to [`Self::store_ctx`]. The context is an unused
