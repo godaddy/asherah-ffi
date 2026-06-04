@@ -109,10 +109,14 @@ module Asherah
     callback :asherah_log_callback, [:pointer, :int, :string, :string], :void
     callback :asherah_metrics_callback, [:pointer, :int, :uint64, :string], :void
 
-    attach_function :asherah_set_log_hook, [:asherah_log_callback, :pointer], :int
-    attach_function :asherah_clear_log_hook, [], :int
-    attach_function :asherah_set_metrics_hook, [:asherah_metrics_callback, :pointer], :int
-    attach_function :asherah_clear_metrics_hook, [], :int
+    # Hook set/clear functions must release the GVL (blocking: true) because
+    # they may join the async dispatcher worker thread (via Drop on the old
+    # AsyncLogSink/AsyncMetricsSink). That worker thread needs the GVL to
+    # execute FFI callbacks into Ruby — holding the GVL here deadlocks.
+    attach_function :asherah_set_log_hook, [:asherah_log_callback, :pointer], :int, blocking: true
+    attach_function :asherah_clear_log_hook, [], :int, blocking: true
+    attach_function :asherah_set_metrics_hook, [:asherah_metrics_callback, :pointer], :int, blocking: true
+    attach_function :asherah_clear_metrics_hook, [], :int, blocking: true
 
     # Internal: integer constants that mirror the C ABI severity/event
     # codes in hooks.rs. The public Ruby API exposes them as
