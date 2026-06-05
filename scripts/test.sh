@@ -308,19 +308,13 @@ do_bindings() {
 
     # Ruby
     if [ "$binding" = "all" ] || [ "$binding" = "ruby" ]; then
-        RUBY_CMD="ruby"
         if [ -x "/opt/homebrew/opt/ruby/bin/ruby" ]; then
-            RUBY_CMD="/opt/homebrew/opt/ruby/bin/ruby"
             export PATH="/opt/homebrew/opt/ruby/bin:/opt/homebrew/lib/ruby/gems/4.0.0/bin:$PATH"
         fi
-        if ! $RUBY_CMD -e 'require "ffi"' 2>/dev/null; then
-            log "Installing Ruby ffi gem..."
-            if gem install ffi --no-document 2>&1 | tail -1; then
-                true
-            elif command -v sudo >/dev/null 2>&1; then
-                sudo gem install ffi --no-document 2>&1 | tail -1
-            fi
+        if ! command -v bundle >/dev/null 2>&1; then
+            gem install bundler --no-document
         fi
+        (cd asherah-ruby && bundle install --quiet)
         run_test "Ruby" bash -c "cd asherah-ruby && bundle exec rake test"
     fi
 
