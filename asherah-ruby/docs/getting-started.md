@@ -14,19 +14,14 @@ encrypt/decrypt. After this guide, see:
 
 ## 1. Install the gem
 
-Configure the GitHub Packages gem source, then install:
-
 ```bash
-gem sources --add https://rubygems.pkg.github.com/godaddy
 gem install asherah
 ```
 
 Or in your Gemfile:
 
 ```ruby
-source "https://rubygems.pkg.github.com/godaddy" do
-  gem "asherah"
-end
+gem "asherah"
 ```
 
 Platform-specific gems ship prebuilt native libraries for Linux

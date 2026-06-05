@@ -32,7 +32,6 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'release') }}
     runs-on: ubuntu-latest
     permissions:
-      packages: write
       contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -78,27 +77,36 @@ jobs:
         working-directory: asherah-ruby
         env:
           INPUT_VERSION: ${{ github.event.inputs.version }}
-          WORKFLOW_RUN_EVENT: ${{ github.event.workflow_run.event }}
-          WORKFLOW_RUN_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUBYGEMS_VERSION: ${{ vars.RUBYGEMS_VERSION }}
         run: |
+          set -euo pipefail
+          # The RubyGems gem version is tracked INDEPENDENTLY of the monorepo
+          # release tag via the RUBYGEMS_VERSION repository variable (currently
+          # the 0.10.x line). We deliberately do NOT fall back to the monorepo
+          # tag: publishing a monorepo version (e.g. 0.6.x) to RubyGems.org
+          # would be a wrong, irreversible release. Fail loudly instead.
           if [ -n "$INPUT_VERSION" ]; then
             VERSION="$INPUT_VERSION"
-          elif [ -n "${{ vars.RUBYGEMS_VERSION }}" ]; then
-            VERSION="${{ vars.RUBYGEMS_VERSION }}"
+            VERSION_SOURCE="input"
+          elif [ -n "$RUBYGEMS_VERSION" ]; then
+            VERSION="$RUBYGEMS_VERSION"
+            VERSION_SOURCE="variable"
           else
-            # Fallback: derive from triggering release tag (only when the
-            # upstream was a release event — workflow_dispatch head_branch
-            # is "main" or similar, not a tag).
-            if [ "$WORKFLOW_RUN_EVENT" = "release" ] && [ -n "$WORKFLOW_RUN_BRANCH" ]; then
-              TAG="$WORKFLOW_RUN_BRANCH"
-            else
-              TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
-            fi
-            VERSION="${TAG#v}"
+            echo "ERROR: No gem version available." >&2
+            echo "Set the RUBYGEMS_VERSION repository variable, or pass the 'version'" >&2
+            echo "input for a workflow_dispatch run. Refusing to fall back to the monorepo" >&2
+            echo "release tag (that would publish a wrong, irreversible version to RubyGems.org)." >&2
+            exit 1
+          fi
+          # Guard against garbage (e.g. a stray tag or empty value) reaching
+          # `gem push` or the patch-increment arithmetic below.
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "ERROR: VERSION '$VERSION' is not a X.Y.Z release version" >&2
+            exit 1
           fi
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
-          echo "Publishing version: ${VERSION}"
+          echo "VERSION_SOURCE=${VERSION_SOURCE}" >> "$GITHUB_ENV"
+          echo "Publishing version: ${VERSION} (source: ${VERSION_SOURCE})"
           cat > lib/asherah/version.rb <<RUBY
           # frozen_string_literal: true
 
@@ -143,13 +151,27 @@ jobs:
         if: ${{ github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }}
         working-directory: asherah-ruby
         env:
-          GEM_HOST_API_KEY: "Bearer ${{ secrets.GITHUB_TOKEN }}"
+          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_TOKEN }}
         run: |
+          set -uo pipefail
           for gem in pkg/*.gem; do
             echo "Publishing $gem..."
-            gem push --host https://rubygems.pkg.github.com/godaddy "$gem" || {
-              echo "WARNING: Failed to push $gem (may already exist)"
-            }
+            push_output="$(gem push "$gem" 2>&1)" && rc=0 || rc=$?
+            printf '%s\n' "$push_output"
+            if [ "$rc" -eq 0 ]; then
+              continue
+            fi
+            # Idempotent rerun: a version already on RubyGems.org cannot be
+            # repushed. Tolerate that so a partial-failure rerun can finish the
+            # remaining platform gems. Any OTHER failure (auth, MFA, network)
+            # must abort the job so "Update version variable" does NOT run and
+            # silently skip this version.
+            if printf '%s' "$push_output" | grep -qiE 'already (been )?(pushed|exists)|Repushing of gem versions|same name and version'; then
+              echo "NOTE: $gem already exists on RubyGems.org; treating as success."
+              continue
+            fi
+            echo "ERROR: Failed to push $gem (rc=$rc) — aborting before version bump." >&2
+            exit "$rc"
           done
 
       - name: Update version variable
@@ -157,7 +179,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
-          if [ -n "${{ vars.RUBYGEMS_VERSION }}" ]; then
+          set -euo pipefail
+          # Only advance the counter when this publish was driven BY the
+          # variable. An explicit workflow_dispatch 'version' input is a one-off
+          # and must not move the tracked line.
+          if [ "$VERSION_SOURCE" = "variable" ]; then
             MAJOR=$(echo "$VERSION" | cut -d. -f1)
             MINOR=$(echo "$VERSION" | cut -d. -f2)
             PATCH=$(echo "$VERSION" | cut -d. -f3)

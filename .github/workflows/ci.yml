@@ -706,6 +706,8 @@ jobs:
         if: matrix.binding == 'ruby'
         with:
           ruby-version: '3.3'
+          bundler-cache: true
+          working-directory: asherah-ruby
       - name: Run ${{ matrix.binding }} binding tests (x86_64)
         env:
           BINDING_ARTIFACTS_DIR: ${{ github.workspace }}/ci-artifacts

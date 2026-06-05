@@ -2,23 +2,18 @@
 
 Ruby bindings for [Asherah](https://github.com/godaddy/asherah-ffi) envelope encryption with automatic key rotation.
 
-Published to [GitHub Packages](https://github.com/godaddy/asherah-ffi/packages) with prebuilt native libraries for Linux x64/ARM64 (glibc and musl/Alpine) and macOS x64/ARM64. A fallback source gem is available for other platforms (requires the Rust toolchain to compile).
+Published to [RubyGems](https://rubygems.org/gems/asherah) with prebuilt native libraries for Linux x64/ARM64 (glibc and musl/Alpine) and macOS x64/ARM64. A fallback source gem is available for other platforms (requires the Rust toolchain to compile).
 
 ## Installation
 
-Configure the GitHub Packages gem source, then install:
-
 ```bash
-gem sources --add https://rubygems.pkg.github.com/godaddy
 gem install asherah
 ```
 
 Or add to your Gemfile:
 
 ```ruby
-source "https://rubygems.pkg.github.com/godaddy" do
-  gem 'asherah'
-end
+gem 'asherah'
 ```
 
 The gem uses FFI to load the native Asherah library. Platform-specific gems ship the prebuilt library; the source gem builds it during installation.
