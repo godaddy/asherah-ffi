@@ -760,48 +760,68 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             id: self.inner.f.partition.system_key_id(),
             created: 0,
         };
-        let sk = self
-            .get_or_load_system_key(sk_meta)
-            .context("create_intermediate_key: failed to get/load system key")?;
-        let ik = generate_key(self.inner.new_key_timestamp())?;
-        let enc_ik = ik
-            .with_key_func(|ikb| sk.with_key_func(|skb| self.crypto.encrypt(ikb, skb)))
-            .context("create_intermediate_key: failed to encrypt IK under SK")??;
-        let ekr = EnvelopeKeyRecord {
-            id: ik_id.clone(),
-            created: ik.created(),
-            encrypted_key: enc_ik?,
-            revoked: None,
-            parent_key_meta: Some(KeyMeta {
-                id: self.inner.f.partition.system_key_id(),
-                created: sk.created(),
-            }),
-        };
-        let stored = self
-            .metastore
-            .store(&ekr.id, ekr.created, &ekr)
-            .unwrap_or_else(|e| {
-                log::warn!(
-                    "create_intermediate_key: store failed for id={ik_id} (will retry load): {e:#}"
-                );
-                false
-            });
-        if stored {
-            return Ok(Arc::new(ik));
-        }
-        log::debug!("create_intermediate_key: store returned false, loading latest for id={ik_id}");
-        // Fallback: assume duplicate/newer IK exists; load latest and return that one
-        if let Some(latest) = self.metastore.load_latest(&ik_id).context(format!(
-            "create_intermediate_key: fallback load_latest failed for id={ik_id}"
-        ))? {
-            if !self.inner.is_envelope_invalid(&latest) {
-                let sk_meta = latest.parent_key_meta.clone().unwrap_or(KeyMeta {
+        // Bounded create-or-load retry. Under a tight `expire_key_after_s`
+        // (≈ `create_date_precision_s`), a concurrent first-encrypt burst can
+        // straddle the expiry boundary: a thread that loses the store race may
+        // then load_latest an IK that has *just* expired. Rather than surfacing
+        // a spurious "after retry" error, regenerate at the now-current
+        // timestamp — time has advanced past the window, so the fresh key is
+        // valid and this is simply the next rotation. Converges in <=2 attempts;
+        // the bound is a safety net (the `enforce_minimums` precision<=expire
+        // clamp guarantees a freshly minted key is not instantly expired).
+        const MAX_ATTEMPTS: usize = 5;
+        for _ in 0..MAX_ATTEMPTS {
+            let sk = self
+                .get_or_load_system_key(sk_meta.clone())
+                .context("create_intermediate_key: failed to get/load system key")?;
+            let ik = generate_key(self.inner.new_key_timestamp())?;
+            let enc_ik = ik
+                .with_key_func(|ikb| sk.with_key_func(|skb| self.crypto.encrypt(ikb, skb)))
+                .context("create_intermediate_key: failed to encrypt IK under SK")??;
+            let ekr = EnvelopeKeyRecord {
+                id: ik_id.clone(),
+                created: ik.created(),
+                encrypted_key: enc_ik?,
+                revoked: None,
+                parent_key_meta: Some(KeyMeta {
                     id: self.inner.f.partition.system_key_id(),
-                    created: 0,
+                    created: sk.created(),
+                }),
+            };
+            let stored = self
+                .metastore
+                .store(&ekr.id, ekr.created, &ekr)
+                .unwrap_or_else(|e| {
+                    log::warn!(
+                        "create_intermediate_key: store failed for id={ik_id} (will retry load): {e:#}"
+                    );
+                    false
                 });
-                let sk2 = self.get_or_load_system_key(sk_meta)?;
-                let ik2 = self.inner.intermediate_key_from_ekr(&sk2, &latest)?;
-                return Ok(Arc::new(ik2));
+            if stored {
+                return Ok(Arc::new(ik));
+            }
+            log::debug!(
+                "create_intermediate_key: store returned false, loading latest for id={ik_id}"
+            );
+            // Fallback: assume duplicate/newer IK exists; load latest and return that one.
+            if let Some(latest) = self.metastore.load_latest(&ik_id).context(format!(
+                "create_intermediate_key: fallback load_latest failed for id={ik_id}"
+            ))? {
+                if !self.inner.is_envelope_invalid(&latest) {
+                    let sk_meta = latest.parent_key_meta.clone().unwrap_or(KeyMeta {
+                        id: self.inner.f.partition.system_key_id(),
+                        created: 0,
+                    });
+                    let sk2 = self.get_or_load_system_key(sk_meta)?;
+                    let ik2 = self.inner.intermediate_key_from_ekr(&sk2, &latest)?;
+                    return Ok(Arc::new(ik2));
+                }
+                // We lost the store race to an IK that has already expired
+                // (tight expiry + precision boundary). Loop to mint a fresh IK
+                // at the advanced timestamp.
+                log::debug!(
+                    "create_intermediate_key: latest IK for id={ik_id} expired during race; regenerating"
+                );
             }
         }
         log::error!("create_intermediate_key: failed to store or load IK for id={ik_id}");
@@ -1179,54 +1199,63 @@ impl<
             id: self.inner.f.partition.system_key_id(),
             created: 0,
         };
-        let sk = self
-            .get_or_load_system_key_async(sk_meta)
-            .await
-            .context("create_intermediate_key_async: failed to get/load system key")?;
-        let ik = generate_key(self.inner.new_key_timestamp())?;
-        let enc_ik = ik
-            .with_key_func(|ikb| sk.with_key_func(|skb| self.crypto.encrypt(ikb, skb)))
-            .context("create_intermediate_key_async: failed to encrypt IK under SK")??;
-        let ekr = EnvelopeKeyRecord {
-            id: ik_id.clone(),
-            created: ik.created(),
-            encrypted_key: enc_ik?,
-            revoked: None,
-            parent_key_meta: Some(KeyMeta {
-                id: self.inner.f.partition.system_key_id(),
-                created: sk.created(),
-            }),
-        };
-        let stored = self
-            .metastore
-            .store_async(&ekr.id, ekr.created, &ekr)
-            .await
-            .unwrap_or_else(|e| {
-                log::warn!("create_intermediate_key_async: store failed for id={ik_id}: {e:#}");
-                false
-            });
-        if stored {
-            return Ok(Arc::new(ik));
-        }
-        log::debug!(
-            "create_intermediate_key_async: store returned false, loading latest for id={ik_id}"
-        );
-        if let Some(latest) = self
-            .metastore
-            .load_latest_async(&ik_id)
-            .await
-            .context(format!(
-                "create_intermediate_key_async: fallback load_latest failed for id={ik_id}"
-            ))?
-        {
-            if !self.inner.is_envelope_invalid(&latest) {
-                let sk_meta = latest.parent_key_meta.clone().unwrap_or(KeyMeta {
+        // Bounded create-or-load retry — see `create_intermediate_key` (sync)
+        // for the boundary-race rationale. Regenerate at the advanced timestamp
+        // when we lose the store race to an IK that has already expired.
+        const MAX_ATTEMPTS: usize = 5;
+        for _ in 0..MAX_ATTEMPTS {
+            let sk = self
+                .get_or_load_system_key_async(sk_meta.clone())
+                .await
+                .context("create_intermediate_key_async: failed to get/load system key")?;
+            let ik = generate_key(self.inner.new_key_timestamp())?;
+            let enc_ik = ik
+                .with_key_func(|ikb| sk.with_key_func(|skb| self.crypto.encrypt(ikb, skb)))
+                .context("create_intermediate_key_async: failed to encrypt IK under SK")??;
+            let ekr = EnvelopeKeyRecord {
+                id: ik_id.clone(),
+                created: ik.created(),
+                encrypted_key: enc_ik?,
+                revoked: None,
+                parent_key_meta: Some(KeyMeta {
                     id: self.inner.f.partition.system_key_id(),
-                    created: 0,
+                    created: sk.created(),
+                }),
+            };
+            let stored = self
+                .metastore
+                .store_async(&ekr.id, ekr.created, &ekr)
+                .await
+                .unwrap_or_else(|e| {
+                    log::warn!("create_intermediate_key_async: store failed for id={ik_id}: {e:#}");
+                    false
                 });
-                let sk2 = self.get_or_load_system_key_async(sk_meta).await?;
-                let ik2 = self.inner.intermediate_key_from_ekr(&sk2, &latest)?;
-                return Ok(Arc::new(ik2));
+            if stored {
+                return Ok(Arc::new(ik));
+            }
+            log::debug!(
+                "create_intermediate_key_async: store returned false, loading latest for id={ik_id}"
+            );
+            if let Some(latest) =
+                self.metastore
+                    .load_latest_async(&ik_id)
+                    .await
+                    .context(format!(
+                        "create_intermediate_key_async: fallback load_latest failed for id={ik_id}"
+                    ))?
+            {
+                if !self.inner.is_envelope_invalid(&latest) {
+                    let sk_meta = latest.parent_key_meta.clone().unwrap_or(KeyMeta {
+                        id: self.inner.f.partition.system_key_id(),
+                        created: 0,
+                    });
+                    let sk2 = self.get_or_load_system_key_async(sk_meta).await?;
+                    let ik2 = self.inner.intermediate_key_from_ekr(&sk2, &latest)?;
+                    return Ok(Arc::new(ik2));
+                }
+                log::debug!(
+                    "create_intermediate_key_async: latest IK for id={ik_id} expired during race; regenerating"
+                );
             }
         }
         Err(anyhow::anyhow!(
