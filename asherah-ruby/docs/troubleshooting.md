@@ -132,22 +132,13 @@ or Homebrew reinstall).
 
 ### `Could not find asherah-x.y.z in any of the sources`
 
-The GitHub Packages source isn't configured. Add to your Gemfile:
+Ensure the gem is in your Gemfile:
 
 ```ruby
-source "https://rubygems.pkg.github.com/godaddy" do
-  gem "asherah"
-end
+gem "asherah"
 ```
 
-Or globally:
-
-```bash
-gem sources --add https://rubygems.pkg.github.com/godaddy
-```
-
-GitHub Packages requires authentication — set `BUNDLE_RUBYGEMS__PKG__GITHUB__COM`
-to a GitHub personal access token with `read:packages`.
+Then run `bundle install`.
 
 ### Lockfile resolves a different platform than your deploy target
 
