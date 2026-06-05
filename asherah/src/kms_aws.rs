@@ -238,6 +238,32 @@ impl<A: AEAD + Send + Sync + 'static> AwsKms<A> {
     }
 }
 
+impl<A: AEAD + Send + Sync + 'static> Drop for AwsKms<A> {
+    /// Shut the per-instance runtime down without blocking the current thread.
+    ///
+    /// `new_async` (and `new` when no ambient runtime exists) stores an owned
+    /// `Arc<Runtime>`. Dropping a Tokio `Runtime` performs a *blocking*
+    /// shutdown of its worker/blocking pools, which panics with "Cannot drop a
+    /// runtime in a context where blocking is not allowed" when it happens
+    /// inside another runtime — exactly the case when an `AwsKms` built via
+    /// `new_async` is later dropped during async shutdown. When we hold the
+    /// last reference and are inside a runtime, hand the shutdown to a
+    /// background thread via `shutdown_background()`; outside a runtime the
+    /// normal blocking drop is safe.
+    fn drop(&mut self) {
+        if let Some(rt) = self.rt.take() {
+            // Only the holder of the last reference performs the shutdown; if
+            // another clone is outstanding, its final drop handles it.
+            if let Ok(rt) = Arc::try_unwrap(rt) {
+                if tokio::runtime::Handle::try_current().is_ok() {
+                    rt.shutdown_background();
+                }
+                // Outside a runtime, letting `rt` drop here blocks safely.
+            }
+        }
+    }
+}
+
 #[async_trait]
 impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKms<A> {
     fn encrypt_key(&self, _ctx: &(), key_bytes: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
@@ -258,5 +284,33 @@ impl<A: AEAD + Send + Sync + 'static> KeyManagementService for AwsKms<A> {
 
     async fn decrypt_key_async(&self, _ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
         self.decrypt_key_impl(blob).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::aead::AES256GCM;
+
+    /// Regression: an `AwsKms` built via `new_async` stores an owned tokio
+    /// runtime, and dropping a runtime inside another runtime previously
+    /// panicked with "Cannot drop a runtime in a context where blocking is not
+    /// allowed". The `Drop` impl must defer the shutdown so the drop is safe.
+    ///
+    /// The client is constructed offline — `aws_config` loads lazily and no KMS
+    /// request is made — so this needs no AWS credentials.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn new_async_drops_without_panicking_inside_runtime() {
+        let kms = AwsKms::new_async(
+            Arc::new(AES256GCM::new()),
+            "alias/asherah-drop-regression",
+            Some("us-east-1".to_string()),
+            None,
+        )
+        .await
+        .expect("AwsKms::new_async should build the client offline");
+
+        // Drops here, inside the `#[tokio::test]` runtime — must not panic.
+        drop(kms);
     }
 }
