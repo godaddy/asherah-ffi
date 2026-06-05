@@ -321,7 +321,7 @@ do_bindings() {
                 sudo gem install ffi --no-document 2>&1 | tail -1
             fi
         fi
-        run_test "Ruby" $RUBY_CMD -I asherah-ruby/lib -I asherah-ruby/test asherah-ruby/test/round_trip_test.rb
+        run_test "Ruby" bash -c "cd asherah-ruby && bundle exec rake test"
     fi
 
     # Go
