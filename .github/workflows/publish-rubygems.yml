@@ -39,6 +39,41 @@ jobs:
         with:
           ruby-version: '3.3'
 
+      - name: Verify RubyGems credentials (read-only)
+        env:
+          RUBYGEMS_TOKEN: ${{ secrets.RUBYGEMS_TOKEN }}
+        run: |
+          set -uo pipefail
+          if [ -z "${RUBYGEMS_TOKEN:-}" ]; then
+            echo "ERROR: RUBYGEMS_TOKEN secret is empty/unset." >&2
+            exit 1
+          fi
+          # Read-only auth probe. This does NOT publish anything.
+          # 200 = key authenticates. 401 = bad/invalid key -> hard fail.
+          # 403/other = key is valid but lacks read scope for this endpoint
+          # (e.g. a push-only key) -> warn only, never block a real release.
+          code=$(curl -sS -o /tmp/rg_me.json -w '%{http_code}' \
+            -H "Authorization: ${RUBYGEMS_TOKEN}" \
+            https://rubygems.org/api/v1/profile/me.json || echo "000")
+          echo "profile/me.json -> HTTP ${code}"
+          case "$code" in
+            200)
+              handle=$(ruby -rjson -e 'puts(JSON.parse(File.read("/tmp/rg_me.json"))["handle"] || "?")' 2>/dev/null || echo "?")
+              echo "RubyGems token authenticates as: ${handle}"
+              ;;
+            401)
+              echo "ERROR: RubyGems rejected the token (401). RUBYGEMS_TOKEN is not a valid API key." >&2
+              exit 1
+              ;;
+            *)
+              echo "WARNING: profile probe returned ${code} (not 401). The key likely authenticates"
+              echo "but lacks read scope for this endpoint; push scope/MFA are only proven by an"
+              echo "actual 'gem push'. Continuing."
+              ;;
+          esac
+          echo "NOTE: a 200 here confirms the key is valid; it does NOT by itself prove push"
+          echo "scope or MFA-on-push. Those are exercised only by the real 'gem push' step."
+
       - name: Download native libraries from release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
