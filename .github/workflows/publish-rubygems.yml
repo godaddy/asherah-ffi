@@ -143,11 +143,11 @@ jobs:
         if: ${{ github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }}
         working-directory: asherah-ruby
         env:
-          GEM_HOST_API_KEY: "Bearer ${{ secrets.GITHUB_TOKEN }}"
+          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_TOKEN }}
         run: |
           for gem in pkg/*.gem; do
             echo "Publishing $gem..."
-            gem push --host https://rubygems.pkg.github.com/godaddy "$gem" || {
+            gem push "$gem" || {
               echo "WARNING: Failed to push $gem (may already exist)"
             }
           done
