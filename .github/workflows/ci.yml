@@ -28,7 +28,7 @@ jobs:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Free disk space
         run: bash scripts/ci-free-disk-space.sh
       - name: Cache cargo registry
@@ -69,7 +69,7 @@ jobs:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Free disk space
         run: bash scripts/ci-free-disk-space.sh
       - name: Restore workspace caches
@@ -84,7 +84,7 @@ jobs:
             rust-tests-${{ runner.os }}-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@4bc351f7f2614e48088386e2a0ad917ca3a7e4ba # v2
         with:
           tool: sccache@0.8.1
       - name: Install protoc
@@ -102,7 +102,7 @@ jobs:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Free disk space
         run: bash scripts/ci-free-disk-space.sh
       - name: Cache cargo registry
@@ -133,7 +133,7 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Restore workspace caches
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -144,7 +144,7 @@ jobs:
           key: build-${{ runner.os }}-x86_64-rlib-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             build-${{ runner.os }}-x86_64-rlib-
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@4bc351f7f2614e48088386e2a0ad917ca3a7e4ba # v2
         with:
           tool: sccache@0.8.1
       - name: Build FFI rlib (x86_64)
@@ -186,7 +186,7 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Restore workspace caches
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -205,7 +205,7 @@ jobs:
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@4bc351f7f2614e48088386e2a0ad917ca3a7e4ba # v2
         with:
           tool: sccache@0.8.1
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
@@ -239,7 +239,7 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Restore workspace caches
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -291,7 +291,7 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Restore workspace caches
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -310,7 +310,7 @@ jobs:
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@4bc351f7f2614e48088386e2a0ad917ca3a7e4ba # v2
         with:
           tool: sccache@0.8.1
       - name: Build Java binding (x86_64)
@@ -339,7 +339,7 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Restore workspace caches
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -358,10 +358,10 @@ jobs:
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@4bc351f7f2614e48088386e2a0ad917ca3a7e4ba # v2
         with:
           tool: sccache@0.8.1
-      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+      - uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5
         with:
           dotnet-version: |
             8.0.x
@@ -385,8 +385,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5
         with:
           dotnet-version: |
             8.0.x
@@ -452,7 +452,7 @@ jobs:
     runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Download x86_64 rlib artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -485,7 +485,7 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Restore workspace caches
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -503,7 +503,7 @@ jobs:
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@4bc351f7f2614e48088386e2a0ad917ca3a7e4ba # v2
         with:
           tool: sccache@0.8.1
       - name: Build asherah-cobhan (x86_64)
@@ -525,7 +525,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
@@ -552,7 +552,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
       - name: Install OpenSSL via vcpkg
         shell: bash
@@ -606,7 +606,7 @@ jobs:
     outputs:
       cache-hit: ${{ steps.check-cache.outputs.cache-hit }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Calculate cache key
         id: cache-key
         run: |
@@ -625,7 +625,7 @@ jobs:
           lookup-only: true
       - name: Set up QEMU
         if: steps.check-cache.outputs.cache-hit != 'true'
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4
         with:
           platforms: linux/arm64
       - name: Set up Docker Buildx
@@ -676,7 +676,7 @@ jobs:
       matrix:
         binding: [python, node, bun, ruby, go, java, dotnet, php]
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Download all x86_64 binding artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -691,7 +691,7 @@ jobs:
         if: matrix.binding == 'bun'
         with:
           bun-version: latest
-      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+      - uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5
         if: matrix.binding == 'dotnet'
         with:
           dotnet-version: |
@@ -727,7 +727,7 @@ jobs:
           - php:8.3-cli
           - php:8.4-cli
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Download x86_64 FFI artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -752,7 +752,7 @@ jobs:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Free disk space
         run: bash scripts/ci-free-disk-space.sh
       - name: Restore workspace caches
@@ -769,7 +769,7 @@ jobs:
         uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           components: rustfmt
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@4bc351f7f2614e48088386e2a0ad917ca3a7e4ba # v2
         with:
           tool: sccache@0.8.1
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
@@ -813,7 +813,7 @@ jobs:
       matrix:
         binding: [python, node, bun, ruby, go, java, dotnet]
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Restore workspace caches
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -840,7 +840,7 @@ jobs:
           name: arm64-tests-image
           path: artifacts
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4
         with:
           platforms: linux/arm64
       - name: Load arm64 test image
@@ -861,7 +861,7 @@ jobs:
       contents: read
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'schedule' || contains(github.event.head_commit.message, '[sanitize]')
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Cache cargo registry
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -895,7 +895,7 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Restore workspace caches
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -965,7 +965,7 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Restore workspace caches
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -1029,7 +1029,7 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Restore workspace caches
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -1106,7 +1106,7 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Restore workspace caches
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -1166,7 +1166,7 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Restore workspace caches
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -1222,7 +1222,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Download arm64 rlib artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -1257,7 +1257,7 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Restore workspace caches
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
         with:
@@ -1336,7 +1336,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: x86_64-unknown-linux-musl
@@ -1351,7 +1351,7 @@ jobs:
         # workflows so dry-runs can't drift.
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@4bc351f7f2614e48088386e2a0ad917ca3a7e4ba # v2
         with:
           tool: cargo-zigbuild
       - name: Build asherah-node for x86_64-musl
@@ -1370,7 +1370,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
@@ -1404,7 +1404,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.11"
@@ -1429,7 +1429,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.11"
@@ -1454,7 +1454,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.11"
@@ -1476,7 +1476,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.11"
@@ -1501,7 +1501,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.11"
@@ -1526,7 +1526,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: aarch64-unknown-linux-musl
@@ -1541,7 +1541,7 @@ jobs:
         # workflows so dry-runs can't drift.
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@4bc351f7f2614e48088386e2a0ad917ca3a7e4ba # v2
         with:
           tool: cargo-zigbuild
       - name: Build asherah-node for aarch64-musl
@@ -1560,7 +1560,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: aarch64-pc-windows-msvc
@@ -1605,7 +1605,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: x86_64-unknown-linux-musl
@@ -1617,7 +1617,7 @@ jobs:
         # workflows so dry-runs can't drift.
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@4bc351f7f2614e48088386e2a0ad917ca3a7e4ba # v2
         with:
           tool: cargo-zigbuild
       - name: Setup musl OpenSSL
@@ -1651,7 +1651,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: aarch64-unknown-linux-musl
@@ -1663,7 +1663,7 @@ jobs:
         # workflows so dry-runs can't drift.
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@4bc351f7f2614e48088386e2a0ad917ca3a7e4ba # v2
         with:
           tool: cargo-zigbuild
       - name: Setup musl OpenSSL
@@ -1698,7 +1698,7 @@ jobs:
       contents: read
     needs: build-ffi-x86_64
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: ruby/setup-ruby@afeafc3d1ab54a631816aba4c914a0081c12ff2f # v1
         with:
           ruby-version: '3.3'
@@ -1730,7 +1730,7 @@ jobs:
       contents: read
     needs: build-ffi-x86_64
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: x86_64-unknown-linux-musl
@@ -1744,7 +1744,7 @@ jobs:
       - name: Install Zig (with retries)
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@4bc351f7f2614e48088386e2a0ad917ca3a7e4ba # v2
         with:
           tool: cargo-zigbuild
       - name: Setup musl OpenSSL
@@ -1812,7 +1812,7 @@ jobs:
       contents: read
     needs: build-java-x86_64
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
         with:
           java-version: '11'
