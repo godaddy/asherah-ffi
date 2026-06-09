@@ -63,11 +63,15 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         // exactly once, no per-field `.clone()`. T-finding "from_config
         // clones every field" in
         // `docs/review-2026-05-05-findings.md`.
+        // The legacy generic SessionFactory does not implement decrypt recovery
+        // (bindings use PublicSession), so `recovery_region_suffixes` is dropped
+        // via `..`; the remaining fields are still moved out exactly once.
         let Config {
             service,
             product,
             policy,
             region_suffix,
+            ..
         } = cfg;
         let part = match region_suffix {
             Some(s) => DefaultPartition::new_suffixed(String::new(), service, product, s),
@@ -376,8 +380,9 @@ impl<
             .ok_or_else(|| anyhow::anyhow!("decrypt: DRR key missing parent_key_meta"))?;
         if !self.f.partition.is_valid_intermediate_key_id(&pmeta.id) {
             return Err(anyhow::anyhow!(
-                "decrypt: invalid IK id={} for partition",
-                pmeta.id
+                "decrypt: invalid IK id={} for partition (expected {})",
+                pmeta.id,
+                self.f.partition.intermediate_key_id()
             ));
         }
         log::debug!(
@@ -648,6 +653,8 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             };
             let cached_ik_id = inner.f.partition.intermediate_key_id();
             let cached_ik_prefix = inner.f.partition.ik_validation_prefix();
+            let recovery_suffixes: Arc<[String]> =
+                Arc::from(self.cfg.recovery_region_suffixes.clone());
             PublicSession {
                 inner,
                 metastore: self.metastore.clone(),
@@ -659,6 +666,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                 invalid_partition,
                 cached_ik_id,
                 cached_ik_prefix,
+                recovery_suffixes,
             }
         };
         if let Some(cache) = &self.session_cache {
@@ -708,6 +716,11 @@ pub struct PublicSession<A: AEAD + Clone, K: KeyManagementService + Clone, M: Me
     cached_ik_id: String,
     /// Pre-computed IK id prefix for suffix validation (avoids format! allocation per decrypt)
     cached_ik_prefix: Option<String>,
+    /// Region suffixes to try (in order) when a decrypt would otherwise fail,
+    /// before falling back to the empty suffix. Read only on the cold recovery
+    /// path; never touched on the encrypt/decrypt hot path. Stored as `Arc<[_]>`
+    /// so per-session clones from the session cache are cheap.
+    recovery_suffixes: Arc<[String]>,
 }
 
 #[allow(clippy::same_name_method)]
@@ -728,6 +741,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             invalid_partition: self.invalid_partition,
             cached_ik_id: self.cached_ik_id.clone(),
             cached_ik_prefix: self.cached_ik_prefix.clone(),
+            recovery_suffixes: self.recovery_suffixes.clone(),
         }
     }
 
@@ -947,6 +961,326 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         Ok(result)
     }
 
+    // ─── Best-effort cross-region decrypt recovery ──────────────────────────
+    //
+    // When the normal decrypt path fails — the row's IK id does not match this
+    // session's partition, the IK is not found at the recorded (id, created),
+    // or the AEAD tag is rejected — we do NOT give up. A row's key chain is
+    // self-describing (the IK record names its own parent SK, which the local
+    // KMS can unwrap in a properly configured multi-region setup), and AES-GCM
+    // authenticates every decrypt, so trying additional candidate keys can
+    // never yield wrong plaintext: a wrong key fails the tag. We therefore try
+    // the IK under the partition's suffix-independent id core with each
+    // configured recovery suffix, the empty suffix, this session's own id, and
+    // the row's verbatim id. This recovers data written under a different
+    // region's suffix or before region suffixing was toggled — the same
+    // misconfiguration family that bit upstream Asherah (godaddy/asherah
+    // #1696/#1698). Recovery is treated as an error condition and logged loudly
+    // at every step regardless of outcome, because reaching it at all means
+    // something upstream is misconfigured and must be fixed.
+
+    /// Build the ordered, deduplicated list of candidate IK ids to try during
+    /// recovery. Every candidate shares the partition's id core
+    /// (`_IK_{id}_{service}_{product}`), so recovery never crosses the
+    /// partition/service/product isolation boundary — only the region suffix
+    /// varies.
+    fn recovery_candidate_ids(&self, row_id: &str) -> Vec<String> {
+        let core = self.inner.f.partition.ik_id_core();
+        let mut out: Vec<String> = Vec::with_capacity(self.recovery_suffixes.len() + 3);
+        // 1. configured recovery suffixes, in listed order
+        for s in self.recovery_suffixes.iter() {
+            let cand = format!("{core}_{s}");
+            if !out.contains(&cand) {
+                out.push(cand);
+            }
+        }
+        // 2. empty suffix (the bare core)
+        if !out.contains(&core) {
+            out.push(core.clone());
+        }
+        // 3. this session's own partition id
+        if !out.contains(&self.cached_ik_id) {
+            out.push(self.cached_ik_id.clone());
+        }
+        // 4. the row's embedded id verbatim — ONLY when it shares this
+        //    partition's id core (bare core or core + "_<suffix>"). This honors
+        //    the row's own claim about where its key lives while guaranteeing
+        //    recovery never crosses the partition/service/product boundary: a
+        //    row referencing a different core is left to fail.
+        let row = row_id.to_string();
+        let shares_core = row == core
+            || row
+                .strip_prefix(&core)
+                .is_some_and(|rest| rest.starts_with('_'));
+        if shares_core && !out.contains(&row) {
+            out.push(row);
+        }
+        out
+    }
+
+    /// Derive an IK from an already-loaded EKR, following the EKR's own parent
+    /// SK meta (cross-region safe). Shared by the sync recovery loaders.
+    fn ik_from_ekr_for_recovery(&self, ekr: EnvelopeKeyRecord) -> anyhow::Result<Arc<CryptoKey>> {
+        let sk_meta = ekr.parent_key_meta.clone().unwrap_or(KeyMeta {
+            id: self.inner.f.partition.system_key_id(),
+            created: 0,
+        });
+        let sk = self.get_or_load_system_key(sk_meta)?;
+        let ik = self.inner.intermediate_key_from_ekr(&sk, &ekr)?;
+        Ok(Arc::new(ik))
+    }
+
+    fn try_load_ik_for_recovery(
+        &self,
+        id: &str,
+        created: i64,
+    ) -> anyhow::Result<Option<Arc<CryptoKey>>> {
+        match self.metastore.load(id, created)? {
+            Some(ekr) => Ok(Some(self.ik_from_ekr_for_recovery(ekr)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn try_load_latest_ik_for_recovery(&self, id: &str) -> anyhow::Result<Option<Arc<CryptoKey>>> {
+        match self.metastore.load_latest(id)? {
+            Some(ekr) => Ok(Some(self.ik_from_ekr_for_recovery(ekr)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Unwrap the DRK with `ik` and decrypt `data`. Returns `Err` (with the DRK
+    /// wiped) when the AEAD tag is rejected — that is the success oracle the
+    /// recovery loops rely on. Used only on the recovery path; the hot path
+    /// keeps its own inline copy.
+    fn try_decrypt_with_ik(
+        &self,
+        ik: &CryptoKey,
+        enc_drk: &[u8],
+        data: &[u8],
+    ) -> anyhow::Result<Vec<u8>> {
+        let mut drk = if let Some(ik_lsk) = ik.less_safe_key() {
+            crate::aead::decrypt_with_lsk(enc_drk, ik_lsk)?
+        } else {
+            ik.with_key_func(|ikb| self.crypto.decrypt(enc_drk, ikb))??
+        };
+        let drk_lsk = match crate::aead::make_lsk(&drk) {
+            Ok(k) => k,
+            Err(e) => {
+                drk.zeroize();
+                return Err(e);
+            }
+        };
+        let pt = crate::aead::decrypt_with_lsk(data, &drk_lsk);
+        drk.zeroize();
+        pt
+    }
+
+    /// Synchronous best-effort recovery. Returns the recovered plaintext on the
+    /// first candidate whose key authenticates, or `None` when every candidate
+    /// is exhausted. Logs loudly at `error` level on entry, per attempt, on
+    /// success, and on exhaustion.
+    fn recover_decrypt(&self, enc_drk: &[u8], data: &[u8], pmeta: &KeyMeta) -> Option<Vec<u8>> {
+        let candidates = self.recovery_candidate_ids(&pmeta.id);
+        log::error!(
+            "decrypt recovery: ENTERING best-effort cross-region recovery for row IK id={} created={} (session partition={}). This indicates a region-suffix/partition misconfiguration and is an ERROR regardless of outcome. Trying {} candidate key id(s).",
+            pmeta.id,
+            pmeta.created,
+            self.cached_ik_id,
+            candidates.len()
+        );
+        // Pass A: exact (candidate id, row's created).
+        for id in &candidates {
+            log::error!(
+                "decrypt recovery: trying candidate IK id={id} created={} (exact)",
+                pmeta.created
+            );
+            match self.try_load_ik_for_recovery(id, pmeta.created) {
+                Ok(Some(ik)) => match self.try_decrypt_with_ik(&ik, enc_drk, data) {
+                    Ok(pt) => {
+                        log::error!(
+                            "decrypt recovery: SUCCEEDED using IK id={id} created={} — row was tagged id={}; FIX THE MISCONFIGURATION that produced cross-region data.",
+                            pmeta.created,
+                            pmeta.id
+                        );
+                        metrics::record_decrypt_recovery(true);
+                        return Some(pt);
+                    }
+                    Err(e) => log::error!(
+                        "decrypt recovery: candidate IK id={id} created={} loaded but AEAD tag rejected it for this row: {e:#}",
+                        pmeta.created
+                    ),
+                },
+                Ok(None) => log::error!(
+                    "decrypt recovery: candidate IK id={id} created={} not found in metastore",
+                    pmeta.created
+                ),
+                Err(e) => log::error!(
+                    "decrypt recovery: candidate IK id={id} created={} load error: {e:#}",
+                    pmeta.created
+                ),
+            }
+        }
+        // Pass B: load_latest per candidate (covers rows whose recorded
+        // `created` is also wrong, not just the suffix).
+        for id in &candidates {
+            log::error!("decrypt recovery: trying candidate IK id={id} (load_latest)");
+            match self.try_load_latest_ik_for_recovery(id) {
+                Ok(Some(ik)) => {
+                    let created = ik.created();
+                    match self.try_decrypt_with_ik(&ik, enc_drk, data) {
+                        Ok(pt) => {
+                            log::error!(
+                                "decrypt recovery: SUCCEEDED using latest IK id={id} created={created} — row was tagged id={} created={}; FIX THE MISCONFIGURATION.",
+                                pmeta.id,
+                                pmeta.created
+                            );
+                            metrics::record_decrypt_recovery(true);
+                            return Some(pt);
+                        }
+                        Err(e) => log::error!(
+                            "decrypt recovery: latest IK id={id} created={created} AEAD tag rejected it for this row: {e:#}"
+                        ),
+                    }
+                }
+                Ok(None) => {
+                    log::error!(
+                        "decrypt recovery: no key found for candidate IK id={id} (load_latest)"
+                    )
+                }
+                Err(e) => {
+                    log::error!("decrypt recovery: candidate IK id={id} load_latest error: {e:#}")
+                }
+            }
+        }
+        log::error!(
+            "decrypt recovery: EXHAUSTED all {} candidate key id(s) for row IK id={} created={}; data is UNRECOVERABLE with the configured recovery suffixes.",
+            candidates.len(),
+            pmeta.id,
+            pmeta.created
+        );
+        metrics::record_decrypt_recovery(false);
+        None
+    }
+
+    async fn ik_from_ekr_for_recovery_async(
+        &self,
+        ekr: EnvelopeKeyRecord,
+    ) -> anyhow::Result<Arc<CryptoKey>>
+    where
+        A: 'static,
+        K: 'static,
+        M: 'static,
+    {
+        let sk_meta = ekr.parent_key_meta.clone().unwrap_or(KeyMeta {
+            id: self.inner.f.partition.system_key_id(),
+            created: 0,
+        });
+        let sk = self.get_or_load_system_key_async(sk_meta).await?;
+        let ik = self.inner.intermediate_key_from_ekr(&sk, &ekr)?;
+        Ok(Arc::new(ik))
+    }
+
+    /// Async counterpart to [`Self::recover_decrypt`]. Mirrors the sync logic
+    /// using the async metastore methods.
+    async fn recover_decrypt_async(
+        &self,
+        enc_drk: &[u8],
+        data: &[u8],
+        pmeta: &KeyMeta,
+    ) -> Option<Vec<u8>>
+    where
+        A: 'static,
+        K: 'static,
+        M: 'static,
+    {
+        let candidates = self.recovery_candidate_ids(&pmeta.id);
+        log::error!(
+            "decrypt_async recovery: ENTERING best-effort cross-region recovery for row IK id={} created={} (session partition={}). This indicates a region-suffix/partition misconfiguration and is an ERROR regardless of outcome. Trying {} candidate key id(s).",
+            pmeta.id,
+            pmeta.created,
+            self.cached_ik_id,
+            candidates.len()
+        );
+        for id in &candidates {
+            log::error!(
+                "decrypt_async recovery: trying candidate IK id={id} created={} (exact)",
+                pmeta.created
+            );
+            match self.metastore.load_async(id, pmeta.created).await {
+                Ok(Some(ekr)) => match self.ik_from_ekr_for_recovery_async(ekr).await {
+                    Ok(ik) => match self.try_decrypt_with_ik(&ik, enc_drk, data) {
+                        Ok(pt) => {
+                            log::error!(
+                                "decrypt_async recovery: SUCCEEDED using IK id={id} created={} — row was tagged id={}; FIX THE MISCONFIGURATION.",
+                                pmeta.created,
+                                pmeta.id
+                            );
+                            metrics::record_decrypt_recovery(true);
+                            return Some(pt);
+                        }
+                        Err(e) => log::error!(
+                            "decrypt_async recovery: candidate IK id={id} created={} loaded but AEAD tag rejected it: {e:#}",
+                            pmeta.created
+                        ),
+                    },
+                    Err(e) => log::error!(
+                        "decrypt_async recovery: candidate IK id={id} created={} key derivation failed: {e:#}",
+                        pmeta.created
+                    ),
+                },
+                Ok(None) => log::error!(
+                    "decrypt_async recovery: candidate IK id={id} created={} not found in metastore",
+                    pmeta.created
+                ),
+                Err(e) => log::error!(
+                    "decrypt_async recovery: candidate IK id={id} created={} load error: {e:#}",
+                    pmeta.created
+                ),
+            }
+        }
+        for id in &candidates {
+            log::error!("decrypt_async recovery: trying candidate IK id={id} (load_latest)");
+            match self.metastore.load_latest_async(id).await {
+                Ok(Some(ekr)) => match self.ik_from_ekr_for_recovery_async(ekr).await {
+                    Ok(ik) => {
+                        let created = ik.created();
+                        match self.try_decrypt_with_ik(&ik, enc_drk, data) {
+                            Ok(pt) => {
+                                log::error!(
+                                    "decrypt_async recovery: SUCCEEDED using latest IK id={id} created={created} — row was tagged id={} created={}; FIX THE MISCONFIGURATION.",
+                                    pmeta.id,
+                                    pmeta.created
+                                );
+                                metrics::record_decrypt_recovery(true);
+                                return Some(pt);
+                            }
+                            Err(e) => log::error!(
+                                "decrypt_async recovery: latest IK id={id} created={created} AEAD tag rejected it: {e:#}"
+                            ),
+                        }
+                    }
+                    Err(e) => log::error!(
+                        "decrypt_async recovery: candidate IK id={id} (load_latest) key derivation failed: {e:#}"
+                    ),
+                },
+                Ok(None) => log::error!(
+                    "decrypt_async recovery: no key found for candidate IK id={id} (load_latest)"
+                ),
+                Err(e) => log::error!(
+                    "decrypt_async recovery: candidate IK id={id} load_latest error: {e:#}"
+                ),
+            }
+        }
+        log::error!(
+            "decrypt_async recovery: EXHAUSTED all {} candidate key id(s) for row IK id={} created={}; data is UNRECOVERABLE with the configured recovery suffixes.",
+            candidates.len(),
+            pmeta.id,
+            pmeta.created
+        );
+        metrics::record_decrypt_recovery(false);
+        None
+    }
+
     pub fn decrypt(&self, drr: crate::types::DataRowRecord) -> anyhow::Result<Vec<u8>> {
         self.ensure_valid_partition()?;
         // Per-session AND global gate: only call Instant::now() when both
@@ -965,45 +1299,66 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         let pmeta = key
             .parent_key_meta
             .ok_or_else(|| anyhow::anyhow!("decrypt: DRR key missing parent_key_meta"))?;
-        let valid_ik = pmeta.id == self.cached_ik_id
-            || self
-                .cached_ik_prefix
-                .as_ref()
-                .is_some_and(|p| pmeta.id.starts_with(p));
-        if !valid_ik {
-            return Err(anyhow::anyhow!(
-                "decrypt: invalid IK id={} for partition",
-                pmeta.id
-            ));
-        }
-        log::debug!(
-            "PublicSession::decrypt: loading IK id={} created={}",
-            pmeta.id,
-            pmeta.created
-        );
-        let mut loader = || self.load_intermediate_key(pmeta.clone());
-        let ik = self
-            .ik_cache
-            .get_or_load(&pmeta, &mut loader)
-            .with_context(|| {
-                format!(
-                    "decrypt: failed to load IK id={} created={}",
-                    pmeta.id, pmeta.created
-                )
-            })?;
-        // Decrypt DRK under IK: use cached LessSafeKey if available (no Enclave::open)
-        let mut drk = if let Some(ik_lsk) = ik.less_safe_key() {
-            crate::aead::decrypt_with_lsk(&key.encrypted_key, ik_lsk)
-                .context("decrypt: failed to decrypt DRK with IK")?
-        } else {
-            ik.with_key_func(|ikb| self.crypto.decrypt(&key.encrypted_key, ikb))
-                .context("decrypt: failed to decrypt DRK with IK")??
+        // Fast path: the row's IK id matches this session's partition. Kept
+        // inline and unchanged so the hot path pays no extra cost; any failure
+        // here (validation reject, IK-not-found, or AEAD tag failure) drops to
+        // the best-effort recovery path below.
+        let fast: anyhow::Result<Vec<u8>> = (|| {
+            let valid_ik = pmeta.id == self.cached_ik_id
+                || self
+                    .cached_ik_prefix
+                    .as_ref()
+                    .is_some_and(|p| pmeta.id.starts_with(p));
+            if !valid_ik {
+                return Err(anyhow::anyhow!(
+                    "decrypt: invalid IK id={} for partition (session partition expected {})",
+                    pmeta.id,
+                    self.cached_ik_id
+                ));
+            }
+            log::debug!(
+                "PublicSession::decrypt: loading IK id={} created={}",
+                pmeta.id,
+                pmeta.created
+            );
+            let mut loader = || self.load_intermediate_key(pmeta.clone());
+            let ik = self
+                .ik_cache
+                .get_or_load(&pmeta, &mut loader)
+                .with_context(|| {
+                    format!(
+                        "decrypt: failed to load IK id={} created={}",
+                        pmeta.id, pmeta.created
+                    )
+                })?;
+            // Decrypt DRK under IK: use cached LessSafeKey if available (no Enclave::open)
+            let mut drk = if let Some(ik_lsk) = ik.less_safe_key() {
+                crate::aead::decrypt_with_lsk(&key.encrypted_key, ik_lsk)
+                    .context("decrypt: failed to decrypt DRK with IK")?
+            } else {
+                ik.with_key_func(|ikb| self.crypto.decrypt(&key.encrypted_key, ikb))
+                    .context("decrypt: failed to decrypt DRK with IK")??
+            };
+            // Create DRK LessSafeKey once for data decryption
+            let drk_lsk =
+                crate::aead::make_lsk(&drk).context("decrypt: failed to create DRK key")?;
+            let pt = crate::aead::decrypt_with_lsk(&drr.data, &drk_lsk)
+                .context("decrypt: failed to decrypt data with DRK");
+            drk.zeroize();
+            pt
+        })();
+        let pt = match fast {
+            Ok(pt) => pt,
+            Err(fast_err) => {
+                log::error!("decrypt: normal path failed, attempting recovery: {fast_err:#}");
+                match self.recover_decrypt(&key.encrypted_key, &drr.data, &pmeta) {
+                    Some(pt) => pt,
+                    None => return Err(fast_err).context(
+                        "decrypt failed and best-effort cross-region recovery found no usable key",
+                    ),
+                }
+            }
         };
-        // Create DRK LessSafeKey once for data decryption
-        let drk_lsk = crate::aead::make_lsk(&drk).context("decrypt: failed to create DRK key")?;
-        let pt = crate::aead::decrypt_with_lsk(&drr.data, &drk_lsk)
-            .context("decrypt: failed to decrypt data with DRK")?;
-        drk.zeroize();
         if let Some(start) = start {
             metrics::record_decrypt(start);
         }
@@ -1362,51 +1717,73 @@ impl<
         let pmeta = key
             .parent_key_meta
             .ok_or_else(|| anyhow::anyhow!("decrypt_async: DRR key missing parent_key_meta"))?;
-        let valid_ik = pmeta.id == self.cached_ik_id
-            || self
-                .cached_ik_prefix
-                .as_ref()
-                .is_some_and(|p| pmeta.id.starts_with(p));
-        if !valid_ik {
-            return Err(anyhow::anyhow!(
-                "decrypt_async: invalid IK id={} for partition",
-                pmeta.id
-            ));
+        // Fast path (see sync `decrypt` for rationale). Any failure drops to the
+        // best-effort recovery path below.
+        let fast: anyhow::Result<Vec<u8>> = async {
+            let valid_ik = pmeta.id == self.cached_ik_id
+                || self
+                    .cached_ik_prefix
+                    .as_ref()
+                    .is_some_and(|p| pmeta.id.starts_with(p));
+            if !valid_ik {
+                return Err(anyhow::anyhow!(
+                    "decrypt_async: invalid IK id={} for partition (session partition expected {})",
+                    pmeta.id,
+                    self.cached_ik_id
+                ));
+            }
+            log::debug!(
+                "PublicSession::decrypt_async: loading IK id={} created={}",
+                pmeta.id,
+                pmeta.created
+            );
+            let ik = match self.ik_cache.check_meta(&pmeta) {
+                CacheCheck::Hit(v) | CacheCheck::StaleOther(v) | CacheCheck::StaleReload(v) => v,
+                CacheCheck::Miss => {
+                    let v = self
+                        .load_intermediate_key_async(pmeta.clone())
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "decrypt_async: failed to load IK id={} created={}",
+                                pmeta.id, pmeta.created
+                            )
+                        })?;
+                    self.ik_cache.insert_meta_key(&pmeta, v.clone());
+                    v
+                }
+            };
+            // Decrypt DRK under IK, then decrypt data — all CPU
+            let mut drk = if let Some(ik_lsk) = ik.less_safe_key() {
+                crate::aead::decrypt_with_lsk(&key.encrypted_key, ik_lsk)
+                    .context("decrypt_async: failed to decrypt DRK with IK")?
+            } else {
+                ik.with_key_func(|ikb| self.crypto.decrypt(&key.encrypted_key, ikb))
+                    .context("decrypt_async: failed to decrypt DRK with IK")??
+            };
+            let drk_lsk =
+                crate::aead::make_lsk(&drk).context("decrypt_async: failed to create DRK key")?;
+            let pt = crate::aead::decrypt_with_lsk(&drr.data, &drk_lsk)
+                .context("decrypt_async: failed to decrypt data with DRK");
+            drk.zeroize();
+            pt
         }
-        log::debug!(
-            "PublicSession::decrypt_async: loading IK id={} created={}",
-            pmeta.id,
-            pmeta.created
-        );
-        let ik = match self.ik_cache.check_meta(&pmeta) {
-            CacheCheck::Hit(v) | CacheCheck::StaleOther(v) | CacheCheck::StaleReload(v) => v,
-            CacheCheck::Miss => {
-                let v = self
-                    .load_intermediate_key_async(pmeta.clone())
+        .await;
+        let pt = match fast {
+            Ok(pt) => pt,
+            Err(fast_err) => {
+                log::error!("decrypt_async: normal path failed, attempting recovery: {fast_err:#}");
+                match self
+                    .recover_decrypt_async(&key.encrypted_key, &drr.data, &pmeta)
                     .await
-                    .with_context(|| {
-                        format!(
-                            "decrypt_async: failed to load IK id={} created={}",
-                            pmeta.id, pmeta.created
-                        )
-                    })?;
-                self.ik_cache.insert_meta_key(&pmeta, v.clone());
-                v
+                {
+                    Some(pt) => pt,
+                    None => return Err(fast_err).context(
+                        "decrypt failed and best-effort cross-region recovery found no usable key",
+                    ),
+                }
             }
         };
-        // Decrypt DRK under IK, then decrypt data — all CPU
-        let mut drk = if let Some(ik_lsk) = ik.less_safe_key() {
-            crate::aead::decrypt_with_lsk(&key.encrypted_key, ik_lsk)
-                .context("decrypt_async: failed to decrypt DRK with IK")?
-        } else {
-            ik.with_key_func(|ikb| self.crypto.decrypt(&key.encrypted_key, ikb))
-                .context("decrypt_async: failed to decrypt DRK with IK")??
-        };
-        let drk_lsk =
-            crate::aead::make_lsk(&drk).context("decrypt_async: failed to create DRK key")?;
-        let pt = crate::aead::decrypt_with_lsk(&drr.data, &drk_lsk)
-            .context("decrypt_async: failed to decrypt data with DRK")?;
-        drk.zeroize();
         if let Some(start) = start {
             metrics::record_decrypt(start);
         }

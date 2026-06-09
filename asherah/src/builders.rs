@@ -255,12 +255,33 @@ pub fn metastore_from_env() -> anyhow::Result<MetastoreEnvResult> {
 }
 
 // Build a Config from env and return it.
+/// Parse `RECOVERY_REGION_SUFFIXES` (comma-separated) into a list of region
+/// suffixes to try as a best-effort last resort on decrypt failure. Whitespace
+/// around each entry is trimmed and empty entries are dropped. This env lever
+/// lets ops enable cross-region recovery without rebuilding bindings.
+fn recovery_region_suffixes_from_env() -> Vec<String> {
+    std::env::var("RECOVERY_REGION_SUFFIXES")
+        .ok()
+        .map(|v| {
+            v.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 pub fn config_from_env() -> crate::Config {
     let service = std::env::var("SERVICE_NAME").unwrap_or_else(|_| "service".to_string());
     let product = std::env::var("PRODUCT_ID").unwrap_or_else(|_| "product".to_string());
     let mut cfg = crate::Config::new(service, product);
     if let Ok(sfx) = std::env::var("REGION_SUFFIX") {
         cfg = cfg.with_region_suffix(sfx);
+    }
+    let recovery = recovery_region_suffixes_from_env();
+    if !recovery.is_empty() {
+        cfg = cfg.with_recovery_region_suffixes(recovery);
     }
     // Policy envs (optional)
     fn get_i64(k: &str) -> Option<i64> {
@@ -473,6 +494,7 @@ pub struct ResolvedConfig {
     pub service_name: String,
     pub product_id: String,
     pub region_suffix: Option<String>,
+    pub recovery_region_suffixes: Vec<String>,
     pub aws_profile_name: Option<String>,
     pub metastore: MetastoreConfig,
     pub kms: KmsConfig,
@@ -483,11 +505,15 @@ fn build_config_from_policy(
     service: &str,
     product: &str,
     region_suffix: Option<&str>,
+    recovery_region_suffixes: &[String],
     policy: &PolicyConfig,
 ) -> crate::Config {
     let mut cfg = crate::Config::new(service.to_string(), product.to_string());
     if let Some(sfx) = region_suffix {
         cfg = cfg.with_region_suffix(sfx.to_string());
+    }
+    if !recovery_region_suffixes.is_empty() {
+        cfg = cfg.with_recovery_region_suffixes(recovery_region_suffixes.to_vec());
     }
     if let Some(v) = policy.expire_key_after_s {
         cfg.policy.expire_key_after_s = v;
@@ -963,6 +989,7 @@ pub fn factory_from_resolved(
         &config.service_name,
         &config.product_id,
         config.region_suffix.as_deref(),
+        &config.recovery_region_suffixes,
         &config.policy,
     );
     let store_dyn = build_metastore(&config.metastore, aws_profile_name)?;
@@ -982,6 +1009,7 @@ pub async fn factory_from_resolved_async(
         &config.service_name,
         &config.product_id,
         config.region_suffix.as_deref(),
+        &config.recovery_region_suffixes,
         &config.policy,
     );
     let store_dyn = build_metastore_async(&config.metastore, aws_profile_name).await?;
@@ -1198,6 +1226,7 @@ pub fn resolve_from_env() -> anyhow::Result<ResolvedConfig> {
         service_name,
         product_id,
         region_suffix,
+        recovery_region_suffixes: recovery_region_suffixes_from_env(),
         aws_profile_name: None,
         metastore,
         kms,

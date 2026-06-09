@@ -53,6 +53,13 @@ pub struct ConfigOptions {
     pub aws_profile_name: Option<String>,
     #[serde(rename = "EnableRegionSuffix")]
     pub enable_region_suffix: Option<bool>,
+    /// Additional region suffixes to try as a best-effort last resort when a
+    /// decrypt would otherwise fail because the row's intermediate-key id does
+    /// not match this session's partition (e.g. data written under another
+    /// region's suffix). Recovery is always AEAD-authenticated, so a wrong key
+    /// can never yield wrong plaintext. The empty suffix is always tried.
+    #[serde(rename = "RecoveryRegionSuffixes")]
+    pub recovery_region_suffixes: Option<Vec<String>>,
     #[serde(rename = "EnableSessionCaching")]
     pub enable_session_caching: Option<bool>,
     #[serde(rename = "Verbose")]
@@ -345,6 +352,14 @@ impl ConfigOptions {
             service_name,
             product_id,
             region_suffix: None,
+            recovery_region_suffixes: self
+                .recovery_region_suffixes
+                .clone()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
             aws_profile_name,
             metastore,
             kms,
@@ -431,16 +446,34 @@ fn resolve_rdbms_connection(
 
 /// Build a factory from structured config — no env var side effects.
 pub fn factory_from_config(config: &ConfigOptions) -> Result<(Factory, AppliedConfig)> {
-    let (resolved, applied) = config.resolve()?;
+    let (mut resolved, applied) = config.resolve()?;
+    merge_recovery_region_suffixes_from_env(&mut resolved);
     let factory = asherah::builders::factory_from_resolved(&resolved)?;
     Ok((factory, applied))
 }
 
-/// Async variant — safe for concurrent use since no env vars are touched.
+/// Async variant — safe for concurrent use since no env vars are written.
 pub async fn factory_from_config_async(config: &ConfigOptions) -> Result<(Factory, AppliedConfig)> {
-    let (resolved, applied) = config.resolve()?;
+    let (mut resolved, applied) = config.resolve()?;
+    merge_recovery_region_suffixes_from_env(&mut resolved);
     let factory = asherah::builders::factory_from_resolved_async(&resolved).await?;
     Ok((factory, applied))
+}
+
+/// Union any `RECOVERY_REGION_SUFFIXES` env entries into the resolved config's
+/// recovery list (config-provided entries first, then env extras), deduping
+/// while preserving order. This gives every language binding the env-based
+/// recovery lever even when it has no first-class config field for it yet.
+/// Only reads env (never writes), so it is safe for concurrent use.
+fn merge_recovery_region_suffixes_from_env(resolved: &mut ResolvedConfig) {
+    let Ok(raw) = std::env::var("RECOVERY_REGION_SUFFIXES") else {
+        return;
+    };
+    for entry in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+        if !resolved.recovery_region_suffixes.iter().any(|s| s == entry) {
+            resolved.recovery_region_suffixes.push(entry.to_string());
+        }
+    }
 }
 
 /// Resolve the DynamoDB endpoint URL given the user-supplied

@@ -104,7 +104,13 @@ fn decrypt_with_wrong_partition_ik_id_fails() {
     };
     let result = session.decrypt(drr);
     assert!(result.is_err());
-    assert!(result.unwrap_err().to_string().contains("invalid IK id"));
+    // Foreign-partition IK id: rejected, and same-core-only recovery finds
+    // nothing, so "invalid IK id" remains in the error's source chain.
+    let msg = format!("{:#}", result.unwrap_err());
+    assert!(
+        msg.contains("invalid IK id"),
+        "expected 'invalid IK id' in chain, got: {msg}"
+    );
 }
 
 // ──────────────────────────── Tampered DRR ────────────────────────────
