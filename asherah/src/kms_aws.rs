@@ -299,6 +299,15 @@ mod tests {
     ///
     /// The client is constructed offline — `aws_config` loads lazily and no KMS
     /// request is made — so this needs no AWS credentials.
+    // Ignored under Miri: `AwsKms::new_async` builds the AWS config provider,
+    // which reads `~/.aws/config` (`open`) — unavailable under Miri's default
+    // isolation, where it aborts the whole run. This is a tokio runtime-drop
+    // regression test, not a memory-safety/layout test, so Miri adds nothing;
+    // it still runs under normal `cargo test` and the AddressSanitizer pass.
+    #[cfg_attr(
+        miri,
+        ignore = "aws_config opens ~/.aws which Miri blocks under isolation"
+    )]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn new_async_drops_without_panicking_inside_runtime() {
         let kms = AwsKms::new_async(

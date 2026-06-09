@@ -859,7 +859,11 @@ jobs:
     needs: build-rlib-x86_64
     permissions:
       contents: read
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'schedule' || contains(github.event.head_commit.message, '[sanitize]')
+    # Runs on every PR to main (gating), on main pushes, on schedule, and on any
+    # push whose commit message contains [sanitize]. PR gating was enabled once
+    # the release cadence slowed enough that the added PR latency is worth more
+    # than fast PRs for catching sanitizer regressions before merge.
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || contains(github.event.head_commit.message, '[sanitize]')
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
       - name: Cache cargo registry
