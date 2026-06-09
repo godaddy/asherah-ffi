@@ -421,6 +421,11 @@ mod tests {
         }
     }
 
+    // Ignored under Miri: `#[tokio::test]` starts the tokio I/O reactor
+    // (mio `kqueue`/`epoll`), a foreign function Miri cannot model. These are
+    // async-dispatch behavior tests (mock KMS, no real I/O) and exercise no
+    // unsafe code, so Miri adds nothing; they run under normal `cargo test`.
+    #[cfg_attr(miri, ignore = "tokio reactor (kqueue/epoll) unavailable under Miri")]
     #[tokio::test]
     async fn multi_kms_async_encrypt_uses_preferred_backend_async_path() {
         static SYNC: AtomicUsize = AtomicUsize::new(0);
@@ -443,6 +448,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore = "tokio reactor (kqueue/epoll) unavailable under Miri")]
     #[tokio::test]
     async fn multi_kms_async_decrypt_fallbacks_on_async_path() {
         static SYNC: AtomicUsize = AtomicUsize::new(0);
@@ -483,6 +489,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore = "tokio reactor (kqueue/epoll) unavailable under Miri")]
     #[tokio::test]
     async fn multi_kms_async_decrypt_aborts_on_terminal_error() {
         static DSYNC: AtomicUsize = AtomicUsize::new(0);
