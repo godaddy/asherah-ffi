@@ -359,11 +359,13 @@ jobs:
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # On retry, treat "version already published" as success (idempotent re-run).
+          RETRY_SUCCESS_REGEX: "previously published version"
         run: |
           for dir in npm/*/; do
             if [ -f "$dir/package.json" ] && ls "$dir"/*.node 1>/dev/null 2>&1; then
               echo "Publishing $(node -p "require('./$dir/package.json').name")@${NPM_VERSION}..."
-              (cd "$dir" && npm publish --access public)
+              (cd "$dir" && bash "$GITHUB_WORKSPACE/scripts/retry.sh" 3 15 -- npm publish --access public)
             fi
           done
 
@@ -389,14 +391,16 @@ jobs:
       - name: Publish main package
         if: ${{ github.event.inputs.dry_run != 'true' }}
         working-directory: asherah-node
-        run: npm publish --access public --tag "$NPM_TAG"
+        run: bash "$GITHUB_WORKSPACE/scripts/retry.sh" 3 15 -- npm publish --access public --tag "$NPM_TAG"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # On retry, treat "version already published" as success (idempotent re-run).
+          RETRY_SUCCESS_REGEX: "previously published version"
 
       - name: Update dist-tags
         if: ${{ github.event.inputs.dry_run != 'true' && env.NPM_TAG == 'latest' }}
         working-directory: asherah-node
-        run: npm dist-tag add "asherah@${NPM_VERSION}" next
+        run: bash "$GITHUB_WORKSPACE/scripts/retry.sh" 3 10 -- npm dist-tag add "asherah@${NPM_VERSION}" next
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

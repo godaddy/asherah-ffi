@@ -161,9 +161,13 @@ jobs:
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_TOKEN }}
         run: |
-          dotnet nuget push dist/*.nupkg \
+          # --skip-duplicate makes a re-push of an already-published version a
+          # no-op (idempotent); retry.sh absorbs transient registry/network flakes.
+          bash "$GITHUB_WORKSPACE/scripts/retry.sh" 3 15 -- \
+            dotnet nuget push dist/*.nupkg \
             --source "https://api.nuget.org/v3/index.json" \
-            --api-key "$NUGET_API_KEY"
+            --api-key "$NUGET_API_KEY" \
+            --skip-duplicate
 
       - name: Dry run
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
