@@ -37,7 +37,16 @@ impl Shared {
     }
 
     fn factory(&self, region_suffix: Option<&str>, recovery: &[&str]) -> Factory {
-        let mut cfg = ael::Config::new("svc", "prod");
+        self.factory_full(region_suffix, recovery, true)
+    }
+
+    fn factory_full(
+        &self,
+        region_suffix: Option<&str>,
+        recovery: &[&str],
+        self_heal: bool,
+    ) -> Factory {
+        let mut cfg = ael::Config::new("svc", "prod").with_self_heal_recovered_keys(self_heal);
         if let Some(s) = region_suffix {
             cfg = cfg.with_region_suffix(s);
         }
@@ -51,6 +60,11 @@ impl Shared {
             self.kms.clone(),
             self.crypto.clone(),
         )
+    }
+
+    fn key_exists(&self, id: &str, created: i64) -> bool {
+        use asherah::traits::Metastore as _;
+        self.store.load(id, created).unwrap().is_some()
     }
 }
 
@@ -201,4 +215,114 @@ async fn recovers_unsuffixed_row_async() {
         .await
         .expect("async suffixed session must recover unsuffixed row");
     assert_eq!(pt, b"async secret");
+}
+
+/// Shape A (the upstream wrong-suffix defect): a row tagged `_..._us-west-2`
+/// whose key only exists under `_..._us-east-1`. Recovery decrypts it, and
+/// self-heal writes the key under the `(id, created)` the row references so the
+/// SECOND read takes the fast path.
+#[test]
+fn self_heal_writes_copy_to_expected_coordinates() {
+    let shared = Shared::new();
+
+    let east = shared.factory(Some("us-east-1"), &[]).get_session("p");
+    let mut drr = east.encrypt(b"heal me").unwrap();
+    let created = drr
+        .key
+        .as_ref()
+        .unwrap()
+        .parent_key_meta
+        .as_ref()
+        .unwrap()
+        .created;
+    // Mislabel to the local suffix at the same created (Shape A): the id is
+    // accepted by the gate, but no key exists at (_..._us-west-2, created).
+    drr.key.as_mut().unwrap().parent_key_meta = Some(KeyMeta {
+        id: "_IK_p_svc_prod_us-west-2".into(),
+        created,
+    });
+    assert!(
+        !shared.key_exists("_IK_p_svc_prod_us-west-2", created),
+        "precondition: no us-west-2 key at that created"
+    );
+
+    let west = shared
+        .factory_full(Some("us-west-2"), &["us-east-1"], true)
+        .get_session("p");
+    assert_eq!(west.decrypt(drr.clone()).unwrap(), b"heal me");
+
+    // Self-heal wrote the recovered key where the row points.
+    assert!(
+        shared.key_exists("_IK_p_svc_prod_us-west-2", created),
+        "self-heal must copy the recovered key to the row's coordinates"
+    );
+    // Second read decrypts again (now via the fast path against the copy).
+    assert_eq!(west.decrypt(drr).unwrap(), b"heal me");
+}
+
+/// With self-heal disabled, recovery still decrypts but writes nothing.
+#[test]
+fn self_heal_disabled_writes_nothing() {
+    let shared = Shared::new();
+
+    let east = shared.factory(Some("us-east-1"), &[]).get_session("p");
+    let mut drr = east.encrypt(b"no heal").unwrap();
+    let created = drr
+        .key
+        .as_ref()
+        .unwrap()
+        .parent_key_meta
+        .as_ref()
+        .unwrap()
+        .created;
+    drr.key.as_mut().unwrap().parent_key_meta = Some(KeyMeta {
+        id: "_IK_p_svc_prod_us-west-2".into(),
+        created,
+    });
+
+    let west = shared
+        .factory_full(Some("us-west-2"), &["us-east-1"], false)
+        .get_session("p");
+    assert_eq!(west.decrypt(drr).unwrap(), b"no heal");
+    assert!(
+        !shared.key_exists("_IK_p_svc_prod_us-west-2", created),
+        "self-heal disabled must not write any key"
+    );
+}
+
+/// Shape B (this incident): a suffixed session reads an unsuffixed-key row. The
+/// gate now accepts the bare core, so it decrypts on the fast path and self-heal
+/// does NOT fire (the key is already where the row points).
+#[test]
+fn unsuffixed_row_fast_paths_without_self_heal_write() {
+    let shared = Shared::new();
+
+    let writer = shared.factory(None, &[]).get_session("p");
+    let drr = writer.encrypt(b"shape b").unwrap();
+    assert_eq!(
+        drr.key
+            .as_ref()
+            .unwrap()
+            .parent_key_meta
+            .as_ref()
+            .unwrap()
+            .id,
+        "_IK_p_svc_prod"
+    );
+    let created = drr
+        .key
+        .as_ref()
+        .unwrap()
+        .parent_key_meta
+        .as_ref()
+        .unwrap()
+        .created;
+
+    let west = shared
+        .factory_full(Some("us-west-2"), &[], true)
+        .get_session("p");
+    assert_eq!(west.decrypt(drr).unwrap(), b"shape b");
+    // No copy under the suffixed id — the row references the bare core, which
+    // already exists and is now accepted by the gate.
+    assert!(!shared.key_exists("_IK_p_svc_prod_us-west-2", created));
 }

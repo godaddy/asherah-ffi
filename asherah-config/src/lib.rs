@@ -60,6 +60,12 @@ pub struct ConfigOptions {
     /// can never yield wrong plaintext. The empty suffix is always tried.
     #[serde(rename = "RecoveryRegionSuffixes")]
     pub recovery_region_suffixes: Option<Vec<String>>,
+    /// Write recovered keys back under the id/created a row expects, so future
+    /// reads fast-path instead of repeating recovery (best-effort, insert-if-
+    /// absent, AEAD-verified). Defaults to `true`. Set `false` for read-only
+    /// decryptors that lack metastore write permission.
+    #[serde(rename = "SelfHealRecoveredKeys")]
+    pub self_heal_recovered_keys: Option<bool>,
     #[serde(rename = "EnableSessionCaching")]
     pub enable_session_caching: Option<bool>,
     #[serde(rename = "Verbose")]
@@ -360,6 +366,7 @@ impl ConfigOptions {
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect(),
+            self_heal_recovered_keys: self.self_heal_recovered_keys.unwrap_or(true),
             aws_profile_name,
             metastore,
             kms,
@@ -466,13 +473,20 @@ pub async fn factory_from_config_async(config: &ConfigOptions) -> Result<(Factor
 /// recovery lever even when it has no first-class config field for it yet.
 /// Only reads env (never writes), so it is safe for concurrent use.
 fn merge_recovery_region_suffixes_from_env(resolved: &mut ResolvedConfig) {
-    let Ok(raw) = std::env::var("RECOVERY_REGION_SUFFIXES") else {
-        return;
-    };
-    for entry in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-        if !resolved.recovery_region_suffixes.iter().any(|s| s == entry) {
-            resolved.recovery_region_suffixes.push(entry.to_string());
+    if let Ok(raw) = std::env::var("RECOVERY_REGION_SUFFIXES") {
+        for entry in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            if !resolved.recovery_region_suffixes.iter().any(|s| s == entry) {
+                resolved.recovery_region_suffixes.push(entry.to_string());
+            }
         }
+    }
+    // SELF_HEAL_RECOVERED_KEYS env overrides the JSON value when present, so ops
+    // can force self-heal on/off (e.g. disable for read-only decryptors).
+    if let Ok(raw) = std::env::var("SELF_HEAL_RECOVERED_KEYS") {
+        resolved.self_heal_recovered_keys = !matches!(
+            raw.trim().to_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        );
     }
 }
 
