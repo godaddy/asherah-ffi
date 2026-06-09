@@ -80,26 +80,25 @@ module Asherah
     attach_function :asherah_factory_free, [:pointer], :void
     attach_function :asherah_factory_get_session, [:pointer, :string], :pointer
     attach_function :asherah_session_free, [:pointer], :void
-    # encrypt/decrypt block on the metastore (MySQL/Postgres/DynamoDB) and
-    # KMS during cache misses. blocking: true frees the GVL so other Ruby
-    # threads stay schedulable while the native call is in-flight.
     attach_function :asherah_encrypt_to_json,
-                    [:pointer, :buffer_in, :size_t, :pointer], :int, blocking: true
+                    [:pointer, :buffer_in, :size_t, :pointer], :int
     attach_function :asherah_decrypt_from_json,
-                    [:pointer, :buffer_in, :size_t, :pointer], :int, blocking: true
+                    [:pointer, :buffer_in, :size_t, :pointer], :int
     attach_function :asherah_buffer_free, [:pointer], :void
 
     # Async callback type: void(user_data, result_data, result_len, error_message)
     callback :asherah_completion_fn, [:pointer, :pointer, :size_t, :string], :void
-    # The async entry points only enqueue work onto the Rust tokio runtime
-    # before returning, so they're brief — but mark them blocking anyway so
-    # a queue-full backpressure stall doesn't pin the GVL.
+    # The async entry points only enqueue work onto the Rust tokio runtime and
+    # return immediately. The encrypt/decrypt work, the metastore/KMS I/O, and
+    # the completion callback all run on tokio worker threads — never on the
+    # calling Ruby thread — so there is no GVL-held native I/O to release for.
+    # The enqueue is an unbounded tokio spawn (no bounded queue, so no
+    # backpressure stall to guard against); blocking: true would only add GVL
+    # release/reacquire overhead to an otherwise instant call.
     attach_function :asherah_encrypt_to_json_async,
-                    [:pointer, :buffer_in, :size_t, :asherah_completion_fn, :pointer], :int,
-                    blocking: true
+                    [:pointer, :buffer_in, :size_t, :asherah_completion_fn, :pointer], :int
     attach_function :asherah_decrypt_from_json_async,
-                    [:pointer, :buffer_in, :size_t, :asherah_completion_fn, :pointer], :int,
-                    blocking: true
+                    [:pointer, :buffer_in, :size_t, :asherah_completion_fn, :pointer], :int
 
     # Log + metrics hooks. The C ABI does not own the callback closure — Ruby
     # must keep a reference to the FFI::Function it passes here for as long as
