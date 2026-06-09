@@ -130,6 +130,11 @@ fn to_config_options(cfg: &AsherahConfig) -> asherah_config::ConfigOptions {
         preferred_region: cfg.preferred_region.clone(),
         aws_profile_name: cfg.aws_profile_name.clone(),
         enable_region_suffix: cfg.enable_region_suffix,
+        // First-class binding config for these is a follow-up; the
+        // RECOVERY_REGION_SUFFIXES / SELF_HEAL_RECOVERED_KEYS env vars still
+        // apply via factory_from_config.
+        recovery_region_suffixes: None,
+        self_heal_recovered_keys: None,
         enable_session_caching: cfg.enable_session_caching,
         verbose: cfg.verbose,
         sql_metastore_db_type: cfg.sql_metastore_db_type.clone(),

@@ -255,6 +255,36 @@ pub fn metastore_from_env() -> anyhow::Result<MetastoreEnvResult> {
 }
 
 // Build a Config from env and return it.
+/// Parse `RECOVERY_REGION_SUFFIXES` (comma-separated) into a list of region
+/// suffixes to try as a best-effort last resort on decrypt failure. Whitespace
+/// around each entry is trimmed and empty entries are dropped. This env lever
+/// lets ops enable cross-region recovery without rebuilding bindings.
+fn recovery_region_suffixes_from_env() -> Vec<String> {
+    std::env::var("RECOVERY_REGION_SUFFIXES")
+        .ok()
+        .map(|v| {
+            v.split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Parse `SELF_HEAL_RECOVERED_KEYS` (default `true`). Accepts the usual truthy
+/// strings; any recognized falsey value disables self-heal (e.g. for read-only
+/// decryptors lacking metastore write permission).
+fn self_heal_recovered_keys_from_env() -> bool {
+    match std::env::var("SELF_HEAL_RECOVERED_KEYS") {
+        Ok(v) => !matches!(
+            v.trim().to_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
+        Err(_) => true,
+    }
+}
+
 pub fn config_from_env() -> crate::Config {
     let service = std::env::var("SERVICE_NAME").unwrap_or_else(|_| "service".to_string());
     let product = std::env::var("PRODUCT_ID").unwrap_or_else(|_| "product".to_string());
@@ -262,6 +292,11 @@ pub fn config_from_env() -> crate::Config {
     if let Ok(sfx) = std::env::var("REGION_SUFFIX") {
         cfg = cfg.with_region_suffix(sfx);
     }
+    let recovery = recovery_region_suffixes_from_env();
+    if !recovery.is_empty() {
+        cfg = cfg.with_recovery_region_suffixes(recovery);
+    }
+    cfg = cfg.with_self_heal_recovered_keys(self_heal_recovered_keys_from_env());
     // Policy envs (optional)
     fn get_i64(k: &str) -> Option<i64> {
         std::env::var(k).ok().and_then(|v| v.parse::<i64>().ok())
@@ -473,6 +508,8 @@ pub struct ResolvedConfig {
     pub service_name: String,
     pub product_id: String,
     pub region_suffix: Option<String>,
+    pub recovery_region_suffixes: Vec<String>,
+    pub self_heal_recovered_keys: bool,
     pub aws_profile_name: Option<String>,
     pub metastore: MetastoreConfig,
     pub kms: KmsConfig,
@@ -483,12 +520,18 @@ fn build_config_from_policy(
     service: &str,
     product: &str,
     region_suffix: Option<&str>,
+    recovery_region_suffixes: &[String],
+    self_heal_recovered_keys: bool,
     policy: &PolicyConfig,
 ) -> crate::Config {
     let mut cfg = crate::Config::new(service.to_string(), product.to_string());
     if let Some(sfx) = region_suffix {
         cfg = cfg.with_region_suffix(sfx.to_string());
     }
+    if !recovery_region_suffixes.is_empty() {
+        cfg = cfg.with_recovery_region_suffixes(recovery_region_suffixes.to_vec());
+    }
+    cfg = cfg.with_self_heal_recovered_keys(self_heal_recovered_keys);
     if let Some(v) = policy.expire_key_after_s {
         cfg.policy.expire_key_after_s = v;
     }
@@ -963,6 +1006,8 @@ pub fn factory_from_resolved(
         &config.service_name,
         &config.product_id,
         config.region_suffix.as_deref(),
+        &config.recovery_region_suffixes,
+        config.self_heal_recovered_keys,
         &config.policy,
     );
     let store_dyn = build_metastore(&config.metastore, aws_profile_name)?;
@@ -982,6 +1027,8 @@ pub async fn factory_from_resolved_async(
         &config.service_name,
         &config.product_id,
         config.region_suffix.as_deref(),
+        &config.recovery_region_suffixes,
+        config.self_heal_recovered_keys,
         &config.policy,
     );
     let store_dyn = build_metastore_async(&config.metastore, aws_profile_name).await?;
@@ -1198,6 +1245,8 @@ pub fn resolve_from_env() -> anyhow::Result<ResolvedConfig> {
         service_name,
         product_id,
         region_suffix,
+        recovery_region_suffixes: recovery_region_suffixes_from_env(),
+        self_heal_recovered_keys: self_heal_recovered_keys_from_env(),
         aws_profile_name: None,
         metastore,
         kms,

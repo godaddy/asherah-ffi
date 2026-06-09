@@ -508,10 +508,13 @@ fn decrypt_invalid_ik_id_fails() {
     };
 
     let err = session.decrypt(drr).unwrap_err();
+    // A foreign-partition IK id is rejected and best-effort recovery (which
+    // only tries same-core candidates) finds nothing, so the original
+    // "invalid IK id" appears in the error's source chain.
+    let msg = format!("{err:#}");
     assert!(
-        err.to_string().contains("invalid IK id"),
-        "expected 'invalid IK id', got: {}",
-        err
+        msg.contains("invalid IK id"),
+        "expected 'invalid IK id' in chain, got: {msg}"
     );
 }
 

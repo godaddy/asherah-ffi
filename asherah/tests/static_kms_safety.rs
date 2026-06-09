@@ -17,6 +17,8 @@ fn resolved_with_kms(kms: KmsConfig) -> ResolvedConfig {
         service_name: "svc".into(),
         product_id: "prod".into(),
         region_suffix: None,
+        recovery_region_suffixes: Vec::new(),
+        self_heal_recovered_keys: true,
         aws_profile_name: None,
         metastore: MetastoreConfig::Memory,
         kms,

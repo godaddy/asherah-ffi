@@ -44,6 +44,14 @@ pub static ENCRYPT_TIMER: Timers = Timers::new();
 pub static DECRYPT_TIMER: Timers = Timers::new();
 static ENABLED: AtomicBool = AtomicBool::new(false);
 
+/// Cumulative count of decrypts that fell back to best-effort cross-region
+/// recovery and succeeded vs. exhausted all candidates. These are incremented
+/// unconditionally (not gated on [`is_enabled`]) because a non-zero value is an
+/// operational signal that a region-suffix misconfiguration is present and
+/// should be investigated regardless of whether timing metrics are enabled.
+static DECRYPT_RECOVERY_SUCCESS: AtomicU64 = AtomicU64::new(0);
+static DECRYPT_RECOVERY_FAILURE: AtomicU64 = AtomicU64::new(0);
+
 pub trait MetricsSink: Send + Sync + 'static {
     fn encrypt(&self, _dur: Duration) {}
     fn decrypt(&self, _dur: Duration) {}
@@ -164,6 +172,26 @@ pub fn record_cache_stale(name: &str) {
         return;
     }
     with_sink(|sink| sink.cache_stale(name));
+}
+
+/// Record the outcome of a best-effort cross-region decrypt recovery attempt.
+/// Always counted (see [`DECRYPT_RECOVERY_SUCCESS`]). A `success` recovery means
+/// a row was decrypted using a key whose id differed from the session's
+/// partition only in its region suffix — investigate the misconfiguration.
+pub fn record_decrypt_recovery(success: bool) {
+    if success {
+        DECRYPT_RECOVERY_SUCCESS.fetch_add(1, Ordering::Relaxed);
+    } else {
+        DECRYPT_RECOVERY_FAILURE.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// Returns `(recovered, unrecoverable)` cumulative decrypt-recovery counts.
+pub fn decrypt_recovery_counts() -> (u64, u64) {
+    (
+        DECRYPT_RECOVERY_SUCCESS.load(Ordering::Relaxed),
+        DECRYPT_RECOVERY_FAILURE.load(Ordering::Relaxed),
+    )
 }
 
 // ─── async dispatch wrapper ──────────────────────────────────────────────

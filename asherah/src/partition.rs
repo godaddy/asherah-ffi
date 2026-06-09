@@ -61,6 +61,15 @@ impl DefaultPartition {
     pub fn ik_validation_prefix(&self) -> Option<String> {
         self.cached_ik_validation_prefix.clone()
     }
+
+    /// Returns the suffix-independent intermediate-key id core
+    /// `_IK_{id}_{service}_{product}` (no trailing suffix or delimiter). Used by
+    /// the best-effort decrypt recovery path to build candidate IK ids under
+    /// alternate region suffixes. Allocates; only called on the cold failure
+    /// path, never on the encrypt/decrypt hot path.
+    pub fn ik_id_core(&self) -> String {
+        format!("_IK_{}_{}_{}", self.id, self.service, self.product)
+    }
 }
 
 impl Partition for DefaultPartition {
@@ -136,6 +145,19 @@ mod tests {
         assert!(!p.is_valid_intermediate_key_id("_IK_other_s_p_r1"));
         // Must not accept non-suffixed IK (missing trailing delimiter)
         assert!(!p.is_valid_intermediate_key_id("_IK_u_s_p"));
+    }
+
+    #[test]
+    fn ik_id_core_is_suffix_independent() {
+        let no_suffix = DefaultPartition::new("u".into(), "s".into(), "p".into());
+        assert_eq!(no_suffix.ik_id_core(), "_IK_u_s_p");
+        // The core is identical with or without a suffix — that's the point.
+        assert_eq!(no_suffix.ik_id_core(), no_suffix.intermediate_key_id());
+
+        let suffixed =
+            DefaultPartition::new_suffixed("u".into(), "s".into(), "p".into(), "r1".into());
+        assert_eq!(suffixed.ik_id_core(), "_IK_u_s_p");
+        assert_eq!(suffixed.intermediate_key_id(), "_IK_u_s_p_r1");
     }
 
     #[test]
