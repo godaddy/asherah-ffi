@@ -111,4 +111,4 @@ jobs:
         if: ${{ github.event_name != 'workflow_dispatch' || (github.event.inputs.dry_run != 'true' && github.event.inputs.tag != '') }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$RELEASE_TAG" asherah-php-source.zip --clobber
+        run: bash "$GITHUB_WORKSPACE/scripts/retry.sh" 3 10 -- gh release upload "$RELEASE_TAG" asherah-php-source.zip --clobber

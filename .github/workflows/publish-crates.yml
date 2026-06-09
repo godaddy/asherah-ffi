@@ -100,7 +100,11 @@ jobs:
             fi
 
             echo ">>> publishing ${crate} ${ver}"
-            cargo publish -p "${crate}" --token "${CARGO_REGISTRY_TOKEN}"
+            # retry.sh absorbs transient crates.io/network flakes; if a retry
+            # races a partial success, "already uploaded" is treated as success.
+            RETRY_SUCCESS_REGEX="already uploaded|already exists" \
+              bash "$GITHUB_WORKSPACE/scripts/retry.sh" 3 20 -- \
+              cargo publish -p "${crate}" --token "${CARGO_REGISTRY_TOKEN}"
             sleep 30
           }
 

@@ -1,0 +1,62 @@
+name: Auto-rerun failed publish
+
+# Transient GitHub Actions infrastructure failures — runner reclamation
+# ("The runner has received a shutdown signal"), job cancellation, and
+# cache-export flakes — have caused half-published releases (e.g. v0.6.112,
+# where PyPI/Server/PHP failed on infra while npm/crates/cobhan/rubygems/
+# nuget/maven succeeded). Step-level retries cannot recover a job whose runner
+# died mid-step; only a fresh job run can.
+#
+# This workflow watches the publish/release workflows and re-runs only their
+# FAILED jobs when a run finishes in failure. It is bounded to 2 automatic
+# retries (fires while run_attempt < 3) so a genuine, reproducible failure
+# still surfaces red instead of looping forever.
+
+on:
+  workflow_run:
+    workflows:
+      - "Publish to PyPI"
+      - "Publish to npm"
+      - "Publish Asherah Server"
+      - "Release Asherah Native Library"
+      - "Publish PHP Composer Package"
+      - "Publish to RubyGems"
+      - "Publish to NuGet.org"
+      - "Publish Java Packages (Maven)"
+      - "Publish to crates.io"
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-rerun-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  rerun:
+    name: Re-run failed jobs
+    # React only to real failures, and stop after 2 auto-reruns: the original
+    # run is attempt 1, so this fires for attempt 1 and 2, producing attempts
+    # 2 and 3, then gives up.
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.run_attempt < 3
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Re-run failed jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          echo "Workflow '${WF_NAME}' run ${RUN_ID} failed on attempt ${ATTEMPT}."
+          echo "Auto-retry #${ATTEMPT} of 2 — re-running failed jobs."
+          # Give transient infrastructure a moment to recover before retrying.
+          sleep 30
+          gh run rerun "${RUN_ID}" --repo "${GITHUB_REPOSITORY}" --failed

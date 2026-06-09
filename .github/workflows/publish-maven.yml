@@ -267,7 +267,9 @@ jobs:
             </servers>
           </settings>
           EOF
-          mvn -B -f asherah-java/java/pom.xml \
+          # retry.sh absorbs transient Maven Central / network flakes.
+          bash "$GITHUB_WORKSPACE/scripts/retry.sh" 3 20 -- \
+            mvn -B -f asherah-java/java/pom.xml \
             -Pcentral \
             -Dnative.build.skip=true \
             -DskipTests \

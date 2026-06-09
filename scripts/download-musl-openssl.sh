@@ -10,12 +10,17 @@ ARCH="${ARCH:?ARCH must be set (x86_64 or aarch64)}"
 ALPINE_VERSION="${ALPINE_VERSION:-v3.20}"
 
 mkdir -p /tmp/musl-ssl
+# Retry transient Alpine CDN failures — these curls were previously bare, so a
+# single network hiccup would fail the whole musl build. Mirrors the retry
+# flags used in scripts/install-zig.sh (no --retry-all-errors, which needs a
+# newer curl than some build containers ship).
+CURL_RETRY=(--retry 5 --retry-connrefused --retry-delay 3 --connect-timeout 30)
 (cd /tmp/musl-ssl && \
-  OPENSSL_DEV=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_VERSION}/main/${ARCH}/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1) && \
-  OPENSSL_STATIC=$(curl -sL "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_VERSION}/main/${ARCH}/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1) && \
+  OPENSSL_DEV=$(curl -sL "${CURL_RETRY[@]}" "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_VERSION}/main/${ARCH}/" | grep -o "openssl-dev-[^\"]*\\.apk" | head -1) && \
+  OPENSSL_STATIC=$(curl -sL "${CURL_RETRY[@]}" "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_VERSION}/main/${ARCH}/" | grep -o "openssl-libs-static-[^\"]*\\.apk" | head -1) && \
   echo "Downloading ${OPENSSL_DEV} and ${OPENSSL_STATIC}" && \
-  curl -sLO "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_VERSION}/main/${ARCH}/${OPENSSL_DEV}" && \
-  curl -sLO "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_VERSION}/main/${ARCH}/${OPENSSL_STATIC}" && \
+  curl -sLO "${CURL_RETRY[@]}" "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_VERSION}/main/${ARCH}/${OPENSSL_DEV}" && \
+  curl -sLO "${CURL_RETRY[@]}" "https://dl-cdn.alpinelinux.org/alpine/${ALPINE_VERSION}/main/${ARCH}/${OPENSSL_STATIC}" && \
   for f in *.apk; do tar xf "$f" 2>/dev/null || true; done)
 
 ls /tmp/musl-ssl/usr/include/openssl/ssl.h || { echo "ERROR: OpenSSL headers not found"; exit 1; }

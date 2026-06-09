@@ -126,7 +126,11 @@ jobs:
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.semver }}
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha,scope=asherah-server
-          cache-to: type=gha,mode=max,scope=asherah-server
+          # ignore-error=true: a transient GHA cache-export flake
+          # ("error writing layer blob: not_found", which failed the v0.6.112
+          # release) must not fail the build/push — the image is already built
+          # and pushed by the time the cache export runs.
+          cache-to: type=gha,mode=max,scope=asherah-server,ignore-error=true
           labels: |
             org.opencontainers.image.title=asherah-server
             org.opencontainers.image.description=gRPC sidecar server for Asherah envelope encryption
