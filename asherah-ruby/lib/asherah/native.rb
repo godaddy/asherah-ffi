@@ -80,13 +80,10 @@ module Asherah
     attach_function :asherah_factory_free, [:pointer], :void
     attach_function :asherah_factory_get_session, [:pointer, :string], :pointer
     attach_function :asherah_session_free, [:pointer], :void
-    # encrypt/decrypt block on the metastore (MySQL/Postgres/DynamoDB) and
-    # KMS during cache misses. blocking: true frees the GVL so other Ruby
-    # threads stay schedulable while the native call is in-flight.
     attach_function :asherah_encrypt_to_json,
-                    [:pointer, :buffer_in, :size_t, :pointer], :int, blocking: true
+                    [:pointer, :buffer_in, :size_t, :pointer], :int
     attach_function :asherah_decrypt_from_json,
-                    [:pointer, :buffer_in, :size_t, :pointer], :int, blocking: true
+                    [:pointer, :buffer_in, :size_t, :pointer], :int
     attach_function :asherah_buffer_free, [:pointer], :void
 
     # Async callback type: void(user_data, result_data, result_len, error_message)
