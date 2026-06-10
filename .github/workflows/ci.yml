@@ -28,11 +28,11 @@ jobs:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Free disk space
         run: bash scripts/ci-free-disk-space.sh
       - name: Cache cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry
@@ -69,11 +69,11 @@ jobs:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Free disk space
         run: bash scripts/ci-free-disk-space.sh
       - name: Restore workspace caches
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry
@@ -84,7 +84,7 @@ jobs:
             rust-tests-${{ runner.os }}-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
         with:
           tool: sccache@0.8.1
       - name: Install protoc
@@ -102,11 +102,11 @@ jobs:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Free disk space
         run: bash scripts/ci-free-disk-space.sh
       - name: Cache cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry
@@ -133,9 +133,9 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Restore workspace caches
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             .cache/cargo
@@ -144,7 +144,7 @@ jobs:
           key: build-${{ runner.os }}-x86_64-rlib-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             build-${{ runner.os }}-x86_64-rlib-
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
         with:
           tool: sccache@0.8.1
       - name: Build FFI rlib (x86_64)
@@ -166,7 +166,7 @@ jobs:
           done
           tar czf /tmp/x86_64-rlib.tar.gz "${TAR_ARGS[@]}"
       - name: Upload x86_64 rlib artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: x86_64-rlib-artifacts
           retention-days: 1
@@ -186,9 +186,9 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Restore workspace caches
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             .cache/cargo
@@ -199,16 +199,16 @@ jobs:
           restore-keys: |
             build-${{ runner.os }}-x86_64-node-
       - name: Download x86_64 rlib artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: x86_64-rlib-artifacts
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
         with:
           tool: sccache@0.8.1
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 20
       - name: Build Node.js binding (x86_64)
@@ -218,7 +218,7 @@ jobs:
           SKIP_CORE_BUILD: "1"
         run: ./scripts/build-bindings.sh
       - name: Upload x86_64 node binding artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bindings-linux-x86_64-part-node
           retention-days: 1
@@ -239,9 +239,9 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Restore workspace caches
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             .cache/cargo
@@ -252,7 +252,7 @@ jobs:
           restore-keys: |
             build-${{ runner.os }}-x86_64-python-
       - name: Download x86_64 rlib artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: x86_64-rlib-artifacts
           path: /tmp
@@ -272,7 +272,7 @@ jobs:
           mkdir -p artifacts/x86_64/python
           python3.11 -m maturin build --release --manifest-path asherah-py/Cargo.toml --compatibility manylinux_2_28 -i python3.11 --out artifacts/x86_64/python
       - name: Upload x86_64 python binding artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bindings-linux-x86_64-part-python
           retention-days: 1
@@ -291,9 +291,9 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Restore workspace caches
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             .cache/cargo
@@ -304,13 +304,13 @@ jobs:
           restore-keys: |
             build-${{ runner.os }}-x86_64-java-
       - name: Download x86_64 rlib artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: x86_64-rlib-artifacts
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
         with:
           tool: sccache@0.8.1
       - name: Build Java binding (x86_64)
@@ -320,7 +320,7 @@ jobs:
           SKIP_CORE_BUILD: "1"
         run: ./scripts/build-bindings.sh
       - name: Upload x86_64 java artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bindings-linux-x86_64-part-java
           retention-days: 1
@@ -339,9 +339,9 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Restore workspace caches
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             .cache/cargo
@@ -352,16 +352,16 @@ jobs:
           restore-keys: |
             build-${{ runner.os }}-x86_64-dotnet-
       - name: Download x86_64 rlib artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: x86_64-rlib-artifacts
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
         with:
           tool: sccache@0.8.1
-      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+      - uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
         with:
           dotnet-version: |
             8.0.x
@@ -373,7 +373,7 @@ jobs:
           SKIP_CORE_BUILD: "1"
         run: ./scripts/build-bindings.sh
       - name: Upload x86_64 dotnet artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bindings-linux-x86_64-part-dotnet
           retention-days: 1
@@ -385,14 +385,14 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
         with:
           dotnet-version: |
             8.0.x
             10.0.x
       - name: Download rlib artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: x86_64-rlib-artifacts
           path: /tmp
@@ -452,9 +452,9 @@ jobs:
     runs-on: ubuntu-22.04
     needs: build-rlib-x86_64
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Download x86_64 rlib artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: x86_64-rlib-artifacts
           path: /tmp
@@ -466,7 +466,7 @@ jobs:
           find target/release -name 'libasherah_ffi.*' -type f ! -name '*.d' -exec cp {} artifacts/x86_64/ffi/ \;
           find target/release -name 'libasherah_ffi.*' -type f ! -name '*.d' -exec cp {} artifacts/x86_64/ruby/ \;
       - name: Upload x86_64 ffi artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bindings-linux-x86_64-part-ffi
           retention-days: 1
@@ -485,9 +485,9 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Restore workspace caches
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             .cache/cargo
@@ -497,13 +497,13 @@ jobs:
           restore-keys: |
             build-${{ runner.os }}-x86_64-cobhan-
       - name: Download x86_64 rlib artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: x86_64-rlib-artifacts
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
         with:
           tool: sccache@0.8.1
       - name: Build asherah-cobhan (x86_64)
@@ -513,7 +513,7 @@ jobs:
           SKIP_CORE_BUILD: "1"
         run: ./scripts/build-bindings.sh
       - name: Upload x86_64 cobhan artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bindings-linux-x86_64-part-cobhan
           retention-days: 1
@@ -525,7 +525,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
@@ -536,7 +536,7 @@ jobs:
       - name: Verify x86_64 binary architecture
         run: file target/x86_64-apple-darwin/release/libasherah_ffi.dylib | grep -q "x86_64"
       - name: Upload macOS artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ffi-macos
           retention-days: 1
@@ -552,7 +552,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
       - name: Install OpenSSL via vcpkg
         shell: bash
@@ -565,7 +565,7 @@ jobs:
         shell: bash
         run: cargo build --release -p asherah-ffi -p asherah-java --target x86_64-pc-windows-msvc
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ffi-windows-x64
           retention-days: 1
@@ -581,7 +581,7 @@ jobs:
     needs: [build-ffi-x86_64, build-cobhan-x86_64, build-node-x86_64, build-python-x86_64, build-dotnet-x86_64, build-java-x86_64]
     steps:
       - name: Download all x86_64 artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: bindings-linux-x86_64-part-*
           path: artifacts-staging
@@ -591,7 +591,7 @@ jobs:
           mkdir -p artifacts/x86_64
           cp -r artifacts-staging/* artifacts/x86_64/
       - name: Upload consolidated x86_64 artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bindings-linux-x86_64
           retention-days: 1
@@ -606,7 +606,7 @@ jobs:
     outputs:
       cache-hit: ${{ steps.check-cache.outputs.cache-hit }}
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Calculate cache key
         id: cache-key
         run: |
@@ -618,19 +618,19 @@ jobs:
           echo "Cache key: ${CACHE_KEY}"
       - name: Check for cached image
         id: check-cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/asherah-tests-arm64.tar
           key: ${{ steps.cache-key.outputs.cache-key }}
           lookup-only: true
       - name: Set up QEMU
         if: steps.check-cache.outputs.cache-hit != 'true'
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
         with:
           platforms: linux/arm64
       - name: Set up Docker Buildx
         if: steps.check-cache.outputs.cache-hit != 'true'
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
       - name: Build arm64 test image
         if: steps.check-cache.outputs.cache-hit != 'true'
         run: |
@@ -644,18 +644,18 @@ jobs:
             .
       - name: Restore cached image
         if: steps.check-cache.outputs.cache-hit == 'true'
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/asherah-tests-arm64.tar
           key: ${{ steps.cache-key.outputs.cache-key }}
       - name: Save image to cache
         if: steps.check-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: /tmp/asherah-tests-arm64.tar
           key: ${{ steps.cache-key.outputs.cache-key }}
       - name: Upload arm64 test image
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: arm64-tests-image
           retention-days: 1
@@ -676,33 +676,33 @@ jobs:
       matrix:
         binding: [python, node, bun, ruby, go, java, dotnet, php]
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Download all x86_64 binding artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: bindings-linux-x86_64-part-*
           path: ${{ github.workspace }}/ci-artifacts
           merge-multiple: true
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         if: matrix.binding == 'node' || matrix.binding == 'bun'
         with:
           node-version: 20
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         if: matrix.binding == 'bun'
         with:
           bun-version: latest
-      - uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5
+      - uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
         if: matrix.binding == 'dotnet'
         with:
           dotnet-version: |
             8.0.x
             10.0.x
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         if: matrix.binding == 'go'
         with:
           go-version: '1.23'
           cache-dependency-path: asherah-go/go.sum
-      - uses: ruby/setup-ruby@afeafc3d1ab54a631816aba4c914a0081c12ff2f # v1
+      - uses: ruby/setup-ruby@12fd324f1d0b43274fdc8130f6980590a667c455 # v1.312.0
         if: matrix.binding == 'ruby'
         with:
           ruby-version: '3.3'
@@ -727,9 +727,9 @@ jobs:
           - php:8.3-cli
           - php:8.4-cli
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Download x86_64 FFI artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: bindings-linux-x86_64-part-ffi
           path: ${{ github.workspace }}/ci-artifacts
@@ -752,11 +752,11 @@ jobs:
       CARGO_BUILD_JOBS: "2"
       CARGO_INCREMENTAL: "0"
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Free disk space
         run: bash scripts/ci-free-disk-space.sh
       - name: Restore workspace caches
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry
@@ -769,13 +769,13 @@ jobs:
         uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           components: rustfmt
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
         with:
           tool: sccache@0.8.1
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 20
-      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
         with:
           # canonical com.godaddy.asherah:appencryption@0.4.0 is compiled
           # with JDK 17 (class file 61.0). The canonical-java probe under
@@ -783,7 +783,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
       - name: Download x86_64 rlib artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: x86_64-rlib-artifacts
           path: /tmp
@@ -813,9 +813,9 @@ jobs:
       matrix:
         binding: [python, node, bun, ruby, go, java, dotnet]
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Restore workspace caches
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             .cache/cargo
@@ -829,18 +829,18 @@ jobs:
             tests-${{ runner.os }}-arm64-${{ matrix.binding }}-
             tests-${{ runner.os }}-arm64-
       - name: Download all arm64 binding artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: bindings-linux-aarch64-part-*
           path: ${{ github.workspace }}/artifacts/aarch64
           merge-multiple: true
       - name: Download arm64 test image
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: arm64-tests-image
           path: artifacts
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4
+        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4.1.0
         with:
           platforms: linux/arm64
       - name: Load arm64 test image
@@ -865,9 +865,9 @@ jobs:
     # than fast PRs for catching sanitizer regressions before merge.
     if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' || contains(github.event.head_commit.message, '[sanitize]')
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Cache cargo registry
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             ~/.cargo/registry
@@ -899,9 +899,9 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Restore workspace caches
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             .cache/cargo
@@ -947,7 +947,7 @@ jobs:
           done
           tar czf /tmp/arm64-rlib.tar.gz "${TAR_ARGS[@]}"
       - name: Upload arm64 rlib artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: arm64-rlib-artifacts
           retention-days: 1
@@ -969,9 +969,9 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Restore workspace caches
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             .cache/cargo
@@ -982,7 +982,7 @@ jobs:
           restore-keys: |
             build-${{ runner.os }}-arm64-node-
       - name: Download arm64 rlib artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: arm64-rlib-artifacts
           path: /tmp
@@ -1011,7 +1011,7 @@ jobs:
           rustup default 1.91.1
           ./scripts/build-bindings.sh
       - name: Upload arm64 node binding artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bindings-linux-aarch64-part-node
           retention-days: 1
@@ -1033,9 +1033,9 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Restore workspace caches
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             .cache/cargo
@@ -1046,7 +1046,7 @@ jobs:
           restore-keys: |
             build-${{ runner.os }}-arm64-python-
       - name: Download arm64 rlib artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: arm64-rlib-artifacts
           path: /tmp
@@ -1089,7 +1089,7 @@ jobs:
           echo "=== Checking for 'Fresh' vs 'Compiling' for asherah ==="
           grep -E "(Fresh|Compiling) (asherah|tokio|aws)" /tmp/maturin-build.log || true
       - name: Upload arm64 python binding artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bindings-linux-aarch64-part-python
           retention-days: 1
@@ -1110,9 +1110,9 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Restore workspace caches
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             .cache/cargo
@@ -1123,7 +1123,7 @@ jobs:
           restore-keys: |
             build-${{ runner.os }}-arm64-java-
       - name: Download arm64 rlib artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: arm64-rlib-artifacts
           path: /tmp
@@ -1149,7 +1149,7 @@ jobs:
           rustup default 1.91.1
           ./scripts/build-bindings.sh
       - name: Upload Java binding artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bindings-linux-aarch64-part-java
           retention-days: 1
@@ -1170,9 +1170,9 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Restore workspace caches
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             .cache/cargo
@@ -1183,7 +1183,7 @@ jobs:
           restore-keys: |
             build-${{ runner.os }}-arm64-dotnet-
       - name: Download arm64 rlib artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: arm64-rlib-artifacts
           path: /tmp
@@ -1214,7 +1214,7 @@ jobs:
           rustup default 1.91.1
           ./scripts/build-bindings.sh
       - name: Upload .NET binding artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bindings-linux-aarch64-part-dotnet
           retention-days: 1
@@ -1226,9 +1226,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Download arm64 rlib artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: arm64-rlib-artifacts
           path: /tmp
@@ -1240,7 +1240,7 @@ jobs:
           find target -name 'libasherah_ffi.*' -type f ! -name '*.d' -exec cp {} artifacts/aarch64/ffi/ \;
           find target -name 'libasherah_ffi.*' -type f ! -name '*.d' -exec cp {} artifacts/aarch64/ruby/ \;
       - name: Upload FFI artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bindings-linux-aarch64-part-ffi
           retention-days: 1
@@ -1261,9 +1261,9 @@ jobs:
       SCCACHE_DIR: ${{ github.workspace }}/.cache/sccache
       SCCACHE_CACHE_SIZE: 2G
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - name: Restore workspace caches
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: |
             .cache/cargo
@@ -1273,7 +1273,7 @@ jobs:
           restore-keys: |
             build-${{ runner.os }}-arm64-cobhan-
       - name: Download arm64 rlib artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: arm64-rlib-artifacts
           path: /tmp
@@ -1300,7 +1300,7 @@ jobs:
           rustup default 1.91.1
           ./scripts/build-bindings.sh
       - name: Upload arm64 cobhan artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bindings-linux-aarch64-part-cobhan
           retention-days: 1
@@ -1314,7 +1314,7 @@ jobs:
     needs: [build-ffi-arm64, build-cobhan-arm64, build-node-arm64, build-python-arm64, build-dotnet-arm64, build-java-arm64]
     steps:
       - name: Download all arm64 artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: bindings-linux-aarch64-part-*
           path: artifacts-staging
@@ -1324,7 +1324,7 @@ jobs:
           mkdir -p artifacts/aarch64
           cp -r artifacts-staging/* artifacts/aarch64/
       - name: Upload consolidated arm64 artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: bindings-linux-aarch64
           retention-days: 1
@@ -1340,11 +1340,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: x86_64-unknown-linux-musl
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 20
       - name: Install Zig (with retries)
@@ -1355,7 +1355,7 @@ jobs:
         # workflows so dry-runs can't drift.
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
         with:
           tool: cargo-zigbuild
       - name: Build asherah-node for x86_64-musl
@@ -1374,12 +1374,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 20
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.11"
       - name: Install OpenSSL via vcpkg
@@ -1408,15 +1408,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.11"
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: x86_64-unknown-linux-gnu
       - name: Build manylinux x86_64 wheel
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: x86_64-unknown-linux-gnu
           manylinux: "2_28"
@@ -1433,15 +1433,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.11"
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: aarch64-unknown-linux-gnu
       - name: Build manylinux aarch64 wheel
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: aarch64-unknown-linux-gnu
           manylinux: "2_28"
@@ -1458,15 +1458,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.11"
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: x86_64-apple-darwin,aarch64-apple-darwin
       - name: Build universal2 wheel
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: universal2-apple-darwin
           args: --release --manifest-path asherah-py/Cargo.toml --out dist/
@@ -1480,15 +1480,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.11"
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: x86_64-unknown-linux-musl
       - name: Build musllinux x86_64 wheel
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: x86_64-unknown-linux-musl
           manylinux: musllinux_1_2
@@ -1505,15 +1505,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.11"
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: aarch64-unknown-linux-musl
       - name: Build musllinux aarch64 wheel
-        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: aarch64-unknown-linux-musl
           manylinux: musllinux_1_2
@@ -1530,11 +1530,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: aarch64-unknown-linux-musl
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 20
       - name: Install Zig (with retries)
@@ -1545,7 +1545,7 @@ jobs:
         # workflows so dry-runs can't drift.
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
         with:
           tool: cargo-zigbuild
       - name: Build asherah-node for aarch64-musl
@@ -1564,14 +1564,14 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: aarch64-pc-windows-msvc
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 20
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: "3.11"
       - name: Install OpenSSL via vcpkg (arm64)
@@ -1609,7 +1609,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: x86_64-unknown-linux-musl
@@ -1621,7 +1621,7 @@ jobs:
         # workflows so dry-runs can't drift.
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
         with:
           tool: cargo-zigbuild
       - name: Setup musl OpenSSL
@@ -1655,7 +1655,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: aarch64-unknown-linux-musl
@@ -1667,7 +1667,7 @@ jobs:
         # workflows so dry-runs can't drift.
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
         with:
           tool: cargo-zigbuild
       - name: Setup musl OpenSSL
@@ -1702,12 +1702,12 @@ jobs:
       contents: read
     needs: build-ffi-x86_64
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: ruby/setup-ruby@afeafc3d1ab54a631816aba4c914a0081c12ff2f # v1
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: ruby/setup-ruby@12fd324f1d0b43274fdc8130f6980590a667c455 # v1.312.0
         with:
           ruby-version: '3.3'
       - name: Download x86_64 FFI artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: bindings-linux-x86_64-part-ffi
           path: artifacts
@@ -1734,12 +1734,12 @@ jobs:
       contents: read
     needs: build-ffi-x86_64
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           targets: x86_64-unknown-linux-musl
       - name: Download x86_64 FFI artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: bindings-linux-x86_64-part-ffi
           path: ci-artifacts
@@ -1748,7 +1748,7 @@ jobs:
       - name: Install Zig (with retries)
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
-      - uses: taiki-e/install-action@920ab1831fbf4fb3ef75c8ead83556c918bb7290 # v2
+      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
         with:
           tool: cargo-zigbuild
       - name: Setup musl OpenSSL
@@ -1816,13 +1816,13 @@ jobs:
       contents: read
     needs: build-java-x86_64
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
         with:
           java-version: '11'
           distribution: 'temurin'
       - name: Download x86_64 Java artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: bindings-linux-x86_64-part-java
           path: artifacts
