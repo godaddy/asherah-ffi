@@ -1,5 +1,5 @@
 # frozen_string_literal: true
 
 module Asherah
-  VERSION = "0.0.0.dev"
+  VERSION = "0.0.0"
 end
