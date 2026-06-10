@@ -27,7 +27,7 @@ log = "0.4"
 parking_lot = "0.12"
 
 [dev-dependencies]
-serial_test = "3.1"
+serial_test = "3.5"
 
 [lints]
 workspace = true
