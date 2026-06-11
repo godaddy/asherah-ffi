@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use zeroize::Zeroizing;
 
 use crate::traits::KeyManagementService;
 
@@ -30,7 +31,7 @@ pub struct VaultTransitKms {
     /// as a documented follow-up — Vault tokens with finite TTL still
     /// fail at expiry; refresh logic requires plumbing through the auth
     /// method (Kubernetes JWT path / AppRole secret_id / explicit token).
-    token: Arc<zeroize::Zeroizing<String>>,
+    token: Arc<Zeroizing<String>>,
 }
 
 impl Clone for VaultTransitKms {
@@ -127,10 +128,10 @@ impl VaultTransitKms {
             // doesn't linger in the freed allocator slab. T-finding
             // "PEM body Vec not wiped; private key half should be
             // Zeroizing" in `docs/review-2026-05-05-findings.md`.
-            let key_pem = zeroize::Zeroizing::new(std::fs::read(&key_path).map_err(|e| {
+            let key_pem = Zeroizing::new(std::fs::read(&key_path).map_err(|e| {
                 anyhow::anyhow!("failed to read VAULT_CLIENT_KEY at {key_path}: {e}")
             })?);
-            let mut combined = zeroize::Zeroizing::new(cert_pem.clone());
+            let mut combined = Zeroizing::new(cert_pem.clone());
             combined.extend_from_slice(&key_pem);
             let identity = reqwest::Identity::from_pem(&combined)
                 .map_err(|e| anyhow::anyhow!("invalid TLS client cert/key: {e}"))?;
@@ -357,7 +358,7 @@ impl VaultTransitKms {
             async_client,
             encrypt_url,
             decrypt_url,
-            token: Arc::new(zeroize::Zeroizing::new(token)),
+            token: Arc::new(Zeroizing::new(token)),
         })
     }
 
@@ -377,7 +378,7 @@ impl VaultTransitKms {
             async_client,
             encrypt_url,
             decrypt_url,
-            token: Arc::new(zeroize::Zeroizing::new(token)),
+            token: Arc::new(Zeroizing::new(token)),
         })
     }
 
@@ -394,10 +395,21 @@ impl VaultTransitKms {
         Ok(())
     }
 
+    fn encode_plaintext_for_vault(key_bytes: &[u8]) -> Zeroizing<String> {
+        Zeroizing::new(BASE64.encode(key_bytes))
+    }
+
+    fn decode_plaintext_from_vault(plaintext: String) -> anyhow::Result<Vec<u8>> {
+        let plaintext = Zeroizing::new(plaintext);
+        BASE64
+            .decode(plaintext.as_bytes())
+            .map_err(|e| anyhow::anyhow!("Vault Transit decrypt: invalid base64 in plaintext: {e}"))
+    }
+
     // --- sync helpers ---
 
     fn encrypt_key_sync(&self, key_bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
-        let encoded = BASE64.encode(key_bytes);
+        let encoded = Self::encode_plaintext_for_vault(key_bytes);
         let body = EncryptRequest {
             plaintext: &encoded,
         };
@@ -484,15 +496,13 @@ impl VaultTransitKms {
         let data = vault_resp
             .data
             .ok_or_else(|| anyhow::anyhow!("Vault Transit decrypt returned no data"))?;
-        BASE64
-            .decode(&data.plaintext)
-            .map_err(|e| anyhow::anyhow!("Vault Transit decrypt: invalid base64 in plaintext: {e}"))
+        Self::decode_plaintext_from_vault(data.plaintext)
     }
 
     // --- async helpers ---
 
     async fn encrypt_key_impl(&self, key_bytes: &[u8]) -> anyhow::Result<Vec<u8>> {
-        let encoded = BASE64.encode(key_bytes);
+        let encoded = Self::encode_plaintext_for_vault(key_bytes);
         let body = EncryptRequest {
             plaintext: &encoded,
         };
@@ -564,9 +574,7 @@ impl VaultTransitKms {
         let data = vault_resp
             .data
             .ok_or_else(|| anyhow::anyhow!("Vault Transit decrypt returned no data"))?;
-        BASE64
-            .decode(&data.plaintext)
-            .map_err(|e| anyhow::anyhow!("Vault Transit decrypt: invalid base64 in plaintext: {e}"))
+        Self::decode_plaintext_from_vault(data.plaintext)
     }
 }
 
@@ -590,5 +598,29 @@ impl KeyManagementService for VaultTransitKms {
 
     async fn decrypt_key_async(&self, _ctx: &(), blob: &[u8]) -> Result<Vec<u8>, anyhow::Error> {
         self.decrypt_key_impl(blob).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn vault_plaintext_request_encoding_round_trips() {
+        let encoded = VaultTransitKms::encode_plaintext_for_vault(b"0123456789abcdef");
+        assert_eq!(&*encoded, "MDEyMzQ1Njc4OWFiY2RlZg==");
+        let decoded = VaultTransitKms::decode_plaintext_from_vault(encoded.to_string())
+            .expect("encoded plaintext must decode");
+        assert_eq!(decoded, b"0123456789abcdef");
+    }
+
+    #[test]
+    fn vault_plaintext_decode_rejects_invalid_base64() {
+        let err = VaultTransitKms::decode_plaintext_from_vault("not base64".to_string())
+            .expect_err("invalid base64 must fail");
+        assert!(
+            err.to_string().contains("invalid base64"),
+            "unexpected error: {err}"
+        );
     }
 }
