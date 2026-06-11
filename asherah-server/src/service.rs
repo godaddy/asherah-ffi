@@ -277,7 +277,7 @@ async fn process_request(
             match dec.data_row_record {
                 Some(proto_drr) => {
                     let drr = proto_to_drr(proto_drr);
-                    if let Err(err) = asherah::limits::check_ciphertext_len(drr.data.len()) {
+                    if let Err(err) = asherah::limits::check_data_row_record(&drr) {
                         return error_response(&err.to_string());
                     }
                     match s.decrypt_async(drr).await {
