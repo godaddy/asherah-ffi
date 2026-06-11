@@ -432,13 +432,16 @@ fn test_replica_read_consistency_set() {
     }
 }
 
-fn test_kms_defaults_to_static() {
+fn test_kms_is_required() {
     let cfg = ConfigOptions {
         kms: None,
         ..base_config()
     };
-    let resolved = resolve(&cfg);
-    assert!(matches!(resolved.kms, KmsConfig::Static { .. }));
+    let err = cfg.resolve().expect_err("missing KMS must fail");
+    assert!(
+        err.to_string().contains("KMS is required"),
+        "unexpected error: {err}"
+    );
 }
 
 fn test_rdbms_go_mysql_dsn_with_tls() {
@@ -570,27 +573,33 @@ fn test_static_master_key_hex() {
     }
 }
 
-fn test_static_kms_without_key_falls_back_to_test_key() {
-    // Drop-in compatibility with the canonical asherah Go server: when
-    // KMS=static is set and StaticMasterKey is omitted, fall back to the
-    // canonical test key (`thisIsAStaticMasterKeyForTesting`) so the
-    // value of KMS=static matches the Go reference's `kms.NewStatic`
-    // hardcoded behavior. The earlier "must error" stance was a
-    // unilateral hardening from the 2026-05-05 review that broke every
-    // Go-server-compatible deployment using KMS=static; the safety
-    // story is preserved by emitting a `WARN asherah::builders` "Using
-    // static master key. This is for testing only" log line at startup
-    // in either the static or test-debug-static path.
-    use asherah::builders::TEST_DEBUG_STATIC_MASTER_KEY_HEX;
-
+fn test_static_kms_without_key_errors() {
     let cfg = ConfigOptions {
         kms: Some("static".into()),
         static_master_key_hex: None,
         ..base_config()
     };
+    let err = cfg
+        .resolve()
+        .expect_err("KMS=static must require explicit key material");
+    assert!(
+        err.to_string()
+            .contains("StaticMasterKeyHex is required when KMS=static"),
+        "unexpected error: {err}"
+    );
+}
+
+fn test_test_debug_static_without_key_falls_back_to_test_key() {
+    use asherah::builders::TEST_DEBUG_STATIC_MASTER_KEY_HEX;
+
+    let cfg = ConfigOptions {
+        kms: Some("test-debug-static".into()),
+        static_master_key_hex: None,
+        ..base_config()
+    };
     let (resolved, _applied) = cfg
         .resolve()
-        .expect("KMS=static must fall back to the canonical test key");
+        .expect("KMS=test-debug-static must fall back to the canonical test key");
     // Avoid `{other:?}` for the non-Static fallthrough — `KmsConfig::Static`
     // carries the master key hex, so debug-formatting the enum on the
     // failure path would leak key material into the test's panic message
@@ -718,7 +727,7 @@ fn main() {
         "test_replica_read_consistency_set",
         test_replica_read_consistency_set
     );
-    run_test!("test_kms_defaults_to_static", test_kms_defaults_to_static);
+    run_test!("test_kms_is_required", test_kms_is_required);
     run_test!(
         "test_rdbms_go_mysql_dsn_with_tls",
         test_rdbms_go_mysql_dsn_with_tls
@@ -749,8 +758,12 @@ fn main() {
     );
     run_test!("test_static_master_key_hex", test_static_master_key_hex);
     run_test!(
-        "test_static_kms_without_key_falls_back_to_test_key",
-        test_static_kms_without_key_falls_back_to_test_key
+        "test_static_kms_without_key_errors",
+        test_static_kms_without_key_errors
+    );
+    run_test!(
+        "test_test_debug_static_without_key_falls_back_to_test_key",
+        test_test_debug_static_without_key_falls_back_to_test_key
     );
     run_test!("test_no_env_side_effects", test_no_env_side_effects);
 

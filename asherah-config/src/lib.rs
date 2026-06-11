@@ -181,21 +181,14 @@ impl ConfigOptions {
 
     /// Resolve into a structured config — no env var reads or writes.
     pub fn resolve(&self) -> Result<(ResolvedConfig, AppliedConfig)> {
-        // KMS aliases: `static` and `test-debug-static` are synonyms.
-        // `test-debug-static` is the preferred identifier because it
-        // makes the non-production nature obvious, but both must behave
-        // identically to preserve interop with the canonical Go
-        // implementation of Asherah (which accepts `static` and falls
-        // back to the well-known test key when no hex is provided).
-        // The fail-fast on empty `StaticMasterKeyHex` previously here
-        // diverged from Go-canonical behavior; the static-KMS path
-        // already logs a loud warning and tagged the test key as
-        // public, which is the right safety net.
+        // `test-debug-static` is an explicit test-only alias that may use the
+        // public test key. Legacy `static` remains supported, but it must
+        // provide an explicit key so a missing KMS config cannot silently fall
+        // back to static master-key material.
         fn normalize_alias(value: &str) -> String {
             match value.to_lowercase().as_str() {
                 "test-debug-memory" => "memory".to_string(),
                 "test-debug-sqlite" => "sqlite".to_string(),
-                "test-debug-static" => "static".to_string(),
                 other => other.to_string(),
             }
         }
@@ -272,18 +265,24 @@ impl ConfigOptions {
 
         let aws_profile_name = self.aws_profile_name.clone();
 
-        let kms_raw = self.kms.as_deref().unwrap_or("static");
+        let kms_raw = self
+            .kms
+            .as_deref()
+            .ok_or_else(|| anyhow!("KMS is required"))?;
         let kms_kind = normalize_alias(kms_raw);
         let kms = match kms_kind.as_str() {
-            // `static` and `test-debug-static` collapse to the same
-            // arm via `normalize_alias` above. Falls back to the
-            // publicly-known test key when no hex is supplied (this
-            // matches Go-canonical asherah behavior); the static-KMS
-            // builder log-warns loudly that the key is non-production.
             "static" => KmsConfig::Static {
                 key_hex: self
                     .static_master_key_hex
                     .clone()
+                    .filter(|key_hex| !key_hex.is_empty())
+                    .ok_or_else(|| anyhow!("StaticMasterKeyHex is required when KMS=static"))?,
+            },
+            "test-debug-static" => KmsConfig::Static {
+                key_hex: self
+                    .static_master_key_hex
+                    .clone()
+                    .filter(|key_hex| !key_hex.is_empty())
                     .unwrap_or_else(|| TEST_DEBUG_STATIC_MASTER_KEY_HEX.to_string()),
             },
             "aws" => KmsConfig::Aws {

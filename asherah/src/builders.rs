@@ -836,15 +836,12 @@ fn build_kms(
 ) -> anyhow::Result<Arc<dyn crate::traits::KeyManagementService>> {
     match kms {
         KmsConfig::Static { key_hex } => {
-            // Empty hex is no longer a hard error — fall back to the
-            // publicly-known test key to preserve Go-canonical interop
-            // (`KMS=static` and `KMS=test-debug-static` are synonyms).
-            // The warning below makes the non-production status loud.
-            let key_hex: &str = if key_hex.is_empty() {
-                TEST_DEBUG_STATIC_MASTER_KEY_HEX
-            } else {
-                key_hex
-            };
+            if key_hex.is_empty() {
+                anyhow::bail!(
+                    "static master key hex is required for KMS=static; \
+                     use KMS=test-debug-static to opt into the public test key"
+                );
+            }
             log::warn!(
                 "Using static master key. \
                  This is for testing only — do NOT use in production."
@@ -1175,19 +1172,27 @@ pub fn resolve_from_env() -> anyhow::Result<ResolvedConfig> {
     };
 
     let kms_kind = std::env::var("KMS")
-        .unwrap_or_else(|_| "static".into())
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "KMS is required; set KMS=aws for production or \
+                 KMS=test-debug-static for explicit test-only static KMS"
+            )
+        })?
         .to_lowercase();
-    // `static` and `test-debug-static` are synonyms — the latter is
-    // the preferred identifier because it makes the non-production
-    // nature obvious, but both must behave identically to preserve
-    // interop with the canonical Go implementation of Asherah. Both
-    // fall back to the publicly-known test key when
-    // `STATIC_MASTER_KEY_HEX` is unset; the static-KMS builder
-    // log-warns loudly that the key is non-production.
     let kms = match kms_kind.as_str() {
-        "static" | "test-debug-static" => KmsConfig::Static {
+        "static" => {
+            let key_hex = std::env::var("STATIC_MASTER_KEY_HEX")
+                .map_err(|_| anyhow::anyhow!("STATIC_MASTER_KEY_HEX required for KMS=static"))?;
+            if key_hex.is_empty() {
+                anyhow::bail!("STATIC_MASTER_KEY_HEX must not be empty for KMS=static");
+            }
+            KmsConfig::Static { key_hex }
+        }
+        "test-debug-static" => KmsConfig::Static {
             key_hex: std::env::var("STATIC_MASTER_KEY_HEX")
-                .unwrap_or_else(|_| TEST_DEBUG_STATIC_MASTER_KEY_HEX.to_string()),
+                .ok()
+                .filter(|key_hex| !key_hex.is_empty())
+                .unwrap_or_else(|| TEST_DEBUG_STATIC_MASTER_KEY_HEX.to_string()),
         },
         "aws" => {
             let region_map = std::env::var("REGION_MAP")
