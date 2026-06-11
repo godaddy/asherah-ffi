@@ -25,6 +25,9 @@ type Session = ael::session::PublicSession<
     ael::builders::DynMetastore,
 >;
 
+const NATIVE_HOOK_QUEUE_CAPACITY: usize = 4096;
+const DEFAULT_LOG_HOOK_MIN_LEVEL: log::LevelFilter = log::LevelFilter::Warn;
+
 /// Shared session handle. Wraps `Arc<Session>` so async tokio tasks can hold
 /// an owned reference that outlives a premature `freeSession` call.
 struct SharedJniSession {
@@ -44,6 +47,34 @@ fn throw_err(env: &mut jni::Env<'_>, msg: impl std::fmt::Display) -> jni::errors
     jni::errors::Error::JavaException
 }
 
+fn sanitized_anyhow_message(op: &str, err: &anyhow::Error) -> String {
+    format!("{op} failed: {err}")
+}
+
+fn throw_anyhow(
+    env: &mut jni::Env<'_>,
+    op: &'static str,
+    err: anyhow::Error,
+) -> jni::errors::Error {
+    log::warn!("{op} failed: {err:#}");
+    throw_err(env, sanitized_anyhow_message(op, &err))
+}
+
+#[allow(deprecated)]
+fn jbyte_array_len(env: &mut jni::Env<'_>, array: &JByteArray<'_>) -> jni::errors::Result<usize> {
+    let len = env.get_array_length(array)?;
+    usize::try_from(len)
+        .map_err(|_| throw_err(env, format_args!("Java byte array length {len} is invalid")))
+}
+
+fn check_plaintext_len_jni(env: &mut jni::Env<'_>, len: usize) -> jni::errors::Result<()> {
+    ael::limits::check_plaintext_len(len).map_err(|err| throw_err(env, err))
+}
+
+fn check_ciphertext_len_jni(env: &mut jni::Env<'_>, len: usize) -> jni::errors::Result<()> {
+    ael::limits::check_ciphertext_len(len).map_err(|err| throw_err(env, err))
+}
+
 #[allow(deprecated)]
 fn get_jstring(env: &mut jni::Env<'_>, s: &JString<'_>) -> jni::errors::Result<String> {
     let chars = env.get_string(s)?;
@@ -57,7 +88,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_factoryFromEnv
 ) -> jlong {
     env.with_env(|env| -> jni::errors::Result<jlong> {
         let factory = ael::builders::factory_from_env()
-            .map_err(|e| throw_err(env, format_args!("factory_from_env failed: {e:#}")))?;
+            .map_err(|e| throw_anyhow(env, "factory_from_env", e))?;
         // Always enable per-factory metrics so an installed metrics hook
         // (setMetricsHook) actually fires for encrypt/decrypt/store/load
         // events. The cost is one Instant::now() per encrypt regardless;
@@ -79,7 +110,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_factoryFromJso
         let cfg_str = get_jstring(env, &config_json)?;
         let (factory, _applied) = config::ConfigOptions::from_json(&cfg_str)
             .and_then(|cfg| config::factory_from_config(&cfg))
-            .map_err(|e| throw_err(env, format_args!("factory_from_json failed: {e:#}")))?;
+            .map_err(|e| throw_anyhow(env, "factory_from_json", e))?;
         let factory = factory.with_metrics(true);
         Ok(Box::into_raw(Box::new(factory)) as jlong)
     })
@@ -97,7 +128,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_closeFactory(
             .ok_or_else(|| throw_err(env, "factory handle is null"))?;
         factory
             .close()
-            .map_err(|e| throw_err(env, format_args!("factory close error: {e:#}")))?;
+            .map_err(|e| throw_anyhow(env, "factory close", e))?;
         Ok(())
     })
     .resolve::<ThrowRuntimeExAndDefault>();
@@ -144,8 +175,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_setEnv(
 ) {
     env.with_env(|env| -> jni::errors::Result<()> {
         let payload = get_jstring(env, &env_json)?;
-        apply_env_json(&payload)
-            .map_err(|e| throw_err(env, format_args!("setEnv error: {e:#}")))?;
+        apply_env_json(&payload).map_err(|e| throw_anyhow(env, "setEnv", e))?;
         Ok(())
     })
     .resolve::<ThrowRuntimeExAndDefault>();
@@ -183,7 +213,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_closeSession(
         shared
             .session
             .close()
-            .map_err(|e| throw_err(env, format_args!("session close error: {e:#}")))?;
+            .map_err(|e| throw_anyhow(env, "session close", e))?;
         Ok(())
     })
     .resolve::<ThrowRuntimeExAndDefault>();
@@ -230,13 +260,15 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_encrypt<'calle
     env.with_env(|env| -> jni::errors::Result<JByteArray<'caller>> {
         let shared = unsafe { from_handle::<SharedJniSession>(session_handle) }
             .ok_or_else(|| throw_err(env, "session handle is null"))?;
+        let plaintext_len = jbyte_array_len(env, &plaintext)?;
+        check_plaintext_len_jni(env, plaintext_len)?;
         let data = Zeroizing::new(env.convert_byte_array(&plaintext)?);
         let drr = shared
             .session
             .encrypt(&data)
-            .map_err(|e| throw_err(env, format_args!("encrypt error: {e:#}")))?;
+            .map_err(|e| throw_anyhow(env, "encrypt", e))?;
         let ciphertext = serde_json::to_vec(&drr)
-            .map_err(|e| throw_err(env, format_args!("encrypt serialization error: {e:#}")))?;
+            .map_err(|e| throw_err(env, format_args!("encrypt serialization error: {e}")))?;
         let arr = env.byte_array_from_slice(&ciphertext)?;
         Ok(arr)
     })
@@ -253,6 +285,8 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decrypt<'calle
     env.with_env(|env| -> jni::errors::Result<JByteArray<'caller>> {
         let shared = unsafe { from_handle::<SharedJniSession>(session_handle) }
             .ok_or_else(|| throw_err(env, "session handle is null"))?;
+        let ciphertext_len = jbyte_array_len(env, &ciphertext)?;
+        check_ciphertext_len_jni(env, ciphertext_len)?;
         let data = env.convert_byte_array(&ciphertext)?;
         let drr: ael::types::DataRowRecord = serde_json::from_slice(&data)
             .map_err(|e| throw_err(env, format_args!("invalid DataRowRecord JSON: {e}")))?;
@@ -260,7 +294,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decrypt<'calle
             shared
                 .session
                 .decrypt(drr)
-                .map_err(|e| throw_err(env, format_args!("decrypt error: {e:#}")))?,
+                .map_err(|e| throw_anyhow(env, "decrypt", e))?,
         );
         let arr = env.byte_array_from_slice(&plaintext)?;
         Ok(arr)
@@ -302,6 +336,8 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_encryptAsync<'
     env.with_env(|env| -> jni::errors::Result<()> {
         let shared = unsafe { from_handle::<SharedJniSession>(session_handle) }
             .ok_or_else(|| throw_err(env, "session handle is null"))?;
+        let plaintext_len = jbyte_array_len(env, &plaintext)?;
+        check_plaintext_len_jni(env, plaintext_len)?;
         let data = Zeroizing::new(env.convert_byte_array(&plaintext)?);
         let jvm = env.get_java_vm()?;
         let future_ref = env.new_global_ref(&future)?;
@@ -317,7 +353,8 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_encryptAsync<'
 
         rt.spawn(async move {
             let result = match session_arc.encrypt_async(&data).await {
-                Ok(drr) => serde_json::to_vec(&drr).map_err(|e| anyhow::anyhow!("{e:#}")),
+                Ok(drr) => serde_json::to_vec(&drr)
+                    .map_err(|e| anyhow::anyhow!("encrypt serialization error: {e}")),
                 Err(e) => Err(e),
             };
             complete_java_future(&jvm, &future_ref, result);
@@ -340,6 +377,8 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decryptAsync<'
     env.with_env(|env| -> jni::errors::Result<()> {
         let shared = unsafe { from_handle::<SharedJniSession>(session_handle) }
             .ok_or_else(|| throw_err(env, "session handle is null"))?;
+        let ciphertext_len = jbyte_array_len(env, &ciphertext)?;
+        check_ciphertext_len_jni(env, ciphertext_len)?;
         let data = env.convert_byte_array(&ciphertext)?;
         let jvm = env.get_java_vm()?;
         let future_ref = env.new_global_ref(&future)?;
@@ -433,6 +472,7 @@ fn complete_java_future(
                     )?;
                 }
                 Err(ref e) => {
+                    log::warn!("java async operation failed: {e:#}");
                     let msg = e.to_string();
                     let jmsg = env.new_string(&msg)?;
                     let exception = env.new_object(
@@ -469,8 +509,10 @@ fn complete_java_future(
 // across the FFI boundary is undefined behavior.
 // =====================================================================
 
-use asherah::logging::{ensure_logger, set_sink as set_log_sink, LogSink};
-use asherah::metrics::{self, MetricsSink};
+use asherah::logging::{
+    ensure_logger, set_sink as set_log_sink, AsyncLogConfig, AsyncLogSink, LogSink,
+};
+use asherah::metrics::{self, AsyncMetricsConfig, AsyncMetricsSink, MetricsSink};
 use parking_lot::Mutex as PMutex;
 use std::cell::Cell;
 
@@ -495,6 +537,10 @@ struct JavaLogSink;
 struct JavaMetricsSink;
 
 impl LogSink for JavaLogSink {
+    fn min_level(&self) -> log::LevelFilter {
+        DEFAULT_LOG_HOOK_MIN_LEVEL
+    }
+
     fn log(&self, record: &log::Record<'_>) {
         // Filter out jni's own internal trace/debug spam — every JNI call
         // we make from inside the sink would otherwise re-enter here.
@@ -661,12 +707,20 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_setLogHook(
         }
         let jvm = env.get_java_vm()?;
         let global = env.new_global_ref(&callback)?;
-        ensure_logger().map_err(|_| jni::errors::Error::JavaException)?;
+        ensure_logger().map_err(|e| throw_err(env, format_args!("log init error: {e}")))?;
+        let sink = AsyncLogSink::new(
+            JavaLogSink,
+            AsyncLogConfig {
+                queue_capacity: NATIVE_HOOK_QUEUE_CAPACITY,
+                min_level: DEFAULT_LOG_HOOK_MIN_LEVEL,
+            },
+        )
+        .map_err(|e| throw_err(env, format_args!("log hook dispatcher error: {e}")))?;
         *JAVA_LOG_HOOK.lock() = Some(Arc::new(JavaHook {
             jvm,
             callback: global,
         }));
-        set_log_sink("java", Some(Arc::new(JavaLogSink)));
+        set_log_sink("java", Some(Arc::new(sink)));
         Ok(())
     })
     .resolve::<ThrowRuntimeExAndDefault>();
@@ -696,11 +750,18 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_setMetricsHook
         }
         let jvm = env.get_java_vm()?;
         let global = env.new_global_ref(&callback)?;
+        let sink = AsyncMetricsSink::new(
+            JavaMetricsSink,
+            AsyncMetricsConfig {
+                queue_capacity: NATIVE_HOOK_QUEUE_CAPACITY,
+            },
+        )
+        .map_err(|e| throw_err(env, format_args!("metrics hook dispatcher error: {e}")))?;
         *JAVA_METRICS_HOOK.lock() = Some(Arc::new(JavaHook {
             jvm,
             callback: global,
         }));
-        metrics::set_sink(JavaMetricsSink);
+        metrics::set_sink(sink);
         metrics::set_enabled(true);
         Ok(())
     })
@@ -726,5 +787,25 @@ mod tests {
     fn async_runtime_builder_returns_result() {
         let rt = build_async_runtime().unwrap();
         drop(rt);
+    }
+
+    #[test]
+    fn sanitizes_anyhow_chain_for_java_callers() {
+        let err = anyhow::anyhow!("secret inner context").context("outer context");
+        let msg = sanitized_anyhow_message("encrypt", &err);
+        assert_eq!(msg, "encrypt failed: outer context");
+        assert!(!msg.contains("secret inner context"));
+    }
+
+    #[test]
+    fn native_hooks_are_bounded_and_warn_by_default() {
+        assert_eq!(NATIVE_HOOK_QUEUE_CAPACITY, 4096);
+        assert_eq!(DEFAULT_LOG_HOOK_MIN_LEVEL, log::LevelFilter::Warn);
+    }
+
+    #[test]
+    fn core_limits_reject_oversize_binding_inputs() {
+        assert!(ael::limits::check_plaintext_len(ael::limits::MAX_PAYLOAD_BYTES + 1).is_err());
+        assert!(ael::limits::check_ciphertext_len(ael::limits::MAX_ENVELOPE_BYTES + 1).is_err());
     }
 }

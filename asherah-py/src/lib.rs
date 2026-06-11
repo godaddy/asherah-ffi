@@ -2,9 +2,11 @@
 #![allow(unused_qualifications)]
 
 use asherah as ael;
-use asherah::logging::{ensure_logger, set_sink as set_log_sink, LogSink};
+use asherah::logging::{
+    ensure_logger, set_sink as set_log_sink, AsyncLogConfig, AsyncLogSink, LogSink,
+};
 use asherah::metrics;
-use asherah::metrics::MetricsSink;
+use asherah::metrics::{AsyncMetricsConfig, AsyncMetricsSink, MetricsSink};
 use asherah_config as config;
 use once_cell::sync::Lazy;
 use pyo3::exceptions::PyRuntimeError;
@@ -30,13 +32,28 @@ type SessionHandle = ael::session::PublicSession<
     ael::builders::DynMetastore,
 >;
 
+const NATIVE_HOOK_QUEUE_CAPACITY: usize = 4096;
+const DEFAULT_LOG_HOOK_MIN_LEVEL: log::LevelFilter = log::LevelFilter::Warn;
+
+fn sanitized_anyhow_message(op: &str, err: &anyhow::Error) -> String {
+    format!("{op} failed: {err}")
+}
+
 fn anyhow_to_py(err: anyhow::Error) -> PyErr {
-    // Use {:#} to show the full error chain, not just the outermost context
-    PyRuntimeError::new_err(format!("{err:#}"))
+    log::warn!("python binding operation failed: {err:#}");
+    PyRuntimeError::new_err(sanitized_anyhow_message("asherah operation", &err))
 }
 
 fn json_parse_err(err: impl std::fmt::Display) -> PyErr {
     PyRuntimeError::new_err(format!("invalid DataRowRecord JSON: {err}"))
+}
+
+fn check_plaintext_len_py(len: usize) -> PyResult<()> {
+    ael::limits::check_plaintext_len(len).map_err(|err| PyRuntimeError::new_err(err.to_string()))
+}
+
+fn check_ciphertext_len_py(len: usize) -> PyResult<()> {
+    ael::limits::check_ciphertext_len(len).map_err(|err| PyRuntimeError::new_err(err.to_string()))
 }
 
 fn config_options_from_py(config_obj: &Bound<'_, PyAny>) -> PyResult<config::ConfigOptions> {
@@ -130,6 +147,7 @@ fn setenv(env_obj: &Bound<'_, PyAny>) -> PyResult<()> {
 
 #[pyfunction]
 fn encrypt_bytes(partition_id: &str, data: &[u8]) -> PyResult<String> {
+    check_plaintext_len_py(data.len())?;
     let session = with_manager(|mgr| Ok(mgr.get_or_create_session(partition_id)))?;
     let input = Zeroizing::new(data.to_vec());
     // Hold the GIL across the encrypt. The warm path is a sub-microsecond
@@ -158,6 +176,7 @@ fn decrypt_bytes<'py>(
     partition_id: &str,
     data_row_record: &str,
 ) -> PyResult<Bound<'py, PyBytes>> {
+    check_ciphertext_len_py(data_row_record.len())?;
     let session = with_manager(|mgr| Ok(mgr.get_or_create_session(partition_id)))?;
     let drr: ael::types::DataRowRecord = serde_json::from_str(data_row_record)
         .map_err(|e| PyRuntimeError::new_err(format!("invalid DataRowRecord JSON: {e}")))?;
@@ -171,6 +190,7 @@ fn decrypt_bytes<'py>(
 
 #[pyfunction]
 fn decrypt_string(partition_id: &str, data_row_record: &str) -> PyResult<String> {
+    check_ciphertext_len_py(data_row_record.len())?;
     let session = with_manager(|mgr| Ok(mgr.get_or_create_session(partition_id)))?;
     let drr: ael::types::DataRowRecord = serde_json::from_str(data_row_record)
         .map_err(|e| PyRuntimeError::new_err(format!("invalid DataRowRecord JSON: {e}")))?;
@@ -191,6 +211,7 @@ fn decrypt_string(partition_id: &str, data_row_record: &str) -> PyResult<String>
 /// Module-level async encrypt — runs on Rust's tokio runtime, returns a Python coroutine.
 #[pyfunction]
 async fn encrypt_bytes_async(partition_id: String, data: Vec<u8>) -> PyResult<String> {
+    check_plaintext_len_py(data.len())?;
     let session = with_manager(|mgr| Ok(mgr.get_or_create_session(&partition_id)))?;
     let input = Zeroizing::new(data);
     let (tx, rx) = tokio::sync::oneshot::channel();
@@ -214,6 +235,7 @@ async fn encrypt_bytes_async(partition_id: String, data: Vec<u8>) -> PyResult<St
 /// Python's heap as `bytes` it's beyond our control.
 #[pyfunction]
 async fn decrypt_bytes_async(partition_id: String, data_row_record: String) -> PyResult<Vec<u8>> {
+    check_ciphertext_len_py(data_row_record.len())?;
     let session = with_manager(|mgr| Ok(mgr.get_or_create_session(&partition_id)))?;
     let drr: ael::types::DataRowRecord =
         serde_json::from_str(&data_row_record).map_err(json_parse_err)?;
@@ -383,6 +405,7 @@ pub struct PySession {
 #[pymethods]
 impl PySession {
     pub fn encrypt_bytes(&self, data: &[u8]) -> PyResult<String> {
+        check_plaintext_len_py(data.len())?;
         let input = Zeroizing::new(data.to_vec());
         // Hold the GIL across the encrypt — see the module-level
         // `encrypt_bytes` for why the sync hot path must not release it.
@@ -418,6 +441,7 @@ impl PySession {
 
     /// True async encrypt — runs on Rust's tokio runtime, returns a Python coroutine.
     pub async fn encrypt_bytes_async(&self, data: Vec<u8>) -> PyResult<String> {
+        check_plaintext_len_py(data.len())?;
         let session = Arc::clone(&self.inner);
         let input = Zeroizing::new(data);
         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -434,6 +458,7 @@ impl PySession {
 
     /// True async decrypt — runs on Rust's tokio runtime, returns a Python coroutine.
     pub async fn decrypt_bytes_async(&self, data_row_record: String) -> PyResult<Vec<u8>> {
+        check_ciphertext_len_py(data_row_record.len())?;
         let session = Arc::clone(&self.inner);
         let drr: ael::types::DataRowRecord =
             serde_json::from_str(&data_row_record).map_err(json_parse_err)?;
@@ -474,6 +499,7 @@ impl PySession {
 #[allow(clippy::multiple_inherent_impl)]
 impl PySession {
     fn decrypt_raw(&self, data_row_record: &str) -> PyResult<Zeroizing<Vec<u8>>> {
+        check_ciphertext_len_py(data_row_record.len())?;
         let drr: ael::types::DataRowRecord =
             serde_json::from_str(data_row_record).map_err(json_parse_err)?;
         // Hold the GIL across the decrypt — see the module-level
@@ -574,6 +600,10 @@ struct PyLogSink {
 }
 
 impl LogSink for PyLogSink {
+    fn min_level(&self) -> log::LevelFilter {
+        DEFAULT_LOG_HOOK_MIN_LEVEL
+    }
+
     fn log(&self, record: &log::Record<'_>) {
         // Normalize to lowercase ("warn" not "WARN") to match the
         // documented set of LogEvent.level values across all bindings.
@@ -608,9 +638,16 @@ fn set_metrics_hook(callback: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
     if let Some(cb) = callback {
         let obj: Py<PyAny> = cb.clone().unbind();
         let arc = Arc::new(obj);
-        metrics::set_sink(PyMetricsSink {
-            callback: Arc::clone(&arc),
-        });
+        let sink = AsyncMetricsSink::new(
+            PyMetricsSink {
+                callback: Arc::clone(&arc),
+            },
+            AsyncMetricsConfig {
+                queue_capacity: NATIVE_HOOK_QUEUE_CAPACITY,
+            },
+        )
+        .map_err(|e| PyRuntimeError::new_err(format!("metrics hook dispatcher error: {e}")))?;
+        metrics::set_sink(sink);
         // Metrics are gated for performance; enable them when a hook is
         // installed, disable them when cleared.
         metrics::set_enabled(true);
@@ -629,12 +666,17 @@ fn set_log_hook(callback: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
     if let Some(cb) = callback {
         let obj: Py<PyAny> = cb.clone().unbind();
         let arc = Arc::new(obj);
-        set_log_sink(
-            "python",
-            Some(Arc::new(PyLogSink {
+        let sink = AsyncLogSink::new(
+            PyLogSink {
                 callback: Arc::clone(&arc),
-            })),
-        );
+            },
+            AsyncLogConfig {
+                queue_capacity: NATIVE_HOOK_QUEUE_CAPACITY,
+                min_level: DEFAULT_LOG_HOOK_MIN_LEVEL,
+            },
+        )
+        .map_err(|e| PyRuntimeError::new_err(format!("log hook dispatcher error: {e}")))?;
+        set_log_sink("python", Some(Arc::new(sink)));
         *PY_LOG_CALLBACK.lock() = Some(arc);
     } else {
         set_log_sink("python", None);
@@ -677,5 +719,25 @@ mod tests {
     fn async_runtime_builder_returns_result() {
         let rt = build_async_runtime().unwrap();
         drop(rt);
+    }
+
+    #[test]
+    fn sanitizes_anyhow_chain_for_python_callers() {
+        let err = anyhow::anyhow!("secret inner context").context("outer context");
+        let msg = sanitized_anyhow_message("decrypt", &err);
+        assert_eq!(msg, "decrypt failed: outer context");
+        assert!(!msg.contains("secret inner context"));
+    }
+
+    #[test]
+    fn native_hooks_are_bounded_and_warn_by_default() {
+        assert_eq!(NATIVE_HOOK_QUEUE_CAPACITY, 4096);
+        assert_eq!(DEFAULT_LOG_HOOK_MIN_LEVEL, log::LevelFilter::Warn);
+    }
+
+    #[test]
+    fn binding_limits_reject_oversize_inputs() {
+        assert!(check_plaintext_len_py(ael::limits::MAX_PAYLOAD_BYTES + 1).is_err());
+        assert!(check_ciphertext_len_py(ael::limits::MAX_ENVELOPE_BYTES + 1).is_err());
     }
 }
