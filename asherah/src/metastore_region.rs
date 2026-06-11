@@ -34,6 +34,14 @@ impl<M: Metastore + ?Sized> Metastore for RegionSuffixMetastore<M> {
     ) -> Result<bool, anyhow::Error> {
         self.inner.store(id, created, ekr)
     }
+    fn upsert_config_drift_guard(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<(), anyhow::Error> {
+        self.inner.upsert_config_drift_guard(id, created, ekr)
+    }
     fn region_suffix(&self) -> Option<String> {
         Some(self.suffix.clone())
     }

@@ -66,6 +66,19 @@ pub struct ConfigOptions {
     /// decryptors that lack metastore write permission.
     #[serde(rename = "SelfHealRecoveredKeys")]
     pub self_heal_recovered_keys: Option<bool>,
+    /// Emergency escape hatch: run even if the persisted TOFU configuration
+    /// drift guard conflicts with this resolved config. The guard is not
+    /// rewritten. Env override: `ASHERAH_CONFIG_DRIFT_FORCE_RUN`.
+    #[serde(rename = "ConfigDriftForceRun", alias = "ForceRunWithConfigDrift")]
+    pub config_drift_force_run: Option<bool>,
+    /// Repair escape hatch: replace the persisted TOFU configuration drift
+    /// guard with this resolved config. Env override:
+    /// `ASHERAH_CONFIG_DRIFT_FORCE_UPDATE`.
+    #[serde(
+        rename = "ConfigDriftForceUpdate",
+        alias = "ForceUpdateConfigDriftGuard"
+    )]
+    pub config_drift_force_update: Option<bool>,
     #[serde(rename = "EnableSessionCaching")]
     pub enable_session_caching: Option<bool>,
     #[serde(rename = "Verbose")]
@@ -169,7 +182,7 @@ pub struct AppliedConfig {
 }
 
 use asherah::builders::{
-    KmsConfig, MetastoreConfig, PolicyConfig, PoolConfig, ResolvedConfig,
+    ConfigDriftGuardOptions, KmsConfig, MetastoreConfig, PolicyConfig, PoolConfig, ResolvedConfig,
     TEST_DEBUG_STATIC_MASTER_KEY_HEX,
 };
 
@@ -177,6 +190,13 @@ impl ConfigOptions {
     pub fn from_json(json: &str) -> Result<Self> {
         let cfg = serde_json::from_str(json).context("invalid config JSON")?;
         Ok(cfg)
+    }
+
+    pub fn config_drift_guard_options(&self) -> ConfigDriftGuardOptions {
+        ConfigDriftGuardOptions {
+            allow_mismatch: self.config_drift_force_run.unwrap_or(false),
+            force_update: self.config_drift_force_update.unwrap_or(false),
+        }
     }
 
     /// Resolve into a structured config — no env var reads or writes.
@@ -453,16 +473,25 @@ fn resolve_rdbms_connection(
 /// Build a factory from structured config — no env var side effects.
 pub fn factory_from_config(config: &ConfigOptions) -> Result<(Factory, AppliedConfig)> {
     let (mut resolved, applied) = config.resolve()?;
-    merge_recovery_region_suffixes_from_env(&mut resolved);
-    let factory = asherah::builders::factory_from_resolved(&resolved)?;
+    let mut config_drift_guard = config.config_drift_guard_options();
+    merge_runtime_env_overrides(&mut resolved, &mut config_drift_guard);
+    let factory = asherah::builders::factory_from_resolved_with_config_drift_guard(
+        &resolved,
+        config_drift_guard,
+    )?;
     Ok((factory, applied))
 }
 
 /// Async variant — safe for concurrent use since no env vars are written.
 pub async fn factory_from_config_async(config: &ConfigOptions) -> Result<(Factory, AppliedConfig)> {
     let (mut resolved, applied) = config.resolve()?;
-    merge_recovery_region_suffixes_from_env(&mut resolved);
-    let factory = asherah::builders::factory_from_resolved_async(&resolved).await?;
+    let mut config_drift_guard = config.config_drift_guard_options();
+    merge_runtime_env_overrides(&mut resolved, &mut config_drift_guard);
+    let factory = asherah::builders::factory_from_resolved_with_config_drift_guard_async(
+        &resolved,
+        config_drift_guard,
+    )
+    .await?;
     Ok((factory, applied))
 }
 
@@ -471,7 +500,18 @@ pub async fn factory_from_config_async(config: &ConfigOptions) -> Result<(Factor
 /// while preserving order. This gives every language binding the env-based
 /// recovery lever even when it has no first-class config field for it yet.
 /// Only reads env (never writes), so it is safe for concurrent use.
-fn merge_recovery_region_suffixes_from_env(resolved: &mut ResolvedConfig) {
+fn merge_runtime_env_overrides(
+    resolved: &mut ResolvedConfig,
+    config_drift_guard: &mut ConfigDriftGuardOptions,
+) {
+    fn parse_bool(raw: &str) -> Option<bool> {
+        match raw.trim().to_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Some(true),
+            "0" | "false" | "no" | "off" => Some(false),
+            _ => None,
+        }
+    }
+
     if let Ok(raw) = std::env::var("RECOVERY_REGION_SUFFIXES") {
         for entry in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
             if !resolved.recovery_region_suffixes.iter().any(|s| s == entry) {
@@ -486,6 +526,16 @@ fn merge_recovery_region_suffixes_from_env(resolved: &mut ResolvedConfig) {
             raw.trim().to_lowercase().as_str(),
             "0" | "false" | "no" | "off"
         );
+    }
+    if let Ok(raw) = std::env::var("ASHERAH_CONFIG_DRIFT_FORCE_RUN") {
+        if let Some(force_run) = parse_bool(&raw) {
+            config_drift_guard.allow_mismatch = force_run;
+        }
+    }
+    if let Ok(raw) = std::env::var("ASHERAH_CONFIG_DRIFT_FORCE_UPDATE") {
+        if let Some(force_update) = parse_bool(&raw) {
+            config_drift_guard.force_update = force_update;
+        }
     }
 }
 

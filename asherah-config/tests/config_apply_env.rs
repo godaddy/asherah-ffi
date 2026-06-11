@@ -69,6 +69,8 @@ fn test_from_json_all_fields() {
         "KMS": "aws",
         "PreferredRegion": "us-west-2",
         "EnableRegionSuffix": true,
+        "ConfigDriftForceRun": true,
+        "ConfigDriftForceUpdate": false,
         "EnableSessionCaching": true,
         "Verbose": true,
         "SQLMetastoreDBType": "postgres",
@@ -83,6 +85,8 @@ fn test_from_json_all_fields() {
     assert_eq!(cfg.session_cache_duration, Some(300));
     assert_eq!(cfg.preferred_region.as_deref(), Some("us-west-2"));
     assert_eq!(cfg.enable_region_suffix, Some(true));
+    assert_eq!(cfg.config_drift_force_run, Some(true));
+    assert_eq!(cfg.config_drift_force_update, Some(false));
     assert_eq!(cfg.verbose, Some(true));
     assert_eq!(cfg.disable_zero_copy, Some(true));
     assert_eq!(cfg.null_data_check, Some(true));
@@ -618,6 +622,37 @@ fn test_test_debug_static_without_key_falls_back_to_test_key() {
     }
 }
 
+fn test_config_drift_guard_flags_default_false() {
+    let options = base_config().config_drift_guard_options();
+    assert!(!options.allow_mismatch);
+    assert!(!options.force_update);
+}
+
+fn test_config_drift_guard_flags_resolve_from_json() {
+    let cfg = ConfigOptions {
+        config_drift_force_run: Some(true),
+        config_drift_force_update: Some(true),
+        ..base_config()
+    };
+    let options = cfg.config_drift_guard_options();
+    assert!(options.allow_mismatch);
+    assert!(options.force_update);
+}
+
+fn test_config_drift_guard_aliases_parse() {
+    let json = r#"{
+        "ServiceName": "svc",
+        "ProductID": "prod",
+        "Metastore": "memory",
+        "KMS": "test-debug-static",
+        "ForceRunWithConfigDrift": true,
+        "ForceUpdateConfigDriftGuard": true
+    }"#;
+    let cfg = ConfigOptions::from_json(json).unwrap();
+    assert_eq!(cfg.config_drift_force_run, Some(true));
+    assert_eq!(cfg.config_drift_force_update, Some(true));
+}
+
 fn test_no_env_side_effects() {
     // Set some env vars that apply_env used to write
     let sentinel = format!("sentinel-{}", std::process::id());
@@ -764,6 +799,18 @@ fn main() {
     run_test!(
         "test_test_debug_static_without_key_falls_back_to_test_key",
         test_test_debug_static_without_key_falls_back_to_test_key
+    );
+    run_test!(
+        "test_config_drift_guard_flags_default_false",
+        test_config_drift_guard_flags_default_false
+    );
+    run_test!(
+        "test_config_drift_guard_flags_resolve_from_json",
+        test_config_drift_guard_flags_resolve_from_json
+    );
+    run_test!(
+        "test_config_drift_guard_aliases_parse",
+        test_config_drift_guard_aliases_parse
     );
     run_test!("test_no_env_side_effects", test_no_env_side_effects);
 

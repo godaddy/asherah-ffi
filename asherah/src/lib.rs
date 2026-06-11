@@ -21,6 +21,7 @@ pub mod api;
 pub mod builders;
 pub mod cache;
 pub mod config;
+pub mod config_drift_guard;
 pub mod internal;
 pub mod kms;
 pub mod kms_aws;

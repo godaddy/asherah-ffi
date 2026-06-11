@@ -153,6 +153,27 @@ impl Metastore for MySqlMetastore {
         Ok(stored)
     }
 
+    fn upsert_config_drift_guard(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<(), anyhow::Error> {
+        log::debug!("mysql config drift guard upsert: id={id} created={created}");
+        let rec = ekr.to_json_fast();
+        let mut conn = self.conn()?;
+        let ts = epoch_to_utc_datetime(created);
+        conn.exec_drop(
+            "INSERT INTO encryption_key(id, created, key_record) VALUES(?, ?, ?) \
+             ON DUPLICATE KEY UPDATE key_record=VALUES(key_record)",
+            (id, &ts, rec),
+        )
+        .with_context(|| {
+            format!("MySQL config drift guard upsert failed for id={id} created={created}")
+        })?;
+        Ok(())
+    }
+
     // Async methods use spawn_blocking (reuses thread pool) instead of
     // std::thread::spawn (creates new OS thread per call). The mysql crate
     // doesn't call block_on internally, so spawn_blocking is safe here.

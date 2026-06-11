@@ -286,6 +286,23 @@ fn self_heal_recovered_keys_from_env() -> bool {
     }
 }
 
+fn bool_from_env(k: &str) -> Option<bool> {
+    std::env::var(k)
+        .ok()
+        .and_then(|v| match v.trim().to_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Some(true),
+            "0" | "false" | "no" | "off" => Some(false),
+            _ => None,
+        })
+}
+
+pub fn config_drift_guard_options_from_env() -> ConfigDriftGuardOptions {
+    ConfigDriftGuardOptions {
+        allow_mismatch: bool_from_env("ASHERAH_CONFIG_DRIFT_FORCE_RUN").unwrap_or(false),
+        force_update: bool_from_env("ASHERAH_CONFIG_DRIFT_FORCE_UPDATE").unwrap_or(false),
+    }
+}
+
 pub fn config_from_env() -> crate::Config {
     let service = std::env::var("SERVICE_NAME").unwrap_or_else(|_| "service".to_string());
     let product = std::env::var("PRODUCT_ID").unwrap_or_else(|_| "product".to_string());
@@ -408,6 +425,14 @@ impl Metastore for DynMetastore {
     ) -> Result<bool, anyhow::Error> {
         self.0.store(id, created, ekr)
     }
+    fn upsert_config_drift_guard(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &crate::types::EnvelopeKeyRecord,
+    ) -> Result<(), anyhow::Error> {
+        self.0.upsert_config_drift_guard(id, created, ekr)
+    }
     fn region_suffix(&self) -> Option<String> {
         self.0.region_suffix()
     }
@@ -431,6 +456,16 @@ impl Metastore for DynMetastore {
         ekr: &crate::types::EnvelopeKeyRecord,
     ) -> Result<bool, anyhow::Error> {
         self.0.store_async(id, created, ekr).await
+    }
+    async fn upsert_config_drift_guard_async(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &crate::types::EnvelopeKeyRecord,
+    ) -> Result<(), anyhow::Error> {
+        self.0
+            .upsert_config_drift_guard_async(id, created, ekr)
+            .await
     }
 }
 
@@ -502,6 +537,15 @@ pub struct PolicyConfig {
     pub session_cache_ttl_s: Option<i64>,
     pub shared_intermediate_key_cache: Option<bool>,
     pub intermediate_key_cache_max_size: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ConfigDriftGuardOptions {
+    /// Allow startup to continue after a mismatched guard is detected. The
+    /// guard is not rewritten.
+    pub allow_mismatch: bool,
+    /// Replace the reserved guard record with this resolved configuration.
+    pub force_update: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -999,6 +1043,15 @@ async fn build_kms_async(
 pub fn factory_from_resolved(
     config: &ResolvedConfig,
 ) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
+    factory_from_resolved_with_config_drift_guard(config, ConfigDriftGuardOptions::default())
+}
+
+/// Build a factory from fully resolved config with explicit config-drift guard
+/// repair options.
+pub fn factory_from_resolved_with_config_drift_guard(
+    config: &ResolvedConfig,
+    config_drift_guard: ConfigDriftGuardOptions,
+) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
     crate::process_hardening::ensure_process_hardened()
         .context("failed to initialize process hardening")?;
     let aws_profile_name = config.aws_profile_name.as_deref();
@@ -1011,9 +1064,24 @@ pub fn factory_from_resolved(
         &config.policy,
     );
     let store_dyn = build_metastore(&config.metastore, aws_profile_name)?;
-    let metastore = Arc::new(DynMetastore(store_dyn));
+    let effective_region_suffix = store_dyn
+        .region_suffix()
+        .filter(|suffix| !suffix.is_empty())
+        .or_else(|| {
+            config
+                .region_suffix
+                .clone()
+                .filter(|suffix| !suffix.is_empty())
+        });
     let crypto = Arc::new(crate::aead::AES256GCM::new());
     let kms_dyn = build_kms(&config.kms, &crypto, aws_profile_name)?;
+    crate::config_drift_guard::enforce_config_drift_guard(
+        store_dyn.as_ref(),
+        config,
+        config_drift_guard,
+        effective_region_suffix.as_deref(),
+    )?;
+    let metastore = Arc::new(DynMetastore(store_dyn));
     let kms = Arc::new(DynKms(kms_dyn));
     Ok(crate::api::new_session_factory(cfg, metastore, kms, crypto))
 }
@@ -1021,6 +1089,15 @@ pub fn factory_from_resolved(
 /// Async variant of factory_from_resolved.
 pub async fn factory_from_resolved_async(
     config: &ResolvedConfig,
+) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
+    factory_from_resolved_with_config_drift_guard_async(config, ConfigDriftGuardOptions::default())
+        .await
+}
+
+/// Async variant of factory_from_resolved_with_config_drift_guard.
+pub async fn factory_from_resolved_with_config_drift_guard_async(
+    config: &ResolvedConfig,
+    config_drift_guard: ConfigDriftGuardOptions,
 ) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
     crate::process_hardening::ensure_process_hardened()
         .context("failed to initialize process hardening")?;
@@ -1034,9 +1111,25 @@ pub async fn factory_from_resolved_async(
         &config.policy,
     );
     let store_dyn = build_metastore_async(&config.metastore, aws_profile_name).await?;
-    let metastore = Arc::new(DynMetastore(store_dyn));
+    let effective_region_suffix = store_dyn
+        .region_suffix()
+        .filter(|suffix| !suffix.is_empty())
+        .or_else(|| {
+            config
+                .region_suffix
+                .clone()
+                .filter(|suffix| !suffix.is_empty())
+        });
     let crypto = Arc::new(crate::aead::AES256GCM::new());
     let kms_dyn = build_kms_async(&config.kms, &crypto, aws_profile_name).await?;
+    crate::config_drift_guard::enforce_config_drift_guard_async(
+        store_dyn.as_ref(),
+        config,
+        config_drift_guard,
+        effective_region_suffix.as_deref(),
+    )
+    .await?;
+    let metastore = Arc::new(DynMetastore(store_dyn));
     let kms = Arc::new(DynKms(kms_dyn));
     Ok(crate::api::new_session_factory(cfg, metastore, kms, crypto))
 }
@@ -1268,7 +1361,7 @@ pub fn resolve_from_env() -> anyhow::Result<ResolvedConfig> {
 pub fn factory_from_env(
 ) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
     let resolved = resolve_from_env()?;
-    factory_from_resolved(&resolved)
+    factory_from_resolved_with_config_drift_guard(&resolved, config_drift_guard_options_from_env())
 }
 
 /// Async variant of metastore_from_env — uses async constructors for DynamoDB.
@@ -1348,7 +1441,11 @@ pub async fn metastore_from_env_async() -> anyhow::Result<MetastoreEnvResult> {
 pub async fn factory_from_env_async(
 ) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
     let resolved = resolve_from_env()?;
-    factory_from_resolved_async(&resolved).await
+    factory_from_resolved_with_config_drift_guard_async(
+        &resolved,
+        config_drift_guard_options_from_env(),
+    )
+    .await
 }
 
 #[cfg(test)]

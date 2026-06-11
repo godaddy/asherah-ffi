@@ -188,6 +188,15 @@ struct Cli {
     #[arg(long, env = "ASHERAH_ENABLE_REGION_SUFFIX")]
     enable_region_suffix: bool,
 
+    /// Continue startup after a conflicting persisted configuration drift guard is detected.
+    /// The guard is not rewritten.
+    #[arg(long, env = "ASHERAH_CONFIG_DRIFT_FORCE_RUN")]
+    config_drift_force_run: bool,
+
+    /// Replace the persisted configuration drift guard with the current resolved config.
+    #[arg(long, env = "ASHERAH_CONFIG_DRIFT_FORCE_UPDATE")]
+    config_drift_force_update: bool,
+
     /// Enable verbose logging output. When set, forces the log filter to
     /// `info,asherah=debug,asherah_server=debug` regardless of `RUST_LOG`,
     /// matching the Go reference server's posture that `ASHERAH_VERBOSE`
@@ -381,6 +390,8 @@ fn cli_to_config(cli: &Cli) -> asherah_config::ConfigOptions {
         dynamo_db_table_name: cli.dynamodb_table_name.clone(),
         replica_read_consistency: cli.replica_read_consistency.map(|m| m.as_str().to_string()),
         enable_region_suffix: Some(cli.enable_region_suffix),
+        config_drift_force_run: Some(cli.config_drift_force_run),
+        config_drift_force_update: Some(cli.config_drift_force_update),
         verbose: Some(cli.verbose),
         ..Default::default()
     }

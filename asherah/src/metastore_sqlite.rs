@@ -98,6 +98,28 @@ impl Metastore for SqliteMetastore {
         log::debug!("sqlite store: id={id} created={created} stored={stored}");
         Ok(stored)
     }
+    fn upsert_config_drift_guard(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<(), anyhow::Error> {
+        log::debug!("sqlite config drift guard upsert: id={id} created={created}");
+        let rec = serde_json::to_string(ekr).with_context(|| {
+            format!("SQLite config drift guard: failed to serialize record for id={id}")
+        })?;
+        let conn = self.conn.lock();
+        conn.execute(
+            "INSERT INTO encryption_key(id, created, key_record) \
+             VALUES (?1, datetime(?2, 'unixepoch'), ?3) \
+             ON CONFLICT(id, created) DO UPDATE SET key_record=excluded.key_record",
+            params![id, created, rec],
+        )
+        .with_context(|| {
+            format!("SQLite config drift guard upsert failed for id={id} created={created}")
+        })?;
+        Ok(())
+    }
     fn region_suffix(&self) -> Option<String> {
         None
     }

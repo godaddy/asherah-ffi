@@ -8,30 +8,39 @@ relevant to metastore/key layout and cannot be safely changed after data exists,
 such as region/extension suffix behavior, should be recorded once and used as a
 configuration drift guard for future clients.
 
-This must be implemented backwards compatibly using a TOFU (trust on first use)
-model. Existing repositories and metastores that do not yet have a drift-check
-metadata record must not break on upgrade. If the record is missing, a correctly
-configured client should populate it from its resolved configuration, and future
-clients should compare against that persisted value. The design should support a
-safe first-run/adoption path that can initialize the metadata record without
-changing existing key record semantics, requiring destructive migrations, or
-preventing existing correctly configured clients from continuing to operate.
+Implemented in `asherah/src/config_drift_guard.rs` using a backwards-compatible
+TOFU (trust on first use) model. Existing repositories and metastores that do
+not yet have a drift-check metadata record do not require a migration. If the
+record is missing, the first correctly configured client inserts it using the
+existing `encryption_key`/`KeyRecord` shape. Future clients compare their
+resolved write-layout configuration against the persisted record.
 
-On startup, Asherah clients should load this persisted drift-check record and
-compare it with their resolved runtime configuration. If a mismatch is detected,
-startup should fail closed before the client can write keys or data row records
-that corrupt or fork the existing repository layout.
+The reserved row is scoped by service/product:
 
-An explicit override flag or environment variable may be allowed for emergency
-operation. Even when overridden, the client should still perform the drift check
-and log loudly that a misconfiguration was detected and bypassed.
+- `Id`: `__asherah_internal_config_drift_guard_v1__:<blake2b-base64url-scope>`
+- `Created`: `946684800` (`2000-01-01T00:00:00Z`)
+- `KeyRecord.Key`: base64 of compact JSON drift payload
+- no TTL or expiration attribute
 
-Open design points:
+The JSON payload records the fields that define key/metastore write layout:
 
-- Which configuration fields are safety-critical and immutable after first write.
-- Where the drift-check record lives for each metastore without colliding with
-  existing Asherah key records.
-- How first-writer initialization is made atomic across concurrent clients.
-- How legacy repositories without a drift-check record perform TOFU adoption
-  safely, including concurrent first-writer behavior.
-- Exact override name, scope, and audit/logging behavior.
+- schema version
+- service name and product id
+- effective region suffix and whether suffixing is enabled
+- key id format version
+- AEAD algorithm (`AES-256-GCM`)
+- data row record format (`asherah-json-v1`)
+- non-secret metastore identity
+- non-secret KMS identity
+
+Startup fails closed on mismatch before key writes. Two explicit repair levers
+exist:
+
+- `ASHERAH_CONFIG_DRIFT_FORCE_RUN=true`, or JSON `ConfigDriftForceRun`, runs
+  despite a mismatch and does not rewrite the guard.
+- `ASHERAH_CONFIG_DRIFT_FORCE_UPDATE=true`, or JSON `ConfigDriftForceUpdate`,
+  replaces the reserved guard row with the current resolved configuration.
+
+Both paths still perform the drift check and log loudly. The update path uses
+an internal metastore replacement hook only for this reserved guard row; normal
+key records remain insert-if-absent.

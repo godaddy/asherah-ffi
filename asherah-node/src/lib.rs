@@ -95,6 +95,8 @@ pub struct AsherahConfig {
     pub preferred_region: Option<String>,
     pub aws_profile_name: Option<String>,
     pub enable_region_suffix: Option<bool>,
+    pub config_drift_force_run: Option<bool>,
+    pub config_drift_force_update: Option<bool>,
     pub enable_session_caching: Option<bool>,
     pub replica_read_consistency: Option<String>,
     pub verbose: Option<bool>,
@@ -154,6 +156,8 @@ fn to_config_options(cfg: &AsherahConfig) -> asherah_config::ConfigOptions {
         // apply via factory_from_config.
         recovery_region_suffixes: None,
         self_heal_recovered_keys: None,
+        config_drift_force_run: cfg.config_drift_force_run,
+        config_drift_force_update: cfg.config_drift_force_update,
         enable_session_caching: cfg.enable_session_caching,
         verbose: cfg.verbose,
         sql_metastore_db_type: cfg.sql_metastore_db_type.clone(),
