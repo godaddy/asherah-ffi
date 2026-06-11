@@ -54,6 +54,7 @@ pub mod partition;
 pub mod policy;
 #[cfg(feature = "mysql")]
 pub mod pool_mysql;
+pub mod process_hardening;
 pub mod session;
 /// Implementation-detail of `session.rs` — caches `PublicSession`
 /// instances by partition. External callers should use the

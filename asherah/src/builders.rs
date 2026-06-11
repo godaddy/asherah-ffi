@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use anyhow::Context as _;
 use async_trait::async_trait;
 use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
 
@@ -1001,6 +1002,8 @@ async fn build_kms_async(
 pub fn factory_from_resolved(
     config: &ResolvedConfig,
 ) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
+    crate::process_hardening::ensure_process_hardened()
+        .context("failed to initialize process hardening")?;
     let aws_profile_name = config.aws_profile_name.as_deref();
     let cfg = build_config_from_policy(
         &config.service_name,
@@ -1022,6 +1025,8 @@ pub fn factory_from_resolved(
 pub async fn factory_from_resolved_async(
     config: &ResolvedConfig,
 ) -> anyhow::Result<crate::session::PublicFactory<crate::aead::AES256GCM, DynKms, DynMetastore>> {
+    crate::process_hardening::ensure_process_hardened()
+        .context("failed to initialize process hardening")?;
     let aws_profile_name = config.aws_profile_name.as_deref();
     let cfg = build_config_from_policy(
         &config.service_name,

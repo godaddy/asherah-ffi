@@ -338,6 +338,9 @@ fn cli_to_config(cli: &Cli) -> asherah_config::ConfigOptions {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    asherah::process_hardening::ensure_process_hardened()
+        .context("failed to initialize process hardening")?;
+
     let cli = Cli::parse();
 
     // Drop-in compatibility with the Go reference: ASHERAH_VERBOSE is the
