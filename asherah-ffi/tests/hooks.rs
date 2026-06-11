@@ -14,8 +14,9 @@ use std::time::Duration;
 use asherah::metrics;
 use asherah_ffi::{
     asherah_clear_log_hook, asherah_clear_metrics_hook, asherah_set_log_hook,
-    asherah_set_log_hook_sync, asherah_set_metrics_hook, asherah_set_metrics_hook_sync,
-    ASHERAH_LOG_TRACE, ASHERAH_LOG_WARN, ASHERAH_METRIC_ENCRYPT,
+    asherah_set_log_hook_sync, asherah_set_log_hook_with_config, asherah_set_metrics_hook,
+    asherah_set_metrics_hook_sync, asherah_set_metrics_hook_with_config, ASHERAH_LOG_TRACE,
+    ASHERAH_LOG_WARN, ASHERAH_METRIC_ENCRYPT,
 };
 
 // All tests in this binary touch the same global hook registration. A
@@ -146,6 +147,20 @@ fn log_hook_null_returns_error() {
 }
 
 #[test]
+fn log_hook_rejects_oversized_queue_capacity() {
+    let _t = HookTest::new();
+    let rc = unsafe {
+        asherah_set_log_hook_with_config(
+            Some(log_cb),
+            std::ptr::null_mut(),
+            65_537,
+            ASHERAH_LOG_WARN,
+        )
+    };
+    assert_eq!(rc, -1);
+}
+
+#[test]
 fn log_hook_replace_works() {
     let _t = HookTest::new();
     unsafe { asherah_set_log_hook(Some(log_cb), std::ptr::null_mut()) };
@@ -250,6 +265,15 @@ fn metrics_hook_replace_works() {
 fn metrics_hook_null_returns_error() {
     let _t = HookTest::new();
     let rc = unsafe { asherah_set_metrics_hook(None, std::ptr::null_mut()) };
+    assert_eq!(rc, -1);
+}
+
+#[test]
+fn metrics_hook_rejects_oversized_queue_capacity() {
+    let _t = HookTest::new();
+    let rc = unsafe {
+        asherah_set_metrics_hook_with_config(Some(metrics_cb), std::ptr::null_mut(), 65_537)
+    };
     assert_eq!(rc, -1);
 }
 

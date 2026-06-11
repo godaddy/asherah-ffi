@@ -462,6 +462,31 @@ impl Metastore for PostgresMetastore {
         Ok(stored)
     }
 
+    fn upsert_config_drift_guard(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<(), anyhow::Error> {
+        log::debug!("postgres config drift guard upsert: id={id} created={created}");
+        let mut c = self.client()?;
+        let v = ekr.to_json_fast();
+        let v_json: serde_json::Value = serde_json::from_str(&v).with_context(|| {
+            format!("Postgres config drift guard: failed to re-parse record JSON for id={id}")
+        })?;
+        let created_f = created as f64;
+        c.execute(
+            "INSERT INTO encryption_key(id, created, key_record) \
+             VALUES ($1, to_timestamp($2), $3) \
+             ON CONFLICT (id, created) DO UPDATE SET key_record = EXCLUDED.key_record",
+            &[&id, &created_f, &v_json],
+        )
+        .with_context(|| {
+            format!("Postgres config drift guard upsert failed for id={id} created={created}")
+        })?;
+        Ok(())
+    }
+
     // The sync postgres crate does blocking I/O with internal block_on for
     // connection management. spawn_blocking is safe here because blocking pool
     // threads don't have the runtime "entered" (only Handle is available).

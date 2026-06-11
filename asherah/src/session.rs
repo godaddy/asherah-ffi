@@ -287,6 +287,7 @@ impl<
     // Public API compatible with Go shapes
 
     pub fn encrypt(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
+        crate::limits::check_plaintext_len(data.len())?;
         let ik_id = self.f.partition.intermediate_key_id();
         log::debug!("encrypt: loading IK id={ik_id}");
         // Load or create IK
@@ -392,6 +393,7 @@ impl<
     }
 
     pub fn decrypt(&self, drr: crate::types::DataRowRecord) -> anyhow::Result<Vec<u8>> {
+        crate::limits::check_data_row_record(&drr)?;
         let key = drr
             .key
             .ok_or_else(|| anyhow::anyhow!("decrypt: DRR missing key envelope"))?;
@@ -947,6 +949,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     }
 
     pub fn encrypt(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
+        crate::limits::check_plaintext_len(data.len())?;
         self.ensure_valid_partition()?;
         // Per-session AND global gate: only call Instant::now() when both
         // are true. Per-session is set at factory construction; the global
@@ -1442,6 +1445,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     }
 
     pub fn decrypt(&self, drr: crate::types::DataRowRecord) -> anyhow::Result<Vec<u8>> {
+        crate::limits::check_data_row_record(&drr)?;
         self.ensure_valid_partition()?;
         // Per-session AND global gate: only call Instant::now() when both
         // are true. Per-session is set at factory construction; the global
@@ -1775,6 +1779,7 @@ impl<
 
     /// Async encrypt — uses async metastore methods, no spawn_blocking needed.
     pub async fn encrypt_async(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
+        crate::limits::check_plaintext_len(data.len())?;
         self.ensure_valid_partition()?;
         // Per-session AND global gate: only call Instant::now() when both
         // are true. Per-session is set at factory construction; the global
@@ -1855,6 +1860,7 @@ impl<
 
     /// Async decrypt — uses async metastore methods, no spawn_blocking needed.
     pub async fn decrypt_async(&self, drr: crate::types::DataRowRecord) -> anyhow::Result<Vec<u8>> {
+        crate::limits::check_data_row_record(&drr)?;
         self.ensure_valid_partition()?;
         // Per-session AND global gate: only call Instant::now() when both
         // are true. Per-session is set at factory construction; the global

@@ -188,6 +188,15 @@ struct Cli {
     #[arg(long, env = "ASHERAH_ENABLE_REGION_SUFFIX")]
     enable_region_suffix: bool,
 
+    /// Continue startup after a conflicting persisted configuration drift guard is detected.
+    /// The guard is not rewritten.
+    #[arg(long, env = "ASHERAH_CONFIG_DRIFT_FORCE_RUN")]
+    config_drift_force_run: bool,
+
+    /// Replace the persisted configuration drift guard with the current resolved config.
+    #[arg(long, env = "ASHERAH_CONFIG_DRIFT_FORCE_UPDATE")]
+    config_drift_force_update: bool,
+
     /// Enable verbose logging output. When set, forces the log filter to
     /// `info,asherah=debug,asherah_server=debug` regardless of `RUST_LOG`,
     /// matching the Go reference server's posture that `ASHERAH_VERBOSE`
@@ -273,6 +282,56 @@ fn parse_octal_mode(s: &str) -> Result<u32, String> {
     Ok(mode)
 }
 
+#[cfg(unix)]
+struct UmaskGuard(rustix::fs::Mode);
+
+#[cfg(unix)]
+impl UmaskGuard {
+    fn set(mask: u32) -> Self {
+        let previous =
+            rustix::process::umask(rustix::fs::Mode::from_raw_mode(mask as rustix::fs::RawMode));
+        Self(previous)
+    }
+}
+
+#[cfg(unix)]
+impl Drop for UmaskGuard {
+    fn drop(&mut self) {
+        rustix::process::umask(self.0);
+    }
+}
+
+#[cfg(unix)]
+fn bind_unix_listener(
+    socket_path: &str,
+    socket_mode: Option<u32>,
+) -> Result<tokio::net::UnixListener> {
+    let listener = if let Some(mode) = socket_mode {
+        let restrictive_umask = (!mode) & 0o777;
+        let _guard = UmaskGuard::set(restrictive_umask);
+        tokio::net::UnixListener::bind(socket_path).context("failed to bind Unix socket")?
+    } else {
+        tokio::net::UnixListener::bind(socket_path).context("failed to bind Unix socket")?
+    };
+
+    if let Some(mode) = socket_mode {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(mode);
+        std::fs::set_permissions(socket_path, perms)
+            .with_context(|| format!("failed to set socket mode {mode:o} on '{socket_path}'"))?;
+    }
+
+    Ok(listener)
+}
+
+#[cfg(not(unix))]
+fn bind_unix_listener(
+    socket_path: &str,
+    _socket_mode: Option<u32>,
+) -> Result<tokio::net::UnixListener> {
+    tokio::net::UnixListener::bind(socket_path).context("failed to bind Unix socket")
+}
+
 /// Parse region map from Go-style `REGION1=ARN1[,REGION2=ARN2]` or JSON format.
 fn parse_region_map(s: &str) -> Option<std::collections::HashMap<String, String>> {
     let trimmed = s.trim();
@@ -331,6 +390,8 @@ fn cli_to_config(cli: &Cli) -> asherah_config::ConfigOptions {
         dynamo_db_table_name: cli.dynamodb_table_name.clone(),
         replica_read_consistency: cli.replica_read_consistency.map(|m| m.as_str().to_string()),
         enable_region_suffix: Some(cli.enable_region_suffix),
+        config_drift_force_run: Some(cli.config_drift_force_run),
+        config_drift_force_update: Some(cli.config_drift_force_update),
         verbose: Some(cli.verbose),
         ..Default::default()
     }
@@ -400,7 +461,9 @@ async fn main() -> Result<()> {
         shutdown_rx.clone(),
         session_tasks.clone(),
     );
-    let grpc_svc = proto::app_encryption_server::AppEncryptionServer::new(svc);
+    let grpc_svc = proto::app_encryption_server::AppEncryptionServer::new(svc)
+        .max_decoding_message_size(asherah::limits::MAX_ENVELOPE_BYTES)
+        .max_encoding_message_size(asherah::limits::MAX_ENVELOPE_BYTES);
 
     // Remove stale socket file from previous run (only if it's a socket)
     if let Ok(meta) = std::fs::symlink_metadata(&socket_path) {
@@ -419,24 +482,7 @@ async fn main() -> Result<()> {
         drop(std::fs::remove_file(&socket_path));
     }
 
-    let listener =
-        tokio::net::UnixListener::bind(&socket_path).context("failed to bind Unix socket")?;
-
-    // Only tighten permissions when the operator explicitly opts in via
-    // `--socket-mode` / `ASHERAH_SOCKET_MODE`. The Go reference server
-    // does not chmod its socket (it inherits umask-default permissions,
-    // typically 0o666); tightening unconditionally broke drop-in
-    // deployments where the sidecar runs under a different UID than the
-    // gRPC client (e.g. supervisord-managed asherah-server vs Apache PHP
-    // under APACHE_RUN_USER). Operators on multi-tenant hosts who want
-    // the socket restricted should set the mode explicitly.
-    #[cfg(unix)]
-    if let Some(mode) = cli.socket_mode {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(mode);
-        std::fs::set_permissions(&socket_path, perms)
-            .with_context(|| format!("failed to set socket mode {mode:o} on '{socket_path}'"))?;
-    }
+    let listener = bind_unix_listener(&socket_path, cli.socket_mode)?;
 
     let incoming = tokio_stream::wrappers::UnixListenerStream::new(listener);
 
@@ -670,5 +716,19 @@ mod tests {
             resolve_socket_path(Some(""), Some("/b/alias.sock")),
             "/b/alias.sock"
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bind_unix_listener_applies_requested_socket_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("asherah.sock");
+        let path_str = path.to_str().unwrap();
+        let listener = bind_unix_listener(path_str, Some(0o600)).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        drop(listener);
     }
 }

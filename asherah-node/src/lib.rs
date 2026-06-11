@@ -46,6 +46,8 @@ struct GlobalState {
 
 static STATE: Lazy<Mutex<Option<GlobalState>>> = Lazy::new(|| Mutex::new(None));
 static DEBUG_ENABLED: AtomicBool = AtomicBool::new(false);
+const NATIVE_HOOK_QUEUE_CAPACITY: usize = 4096;
+const DEFAULT_LOG_HOOK_MIN_LEVEL: log::LevelFilter = log::LevelFilter::Warn;
 
 fn is_debug() -> bool {
     DEBUG_ENABLED.load(Ordering::Relaxed)
@@ -54,6 +56,23 @@ fn debug_log(msg: &str) {
     if is_debug() {
         log::debug!("[asherah-node] {msg}");
     }
+}
+
+fn sanitized_anyhow_message(op: &str, err: &anyhow::Error) -> String {
+    format!("{op} failed: {err}")
+}
+
+fn anyhow_to_napi(op: &'static str, err: anyhow::Error) -> Error {
+    log::warn!("{op} failed: {err:#}");
+    Error::from_reason(sanitized_anyhow_message(op, &err))
+}
+
+fn check_plaintext_len_napi(len: usize) -> Result<()> {
+    asherah::limits::check_plaintext_len(len).map_err(|err| Error::from_reason(err.to_string()))
+}
+
+fn check_ciphertext_len_napi(len: usize) -> Result<()> {
+    asherah::limits::check_ciphertext_len(len).map_err(|err| Error::from_reason(err.to_string()))
 }
 
 #[derive(Debug)]
@@ -76,6 +95,8 @@ pub struct AsherahConfig {
     pub preferred_region: Option<String>,
     pub aws_profile_name: Option<String>,
     pub enable_region_suffix: Option<bool>,
+    pub config_drift_force_run: Option<bool>,
+    pub config_drift_force_update: Option<bool>,
     pub enable_session_caching: Option<bool>,
     pub replica_read_consistency: Option<String>,
     pub verbose: Option<bool>,
@@ -135,6 +156,8 @@ fn to_config_options(cfg: &AsherahConfig) -> asherah_config::ConfigOptions {
         // apply via factory_from_config.
         recovery_region_suffixes: None,
         self_heal_recovered_keys: None,
+        config_drift_force_run: cfg.config_drift_force_run,
+        config_drift_force_update: cfg.config_drift_force_update,
         enable_session_caching: cfg.enable_session_caching,
         verbose: cfg.verbose,
         sql_metastore_db_type: cfg.sql_metastore_db_type.clone(),
@@ -165,8 +188,8 @@ fn to_config_options(cfg: &AsherahConfig) -> asherah_config::ConfigOptions {
 #[napi]
 pub fn setup(config: AsherahConfig) -> Result<()> {
     let opts = to_config_options(&config);
-    let (factory, applied) = asherah_config::factory_from_config(&opts)
-        .map_err(|e| Error::from_reason(format!("setup error: {e:#}")))?;
+    let (factory, applied) =
+        asherah_config::factory_from_config(&opts).map_err(|e| anyhow_to_napi("setup", e))?;
     // Always enable per-factory metrics so an installed metrics hook
     // actually fires for encrypt/decrypt/store/load events. The
     // additional cost is one Instant::now() per encrypt regardless of
@@ -208,7 +231,7 @@ pub async fn setup_async(config: AsherahConfig) -> Result<()> {
     let opts = to_config_options(&config);
     let (factory, applied) = asherah_config::factory_from_config_async(&opts)
         .await
-        .map_err(|e| Error::from_reason(format!("setup error: {e:#}")))?;
+        .map_err(|e| anyhow_to_napi("setup", e))?;
     let factory = factory.with_metrics(true);
 
     let dbg_env = std::env::var("ASHERAH_NODE_DEBUG")
@@ -247,7 +270,7 @@ pub fn shutdown() -> Result<()> {
         state
             .factory
             .close()
-            .map_err(|e| Error::from_reason(format!("shutdown error: {e:#}")))?;
+            .map_err(|e| anyhow_to_napi("shutdown", e))?;
     }
     DEBUG_ENABLED.store(false, Ordering::Relaxed);
     Ok(())
@@ -292,7 +315,7 @@ fn with_session<R>(partition_id: &str, fcall: impl FnOnce(&Session) -> Result<R>
             let result = fcall(&session);
             let close_result = session
                 .close()
-                .map_err(|e| Error::from_reason(format!("session close error: {e:#}")));
+                .map_err(|e| anyhow_to_napi("session close", e));
             return match (result, close_result) {
                 (Ok(value), Ok(())) => Ok(value),
                 (Ok(_), Err(e)) | (Err(e), Ok(())) => Err(e),
@@ -351,12 +374,11 @@ pub fn setenv(env: String) -> Result<()> {
 
 #[napi]
 pub fn encrypt(partition_id: String, data: Buffer) -> Result<String> {
+    check_plaintext_len_napi(data.len())?;
     let t0 = Instant::now();
     let drr = with_session(&partition_id, |s| {
         let t_core0 = Instant::now();
-        let r = s
-            .encrypt(&data)
-            .map_err(|e| Error::from_reason(format!("encrypt error: {e:#}")));
+        let r = s.encrypt(&data).map_err(|e| anyhow_to_napi("encrypt", e));
         debug_log(&format!(
             "encrypt core {} us",
             t_core0.elapsed().as_micros()
@@ -375,11 +397,12 @@ pub fn encrypt(partition_id: String, data: Buffer) -> Result<String> {
 
 #[napi]
 pub async fn encrypt_async(partition_id: String, data: Buffer) -> Result<String> {
+    check_plaintext_len_napi(data.len())?;
     let (session, cached) = get_session_arc(&partition_id)?;
     let drr = session
         .encrypt_async(&data)
         .await
-        .map_err(|e| Error::from_reason(format!("encrypt error: {e:#}")))?;
+        .map_err(|e| anyhow_to_napi("encrypt", e))?;
     if !cached {
         drop(session.close());
     }
@@ -388,6 +411,7 @@ pub async fn encrypt_async(partition_id: String, data: Buffer) -> Result<String>
 
 #[napi]
 pub fn decrypt(partition_id: String, data_row_record: Buffer) -> Result<Buffer> {
+    check_ciphertext_len_napi(data_row_record.len())?;
     let t0 = Instant::now();
     let t_parse0 = Instant::now();
     let drr: asherah::types::DataRowRecord = serde_json::from_slice(&data_row_record)
@@ -398,9 +422,7 @@ pub fn decrypt(partition_id: String, data_row_record: Buffer) -> Result<Buffer> 
     ));
     let pt = with_session(&partition_id, |s| {
         let t_core0 = Instant::now();
-        let r = s
-            .decrypt(drr)
-            .map_err(|e| Error::from_reason(format!("decrypt error: {e:#}")));
+        let r = s.decrypt(drr).map_err(|e| anyhow_to_napi("decrypt", e));
         debug_log(&format!(
             "decrypt core {} us",
             t_core0.elapsed().as_micros()
@@ -413,13 +435,14 @@ pub fn decrypt(partition_id: String, data_row_record: Buffer) -> Result<Buffer> 
 
 #[napi]
 pub async fn decrypt_async(partition_id: String, data_row_record: Buffer) -> Result<Buffer> {
+    check_ciphertext_len_napi(data_row_record.len())?;
     let drr: asherah::types::DataRowRecord = serde_json::from_slice(&data_row_record)
         .map_err(|e| Error::from_reason(format!("invalid DataRowRecord JSON: {e}")))?;
     let (session, cached) = get_session_arc(&partition_id)?;
     let pt = session
         .decrypt_async(drr)
         .await
-        .map_err(|e| Error::from_reason(format!("decrypt error: {e:#}")))?;
+        .map_err(|e| anyhow_to_napi("decrypt", e))?;
     if !cached {
         drop(session.close());
     }
@@ -438,12 +461,14 @@ pub async fn encrypt_string_async(partition_id: String, data: String) -> Result<
 
 #[napi]
 pub fn decrypt_string(partition_id: String, drr: String) -> Result<String> {
+    check_ciphertext_len_napi(drr.len())?;
     let buf = decrypt(partition_id, Buffer::from(drr.into_bytes()))?;
     String::from_utf8(buf.to_vec()).map_err(|e| Error::from_reason(format!("utf8 error: {e}")))
 }
 
 #[napi]
 pub async fn decrypt_string_async(partition_id: String, drr: String) -> Result<String> {
+    check_ciphertext_len_napi(drr.len())?;
     let buf = decrypt_async(partition_id, Buffer::from(drr.into_bytes())).await?;
     String::from_utf8(buf.to_vec()).map_err(|e| Error::from_reason(format!("utf8 error: {e}")))
 }
@@ -469,7 +494,7 @@ impl SessionFactory {
     pub fn new(config: AsherahConfig) -> Result<Self> {
         let opts = to_config_options(&config);
         let (factory, _applied) = asherah_config::factory_from_config(&opts)
-            .map_err(|e| Error::from_reason(format!("factory creation failed: {e}")))?;
+            .map_err(|e| anyhow_to_napi("factory creation", e))?;
         // Always enable per-factory metrics — see comment in setup().
         let factory = factory.with_metrics(true);
         Ok(Self {
@@ -479,9 +504,8 @@ impl SessionFactory {
 
     #[napi(factory)]
     pub fn from_env() -> Result<Self> {
-        let opts = asherah_config::ConfigOptions::default();
-        let (factory, _applied) = asherah_config::factory_from_config(&opts)
-            .map_err(|e| Error::from_reason(format!("factory_from_env failed: {e}")))?;
+        let factory = asherah::builders::factory_from_env()
+            .map_err(|e| anyhow_to_napi("factory_from_env", e))?;
         let factory = factory.with_metrics(true);
         Ok(Self {
             factory: Mutex::new(Some(factory)),
@@ -506,7 +530,7 @@ impl SessionFactory {
         if let Some(factory) = guard.take() {
             factory
                 .close()
-                .map_err(|e| Error::from_reason(format!("factory close error: {e:#}")))?;
+                .map_err(|e| anyhow_to_napi("factory close", e))?;
         }
         Ok(())
     }
@@ -529,13 +553,14 @@ impl std::fmt::Debug for AsherahSession {
 impl AsherahSession {
     #[napi]
     pub fn encrypt(&self, data: Buffer) -> Result<String> {
+        check_plaintext_len_napi(data.len())?;
         let guard = self.session.lock();
         let session = guard
             .as_ref()
             .ok_or_else(|| Error::from_reason("session is closed"))?;
         let drr = session
             .encrypt(&data)
-            .map_err(|e| Error::from_reason(format!("encrypt error: {e:#}")))?;
+            .map_err(|e| anyhow_to_napi("encrypt", e))?;
         Ok(drr.to_json_fast())
     }
 
@@ -546,6 +571,7 @@ impl AsherahSession {
 
     #[napi]
     pub fn decrypt(&self, data_row_record: String) -> Result<Buffer> {
+        check_ciphertext_len_napi(data_row_record.len())?;
         let drr: asherah::types::DataRowRecord = serde_json::from_str(&data_row_record)
             .map_err(|e| Error::from_reason(format!("invalid DataRowRecord JSON: {e}")))?;
         let guard = self.session.lock();
@@ -554,7 +580,7 @@ impl AsherahSession {
             .ok_or_else(|| Error::from_reason("session is closed"))?;
         let pt = session
             .decrypt(drr)
-            .map_err(|e| Error::from_reason(format!("decrypt error: {e:#}")))?;
+            .map_err(|e| anyhow_to_napi("decrypt", e))?;
         Ok(Buffer::from(pt))
     }
 
@@ -570,7 +596,7 @@ impl AsherahSession {
         if let Some(session) = guard.take() {
             session
                 .close()
-                .map_err(|e| Error::from_reason(format!("session close error: {e:#}")))?;
+                .map_err(|e| anyhow_to_napi("session close", e))?;
         }
         Ok(())
     }
@@ -596,8 +622,15 @@ struct MetricsEvent {
     name: Option<String>,
 }
 
-type MetricsCallback =
-    ThreadsafeFunction<MetricsEvent, Unknown<'static>, JsArgList, Status, false, false, 0>;
+type MetricsCallback = ThreadsafeFunction<
+    MetricsEvent,
+    Unknown<'static>,
+    JsArgList,
+    Status,
+    false,
+    false,
+    { NATIVE_HOOK_QUEUE_CAPACITY },
+>;
 
 struct JsMetricsSink {
     tsfn: Arc<MetricsCallback>,
@@ -688,7 +721,7 @@ pub fn set_metrics_hook(mut env: Env, callback: Option<Function<'_>>) -> Result<
         let borrowed_static: Function<'static> = unsafe { std::mem::transmute(borrowed) };
         let tsfn = borrowed_static
             .build_threadsafe_function::<MetricsEvent>()
-            .max_queue_size::<0>()
+            .max_queue_size::<{ NATIVE_HOOK_QUEUE_CAPACITY }>()
             .callee_handled::<false>()
             .build_callback(|ctx: ThreadsafeCallContext<MetricsEvent>| {
                 let env = ctx.env;
@@ -736,8 +769,15 @@ struct LogEvent {
     target: String,
 }
 
-type LogCallback =
-    ThreadsafeFunction<LogEvent, Unknown<'static>, JsArgList, Status, false, false, 0>;
+type LogCallback = ThreadsafeFunction<
+    LogEvent,
+    Unknown<'static>,
+    JsArgList,
+    Status,
+    false,
+    false,
+    { NATIVE_HOOK_QUEUE_CAPACITY },
+>;
 
 struct JsLogSink {
     tsfn: Arc<LogCallback>,
@@ -749,6 +789,10 @@ struct LogHook {
 }
 
 impl LogSink for JsLogSink {
+    fn min_level(&self) -> log::LevelFilter {
+        DEFAULT_LOG_HOOK_MIN_LEVEL
+    }
+
     fn log(&self, record: &log::Record<'_>) {
         let event = LogEvent {
             level: record.level(),
@@ -789,7 +833,7 @@ pub fn set_log_hook(env: Env, callback: Option<Function<'_>>) -> Result<()> {
         let borrowed_static: Function<'static> = unsafe { std::mem::transmute(borrowed) };
         let tsfn = borrowed_static
             .build_threadsafe_function::<LogEvent>()
-            .max_queue_size::<0>()
+            .max_queue_size::<{ NATIVE_HOOK_QUEUE_CAPACITY }>()
             .callee_handled::<false>()
             .build_callback(|ctx: ThreadsafeCallContext<LogEvent>| {
                 let env = ctx.env;
@@ -833,4 +877,29 @@ pub fn set_log_hook(env: Env, callback: Option<Function<'_>>) -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitizes_anyhow_chain_for_js_callers() {
+        let err = anyhow::anyhow!("secret inner context").context("outer context");
+        let msg = sanitized_anyhow_message("encrypt", &err);
+        assert_eq!(msg, "encrypt failed: outer context");
+        assert!(!msg.contains("secret inner context"));
+    }
+
+    #[test]
+    fn native_hooks_are_bounded_and_warn_by_default() {
+        assert_eq!(NATIVE_HOOK_QUEUE_CAPACITY, 4096);
+        assert_eq!(DEFAULT_LOG_HOOK_MIN_LEVEL, log::LevelFilter::Warn);
+    }
+
+    #[test]
+    fn binding_limits_reject_oversize_inputs() {
+        assert!(check_plaintext_len_napi(asherah::limits::MAX_PAYLOAD_BYTES + 1).is_err());
+        assert!(check_ciphertext_len_napi(asherah::limits::MAX_ENVELOPE_BYTES + 1).is_err());
+    }
 }
