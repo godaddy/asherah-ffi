@@ -43,6 +43,7 @@ pub mod metastore_region;
 #[cfg(feature = "sqlite")]
 pub mod metastore_sqlite;
 pub mod metrics;
+pub mod microarchitecture;
 // `partition` exposes `DefaultPartition`, an implementation detail
 // used by integration tests inside the same workspace. `#[doc(hidden)]`
 // keeps it off the public API surface (rustdoc landing page) without

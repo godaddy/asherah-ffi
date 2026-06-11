@@ -336,6 +336,23 @@ fn cli_to_config(cli: &Cli) -> asherah_config::ConfigOptions {
     }
 }
 
+fn warn_cpu_vulnerability_status() {
+    match asherah::microarchitecture::host_cpu_vulnerabilities_requiring_attention() {
+        Ok(statuses) => {
+            for status in statuses {
+                log::warn!(
+                    "host CPU vulnerability status requires operator review: {}: {}",
+                    status.name,
+                    status.status
+                );
+            }
+        }
+        Err(err) => {
+            log::debug!("unable to read host CPU vulnerability status: {err}");
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     asherah::process_hardening::ensure_process_hardened()
@@ -356,6 +373,7 @@ async fn main() -> Result<()> {
     } else {
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     }
+    warn_cpu_vulnerability_status();
 
     let socket_path = resolve_socket_path(cli.socket_file.as_deref(), cli.socket.as_deref());
 
