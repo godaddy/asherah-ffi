@@ -12,6 +12,7 @@ fn default_policy_values() {
     assert_eq!(p.expire_key_after_s, 60 * 60 * 24 * 90);
     assert!(p.cache_system_keys);
     assert!(p.cache_intermediate_keys);
+    assert!(p.cache_key_schedules);
     assert!(p.shared_intermediate_key_cache);
     assert_eq!(p.intermediate_key_cache_max_size, 1000);
     assert_eq!(p.intermediate_key_cache_eviction_policy, "simple");
@@ -39,6 +40,15 @@ fn option_no_cache() {
     let p = new_crypto_policy(&[PolicyOption::NoCache]);
     assert!(!p.cache_system_keys);
     assert!(!p.cache_intermediate_keys);
+    assert!(p.cache_key_schedules);
+}
+
+#[test]
+fn option_cache_key_schedules() {
+    let p = new_crypto_policy(&[PolicyOption::CacheKeySchedules(false)]);
+    assert!(!p.cache_key_schedules);
+    assert!(p.cache_system_keys);
+    assert!(p.cache_intermediate_keys);
 }
 
 #[test]

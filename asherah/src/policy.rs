@@ -16,6 +16,10 @@ pub struct CryptoPolicy {
     // to false is a no-op. Use cache max sizes to control capacity.
     pub cache_system_keys: bool,
     pub cache_intermediate_keys: bool,
+    /// Cache pre-expanded AEAD key schedules outside the locked enclave.
+    /// Disable this for higher assurance against microarchitectural disclosure
+    /// of long-lived SK/IK key-equivalent material.
+    pub cache_key_schedules: bool,
     pub shared_intermediate_key_cache: bool,
     pub intermediate_key_cache_max_size: usize,
     pub intermediate_key_cache_eviction_policy: String,
@@ -52,6 +56,7 @@ impl Default for CryptoPolicy {
             expire_key_after_s: 60 * 60 * 24 * 90,
             cache_system_keys: true,
             cache_intermediate_keys: true,
+            cache_key_schedules: true,
             shared_intermediate_key_cache: true,
             intermediate_key_cache_max_size: 1000,
             intermediate_key_cache_eviction_policy: "simple".to_string(),
@@ -105,6 +110,7 @@ pub enum PolicyOption {
     RevokeCheckIntervalSecs(i64),
     ExpireAfterSecs(i64),
     NoCache,
+    CacheKeySchedules(bool),
     SharedIntermediateKeyCache(bool),
     IntermediateKeyCacheMaxSize(usize),
     IntermediateKeyCacheEvictionPolicy(String),
@@ -131,6 +137,7 @@ pub fn new_crypto_policy(opts: &[PolicyOption]) -> CryptoPolicy {
                 p.cache_intermediate_keys = false;
                 explicit_no_cache = true;
             }
+            PolicyOption::CacheKeySchedules(b) => p.cache_key_schedules = b,
             PolicyOption::SharedIntermediateKeyCache(b) => p.shared_intermediate_key_cache = b,
             PolicyOption::IntermediateKeyCacheMaxSize(sz) => p.intermediate_key_cache_max_size = sz,
             PolicyOption::IntermediateKeyCacheEvictionPolicy(ref s) => {

@@ -1,6 +1,8 @@
 use crate::cache::{CacheCheck, CachePolicy, KeyCacher, NeverCache, SimpleKeyCache};
 use crate::config::Config;
-use crate::internal::crypto_key::{generate_key, is_key_expired};
+use crate::internal::crypto_key::{
+    generate_key, generate_key_with_key_schedule_cache, is_key_expired,
+};
 use crate::internal::CryptoKey;
 use crate::metrics;
 use crate::partition::DefaultPartition;
@@ -144,7 +146,12 @@ impl<
                 "KMS failed to decrypt system key id={} created={}",
                 ekr.id, ekr.created
             ))?;
-        CryptoKey::new(ekr.created, ekr.revoked.unwrap_or(false), bytes)
+        CryptoKey::new_with_key_schedule_cache(
+            ekr.created,
+            ekr.revoked.unwrap_or(false),
+            bytes,
+            self.f.policy.cache_key_schedules,
+        )
     }
 
     fn intermediate_key_from_ekr(
@@ -163,7 +170,12 @@ impl<
                 let ik_bytes = sk_loaded.with_key_func(|sk_bytes| {
                     self.f.crypto.decrypt(&ekr.encrypted_key, sk_bytes)
                 })??;
-                return CryptoKey::new(ekr.created, ekr.revoked.unwrap_or(false), ik_bytes);
+                return CryptoKey::new_with_key_schedule_cache(
+                    ekr.created,
+                    ekr.revoked.unwrap_or(false),
+                    ik_bytes,
+                    self.f.policy.cache_key_schedules,
+                );
             }
         }
         let ik_bytes = sk
@@ -172,7 +184,12 @@ impl<
                 "failed to decrypt intermediate key id={} created={}",
                 ekr.id, ekr.created
             ))??;
-        CryptoKey::new(ekr.created, ekr.revoked.unwrap_or(false), ik_bytes)
+        CryptoKey::new_with_key_schedule_cache(
+            ekr.created,
+            ekr.revoked.unwrap_or(false),
+            ik_bytes,
+            self.f.policy.cache_key_schedules,
+        )
     }
 
     fn get_or_load_system_key(&self, meta: KeyMeta) -> anyhow::Result<CryptoKey> {
@@ -242,7 +259,10 @@ impl<
     }
 
     fn generate_key(&self) -> anyhow::Result<CryptoKey> {
-        generate_key(self.new_key_timestamp())
+        generate_key_with_key_schedule_cache(
+            self.new_key_timestamp(),
+            self.f.policy.cache_key_schedules,
+        )
     }
 
     fn must_load_latest(&self, id: &str) -> anyhow::Result<EnvelopeKeyRecord> {
@@ -290,7 +310,7 @@ impl<
                 let sk = self
                     .load_latest_or_create_system_key()
                     .context("encrypt: failed to load or create system key")?;
-                let ik = generate_key(self.new_key_timestamp())?;
+                let ik = self.generate_key()?;
                 // store IK encrypted under SK
                 let enc_ik = ik.with_key_func(|ikb| {
                     sk.with_key_func(|skb| self.f.crypto.encrypt(ikb, skb))
@@ -817,7 +837,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             let sk = self
                 .get_or_load_system_key(sk_meta.clone())
                 .context("create_intermediate_key: failed to get/load system key")?;
-            let ik = generate_key(self.inner.new_key_timestamp())?;
+            let ik = self.inner.generate_key()?;
             let enc_ik = ik
                 .with_key_func(|ikb| sk.with_key_func(|skb| self.crypto.encrypt(ikb, skb)))
                 .context("create_intermediate_key: failed to encrypt IK under SK")??;
@@ -1698,7 +1718,7 @@ impl<
                 .get_or_load_system_key_async(sk_meta.clone())
                 .await
                 .context("create_intermediate_key_async: failed to get/load system key")?;
-            let ik = generate_key(self.inner.new_key_timestamp())?;
+            let ik = self.inner.generate_key()?;
             let enc_ik = ik
                 .with_key_func(|ikb| sk.with_key_func(|skb| self.crypto.encrypt(ikb, skb)))
                 .context("create_intermediate_key_async: failed to encrypt IK under SK")??;

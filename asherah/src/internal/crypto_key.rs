@@ -29,7 +29,16 @@ impl std::fmt::Debug for CryptoKey {
 }
 
 impl CryptoKey {
-    pub fn new(created: i64, revoked: bool, mut bytes: Vec<u8>) -> anyhow::Result<Self> {
+    pub fn new(created: i64, revoked: bool, bytes: Vec<u8>) -> anyhow::Result<Self> {
+        Self::new_with_key_schedule_cache(created, revoked, bytes, true)
+    }
+
+    pub fn new_with_key_schedule_cache(
+        created: i64,
+        revoked: bool,
+        mut bytes: Vec<u8>,
+        cache_key_schedule: bool,
+    ) -> anyhow::Result<Self> {
         // Pre-expand key schedule for 32-byte keys.
         //
         // `UnboundKey::new` returns Err only for an algorithm/key-length
@@ -42,7 +51,7 @@ impl CryptoKey {
         // not-cached path. T-finding "UnboundKey::new(&AES_256_GCM,
         // &bytes).ok() silently discards unreachable error" in
         // `docs/review-2026-05-05-findings.md`.
-        let cached_lsk = if bytes.len() == 32 {
+        let cached_lsk = if cache_key_schedule && bytes.len() == 32 {
             match UnboundKey::new(&AES_256_GCM, &bytes) {
                 Ok(k) => Some(LessSafeKey::new(k)),
                 Err(_) => {
@@ -132,11 +141,18 @@ impl CryptoKey {
 }
 
 pub fn generate_key(created: i64) -> anyhow::Result<CryptoKey> {
+    generate_key_with_key_schedule_cache(created, true)
+}
+
+pub fn generate_key_with_key_schedule_cache(
+    created: i64,
+    cache_key_schedule: bool,
+) -> anyhow::Result<CryptoKey> {
     let mut raw = vec![0_u8; 32];
     rand::rngs::OsRng
         .try_fill_bytes(&mut raw)
         .map_err(|e| anyhow::anyhow!("OsRng: {e}"))?;
-    CryptoKey::new(created, false, raw)
+    CryptoKey::new_with_key_schedule_cache(created, false, raw, cache_key_schedule)
 }
 
 pub fn is_key_expired(created_s: i64, expire_after_s: i64, now_s: i64) -> bool {
