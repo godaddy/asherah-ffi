@@ -16,7 +16,7 @@ use pyo3::PyRef;
 use lru::LruCache;
 use parking_lot::Mutex;
 use std::num::NonZeroUsize;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use zeroize::Zeroizing;
 
 type Factory = ael::session::PublicFactory<
@@ -192,10 +192,11 @@ fn decrypt_string(partition_id: &str, data_row_record: &str) -> PyResult<String>
 #[pyfunction]
 async fn encrypt_bytes_async(partition_id: String, data: Vec<u8>) -> PyResult<String> {
     let session = with_manager(|mgr| Ok(mgr.get_or_create_session(&partition_id)))?;
+    let input = Zeroizing::new(data);
     let (tx, rx) = tokio::sync::oneshot::channel();
-    ASYNC_RT.spawn(async move {
+    async_rt()?.spawn(async move {
         let result = session
-            .encrypt_async(&data)
+            .encrypt_async(&input)
             .await
             .and_then(|drr| serde_json::to_string(&drr).map_err(|e| anyhow::anyhow!("json: {e}")));
         drop(tx.send(result));
@@ -217,7 +218,7 @@ async fn decrypt_bytes_async(partition_id: String, data_row_record: String) -> P
     let drr: ael::types::DataRowRecord =
         serde_json::from_str(&data_row_record).map_err(json_parse_err)?;
     let (tx, rx) = tokio::sync::oneshot::channel();
-    ASYNC_RT.spawn(async move {
+    async_rt()?.spawn(async move {
         let result = session.decrypt_async(drr).await;
         drop(tx.send(result));
     });
@@ -297,14 +298,24 @@ where
 }
 
 /// Shared tokio runtime for async Python operations.
-static ASYNC_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+static ASYNC_RT: OnceLock<Result<tokio::runtime::Runtime, String>> = OnceLock::new();
+
+fn build_async_runtime() -> std::io::Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .thread_name("asherah-py-async")
         .enable_all()
         .build()
-        .expect("failed to create async Python tokio runtime")
-});
+}
+
+fn async_rt() -> PyResult<&'static tokio::runtime::Runtime> {
+    match ASYNC_RT.get_or_init(|| build_async_runtime().map_err(|e| e.to_string())) {
+        Ok(rt) => Ok(rt),
+        Err(e) => Err(PyRuntimeError::new_err(format!(
+            "failed to create async Python tokio runtime: {e}"
+        ))),
+    }
+}
 
 #[pyclass(module = "asherah", frozen, name = "SessionFactory")]
 #[allow(missing_debug_implementations)]
@@ -408,9 +419,10 @@ impl PySession {
     /// True async encrypt — runs on Rust's tokio runtime, returns a Python coroutine.
     pub async fn encrypt_bytes_async(&self, data: Vec<u8>) -> PyResult<String> {
         let session = Arc::clone(&self.inner);
+        let input = Zeroizing::new(data);
         let (tx, rx) = tokio::sync::oneshot::channel();
-        ASYNC_RT.spawn(async move {
-            let result = session.encrypt_async(&data).await.and_then(|drr| {
+        async_rt()?.spawn(async move {
+            let result = session.encrypt_async(&input).await.and_then(|drr| {
                 serde_json::to_string(&drr).map_err(|e| anyhow::anyhow!("json error: {e}"))
             });
             drop(tx.send(result));
@@ -426,7 +438,7 @@ impl PySession {
         let drr: ael::types::DataRowRecord =
             serde_json::from_str(&data_row_record).map_err(json_parse_err)?;
         let (tx, rx) = tokio::sync::oneshot::channel();
-        ASYNC_RT.spawn(async move {
+        async_rt()?.spawn(async move {
             let result = session.decrypt_async(drr).await;
             drop(tx.send(result));
         });
@@ -654,4 +666,16 @@ fn _asherah(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(set_log_hook, m)?)?;
     m.add_function(wrap_pyfunction!(version, m)?)?;
     Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn async_runtime_builder_returns_result() {
+        let rt = build_async_runtime().unwrap();
+        drop(rt);
+    }
 }

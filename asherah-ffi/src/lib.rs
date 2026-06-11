@@ -348,6 +348,10 @@ pub unsafe extern "C" fn asherah_encrypt_to_json(
             set_error("null data");
             return -1;
         }
+        if let Err(e) = asherah::limits::check_plaintext_len(len) {
+            set_error(e.to_string());
+            return -1;
+        }
         let s = &(*session).session;
         let bytes = if data.is_null() {
             &[]
@@ -389,6 +393,10 @@ pub unsafe extern "C" fn asherah_decrypt_from_json(
         }
         if json.is_null() && len > 0 {
             set_error("null json");
+            return -1;
+        }
+        if let Err(e) = asherah::limits::check_ciphertext_len(len) {
+            set_error(e.to_string());
             return -1;
         }
         let s = &(*session).session;
@@ -531,6 +539,10 @@ pub unsafe extern "C" fn asherah_encrypt_to_json_async(
             set_error("null data");
             return -1;
         }
+        if let Err(e) = asherah::limits::check_plaintext_len(len) {
+            set_error(e.to_string());
+            return -1;
+        }
         // Clone the Arc so the session outlives a premature free.
         let arc = Arc::clone(&(*session).session);
         // Copy input data — the caller's buffer may not outlive the async task.
@@ -653,6 +665,10 @@ pub unsafe extern "C" fn asherah_decrypt_from_json_async(
             set_error("null json");
             return -1;
         }
+        if let Err(e) = asherah::limits::check_ciphertext_len(len) {
+            set_error(e.to_string());
+            return -1;
+        }
         let arc = Arc::clone(&(*session).session);
         let input = if json.is_null() {
             Vec::new()
@@ -677,6 +693,7 @@ mod tests {
     use std::ffi::CString;
     use std::fs;
     use std::ptr::null;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -840,6 +857,91 @@ mod tests {
         let mut out = empty_buffer();
         let rc = unsafe { asherah_decrypt_from_json(session, null(), 0, &mut out) };
         assert_ne!(rc, 0, "empty json must be rejected as invalid");
+        free_factory_and_session(factory, session);
+    }
+
+    #[test]
+    fn encrypt_rejects_oversized_len_before_reading_data_pointer() {
+        let (factory, session) = make_factory_and_session();
+        let mut out = empty_buffer();
+        let dangling = std::ptr::NonNull::<u8>::dangling().as_ptr();
+        let rc = unsafe {
+            asherah_encrypt_to_json(
+                session,
+                dangling,
+                asherah::limits::MAX_PAYLOAD_BYTES + 1,
+                &mut out,
+            )
+        };
+        assert_ne!(rc, 0, "oversized encrypt input must fail");
+        assert!(out.data.is_null());
+        free_factory_and_session(factory, session);
+    }
+
+    #[test]
+    fn decrypt_rejects_oversized_len_before_reading_json_pointer() {
+        let (factory, session) = make_factory_and_session();
+        let mut out = empty_buffer();
+        let dangling = std::ptr::NonNull::<u8>::dangling().as_ptr();
+        let rc = unsafe {
+            asherah_decrypt_from_json(
+                session,
+                dangling,
+                asherah::limits::MAX_ENVELOPE_BYTES + 1,
+                &mut out,
+            )
+        };
+        assert_ne!(rc, 0, "oversized decrypt input must fail");
+        assert!(out.data.is_null());
+        free_factory_and_session(factory, session);
+    }
+
+    static ASYNC_COMPLETION_CALLED: AtomicBool = AtomicBool::new(false);
+
+    unsafe extern "C" fn oversized_async_cb(
+        _user_data: *mut c_void,
+        _result_data: *const u8,
+        _result_len: usize,
+        _error_message: *const c_char,
+    ) {
+        ASYNC_COMPLETION_CALLED.store(true, Ordering::SeqCst);
+    }
+
+    #[test]
+    fn async_encrypt_rejects_oversized_len_before_spawn() {
+        let (factory, session) = make_factory_and_session();
+        ASYNC_COMPLETION_CALLED.store(false, Ordering::SeqCst);
+        let dangling = std::ptr::NonNull::<u8>::dangling().as_ptr();
+        let rc = unsafe {
+            asherah_encrypt_to_json_async(
+                session,
+                dangling,
+                asherah::limits::MAX_PAYLOAD_BYTES + 1,
+                oversized_async_cb,
+                null_mut(),
+            )
+        };
+        assert_ne!(rc, 0, "oversized async encrypt input must fail");
+        assert!(!ASYNC_COMPLETION_CALLED.load(Ordering::SeqCst));
+        free_factory_and_session(factory, session);
+    }
+
+    #[test]
+    fn async_decrypt_rejects_oversized_len_before_spawn() {
+        let (factory, session) = make_factory_and_session();
+        ASYNC_COMPLETION_CALLED.store(false, Ordering::SeqCst);
+        let dangling = std::ptr::NonNull::<u8>::dangling().as_ptr();
+        let rc = unsafe {
+            asherah_decrypt_from_json_async(
+                session,
+                dangling,
+                asherah::limits::MAX_ENVELOPE_BYTES + 1,
+                oversized_async_cb,
+                null_mut(),
+            )
+        };
+        assert_ne!(rc, 0, "oversized async decrypt input must fail");
+        assert!(!ASYNC_COMPLETION_CALLED.load(Ordering::SeqCst));
         free_factory_and_session(factory, session);
     }
 

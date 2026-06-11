@@ -150,11 +150,21 @@ impl LogSink for CallbackLogSink {
 // thousand encrypts worth of records on a hot path before the queue starts
 // dropping. Override per-hook via `asherah_set_log_hook_with_config`.
 const DEFAULT_LOG_QUEUE_CAPACITY: usize = 4096;
+const MAX_HOOK_QUEUE_CAPACITY: usize = 65_536;
 // Default min level — Warn and above. Trace/Debug/Info are dropped at the
 // producer thread so they never reach the queue. Callers who want the
 // verbose records pass `ASHERAH_LOG_TRACE` (or any other level constant)
 // to `_with_config` / `_sync` explicitly.
 const DEFAULT_LOG_MIN_LEVEL: i32 = ASHERAH_LOG_WARN;
+
+fn normalize_queue_capacity(queue_capacity: usize, default_capacity: usize) -> Option<usize> {
+    let capacity = if queue_capacity == 0 {
+        default_capacity
+    } else {
+        queue_capacity
+    };
+    (capacity <= MAX_HOOK_QUEUE_CAPACITY).then_some(capacity)
+}
 
 // Synchronous variant of `CallbackLogSink` that applies a per-hook level
 // filter. Async mode does the filter inside `AsyncLogSink::log` to avoid
@@ -223,11 +233,7 @@ fn install_log_hook_with_config(
     let async_sink = match AsyncLogSink::new(
         inner,
         AsyncLogConfig {
-            queue_capacity: if queue_capacity == 0 {
-                DEFAULT_LOG_QUEUE_CAPACITY
-            } else {
-                queue_capacity
-            },
+            queue_capacity,
             min_level: map_log_level(min_level),
         },
     ) {
@@ -258,7 +264,8 @@ fn install_log_hook_with_config(
 /// Pass a non-null `callback`. `user_data` is opaque and passed back
 /// unchanged on every invocation; it may be NULL.
 ///
-/// Returns 0 on success, -1 if `callback` is NULL.
+/// Returns 0 on success, -1 if `callback` is NULL or the requested queue
+/// capacity exceeds 65536.
 ///
 /// # Default level filter
 /// Only `Warn` and `Error` records are delivered by default. Verbose
@@ -287,18 +294,19 @@ pub unsafe extern "C" fn asherah_set_log_hook(
         Some(c) => c,
         None => return -1,
     };
-    install_log_hook_with_config(
-        cb,
-        user_data,
-        DEFAULT_LOG_QUEUE_CAPACITY,
-        DEFAULT_LOG_MIN_LEVEL,
-    );
+    let Some(queue_capacity) =
+        normalize_queue_capacity(DEFAULT_LOG_QUEUE_CAPACITY, DEFAULT_LOG_QUEUE_CAPACITY)
+    else {
+        return -1;
+    };
+    install_log_hook_with_config(cb, user_data, queue_capacity, DEFAULT_LOG_MIN_LEVEL);
     0
 }
 
 /// Configurable variant of [`asherah_set_log_hook`].
 ///
 /// - `queue_capacity`: max events buffered. `0` = use default (4096).
+///   Values above 65536 are rejected to prevent unbounded memory growth.
 ///   When the queue is full, records are dropped and counted in
 ///   [`asherah_log_dropped_count`].
 /// - `min_level`: only records at this severity or higher are delivered.
@@ -318,6 +326,10 @@ pub unsafe extern "C" fn asherah_set_log_hook_with_config(
     let cb = match callback {
         Some(c) => c,
         None => return -1,
+    };
+    let Some(queue_capacity) = normalize_queue_capacity(queue_capacity, DEFAULT_LOG_QUEUE_CAPACITY)
+    else {
+        return -1;
     };
     install_log_hook_with_config(cb, user_data, queue_capacity, min_level);
     0
@@ -506,16 +518,7 @@ fn install_metrics_hook_with_config(
         user_data: user_data as usize,
     });
     METRICS_HOOK_INSTALLED.store(1, Ordering::Release);
-    match AsyncMetricsSink::new(
-        CallbackMetricsSink,
-        AsyncMetricsConfig {
-            queue_capacity: if queue_capacity == 0 {
-                DEFAULT_METRICS_QUEUE_CAPACITY
-            } else {
-                queue_capacity
-            },
-        },
-    ) {
+    match AsyncMetricsSink::new(CallbackMetricsSink, AsyncMetricsConfig { queue_capacity }) {
         Ok(s) => metrics::set_sink(s),
         Err(e) => {
             log::error!(
@@ -533,7 +536,8 @@ fn install_metrics_hook_with_config(
 /// off by default for performance).
 ///
 /// Pass a non-null `callback`. `user_data` is opaque and passed back
-/// unchanged. Returns 0 on success, -1 if `callback` is NULL.
+/// unchanged. Returns 0 on success, -1 if `callback` is NULL or the requested
+/// queue capacity exceeds 65536.
 ///
 /// # Async dispatch
 /// The callback is **not** invoked on the encrypt/decrypt thread. Events
@@ -553,13 +557,20 @@ pub unsafe extern "C" fn asherah_set_metrics_hook(
         Some(c) => c,
         None => return -1,
     };
-    install_metrics_hook_with_config(cb, user_data, DEFAULT_METRICS_QUEUE_CAPACITY);
+    let Some(queue_capacity) = normalize_queue_capacity(
+        DEFAULT_METRICS_QUEUE_CAPACITY,
+        DEFAULT_METRICS_QUEUE_CAPACITY,
+    ) else {
+        return -1;
+    };
+    install_metrics_hook_with_config(cb, user_data, queue_capacity);
     0
 }
 
 /// Configurable variant of [`asherah_set_metrics_hook`].
 ///
 /// - `queue_capacity`: max events buffered. `0` = use default (4096).
+///   Values above 65536 are rejected to prevent unbounded memory growth.
 ///
 /// # Safety
 /// Same lifetime requirements as [`asherah_set_metrics_hook`].
@@ -572,6 +583,11 @@ pub unsafe extern "C" fn asherah_set_metrics_hook_with_config(
     let cb = match callback {
         Some(c) => c,
         None => return -1,
+    };
+    let Some(queue_capacity) =
+        normalize_queue_capacity(queue_capacity, DEFAULT_METRICS_QUEUE_CAPACITY)
+    else {
+        return -1;
     };
     install_metrics_hook_with_config(cb, user_data, queue_capacity);
     0

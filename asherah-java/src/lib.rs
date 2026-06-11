@@ -11,7 +11,8 @@ use jni::sys::jlong;
 use jni::{EnvUnowned, JavaVM};
 use once_cell::sync::Lazy;
 use serde_json::{self, Value};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
+use zeroize::Zeroizing;
 
 type Factory = ael::session::PublicFactory<
     ael::aead::AES256GCM,
@@ -229,7 +230,7 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_encrypt<'calle
     env.with_env(|env| -> jni::errors::Result<JByteArray<'caller>> {
         let shared = unsafe { from_handle::<SharedJniSession>(session_handle) }
             .ok_or_else(|| throw_err(env, "session handle is null"))?;
-        let data = env.convert_byte_array(&plaintext)?;
+        let data = Zeroizing::new(env.convert_byte_array(&plaintext)?);
         let drr = shared
             .session
             .encrypt(&data)
@@ -255,10 +256,12 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decrypt<'calle
         let data = env.convert_byte_array(&ciphertext)?;
         let drr: ael::types::DataRowRecord = serde_json::from_slice(&data)
             .map_err(|e| throw_err(env, format_args!("invalid DataRowRecord JSON: {e}")))?;
-        let plaintext = shared
-            .session
-            .decrypt(drr)
-            .map_err(|e| throw_err(env, format_args!("decrypt error: {e:#}")))?;
+        let plaintext = Zeroizing::new(
+            shared
+                .session
+                .decrypt(drr)
+                .map_err(|e| throw_err(env, format_args!("decrypt error: {e:#}")))?,
+        );
         let arr = env.byte_array_from_slice(&plaintext)?;
         Ok(arr)
     })
@@ -267,14 +270,24 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decrypt<'calle
 
 // ── Async JNI ────────────────────────────────────────────────────────
 
-static ASYNC_RT: Lazy<tokio::runtime::Runtime> = Lazy::new(|| {
+static ASYNC_RT: OnceLock<Result<tokio::runtime::Runtime, String>> = OnceLock::new();
+
+fn build_async_runtime() -> std::io::Result<tokio::runtime::Runtime> {
     tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .thread_name("asherah-java-async")
         .enable_all()
         .build()
-        .expect("failed to create async JNI tokio runtime")
-});
+}
+
+fn async_rt() -> anyhow::Result<&'static tokio::runtime::Runtime> {
+    match ASYNC_RT.get_or_init(|| build_async_runtime().map_err(|e| e.to_string())) {
+        Ok(rt) => Ok(rt),
+        Err(e) => Err(anyhow::anyhow!(
+            "failed to create async JNI tokio runtime: {e}"
+        )),
+    }
+}
 
 /// Async encrypt. Accepts a CompletableFuture<byte[]> and completes it on a tokio worker thread.
 /// The session is kept alive by an Arc clone until the async operation completes.
@@ -289,12 +302,20 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_encryptAsync<'
     env.with_env(|env| -> jni::errors::Result<()> {
         let shared = unsafe { from_handle::<SharedJniSession>(session_handle) }
             .ok_or_else(|| throw_err(env, "session handle is null"))?;
-        let data = env.convert_byte_array(&plaintext)?;
+        let data = Zeroizing::new(env.convert_byte_array(&plaintext)?);
         let jvm = env.get_java_vm()?;
         let future_ref = env.new_global_ref(&future)?;
         let session_arc = Arc::clone(&shared.session);
 
-        ASYNC_RT.spawn(async move {
+        let rt = match async_rt() {
+            Ok(rt) => rt,
+            Err(e) => {
+                complete_java_future(&jvm, &future_ref, Err(e));
+                return Ok(());
+            }
+        };
+
+        rt.spawn(async move {
             let result = match session_arc.encrypt_async(&data).await {
                 Ok(drr) => serde_json::to_vec(&drr).map_err(|e| anyhow::anyhow!("{e:#}")),
                 Err(e) => Err(e),
@@ -324,7 +345,15 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_decryptAsync<'
         let future_ref = env.new_global_ref(&future)?;
         let session_arc = Arc::clone(&shared.session);
 
-        ASYNC_RT.spawn(async move {
+        let rt = match async_rt() {
+            Ok(rt) => rt,
+            Err(e) => {
+                complete_java_future(&jvm, &future_ref, Err(e));
+                return Ok(());
+            }
+        };
+
+        rt.spawn(async move {
             let drr = match serde_json::from_slice::<ael::types::DataRowRecord>(&data) {
                 Ok(d) => d,
                 Err(e) => {
@@ -361,7 +390,7 @@ struct CompletionSignatures {
     rt_ctor: jni::signature::RuntimeMethodSignature,
 }
 
-static COMPLETION_SIGS: std::sync::OnceLock<CompletionSignatures> = std::sync::OnceLock::new();
+static COMPLETION_SIGS: OnceLock<CompletionSignatures> = OnceLock::new();
 
 fn completion_sigs() -> &'static CompletionSignatures {
     COMPLETION_SIGS.get_or_init(|| {
@@ -393,8 +422,9 @@ fn complete_java_future(
         jvm.attach_current_thread(|env| -> Result<(), jni::errors::Error> {
             let sigs = completion_sigs();
             match result {
-                Ok(ref bytes) => {
-                    let byte_array = env.byte_array_from_slice(bytes)?;
+                Ok(bytes) => {
+                    let bytes = Zeroizing::new(bytes);
+                    let byte_array = env.byte_array_from_slice(&bytes)?;
                     env.call_method(
                         future_ref.as_obj(),
                         JNIString::from("complete"),
@@ -685,4 +715,16 @@ pub extern "system" fn Java_com_godaddy_asherah_jni_AsherahNative_clearMetricsHo
     *JAVA_METRICS_HOOK.lock() = None;
     metrics::clear_sink();
     metrics::set_enabled(false);
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn async_runtime_builder_returns_result() {
+        let rt = build_async_runtime().unwrap();
+        drop(rt);
+    }
 }

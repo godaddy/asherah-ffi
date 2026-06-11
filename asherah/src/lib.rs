@@ -31,6 +31,7 @@ pub mod kms_multi;
 pub mod kms_secrets_manager;
 #[cfg(feature = "vault")]
 pub mod kms_vault_transit;
+pub mod limits;
 pub mod logging;
 pub mod metastore;
 #[cfg(feature = "dynamodb")]

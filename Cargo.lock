@@ -248,6 +248,7 @@ dependencies = [
  "serde_json",
  "serial_test",
  "tokio",
+ "zeroize",
 ]
 
 [[package]]
@@ -298,8 +299,10 @@ dependencies = [
  "hyper-util",
  "log",
  "prost",
+ "rustix",
  "serde_json",
  "serial_test",
+ "tempfile",
  "tokio",
  "tokio-stream",
  "tonic",
