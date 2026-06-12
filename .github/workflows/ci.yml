@@ -1790,7 +1790,7 @@ jobs:
               composer config repositories.asherah path /work/asherah-php
               composer config minimum-stability dev
               composer config prefer-stable true
-              composer require godaddy/asherah:* --no-interaction --no-progress >/dev/null
+              bash /work/scripts/composer-retry.sh require godaddy/asherah:* --no-interaction --no-progress >/dev/null
               php vendor/godaddy/asherah/tests/consumer_smoke.php
             '
       - name: Consumer source install smoke (musl)
@@ -1806,7 +1806,7 @@ jobs:
               composer config repositories.asherah path /work/asherah-php
               composer config minimum-stability dev
               composer config prefer-stable true
-              composer require godaddy/asherah:* --no-interaction --no-progress >/dev/null
+              bash /work/scripts/composer-retry.sh require godaddy/asherah:* --no-interaction --no-progress >/dev/null
               php vendor/godaddy/asherah/tests/consumer_smoke.php
             '
 

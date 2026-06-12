@@ -165,7 +165,13 @@ def build_artifacts():
     if PHP_DIR.exists() and shutil.which("php") and shutil.which("composer"):
         LOGGER.info("installing PHP Composer dependencies for interop")
         subprocess.run(
-            ["composer", "install", "--prefer-dist", "--no-progress"],
+            [
+                "bash",
+                str(ROOT / "scripts" / "composer-retry.sh"),
+                "install",
+                "--prefer-dist",
+                "--no-progress",
+            ],
             cwd=PHP_DIR,
             env=env,
             check=True,

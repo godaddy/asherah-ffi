@@ -36,6 +36,20 @@ fn session_roundtrip_inmemory() {
 }
 
 #[test]
+fn session_roundtrip_without_cached_key_schedules() {
+    let crypto = Arc::new(ael::aead::AES256GCM::new());
+    let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![7_u8; 32]).unwrap());
+    let metastore = Arc::new(ael::metastore::InMemoryMetastore::new());
+    let cfg = ael::Config::new("svc", "prod")
+        .with_policy_options(&[ael::policy::PolicyOption::CacheKeySchedules(false)]);
+    let f = ael::api::new_session_factory(cfg, metastore, kms, crypto);
+    let s = f.get_session("p1-no-lsk-cache");
+    let drr = s.encrypt(b"hello").unwrap();
+    let pt = s.decrypt(drr).unwrap();
+    assert_eq!(pt, b"hello");
+}
+
+#[test]
 fn store_load_with_context_variants() {
     let crypto = Arc::new(ael::aead::AES256GCM::new());
     let kms = Arc::new(ael::kms::StaticKMS::new(crypto.clone(), vec![7_u8; 32]).unwrap());

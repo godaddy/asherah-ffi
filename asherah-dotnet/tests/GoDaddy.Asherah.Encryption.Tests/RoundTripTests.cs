@@ -23,7 +23,7 @@ public class RoundTripTests
         }
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("KMS")))
         {
-            Environment.SetEnvironmentVariable("KMS", "static");
+            Environment.SetEnvironmentVariable("KMS", "test-debug-static");
         }
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("STATIC_MASTER_KEY_HEX")))
         {
@@ -70,7 +70,7 @@ public class RoundTripTests
     {
         Environment.SetEnvironmentVariable("SERVICE_NAME", "svc");
         Environment.SetEnvironmentVariable("PRODUCT_ID", "prod");
-        Environment.SetEnvironmentVariable("KMS", "static");
+        Environment.SetEnvironmentVariable("KMS", "test-debug-static");
         Environment.SetEnvironmentVariable(
             "STATIC_MASTER_KEY_HEX",
             "2222222222222222222222222222222222222222222222222222222222222222");

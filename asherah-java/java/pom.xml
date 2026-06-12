@@ -151,7 +151,7 @@
           <environmentVariables>
             <SERVICE_NAME>svc</SERVICE_NAME>
             <PRODUCT_ID>prod</PRODUCT_ID>
-            <KMS>static</KMS>
+            <KMS>test-debug-static</KMS>
             <STATIC_MASTER_KEY_HEX>2222222222222222222222222222222222222222222222222222222222222222</STATIC_MASTER_KEY_HEX>
           </environmentVariables>
         </configuration>

@@ -1,6 +1,8 @@
 use crate::cache::{CacheCheck, CachePolicy, KeyCacher, NeverCache, SimpleKeyCache};
 use crate::config::Config;
-use crate::internal::crypto_key::{generate_key, is_key_expired};
+use crate::internal::crypto_key::{
+    generate_key, generate_key_with_key_schedule_cache, is_key_expired,
+};
 use crate::internal::CryptoKey;
 use crate::metrics;
 use crate::partition::DefaultPartition;
@@ -37,10 +39,11 @@ impl<
     pub fn new(
         metastore: Arc<M>,
         kms: Arc<K>,
-        policy: CryptoPolicy,
+        mut policy: CryptoPolicy,
         crypto: Arc<A>,
         partition: Arc<P>,
     ) -> Self {
+        policy.clamp_create_date_precision_to_expire();
         Self {
             metastore,
             kms,
@@ -144,7 +147,12 @@ impl<
                 "KMS failed to decrypt system key id={} created={}",
                 ekr.id, ekr.created
             ))?;
-        CryptoKey::new(ekr.created, ekr.revoked.unwrap_or(false), bytes)
+        CryptoKey::new_with_key_schedule_cache(
+            ekr.created,
+            ekr.revoked.unwrap_or(false),
+            bytes,
+            self.f.policy.cache_key_schedules,
+        )
     }
 
     fn intermediate_key_from_ekr(
@@ -163,7 +171,12 @@ impl<
                 let ik_bytes = sk_loaded.with_key_func(|sk_bytes| {
                     self.f.crypto.decrypt(&ekr.encrypted_key, sk_bytes)
                 })??;
-                return CryptoKey::new(ekr.created, ekr.revoked.unwrap_or(false), ik_bytes);
+                return CryptoKey::new_with_key_schedule_cache(
+                    ekr.created,
+                    ekr.revoked.unwrap_or(false),
+                    ik_bytes,
+                    self.f.policy.cache_key_schedules,
+                );
             }
         }
         let ik_bytes = sk
@@ -172,7 +185,12 @@ impl<
                 "failed to decrypt intermediate key id={} created={}",
                 ekr.id, ekr.created
             ))??;
-        CryptoKey::new(ekr.created, ekr.revoked.unwrap_or(false), ik_bytes)
+        CryptoKey::new_with_key_schedule_cache(
+            ekr.created,
+            ekr.revoked.unwrap_or(false),
+            ik_bytes,
+            self.f.policy.cache_key_schedules,
+        )
     }
 
     fn get_or_load_system_key(&self, meta: KeyMeta) -> anyhow::Result<CryptoKey> {
@@ -242,7 +260,10 @@ impl<
     }
 
     fn generate_key(&self) -> anyhow::Result<CryptoKey> {
-        generate_key(self.new_key_timestamp())
+        generate_key_with_key_schedule_cache(
+            self.new_key_timestamp(),
+            self.f.policy.cache_key_schedules,
+        )
     }
 
     fn must_load_latest(&self, id: &str) -> anyhow::Result<EnvelopeKeyRecord> {
@@ -267,6 +288,7 @@ impl<
     // Public API compatible with Go shapes
 
     pub fn encrypt(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
+        crate::limits::check_plaintext_len(data.len())?;
         let ik_id = self.f.partition.intermediate_key_id();
         log::debug!("encrypt: loading IK id={ik_id}");
         // Load or create IK
@@ -290,7 +312,7 @@ impl<
                 let sk = self
                     .load_latest_or_create_system_key()
                     .context("encrypt: failed to load or create system key")?;
-                let ik = generate_key(self.new_key_timestamp())?;
+                let ik = self.generate_key()?;
                 // store IK encrypted under SK
                 let enc_ik = ik.with_key_func(|ikb| {
                     sk.with_key_func(|skb| self.f.crypto.encrypt(ikb, skb))
@@ -372,6 +394,7 @@ impl<
     }
 
     pub fn decrypt(&self, drr: crate::types::DataRowRecord) -> anyhow::Result<Vec<u8>> {
+        crate::limits::check_data_row_record(&drr)?;
         let key = drr
             .key
             .ok_or_else(|| anyhow::anyhow!("decrypt: DRR missing key envelope"))?;
@@ -522,7 +545,8 @@ pub struct PublicFactory<A: AEAD + Clone, K: KeyManagementService + Clone, M: Me
 impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     PublicFactory<A, K, M>
 {
-    pub fn new(cfg: Config, metastore: Arc<M>, kms: Arc<K>, crypto: Arc<A>) -> Self {
+    pub fn new(mut cfg: Config, metastore: Arc<M>, kms: Arc<K>, crypto: Arc<A>) -> Self {
+        cfg.policy.clamp_create_date_precision_to_expire();
         // IK cache: optionally shared across sessions
         let shared =
             if cfg.policy.shared_intermediate_key_cache && cfg.policy.cache_intermediate_keys {
@@ -817,7 +841,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
             let sk = self
                 .get_or_load_system_key(sk_meta.clone())
                 .context("create_intermediate_key: failed to get/load system key")?;
-            let ik = generate_key(self.inner.new_key_timestamp())?;
+            let ik = self.inner.generate_key()?;
             let enc_ik = ik
                 .with_key_func(|ikb| sk.with_key_func(|skb| self.crypto.encrypt(ikb, skb)))
                 .context("create_intermediate_key: failed to encrypt IK under SK")??;
@@ -927,6 +951,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     }
 
     pub fn encrypt(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
+        crate::limits::check_plaintext_len(data.len())?;
         self.ensure_valid_partition()?;
         // Per-session AND global gate: only call Instant::now() when both
         // are true. Per-session is set at factory construction; the global
@@ -1422,6 +1447,7 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     }
 
     pub fn decrypt(&self, drr: crate::types::DataRowRecord) -> anyhow::Result<Vec<u8>> {
+        crate::limits::check_data_row_record(&drr)?;
         self.ensure_valid_partition()?;
         // Per-session AND global gate: only call Instant::now() when both
         // are true. Per-session is set at factory construction; the global
@@ -1698,7 +1724,7 @@ impl<
                 .get_or_load_system_key_async(sk_meta.clone())
                 .await
                 .context("create_intermediate_key_async: failed to get/load system key")?;
-            let ik = generate_key(self.inner.new_key_timestamp())?;
+            let ik = self.inner.generate_key()?;
             let enc_ik = ik
                 .with_key_func(|ikb| sk.with_key_func(|skb| self.crypto.encrypt(ikb, skb)))
                 .context("create_intermediate_key_async: failed to encrypt IK under SK")??;
@@ -1755,6 +1781,7 @@ impl<
 
     /// Async encrypt — uses async metastore methods, no spawn_blocking needed.
     pub async fn encrypt_async(&self, data: &[u8]) -> anyhow::Result<crate::types::DataRowRecord> {
+        crate::limits::check_plaintext_len(data.len())?;
         self.ensure_valid_partition()?;
         // Per-session AND global gate: only call Instant::now() when both
         // are true. Per-session is set at factory construction; the global
@@ -1835,6 +1862,7 @@ impl<
 
     /// Async decrypt — uses async metastore methods, no spawn_blocking needed.
     pub async fn decrypt_async(&self, drr: crate::types::DataRowRecord) -> anyhow::Result<Vec<u8>> {
+        crate::limits::check_data_row_record(&drr)?;
         self.ensure_valid_partition()?;
         // Per-session AND global gate: only call Instant::now() when both
         // are true. Per-session is set at factory construction; the global

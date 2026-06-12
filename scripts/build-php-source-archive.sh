@@ -35,7 +35,7 @@ rm -rf "$PACKAGE_WORK/vendor" \
 
 cd "$PACKAGE_WORK"
 rm -f composer.lock
-composer install --prefer-dist --no-progress
+bash "$ROOT_DIR/scripts/composer-retry.sh" install --prefer-dist --no-progress
 composer validate --strict
 composer archive --format=zip --dir="$OUT_DIR" >/dev/null
 

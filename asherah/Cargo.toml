@@ -34,7 +34,7 @@ ring = "0.17"
 scc = "3"
 percent-encoding = "2"
 zeroize = "1.8"
-hardware-enclave = { version = "0.2.8", default-features = false, features = ["memory"] }
+hardware-enclave = { version = "0.2.9", default-features = false, features = ["memory"] }
 
 [[bin]]
 name = "asherah-interop"

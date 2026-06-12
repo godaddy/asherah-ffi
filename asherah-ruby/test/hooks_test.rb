@@ -9,13 +9,12 @@ class HooksTest < Minitest::Test
     "ServiceName"          => "svc",
     "ProductID"            => "prod",
     "Metastore"            => "memory",
-    "KMS"                  => "static",
+    "KMS"                  => "test-debug-static",
     "EnableSessionCaching" => false,
     "Verbose"              => false
   }.freeze
 
   def setup
-    ENV["STATIC_MASTER_KEY_HEX"] = "22" * 32
     Asherah.clear_log_hook
     Asherah.clear_metrics_hook
   end

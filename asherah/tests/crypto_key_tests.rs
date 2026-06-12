@@ -32,6 +32,22 @@ fn crypto_key_with_key_func() {
 }
 
 #[test]
+fn crypto_key_caches_key_schedule_by_default() {
+    let key = CryptoKey::new(0, false, vec![0xCC; 32]).unwrap();
+    assert!(key.less_safe_key().is_some());
+}
+
+#[test]
+fn crypto_key_can_disable_cached_key_schedule() {
+    let key = CryptoKey::new_with_key_schedule_cache(0, false, vec![0xCC; 32], false).unwrap();
+    assert!(key.less_safe_key().is_none());
+    key.with_key_func(|bytes| {
+        assert_eq!(bytes, &[0xCC; 32]);
+    })
+    .unwrap();
+}
+
+#[test]
 fn crypto_key_with_key_func_preserves_data() {
     let input = vec![
         1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
@@ -62,6 +78,19 @@ fn generate_key_is_32_bytes() {
     let key = crypto_key::generate_key(1000).unwrap();
     assert_eq!(key.created(), 1000);
     assert!(!key.revoked());
+    assert!(key.less_safe_key().is_some());
+    key.with_key_func(|bytes| {
+        assert_eq!(bytes.len(), 32);
+    })
+    .unwrap();
+}
+
+#[test]
+fn generate_key_can_disable_cached_key_schedule() {
+    let key = crypto_key::generate_key_with_key_schedule_cache(1000, false).unwrap();
+    assert_eq!(key.created(), 1000);
+    assert!(!key.revoked());
+    assert!(key.less_safe_key().is_none());
     key.with_key_func(|bytes| {
         assert_eq!(bytes.len(), 32);
     })

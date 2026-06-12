@@ -122,6 +122,20 @@ impl Metastore for InMemoryMetastore {
             Err(_) => Ok(false), // Key already exists
         }
     }
+
+    fn upsert_config_drift_guard(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<(), anyhow::Error> {
+        let interned: Arc<str> = Arc::from(id);
+        let key = (interned.clone(), created);
+        let _old = self.by_key.upsert_sync(key, ekr.clone());
+        let _old_latest = self.latest.upsert_sync(interned, created);
+        Ok(())
+    }
+
     fn region_suffix(&self) -> Option<String> {
         None
     }

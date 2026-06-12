@@ -14,6 +14,9 @@ pub fn new_session_factory<
     kms: Arc<K>,
     crypto: Arc<A>,
 ) -> PublicFactory<A, K, M> {
+    if let Err(err) = crate::process_hardening::ensure_process_hardened() {
+        log::error!("failed to initialize process hardening: {err:#}");
+    }
     PublicFactory::new(cfg, store, kms, crypto)
 }
 
@@ -49,6 +52,9 @@ pub fn new_session_factory_with_options<
     crypto: Arc<A>,
     opts: &[FactoryOption],
 ) -> PublicFactory<A, K, M> {
+    if let Err(err) = crate::process_hardening::ensure_process_hardened() {
+        log::error!("failed to initialize process hardening: {err:#}");
+    }
     let mut metrics_enabled = true;
     for opt in opts {
         match opt {

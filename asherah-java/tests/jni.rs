@@ -25,7 +25,7 @@ fn prepare_env() {
     INIT.call_once(|| {
         std::env::set_var("SERVICE_NAME", "svc");
         std::env::set_var("PRODUCT_ID", "prod");
-        std::env::set_var("KMS", "static");
+        std::env::set_var("KMS", "test-debug-static");
         std::env::set_var("STATIC_MASTER_KEY_HEX", "22".repeat(32));
         std::env::remove_var("SQLITE_PATH");
         std::env::remove_var("CONNECTION_STRING");

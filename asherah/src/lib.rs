@@ -21,6 +21,7 @@ pub mod api;
 pub mod builders;
 pub mod cache;
 pub mod config;
+pub mod config_drift_guard;
 pub mod internal;
 pub mod kms;
 pub mod kms_aws;
@@ -31,6 +32,7 @@ pub mod kms_multi;
 pub mod kms_secrets_manager;
 #[cfg(feature = "vault")]
 pub mod kms_vault_transit;
+pub mod limits;
 pub mod logging;
 pub mod metastore;
 #[cfg(feature = "dynamodb")]
@@ -43,6 +45,7 @@ pub mod metastore_region;
 #[cfg(feature = "sqlite")]
 pub mod metastore_sqlite;
 pub mod metrics;
+pub mod microarchitecture;
 // `partition` exposes `DefaultPartition`, an implementation detail
 // used by integration tests inside the same workspace. `#[doc(hidden)]`
 // keeps it off the public API surface (rustdoc landing page) without
@@ -54,6 +57,7 @@ pub mod partition;
 pub mod policy;
 #[cfg(feature = "mysql")]
 pub mod pool_mysql;
+pub mod process_hardening;
 pub mod session;
 /// Implementation-detail of `session.rs` — caches `PublicSession`
 /// instances by partition. External callers should use the

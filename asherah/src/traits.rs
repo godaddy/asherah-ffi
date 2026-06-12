@@ -31,6 +31,22 @@ pub trait Metastore: Send + Sync {
     fn load_latest(&self, id: &str) -> Result<Option<EnvelopeKeyRecord>, anyhow::Error>;
     fn store(&self, id: &str, created: i64, ekr: &EnvelopeKeyRecord)
         -> Result<bool, anyhow::Error>;
+    /// Replace the reserved internal configuration drift guard record.
+    ///
+    /// Normal key records must remain insert-if-absent; this hook exists only
+    /// for the explicit drift-guard repair path.
+    fn upsert_config_drift_guard(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<(), anyhow::Error> {
+        if self.store(id, created, ekr)? {
+            Ok(())
+        } else {
+            anyhow::bail!("metastore does not support replacing config drift guard records")
+        }
+    }
     fn region_suffix(&self) -> Option<String> {
         None
     }
@@ -57,6 +73,14 @@ pub trait Metastore: Send + Sync {
         ekr: &EnvelopeKeyRecord,
     ) -> Result<bool, anyhow::Error> {
         self.store(id, created, ekr)
+    }
+    async fn upsert_config_drift_guard_async(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<(), anyhow::Error> {
+        self.upsert_config_drift_guard(id, created, ekr)
     }
 }
 

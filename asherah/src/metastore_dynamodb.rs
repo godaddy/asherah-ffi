@@ -258,6 +258,15 @@ impl DynamoDbMetastore {
         Self::do_store(&self.sync_client, &self.table, id, created, ekr).await
     }
 
+    async fn upsert_config_drift_guard_impl_sync(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<(), anyhow::Error> {
+        Self::do_upsert_config_drift_guard(&self.sync_client, &self.table, id, created, ekr).await
+    }
+
     // ── Async implementations (use async_client on caller's runtime) ──
 
     async fn load_impl_async(
@@ -317,6 +326,16 @@ impl DynamoDbMetastore {
         Self::do_store(client, &self.table, id, created, ekr).await
     }
 
+    async fn upsert_config_drift_guard_impl_async(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<(), anyhow::Error> {
+        let client = self.async_client().await;
+        Self::do_upsert_config_drift_guard(client, &self.table, id, created, ekr).await
+    }
+
     // ── Shared helpers ──
 
     /// Parse a DynamoDB Item into an EnvelopeKeyRecord.
@@ -354,13 +373,9 @@ impl DynamoDbMetastore {
         Ok(Some(Self::decode_key_record(m, id)?))
     }
 
-    async fn do_store(
-        client: &Client,
-        table: &str,
-        id: &str,
-        created: i64,
+    fn key_record_attribute_map(
         ekr: &EnvelopeKeyRecord,
-    ) -> Result<bool, anyhow::Error> {
+    ) -> std::collections::HashMap<String, AttributeValue> {
         let mut key_record: std::collections::HashMap<String, AttributeValue> =
             std::collections::HashMap::new();
         if let Some(rv) = ekr.revoked {
@@ -384,6 +399,17 @@ impl DynamoDbMetastore {
             );
             key_record.insert("ParentKeyMeta".to_string(), AttributeValue::M(m));
         }
+        key_record
+    }
+
+    async fn do_store(
+        client: &Client,
+        table: &str,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<bool, anyhow::Error> {
+        let key_record = Self::key_record_attribute_map(ekr);
         log::debug!("dynamodb store: table={table} id={id} created={created}");
         let out = client
             .put_item()
@@ -422,6 +448,29 @@ impl DynamoDbMetastore {
                 }
             }
         }
+    }
+
+    async fn do_upsert_config_drift_guard(
+        client: &Client,
+        table: &str,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<(), anyhow::Error> {
+        let key_record = Self::key_record_attribute_map(ekr);
+        log::debug!("dynamodb config drift guard upsert: table={table} id={id} created={created}");
+        client
+            .put_item()
+            .table_name(table)
+            .item("Id", AttributeValue::S(id.to_string()))
+            .item("Created", AttributeValue::N(created.to_string()))
+            .item("KeyRecord", AttributeValue::M(key_record))
+            .send()
+            .await
+            .with_context(|| {
+                format!("DynamoDB config drift guard PutItem failed for table={table} id={id}")
+            })?;
+        Ok(())
     }
 
     fn decode_key_record(
@@ -512,6 +561,18 @@ impl Metastore for DynamoDbMetastore {
         Self::block_on_maybe(self.rt.runtime(), self.store_impl_sync(id, created, ekr))
     }
 
+    fn upsert_config_drift_guard(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<(), anyhow::Error> {
+        Self::block_on_maybe(
+            self.rt.runtime(),
+            self.upsert_config_drift_guard_impl_sync(id, created, ekr),
+        )
+    }
+
     fn region_suffix(&self) -> Option<String> {
         if self.region_suffix_enabled {
             self.region_suffix.clone()
@@ -543,6 +604,16 @@ impl Metastore for DynamoDbMetastore {
         ekr: &EnvelopeKeyRecord,
     ) -> Result<bool, anyhow::Error> {
         self.store_impl_async(id, created, ekr).await
+    }
+
+    async fn upsert_config_drift_guard_async(
+        &self,
+        id: &str,
+        created: i64,
+        ekr: &EnvelopeKeyRecord,
+    ) -> Result<(), anyhow::Error> {
+        self.upsert_config_drift_guard_impl_async(id, created, ekr)
+            .await
     }
 }
 

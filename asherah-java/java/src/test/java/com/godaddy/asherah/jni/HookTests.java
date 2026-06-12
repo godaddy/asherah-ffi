@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -40,7 +41,7 @@ class HookTests {
     System.setProperty("PRODUCT_ID", "prod");
     System.setProperty("STATIC_MASTER_KEY_HEX",
         "2222222222222222222222222222222222222222222222222222222222222222");
-    System.setProperty("KMS", "static");
+    System.setProperty("KMS", "test-debug-static");
   }
 
   @BeforeEach
@@ -63,6 +64,22 @@ class HookTests {
         .kms("test-debug-static")
         .enableSessionCaching(Boolean.FALSE)
         .build();
+  }
+
+  private static boolean waitFor(BooleanSupplier condition) {
+    final long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+    while (System.nanoTime() < deadline) {
+      if (condition.getAsBoolean()) {
+        return true;
+      }
+      try {
+        Thread.sleep(2);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return condition.getAsBoolean();
+      }
+    }
+    return condition.getAsBoolean();
   }
 
   // ---------- log hook ----------
@@ -194,6 +211,9 @@ class HookTests {
         session.decryptString(ct);
       }
     }
+    assertTrue(waitFor(() -> seen.contains(MetricsEventType.ENCRYPT)
+            && seen.contains(MetricsEventType.DECRYPT)),
+        "expected ENCRYPT and DECRYPT events, saw " + seen);
     Asherah.clearMetricsHook();
     assertTrue(seen.contains(MetricsEventType.ENCRYPT),
         "expected ENCRYPT event, saw " + seen);
@@ -222,6 +242,7 @@ class HookTests {
         session.decryptString(session.encryptString("timed-" + i));
       }
     }
+    assertTrue(waitFor(() -> !timings.isEmpty()), "expected at least one timing event");
     Asherah.clearMetricsHook();
     assertFalse(timings.isEmpty(), "expected at least one timing event");
     for (MetricsEvent event : timings) {
@@ -243,6 +264,7 @@ class HookTests {
         session.decryptString(session.encryptString("replace-" + i));
       }
     }
+    assertTrue(waitFor(() -> newHits.get() > 0), "replacement hook should have received events");
     Asherah.clearMetricsHook();
     assertTrue(newHits.get() > 0, "replacement hook should have received events");
     // We don't assert oldHits == 0 because there's a brief window between the
@@ -262,6 +284,7 @@ class HookTests {
       String ct = session.encryptString("survive-metrics-throw");
       assertEquals("survive-metrics-throw", session.decryptString(ct));
     }
+    assertTrue(waitFor(() -> fired.get() > 0), "hook must have fired at least once");
     Asherah.clearMetricsHook();
     assertTrue(fired.get() > 0, "hook must have fired at least once");
   }
@@ -276,6 +299,8 @@ class HookTests {
         session.decryptString(session.encryptString("vol-" + i));
       }
     }
+    assertTrue(waitFor(() -> fired.get() >= 200),
+        "expected ≥200 metrics events for 100 enc/dec ops, got " + fired.get());
     Asherah.clearMetricsHook();
     assertTrue(fired.get() >= 200,
         "expected ≥200 metrics events for 100 enc/dec ops, got " + fired.get());
@@ -293,6 +318,7 @@ class HookTests {
         session.decryptString(session.encryptString("coexist-" + i));
       }
     }
+    assertTrue(waitFor(() -> metricHits.get() > 0), "metrics hook should have fired");
     Asherah.clearLogHook();
     Asherah.clearMetricsHook();
     assertTrue(metricHits.get() > 0, "metrics hook should have fired");
@@ -355,6 +381,7 @@ class HookTests {
         session.decryptString(session.encryptString("payload-" + cycle));
       }
     }
+    assertTrue(waitFor(() -> metricHits.get() > 0), "hook should fire across factory cycles");
     Asherah.clearMetricsHook();
     assertTrue(metricHits.get() > 0, "hook should fire across factory cycles");
   }

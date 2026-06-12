@@ -53,7 +53,7 @@ function configFromEnv() {
     dynamoDbTableName: process.env.DDB_TABLE,
     sessionCacheMaxSize: process.env.SESSION_CACHE_MAX_SIZE ? Number(process.env.SESSION_CACHE_MAX_SIZE) : undefined,
     sessionCacheDuration: process.env.SESSION_CACHE_DURATION_SECS ? Number(process.env.SESSION_CACHE_DURATION_SECS) : undefined,
-    kms: process.env.KMS || 'static',
+    kms: process.env.KMS || 'test-debug-static',
     staticMasterKeyHex: process.env.STATIC_MASTER_KEY_HEX,
     regionMap: process.env.REGION_MAP ? JSON.parse(process.env.REGION_MAP) : undefined,
     preferredRegion: process.env.PREFERRED_REGION,

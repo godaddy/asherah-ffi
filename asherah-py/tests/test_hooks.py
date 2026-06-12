@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 
 import pytest
 
@@ -24,7 +25,7 @@ import pytest
 def _configure_env():
     os.environ.setdefault("SERVICE_NAME", "hook-test-svc")
     os.environ.setdefault("PRODUCT_ID", "hook-test-prod")
-    os.environ.setdefault("KMS", "static")
+    os.environ.setdefault("KMS", "test-debug-static")
     os.environ.setdefault("STATIC_MASTER_KEY_HEX", "22" * 32)
 
 
@@ -41,6 +42,30 @@ def _config(verbose: bool = False):
 
 # Hooks are global state; serialize the tests so they don't race.
 _LOCK = threading.Lock()
+
+
+def _wait_for(predicate, timeout: float = 2.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.002)
+    return predicate()
+
+
+def _wait_for_stable_len(events, quiet: float = 0.05, timeout: float = 2.0) -> bool:
+    deadline = time.monotonic() + timeout
+    last_len = len(events)
+    stable_since = time.monotonic()
+    while time.monotonic() < deadline:
+        time.sleep(0.002)
+        current_len = len(events)
+        if current_len != last_len:
+            last_len = current_len
+            stable_since = time.monotonic()
+        elif time.monotonic() - stable_since >= quiet:
+            return True
+    return False
 
 
 def _reset_hooks(asherah):
@@ -80,8 +105,10 @@ def test_log_hook_fires():
     asherah.setup(_config(verbose=True))
     ct = asherah.encrypt_string("p1", "log-test")
     asherah.decrypt_string("p1", ct)
+    assert _wait_for(lambda: len(events) > 0), (
+        f"expected at least 1 log event, got {len(events)}"
+    )
     asherah.shutdown()
-    assert len(events) > 0, f"expected ≥1 log event, got {len(events)}"
     # Each event has the documented dict shape
     for e in events:
         assert "level" in e and isinstance(e["level"], str)
@@ -102,9 +129,15 @@ def test_metrics_hook_fires_on_encrypt_decrypt():
     for i in range(5):
         ct = asherah.encrypt_string("p2", f"payload-{i}")
         asherah.decrypt_string("p2", ct)
-    asherah.shutdown()
+    assert _wait_for(
+        lambda: (
+            sum(1 for e in events if e["type"] == "encrypt") >= 5
+            and sum(1 for e in events if e["type"] == "decrypt") >= 5
+        )
+    )
     encrypts = [e for e in events if e["type"] == "encrypt"]
     decrypts = [e for e in events if e["type"] == "decrypt"]
+    asherah.shutdown()
     assert len(encrypts) >= 5, f"expected ≥5 encrypt events, got {len(encrypts)}"
     assert len(decrypts) >= 5, f"expected ≥5 decrypt events, got {len(decrypts)}"
     for e in encrypts:
@@ -139,10 +172,12 @@ def test_hook_deregister_stops_callbacks():
     asherah.set_metrics_hook(lambda e: events.append(e))
     asherah.setup(_config())
     asherah.encrypt_string("p3", "pre-deregister")
+    assert _wait_for(lambda: len(events) > 0), "expected pre-deregister metrics"
+    assert _wait_for_stable_len(events), "pre-deregister metrics did not drain"
     before = len(events)
-    assert before > 0
     asherah.set_metrics_hook(None)
     asherah.encrypt_string("p3", "post-deregister")
+    time.sleep(0.05)
     after = len(events)
     asherah.shutdown()
     assert before == after, f"events fired after deregister: {before=} {after=}"
@@ -157,8 +192,12 @@ def test_hook_replacement():
     asherah.set_metrics_hook(lambda e: events_a.append(e))
     asherah.setup(_config())
     asherah.encrypt_string("p4", "first")
+    assert _wait_for(lambda: len(events_a) > 0), "first callback should have fired"
     asherah.set_metrics_hook(lambda e: events_b.append(e))
     asherah.encrypt_string("p4", "second")
+    assert _wait_for(lambda: len(events_b) > 0), (
+        "second callback should have fired after replace"
+    )
     asherah.shutdown()
     assert len(events_a) > 0, "first callback should have fired"
     assert len(events_b) > 0, "second callback should have fired after replace"
@@ -173,8 +212,10 @@ def test_hook_installed_before_setup_fires():
     # setup happens AFTER hook is installed
     asherah.setup(_config())
     asherah.encrypt_string("p5", "before-setup")
+    assert _wait_for(lambda: len(events) > 0), (
+        "hook installed before setup should still fire"
+    )
     asherah.shutdown()
-    assert len(events) > 0, "hook installed before setup should still fire"
 
 
 def test_multiple_register_clear_cycles():
@@ -186,6 +227,9 @@ def test_multiple_register_clear_cycles():
         asherah.set_metrics_hook(lambda e, lst=events: lst.append(e))
         asherah.setup(_config())
         asherah.encrypt_string("p6", f"cycle-{cycle}")
+        assert _wait_for(lambda: len(events) > 0), (
+            f"cycle {cycle} should produce events"
+        )
         asherah.shutdown()
         asherah.set_metrics_hook(None)
         assert len(events) > 0, f"cycle {cycle} should produce events"
@@ -205,6 +249,9 @@ def test_hooks_with_session_factory_api():
         ct = session.encrypt_text("factory-payload")
         recovered = session.decrypt_text(ct)
         assert recovered == "factory-payload"
+        assert _wait_for(lambda: len(metrics) > 0), (
+            "factory/session ops should fire metrics"
+        )
     finally:
         factory.close()
     assert len(metrics) > 0, "factory/session ops should fire metrics"

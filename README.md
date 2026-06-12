@@ -161,8 +161,8 @@ TIER 1: mlock'd Slab (hot cache, ~400ns access)
   +----------------------------------------------------+
   Guard Page [PROT_NONE -- segfaults on access]
 
-  Canary bytes between guard pages and data detect
-  buffer overflows at runtime.
+  Guard pages fault on page-boundary overflows and underflows.
+  Standalone secure buffers also use canaries for corruption detection.
 
 TIER 2: Encrypted Enclaves (cold cache, ~1us access)
 ========================================================
@@ -297,6 +297,21 @@ mlock'd slots using XOR + hash derivation — neither slot alone reveals
 the key
 - **AES-256-GCM Enclaves**: Keys at rest in regular memory are encrypted
 with authenticated encryption; only the mlock'd Coffer can decrypt them
+
+### Microarchitectural side channels
+
+Asherah's memory hardening reduces normal process-memory exposure, but it does
+not by itself mitigate Spectre, Meltdown, L1TF, MDS, or related CPU side-channel
+classes. Guard pages and `mprotect` catch architectural out-of-bounds access;
+they do not make secrets invisible to speculative-execution gadgets or hostile
+co-tenants on an unmitigated host.
+
+Production deployments that handle high-value plaintext or keys should run on
+hosts with current CPU microcode and kernel mitigations, avoid untrusted
+co-tenants on the same physical core, and consider disabling SMT or using core
+scheduling where the platform requires it. On Linux, `asherah-server` reads
+`/sys/devices/system/cpu/vulnerabilities/*` at startup and warns when the host
+reports a vulnerable or residual-vulnerable status.
 
 ## License
 

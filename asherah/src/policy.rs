@@ -16,6 +16,10 @@ pub struct CryptoPolicy {
     // to false is a no-op. Use cache max sizes to control capacity.
     pub cache_system_keys: bool,
     pub cache_intermediate_keys: bool,
+    /// Cache pre-expanded AEAD key schedules outside the locked enclave.
+    /// Disable this for higher assurance against microarchitectural disclosure
+    /// of long-lived SK/IK key-equivalent material.
+    pub cache_key_schedules: bool,
     pub shared_intermediate_key_cache: bool,
     pub intermediate_key_cache_max_size: usize,
     pub intermediate_key_cache_eviction_policy: String,
@@ -52,6 +56,7 @@ impl Default for CryptoPolicy {
             expire_key_after_s: 60 * 60 * 24 * 90,
             cache_system_keys: true,
             cache_intermediate_keys: true,
+            cache_key_schedules: true,
             shared_intermediate_key_cache: true,
             intermediate_key_cache_max_size: 1000,
             intermediate_key_cache_eviction_policy: "simple".to_string(),
@@ -83,16 +88,16 @@ impl CryptoPolicy {
         self.cache_system_keys = true;
         self.cache_intermediate_keys = true;
         self.cache_sessions = true;
+        self.clamp_create_date_precision_to_expire();
+    }
+
+    pub(crate) fn clamp_create_date_precision_to_expire(&mut self) {
         // Defense-in-depth: clamp create_date_precision_s ≤ expire_key_after_s.
         // Without this, a config with `expire_after_s < create_date_precision_s`
         // (e.g. expire=1, default precision=60) makes the engine fail closed
-        // on the second encrypt within a precision window — every binding
-        // user setting `expireAfter < 60` hits this. Mirror clamp logic in
-        // asherah-config::resolve, but apply it here too so any code path
-        // that builds a CryptoPolicy benefits, including direct
-        // `Config::new()` consumers and integration tests. T-finding
-        // `expire_smaller_than_precision_fails_closed` in
-        // asherah/tests/rotation_timing_edges.rs.
+        // on the second encrypt within a precision window. Keep this separate
+        // from enforce_minimums() so programmatic factory construction can get
+        // the time-bound fix without changing explicit cache settings.
         if self.expire_key_after_s > 0 && self.create_date_precision_s > self.expire_key_after_s {
             self.create_date_precision_s = self.expire_key_after_s;
         }
@@ -105,6 +110,7 @@ pub enum PolicyOption {
     RevokeCheckIntervalSecs(i64),
     ExpireAfterSecs(i64),
     NoCache,
+    CacheKeySchedules(bool),
     SharedIntermediateKeyCache(bool),
     IntermediateKeyCacheMaxSize(usize),
     IntermediateKeyCacheEvictionPolicy(String),
@@ -131,6 +137,7 @@ pub fn new_crypto_policy(opts: &[PolicyOption]) -> CryptoPolicy {
                 p.cache_intermediate_keys = false;
                 explicit_no_cache = true;
             }
+            PolicyOption::CacheKeySchedules(b) => p.cache_key_schedules = b,
             PolicyOption::SharedIntermediateKeyCache(b) => p.shared_intermediate_key_cache = b,
             PolicyOption::IntermediateKeyCacheMaxSize(sz) => p.intermediate_key_cache_max_size = sz,
             PolicyOption::IntermediateKeyCacheEvictionPolicy(ref s) => {
