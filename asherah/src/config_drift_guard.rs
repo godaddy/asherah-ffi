@@ -224,6 +224,24 @@ fn snapshot_from_envelope(ekr: &EnvelopeKeyRecord) -> anyhow::Result<ConfigDrift
     serde_json::from_slice(&ekr.encrypted_key).context("parse config drift guard snapshot")
 }
 
+fn log_mismatch_force_run_override() {
+    log::error!(
+        "config drift guard mismatch detected; continuing because force-run override is enabled"
+    );
+}
+
+fn log_load_error_force_update_override() {
+    log::error!(
+        "config drift guard could not be loaded; replacing it because force-update override is enabled"
+    );
+}
+
+fn log_load_error_force_run_override() {
+    log::error!(
+        "config drift guard could not be loaded; continuing because force-run override is enabled"
+    );
+}
+
 fn handle_existing(
     stored: &ConfigDriftGuardSnapshot,
     current: &ConfigDriftGuardSnapshot,
@@ -236,9 +254,7 @@ fn handle_existing(
         return Ok(false);
     }
     if options.allow_mismatch {
-        log::error!(
-            "config drift guard mismatch detected; continuing because force-run override is enabled"
-        );
+        log_mismatch_force_run_override();
         return Ok(true);
     }
     anyhow::bail!(
@@ -251,15 +267,11 @@ fn handle_existing(
 
 fn handle_load_error(err: anyhow::Error, options: ConfigDriftGuardOptions) -> anyhow::Result<bool> {
     if options.force_update {
-        log::error!(
-            "config drift guard could not be loaded; replacing it because force-update override is enabled"
-        );
+        log_load_error_force_update_override();
         return Ok(false);
     }
     if options.allow_mismatch {
-        log::error!(
-            "config drift guard could not be loaded; continuing because force-run override is enabled"
-        );
+        log_load_error_force_run_override();
         return Ok(true);
     }
     Err(err).context("load config drift guard")
