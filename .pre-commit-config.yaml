@@ -17,7 +17,7 @@ repos:
 
       - id: cargo-test
         name: cargo test
-        entry: cargo test --workspace --lib
+        entry: cargo test --workspace --lib --exclude asherah-node --exclude asherah-py --exclude asherah-bench
         language: system
         types: [rust]
         pass_filenames: false

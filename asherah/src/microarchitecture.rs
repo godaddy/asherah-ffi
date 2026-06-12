@@ -91,16 +91,16 @@ pub fn host_cpu_vulnerabilities_requiring_attention() -> io::Result<Vec<CpuVulne
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     fn temp_dir() -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!(
-            "asherah-cpu-vulnerabilities-{}-{nanos}",
-            std::process::id()
-        ));
+        let suffix = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("asherah-cpu-vulnerabilities-{suffix}"));
+        if dir.exists() {
+            fs::remove_dir_all(&dir).unwrap();
+        }
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -129,6 +129,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "isolated Miri does not permit the filesystem syscalls this test exercises"
+    )]
     #[test]
     fn reads_and_filters_cpu_vulnerabilities_from_sysfs_shape() {
         let dir = temp_dir();
@@ -162,6 +166,10 @@ mod tests {
         fs::remove_dir_all(dir).unwrap();
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "isolated Miri does not permit the filesystem syscalls this test exercises"
+    )]
     #[test]
     fn missing_cpu_vulnerability_directory_is_empty() {
         let dir = temp_dir();

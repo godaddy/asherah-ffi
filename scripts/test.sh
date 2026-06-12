@@ -188,8 +188,10 @@ do_unit() {
     # (104 tests needing Docker + --test-threads=1) during the unit test phase.
     # Workspace feature unification enables mysql/postgres/dynamodb from binding
     # crates, which causes cargo to compile and include integration_containers.
+    # asherah-py is a PyO3 extension module and is exercised by the binding
+    # phase; testing it as a normal Rust test binary requires embedding Python.
     run_test "cargo test (workspace, excl. asherah core)" \
-        cargo test --workspace --exclude asherah --exclude asherah-node --exclude asherah-bench
+        cargo test --workspace --exclude asherah --exclude asherah-node --exclude asherah-py --exclude asherah-bench
 
     # Run asherah crate unit tests: lib tests + all test files except
     # integration_containers (Docker) and cucumber (BDD framework).
@@ -430,7 +432,7 @@ do_bindings() {
                     asherah-php-ffi-test sh -c 'set -e; before="$(find /work/asherah-php -maxdepth 1 \( -name composer.lock -o -name vendor -o -name native \) -print | sort)"; /work/scripts/build-php-source-archive.sh /tmp/asherah-php-dist >/tmp/asherah-php-archive.log; after="$(find /work/asherah-php -maxdepth 1 \( -name composer.lock -o -name vendor -o -name native \) -print | sort)"; test "$before" = "$after"'
                 run_test "PHP Composer install" docker run --rm \
                     -v "$ROOT_DIR:/work" -w /work/asherah-php \
-                    asherah-php-ffi-test sh -c 'rm -f composer.lock && composer install --prefer-dist --no-progress'
+                    asherah-php-ffi-test sh -c 'rm -f composer.lock && bash /work/scripts/composer-retry.sh install --prefer-dist --no-progress'
                 run_test "PHP composer validate" docker run --rm \
                     -v "$ROOT_DIR:/work" -w /work/asherah-php \
                     asherah-php-ffi-test composer validate --strict
@@ -456,11 +458,11 @@ do_bindings() {
                     -v "$ROOT_DIR:/work" -w /work \
                     -e ASHERAH_PHP_NATIVE="$php_native_container" \
                     -e ASHERAH_PHP_INTEROP_SQLITE=/tmp/asherah-php-interop.db \
-                    asherah-php-ffi-test sh -c 'set -e; rm -f /tmp/asherah-php-interop.db; cd /work/asherah-php; rm -f composer.lock; composer install --prefer-dist --no-progress >/dev/null; cd /work; DRR=$(php interop/php/encrypt.php tenant-interop php-interop-payload); OUT=$(php interop/php/decrypt.php tenant-interop "$DRR"); test "$OUT" = php-interop-payload'
+                    asherah-php-ffi-test sh -c 'set -e; rm -f /tmp/asherah-php-interop.db; cd /work/asherah-php; rm -f composer.lock; bash /work/scripts/composer-retry.sh install --prefer-dist --no-progress >/dev/null; cd /work; DRR=$(php interop/php/encrypt.php tenant-interop php-interop-payload); OUT=$(php interop/php/decrypt.php tenant-interop "$DRR"); test "$OUT" = php-interop-payload'
                 run_test "PHP consumer smoke" docker run --rm \
                     -v "$ROOT_DIR:/work" -w /work \
                     -e ASHERAH_PHP_NATIVE="$php_native_container" \
-                    asherah-php-ffi-test sh -c 'set -e; rm -rf /tmp/asherah-php-consumer; mkdir /tmp/asherah-php-consumer; cd /tmp/asherah-php-consumer; composer init --name asherah/consumer-smoke --no-interaction >/dev/null; composer config repositories.asherah path /work/asherah-php; composer config minimum-stability dev; composer config prefer-stable true; composer require godaddy/asherah:* --no-interaction --no-progress >/dev/null; php vendor/godaddy/asherah/tests/consumer_smoke.php'
+                    asherah-php-ffi-test sh -c 'set -e; rm -rf /tmp/asherah-php-consumer; mkdir /tmp/asherah-php-consumer; cd /tmp/asherah-php-consumer; composer init --name asherah/consumer-smoke --no-interaction >/dev/null; composer config repositories.asherah path /work/asherah-php; composer config minimum-stability dev; composer config prefer-stable true; bash /work/scripts/composer-retry.sh require godaddy/asherah:* --no-interaction --no-progress >/dev/null; php vendor/godaddy/asherah/tests/consumer_smoke.php'
                 run_test "PHP preload smoke" docker run --rm \
                     --user "$(id -u):$(id -g)" \
                     -v "$ROOT_DIR:/work" -w /work/asherah-php \
@@ -472,15 +474,15 @@ do_bindings() {
                 local php_native="${ASHERAH_PHP_NATIVE:-$ROOT_DIR/target/release}"
                 run_test "PHP no-vendor smoke" bash -c "rm -rf /tmp/asherah-php-no-vendor && cp -a \"$ROOT_DIR/asherah-php\" /tmp/asherah-php-no-vendor && rm -rf /tmp/asherah-php-no-vendor/vendor /tmp/asherah-php-no-vendor/composer.lock && cd /tmp/asherah-php-no-vendor && ASHERAH_PHP_NATIVE=\"$php_native\" php tests/smoke.php"
                 run_test "PHP source archive lifecycle" bash -c "before=\$(find \"$ROOT_DIR/asherah-php\" -maxdepth 1 \\( -name composer.lock -o -name vendor -o -name native \\) -print | sort) && \"$ROOT_DIR/scripts/build-php-source-archive.sh\" /tmp/asherah-php-dist >/tmp/asherah-php-archive.log && after=\$(find \"$ROOT_DIR/asherah-php\" -maxdepth 1 \\( -name composer.lock -o -name vendor -o -name native \\) -print | sort) && test \"\$before\" = \"\$after\""
-                run_test "PHP Composer install" bash -c "cd asherah-php && rm -f composer.lock && composer install --prefer-dist --no-progress"
+                run_test "PHP Composer install" bash -c "cd asherah-php && rm -f composer.lock && bash \"$ROOT_DIR/scripts/composer-retry.sh\" install --prefer-dist --no-progress"
                 run_test "PHP composer validate" bash -c "cd asherah-php && composer validate --strict"
                 run_test "PHP syntax" bash -c "cd asherah-php && for f in src/*.php scripts/*.php tests/*.php tests/*/*.php preload.php ../interop/php/*.php; do php -l \"\$f\" || exit 1; done"
                 run_test "PHPStan" bash -c "cd asherah-php && vendor/bin/phpstan analyse --memory-limit=256M"
                 run_test "PHP-CS-Fixer" bash -c "cd asherah-php && vendor/bin/php-cs-fixer fix --config=.php-cs-fixer.php --dry-run --diff --allow-unsupported-php-version=yes"
                 run_test "PHP PHPUnit" bash -c "cd asherah-php && ASHERAH_PHP_NATIVE=\"$php_native\" vendor/bin/phpunit --no-coverage"
                 run_test "PHP smoke" bash -c "cd asherah-php && ASHERAH_PHP_NATIVE=\"$php_native\" php tests/smoke.php"
-                run_test "PHP interop probes" bash -c "rm -f /tmp/asherah-php-interop.db && cd asherah-php && rm -f composer.lock && composer install --prefer-dist --no-progress >/dev/null && cd \"$ROOT_DIR\" && DRR=\$(ASHERAH_PHP_NATIVE=\"$php_native\" ASHERAH_PHP_INTEROP_SQLITE=/tmp/asherah-php-interop.db php interop/php/encrypt.php tenant-interop php-interop-payload) && OUT=\$(ASHERAH_PHP_NATIVE=\"$php_native\" ASHERAH_PHP_INTEROP_SQLITE=/tmp/asherah-php-interop.db php interop/php/decrypt.php tenant-interop \"\$DRR\") && test \"\$OUT\" = php-interop-payload"
-                run_test "PHP consumer smoke" bash -c "rm -rf /tmp/asherah-php-consumer && mkdir /tmp/asherah-php-consumer && cd /tmp/asherah-php-consumer && composer init --name asherah/consumer-smoke --no-interaction >/dev/null && composer config repositories.asherah path \"$ROOT_DIR/asherah-php\" && composer config minimum-stability dev && composer config prefer-stable true && composer require godaddy/asherah:* --no-interaction --no-progress >/dev/null && ASHERAH_PHP_NATIVE=\"$php_native\" php vendor/godaddy/asherah/tests/consumer_smoke.php"
+                run_test "PHP interop probes" bash -c "rm -f /tmp/asherah-php-interop.db && cd asherah-php && rm -f composer.lock && bash \"$ROOT_DIR/scripts/composer-retry.sh\" install --prefer-dist --no-progress >/dev/null && cd \"$ROOT_DIR\" && DRR=\$(ASHERAH_PHP_NATIVE=\"$php_native\" ASHERAH_PHP_INTEROP_SQLITE=/tmp/asherah-php-interop.db php interop/php/encrypt.php tenant-interop php-interop-payload) && OUT=\$(ASHERAH_PHP_NATIVE=\"$php_native\" ASHERAH_PHP_INTEROP_SQLITE=/tmp/asherah-php-interop.db php interop/php/decrypt.php tenant-interop \"\$DRR\") && test \"\$OUT\" = php-interop-payload"
+                run_test "PHP consumer smoke" bash -c "rm -rf /tmp/asherah-php-consumer && mkdir /tmp/asherah-php-consumer && cd /tmp/asherah-php-consumer && composer init --name asherah/consumer-smoke --no-interaction >/dev/null && composer config repositories.asherah path \"$ROOT_DIR/asherah-php\" && composer config minimum-stability dev && composer config prefer-stable true && bash \"$ROOT_DIR/scripts/composer-retry.sh\" require godaddy/asherah:* --no-interaction --no-progress >/dev/null && ASHERAH_PHP_NATIVE=\"$php_native\" php vendor/godaddy/asherah/tests/consumer_smoke.php"
             else
                 skip "PHP tests (php/composer unavailable and Docker not running)"
             fi

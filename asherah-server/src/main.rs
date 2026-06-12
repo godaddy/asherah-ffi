@@ -286,10 +286,30 @@ fn parse_octal_mode(s: &str) -> Result<u32, String> {
 struct UmaskGuard(rustix::fs::Mode);
 
 #[cfg(unix)]
+fn unix_permission_mode(bits: u32) -> rustix::fs::Mode {
+    let mut mode = rustix::fs::Mode::empty();
+    for (bit, flag) in [
+        (0o400, rustix::fs::Mode::RUSR),
+        (0o200, rustix::fs::Mode::WUSR),
+        (0o100, rustix::fs::Mode::XUSR),
+        (0o040, rustix::fs::Mode::RGRP),
+        (0o020, rustix::fs::Mode::WGRP),
+        (0o010, rustix::fs::Mode::XGRP),
+        (0o004, rustix::fs::Mode::ROTH),
+        (0o002, rustix::fs::Mode::WOTH),
+        (0o001, rustix::fs::Mode::XOTH),
+    ] {
+        if bits & bit != 0 {
+            mode |= flag;
+        }
+    }
+    mode
+}
+
+#[cfg(unix)]
 impl UmaskGuard {
     fn set(mask: u32) -> Self {
-        let previous =
-            rustix::process::umask(rustix::fs::Mode::from_raw_mode(mask as rustix::fs::RawMode));
+        let previous = rustix::process::umask(unix_permission_mode(mask));
         Self(previous)
     }
 }
@@ -535,10 +555,9 @@ async fn main() -> Result<()> {
     // (force-cancel via `set.shutdown()`), ensuring `close()` actually
     // runs before the runtime tears down — the previous design dropped
     // the server future on timeout and abandoned in-flight `close()`s.
-    let drain_timeout = if cli.shutdown_drain_timeout > 0 {
-        Duration::from_secs(cli.shutdown_drain_timeout as u64)
-    } else {
-        Duration::from_secs(30)
+    let drain_timeout = match u64::try_from(cli.shutdown_drain_timeout) {
+        Ok(seconds) if seconds > 0 => Duration::from_secs(seconds),
+        _ => Duration::from_secs(30),
     };
 
     tokio::pin!(server);
