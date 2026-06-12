@@ -39,10 +39,11 @@ impl<
     pub fn new(
         metastore: Arc<M>,
         kms: Arc<K>,
-        policy: CryptoPolicy,
+        mut policy: CryptoPolicy,
         crypto: Arc<A>,
         partition: Arc<P>,
     ) -> Self {
+        policy.clamp_create_date_precision_to_expire();
         Self {
             metastore,
             kms,
@@ -544,7 +545,8 @@ pub struct PublicFactory<A: AEAD + Clone, K: KeyManagementService + Clone, M: Me
 impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
     PublicFactory<A, K, M>
 {
-    pub fn new(cfg: Config, metastore: Arc<M>, kms: Arc<K>, crypto: Arc<A>) -> Self {
+    pub fn new(mut cfg: Config, metastore: Arc<M>, kms: Arc<K>, crypto: Arc<A>) -> Self {
+        cfg.policy.clamp_create_date_precision_to_expire();
         // IK cache: optionally shared across sessions
         let shared =
             if cfg.policy.shared_intermediate_key_cache && cfg.policy.cache_intermediate_keys {

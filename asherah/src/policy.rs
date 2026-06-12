@@ -88,16 +88,16 @@ impl CryptoPolicy {
         self.cache_system_keys = true;
         self.cache_intermediate_keys = true;
         self.cache_sessions = true;
+        self.clamp_create_date_precision_to_expire();
+    }
+
+    pub(crate) fn clamp_create_date_precision_to_expire(&mut self) {
         // Defense-in-depth: clamp create_date_precision_s ≤ expire_key_after_s.
         // Without this, a config with `expire_after_s < create_date_precision_s`
         // (e.g. expire=1, default precision=60) makes the engine fail closed
-        // on the second encrypt within a precision window — every binding
-        // user setting `expireAfter < 60` hits this. Mirror clamp logic in
-        // asherah-config::resolve, but apply it here too so any code path
-        // that builds a CryptoPolicy benefits, including direct
-        // `Config::new()` consumers and integration tests. T-finding
-        // `expire_smaller_than_precision_fails_closed` in
-        // asherah/tests/rotation_timing_edges.rs.
+        // on the second encrypt within a precision window. Keep this separate
+        // from enforce_minimums() so programmatic factory construction can get
+        // the time-bound fix without changing explicit cache settings.
         if self.expire_key_after_s > 0 && self.create_date_precision_s > self.expire_key_after_s {
             self.create_date_precision_s = self.expire_key_after_s;
         }

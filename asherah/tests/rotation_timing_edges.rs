@@ -99,57 +99,37 @@ fn precision_window_groups_encrypts_into_one_ik() {
     assert_eq!(session.decrypt(drr3).unwrap(), b"c");
 }
 
-/// `expire_s < precision_s` is a soft footgun.
+/// `expire_s < precision_s` used to be a soft footgun: the second
+/// encrypt inside the precision window would see an expired IK but
+/// collide with the same rounded `(id, created)`.
 ///
-/// The first encrypt succeeds (the cache is cold; create_intermediate_key
-/// stores fresh). Any later encrypt **within the same precision
-/// window after the IK has aged past `expire_s`** then sees:
-///   1. The cached IK fails `is_envelope_invalid` (policy-expired).
-///   2. `create_intermediate_key` computes a `created` rounded to
-///      the same precision bucket → metastore `store` returns
-///      `Ok(false)` (duplicate `(id, created)`).
-///   3. The fallback `load_latest` returns the **same** policy-
-///      expired row, so `is_envelope_invalid` rejects it again.
-///   4. encrypt errors with "failed to create or load intermediate
-///      key after retry".
-///
-/// The first DRR still round-trips (decrypt loads by exact meta
-/// and bypasses the policy check). The second encrypt fails closed.
-///
-/// Locking this behavior down so:
-///  - A future change that introduces silent corruption fails this
-///    test instead of slipping through.
-///  - The "fail closed" property is asserted (not a panic, hang, or
-///    successful encrypt under a stale-but-still-cached IK).
-///
-/// Operationally, `precision_s` must be ≤ `expire_s`. A future PR
-/// could add config validation that rejects this configuration at
-/// factory construction.
+/// The factory now clamps `create_date_precision_s` to
+/// `expire_key_after_s`, so this pathological config converges by
+/// rotating into a new one-second bucket after expiry instead of
+/// failing closed.
 #[test]
-fn expire_smaller_than_precision_fails_closed() {
+fn expire_smaller_than_precision_is_clamped_and_rotates() {
     let store = Arc::new(ael::metastore::InMemoryMetastore::new());
     let factory = make_factory(store, 60, 1);
     let session = factory.get_session("p-pathological");
 
     // First encrypt populates SK + IK and round-trips.
     let drr1 = session.encrypt(b"x").unwrap();
+    let (_, c1) = ik_meta(&drr1);
     assert_eq!(session.decrypt(drr1).unwrap(), b"x");
 
-    // Sleep past expire_s while still inside the precision window.
+    // Sleep past expire_s. The originally requested precision was 60s, but
+    // policy minimum enforcement clamps it to expire_s=1s, so this crosses
+    // the effective precision window too.
     sleep(Duration::from_millis(1100));
 
-    // Second encrypt: cached IK is policy-expired; create can't
-    // store a newer (id, created) inside the same precision window.
-    // Must fail closed, not silently corrupt.
-    let err = session
-        .encrypt(b"y")
-        .expect_err("expected fail-closed when expire < precision and IK has aged in window");
-    let chain = format!("{err:#}");
+    let drr2 = session.encrypt(b"y").unwrap();
+    let (_, c2) = ik_meta(&drr2);
     assert!(
-        chain.contains("failed to create or load intermediate key")
-            || chain.contains("failed to get or create intermediate key"),
-        "expected create-or-load-IK error, got: {chain}"
+        c2 > c1,
+        "clamped precision should allow rotation after expiry: {c2} > {c1}"
     );
+    assert_eq!(session.decrypt(drr2).unwrap(), b"y");
 }
 
 /// `precision_s=0` skips the rounding entirely; encrypts get
