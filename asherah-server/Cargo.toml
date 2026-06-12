@@ -15,8 +15,8 @@ name = "asherah-server"
 path = "src/main.rs"
 
 [dependencies]
-asherah = { path = "../asherah" }
-asherah-config = { path = "../asherah-config" }
+asherah = { path = "../asherah", default-features = false }
+asherah-config = { path = "../asherah-config", default-features = false }
 tonic = "0.14"
 tonic-prost = "0.14"
 prost = "0.14"
@@ -39,7 +39,9 @@ serial_test = "3"
 tempfile = "3"
 
 [features]
-default = ["mysql", "postgres", "dynamodb"]
+default = ["crypto-hardware-rust", "mysql", "postgres", "dynamodb"]
+crypto-hardware-rust = ["asherah/crypto-hardware-rust", "asherah-config/crypto-hardware-rust"]
+crypto-ring = ["asherah/crypto-ring", "asherah-config/crypto-ring"]
 mysql = ["asherah/mysql"]
 postgres = ["asherah/postgres"]
 dynamodb = ["asherah/dynamodb"]

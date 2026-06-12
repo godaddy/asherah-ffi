@@ -82,6 +82,8 @@ BENCH_MYSQL_IMAGE="${BENCH_MYSQL_IMAGE:-mysql:8.1}"
 MYSQL_CONTAINER_ID=""
 MYSQL_STARTED_BY_SCRIPT=0
 RUST_ONLY=0
+CRYPTO_BACKEND_FEATURES=""
+CRYPTO_BACKEND_NO_DEFAULTS=0
 log() { echo ">>> $1" >&2; }
 skip() { echo "    SKIP: $1" >&2; }
 
@@ -154,16 +156,32 @@ while [ $# -gt 0 ]; do
         --rust-only)
             RUST_ONLY=1
             ;;
+        --crypto-hardware-rust)
+            CRYPTO_BACKEND_FEATURES="crypto-hardware-rust"
+            CRYPTO_BACKEND_NO_DEFAULTS=1
+            ;;
+        --crypto-ring)
+            CRYPTO_BACKEND_FEATURES="crypto-ring"
+            CRYPTO_BACKEND_NO_DEFAULTS=1
+            ;;
         "")
             ;;
         *)
             echo "Unknown option: $1" >&2
-            echo "Usage: $0 [--memory|--hot|--warm|--cold] [--rust-only] [--mysql-url <url>] [--setup|--clean]" >&2
+            echo "Usage: $0 [--memory|--hot|--warm|--cold] [--rust-only] [--crypto-hardware-rust|--crypto-ring] [--mysql-url <url>] [--setup|--clean]" >&2
             exit 2
             ;;
     esac
     shift
 done
+
+CARGO_FEATURE_ARGS=()
+if [ "$CRYPTO_BACKEND_NO_DEFAULTS" = "1" ]; then
+    CARGO_FEATURE_ARGS+=(--no-default-features)
+fi
+if [ -n "$CRYPTO_BACKEND_FEATURES" ]; then
+    CARGO_FEATURE_ARGS+=(--features "$CRYPTO_BACKEND_FEATURES")
+fi
 
 start_mysql_container() {
     log "No MySQL URL provided; starting ephemeral Docker MySQL (${BENCH_MYSQL_IMAGE})..."
@@ -393,7 +411,7 @@ fi
 
 if [ "$HAVE_RUST" = 1 ] && [ "$FFI_LIB_EXISTS" = 0 ]; then
     log "Building Rust FFI + Java JNI libraries (release)..."
-    cargo build --release -p asherah-ffi -p asherah-java --manifest-path "$ROOT_DIR/Cargo.toml" -q 2>&1
+    cargo build --release -p asherah-ffi -p asherah-java --manifest-path "$ROOT_DIR/Cargo.toml" "${CARGO_FEATURE_ARGS[@]}" -q 2>&1
     FFI_LIB_EXISTS=1
 elif [ "$FFI_LIB_EXISTS" = 1 ]; then
     log "Using existing Rust FFI library in $FFI_LIB_DIR"
@@ -412,11 +430,11 @@ export ASHERAH_GO_NATIVE="$FFI_LIB_DIR"
 if [ "$HAVE_RUST" = 1 ]; then
     reset_mysql
     log "Running Rust native benchmark (Criterion)..."
-    CRITERION_EXTRA=""
-    if [ "$BENCH_MODE" = "cold" ]; then
+    CRITERION_EXTRA="${CRITERION_EXTRA:-}"
+    if [ "$BENCH_MODE" = "cold" ] && [ -z "$CRITERION_EXTRA" ]; then
         CRITERION_EXTRA="-- --sample-size 20 --warm-up-time 1"
     fi
-    if cargo bench --manifest-path "$BENCH_DIR/asherah-bench/Cargo.toml" --bench native $CRITERION_EXTRA 2>&1 \
+    if cargo bench --manifest-path "$BENCH_DIR/asherah-bench/Cargo.toml" --bench native "${CARGO_FEATURE_ARGS[@]}" $CRITERION_EXTRA 2>&1 \
         > "$RESULTS_DIR/criterion_native.log"; then
         python3 -c "
 import re, sys

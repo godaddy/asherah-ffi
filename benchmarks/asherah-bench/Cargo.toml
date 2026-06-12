@@ -8,11 +8,14 @@ publish = false
 # Benchmark code legitimately uses unsafe, unwrap, panic, eprintln, etc.
 
 [features]
+default = ["crypto-hardware-rust"]
+crypto-hardware-rust = ["asherah/crypto-hardware-rust"]
+crypto-ring = ["asherah/crypto-ring"]
 mysql = ["asherah/mysql", "dep:mysql", "dep:testcontainers", "dep:testcontainers-modules"]
 
 [dependencies]
 anyhow = "1.0"
-asherah = { path = "../../asherah", features = ["mysql", "postgres"] }
+asherah = { path = "../../asherah", default-features = false, features = ["mysql", "postgres"] }
 criterion = { version = "0.5", features = ["html_reports", "async_tokio"] }
 libloading = "0.8"
 log = "0.4"
@@ -37,6 +40,10 @@ harness = false
 
 [[bench]]
 name = "hook_overhead"
+harness = false
+
+[[bench]]
+name = "crypto_backend"
 harness = false
 
 [[bench]]

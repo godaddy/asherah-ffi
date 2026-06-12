@@ -13,19 +13,21 @@ categories = ["cryptography", "memory-management", "api-bindings"]
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = []
+default = ["crypto-hardware-rust"]
+crypto-hardware-rust = ["asherah/crypto-hardware-rust", "asherah-config/crypto-hardware-rust"]
+crypto-ring = ["asherah/crypto-ring", "asherah-config/crypto-ring"]
 test-helpers = []
 
 [dependencies]
-asherah = { version = "0.1.2", path = "../asherah", features = ["sqlite", "mysql", "postgres", "dynamodb"] }
-asherah-config = { version = "0.1.2", path = "../asherah-config" }
+asherah = { version = "0.1.2", path = "../asherah", default-features = false, features = ["sqlite", "mysql", "postgres", "dynamodb"] }
+asherah-config = { version = "0.1.2", path = "../asherah-config", default-features = false }
 log = "0.4"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 zeroize = { version = "1.8", features = ["alloc"] }
 
 [dev-dependencies]
-asherah-cobhan = { path = ".", features = ["test-helpers"] }
+asherah-cobhan = { path = ".", default-features = false, features = ["test-helpers"] }
 serde = { version = "1.0", features = ["derive"] }
 
 # Allow unsafe code (required for FFI)
