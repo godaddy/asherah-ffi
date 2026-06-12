@@ -654,6 +654,7 @@ mod tests {
         );
     }
 
+    #[cfg_attr(miri, ignore = "tokio reactor (kqueue/epoll) unavailable under Miri")]
     #[tokio::test]
     async fn async_tofu_initializes_guard_record() {
         let store = Arc::new(InMemoryMetastore::new());

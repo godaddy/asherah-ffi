@@ -1,5 +1,7 @@
+#[cfg(not(miri))]
 use std::sync::OnceLock;
 
+#[cfg(not(miri))]
 static PROCESS_HARDENING: OnceLock<Result<(), String>> = OnceLock::new();
 
 /// Apply process-level hardening and initialize the locked memory pool.
@@ -7,6 +9,7 @@ static PROCESS_HARDENING: OnceLock<Result<(), String>> = OnceLock::new();
 /// This is idempotent. A pre-initialized hardware-enclave pool is treated as
 /// success so callers can invoke this from multiple language binding setup
 /// paths without depending on global initialization order.
+#[cfg(not(miri))]
 pub fn ensure_process_hardened() -> anyhow::Result<()> {
     let result = PROCESS_HARDENING.get_or_init(|| {
         hardware_enclave::harden_process();
@@ -29,6 +32,17 @@ pub fn ensure_process_hardened() -> anyhow::Result<()> {
     }
 }
 
+/// Apply process-level hardening and initialize the locked memory pool.
+///
+/// Miri cannot emulate the OS syscalls used by hardware-enclave process
+/// hardening (`setrlimit`, `mlock`, and page protection calls). Native
+/// sanitizer and Valgrind jobs still exercise those paths; Miri keeps testing
+/// caller behavior without crossing unsupported libc boundaries.
+#[cfg(miri)]
+pub fn ensure_process_hardened() -> anyhow::Result<()> {
+    Ok(())
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
@@ -41,6 +55,7 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[cfg_attr(miri, ignore = "getrlimit unavailable under Miri")]
     #[test]
     fn process_hardening_disables_core_dumps() {
         ensure_process_hardened().unwrap();
