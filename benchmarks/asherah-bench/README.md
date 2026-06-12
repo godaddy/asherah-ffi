@@ -1,5 +1,30 @@
 # Asherah Performance Benchmarks
 
+## Crypto Backend Comparison
+
+Run the focused crypto backend benchmark once with the default hardware backend
+and once with the explicit ring backend:
+
+```bash
+cargo bench -p asherah-bench --bench crypto_backend
+cargo bench -p asherah-bench --bench crypto_backend --no-default-features --features crypto-ring
+```
+
+The end-to-end native benchmark can be compared the same way:
+
+```bash
+cargo bench -p asherah-bench --bench native
+cargo bench -p asherah-bench --bench native --no-default-features --features crypto-ring
+```
+
+The repository benchmark script also supports backend selection for the Rust
+native path:
+
+```bash
+scripts/benchmark.sh --rust-only --memory --crypto-hardware-rust
+scripts/benchmark.sh --rust-only --memory --crypto-ring
+```
+
 This standalone Cargo project compares the performance of the native Rust
 Asherah implementation (`asherah-ffi`) against the original Go
 implementation. Both libraries are invoked through their C ABIs from the same
