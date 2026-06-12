@@ -7,7 +7,7 @@ import pytest
 def _configure_env():
     os.environ.setdefault("SERVICE_NAME", "svc")
     os.environ.setdefault("PRODUCT_ID", "prod")
-    os.environ.setdefault("KMS", "static")
+    os.environ.setdefault("KMS", "test-debug-static")
     os.environ.setdefault("STATIC_MASTER_KEY_HEX", "22" * 32)
 
 
@@ -576,9 +576,11 @@ def test_session_factory_without_config_does_not_inherit_setup_config(tmp_path, 
         "POSTGRES_URL",
         "MYSQL_URL",
         "DDB_TABLE",
+        "KMS",
         "STATIC_MASTER_KEY_HEX",
     ):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("KMS", "test-debug-static")
     monkeypatch.setenv("STATIC_MASTER_KEY_HEX", "33" * 32)
 
     config = _sqlite_config(tmp_path, service="configured-svc", product="configured-prod")
@@ -590,8 +592,12 @@ def test_session_factory_without_config_does_not_inherit_setup_config(tmp_path, 
         factory = asherah.SessionFactory()
         try:
             session = factory.get_session(partition)
-            with pytest.raises(Exception, match="invalid IK id"):
+            with pytest.raises(Exception) as excinfo:
                 session.decrypt_bytes(ct)
+            assert any(
+                marker in str(excinfo.value)
+                for marker in ("invalid IK id", "no usable key")
+            )
         finally:
             factory.close()
     finally:

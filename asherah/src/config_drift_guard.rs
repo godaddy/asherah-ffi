@@ -237,43 +237,28 @@ fn handle_existing(
     }
     if options.allow_mismatch {
         log::error!(
-            "config drift guard mismatch detected for service={} product={}; \
-             continuing because force-run override is enabled",
-            current.service_name,
-            current.product_id
+            "config drift guard mismatch detected; continuing because force-run override is enabled"
         );
         return Ok(true);
     }
     anyhow::bail!(
-        "config drift guard mismatch detected for service={} product={}; \
-         startup refused before key writes. Set ASHERAH_CONFIG_DRIFT_FORCE_RUN=true \
+        "config drift guard mismatch detected; startup refused before key writes. \
+         Set ASHERAH_CONFIG_DRIFT_FORCE_RUN=true \
          to run without changing the guard, or ASHERAH_CONFIG_DRIFT_FORCE_UPDATE=true \
-         to replace the guard after validating this configuration is correct.",
-        current.service_name,
-        current.product_id
+         to replace the guard after validating this configuration is correct."
     );
 }
 
-fn handle_load_error(
-    err: anyhow::Error,
-    current: &ConfigDriftGuardSnapshot,
-    options: ConfigDriftGuardOptions,
-) -> anyhow::Result<bool> {
+fn handle_load_error(err: anyhow::Error, options: ConfigDriftGuardOptions) -> anyhow::Result<bool> {
     if options.force_update {
         log::error!(
-            "config drift guard could not be loaded for service={} product={}; \
-             replacing it because force-update override is enabled: {err:#}",
-            current.service_name,
-            current.product_id
+            "config drift guard could not be loaded; replacing it because force-update override is enabled"
         );
         return Ok(false);
     }
     if options.allow_mismatch {
         log::error!(
-            "config drift guard could not be loaded for service={} product={}; \
-             continuing because force-run override is enabled: {err:#}",
-            current.service_name,
-            current.product_id
+            "config drift guard could not be loaded; continuing because force-run override is enabled"
         );
         return Ok(true);
     }
@@ -296,7 +281,7 @@ pub fn enforce_config_drift_guard(
             let stored = match snapshot_from_envelope(&existing) {
                 Ok(stored) => stored,
                 Err(err) => {
-                    if handle_load_error(err, &current, options)? {
+                    if handle_load_error(err, options)? {
                         return Ok(());
                     }
                     metastore.upsert_config_drift_guard(
@@ -304,11 +289,7 @@ pub fn enforce_config_drift_guard(
                         CONFIG_DRIFT_GUARD_CREATED,
                         &current_envelope,
                     )?;
-                    log::error!(
-                        "config drift guard replaced for service={} product={} by force-update override",
-                        current.service_name,
-                        current.product_id
-                    );
+                    log::error!("config drift guard replaced by force-update override");
                     return Ok(());
                 }
             };
@@ -320,20 +301,12 @@ pub fn enforce_config_drift_guard(
                 CONFIG_DRIFT_GUARD_CREATED,
                 &current_envelope,
             )?;
-            log::error!(
-                "config drift guard replaced for service={} product={} by force-update override",
-                current.service_name,
-                current.product_id
-            );
+            log::error!("config drift guard replaced by force-update override");
             Ok(())
         }
         Ok(None) => {
             if metastore.store(&guard_id, CONFIG_DRIFT_GUARD_CREATED, &current_envelope)? {
-                log::info!(
-                    "config drift guard initialized for service={} product={}",
-                    current.service_name,
-                    current.product_id
-                );
+                log::info!("config drift guard initialized");
                 return Ok(());
             }
             let Some(raced) = metastore.load(&guard_id, CONFIG_DRIFT_GUARD_CREATED)? else {
@@ -348,15 +321,11 @@ pub fn enforce_config_drift_guard(
                 CONFIG_DRIFT_GUARD_CREATED,
                 &current_envelope,
             )?;
-            log::error!(
-                "config drift guard replaced for service={} product={} by force-update override",
-                current.service_name,
-                current.product_id
-            );
+            log::error!("config drift guard replaced by force-update override");
             Ok(())
         }
         Err(err) => {
-            if handle_load_error(err, &current, options)? {
+            if handle_load_error(err, options)? {
                 return Ok(());
             }
             metastore.upsert_config_drift_guard(
@@ -364,11 +333,7 @@ pub fn enforce_config_drift_guard(
                 CONFIG_DRIFT_GUARD_CREATED,
                 &current_envelope,
             )?;
-            log::error!(
-                "config drift guard replaced for service={} product={} by force-update override",
-                current.service_name,
-                current.product_id
-            );
+            log::error!("config drift guard replaced by force-update override");
             Ok(())
         }
     }
@@ -393,7 +358,7 @@ pub async fn enforce_config_drift_guard_async(
             let stored = match snapshot_from_envelope(&existing) {
                 Ok(stored) => stored,
                 Err(err) => {
-                    if handle_load_error(err, &current, options)? {
+                    if handle_load_error(err, options)? {
                         return Ok(());
                     }
                     metastore
@@ -403,11 +368,7 @@ pub async fn enforce_config_drift_guard_async(
                             &current_envelope,
                         )
                         .await?;
-                    log::error!(
-                        "config drift guard replaced for service={} product={} by force-update override",
-                        current.service_name,
-                        current.product_id
-                    );
+                    log::error!("config drift guard replaced by force-update override");
                     return Ok(());
                 }
             };
@@ -421,11 +382,7 @@ pub async fn enforce_config_drift_guard_async(
                     &current_envelope,
                 )
                 .await?;
-            log::error!(
-                "config drift guard replaced for service={} product={} by force-update override",
-                current.service_name,
-                current.product_id
-            );
+            log::error!("config drift guard replaced by force-update override");
             Ok(())
         }
         Ok(None) => {
@@ -433,11 +390,7 @@ pub async fn enforce_config_drift_guard_async(
                 .store_async(&guard_id, CONFIG_DRIFT_GUARD_CREATED, &current_envelope)
                 .await?
             {
-                log::info!(
-                    "config drift guard initialized for service={} product={}",
-                    current.service_name,
-                    current.product_id
-                );
+                log::info!("config drift guard initialized");
                 return Ok(());
             }
             let Some(raced) = metastore
@@ -457,15 +410,11 @@ pub async fn enforce_config_drift_guard_async(
                     &current_envelope,
                 )
                 .await?;
-            log::error!(
-                "config drift guard replaced for service={} product={} by force-update override",
-                current.service_name,
-                current.product_id
-            );
+            log::error!("config drift guard replaced by force-update override");
             Ok(())
         }
         Err(err) => {
-            if handle_load_error(err, &current, options)? {
+            if handle_load_error(err, options)? {
                 return Ok(());
             }
             metastore
@@ -475,11 +424,7 @@ pub async fn enforce_config_drift_guard_async(
                     &current_envelope,
                 )
                 .await?;
-            log::error!(
-                "config drift guard replaced for service={} product={} by force-update override",
-                current.service_name,
-                current.product_id
-            );
+            log::error!("config drift guard replaced by force-update override");
             Ok(())
         }
     }

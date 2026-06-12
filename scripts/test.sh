@@ -229,6 +229,9 @@ do_bindings() {
     local binding="${BINDING_FILTER:-all}"
     log "=== Binding Tests (${binding}) ==="
 
+    export SERVICE_NAME="${SERVICE_NAME:-svc}"
+    export PRODUCT_ID="${PRODUCT_ID:-prod}"
+    export KMS="${KMS:-test-debug-static}"
     export STATIC_MASTER_KEY_HEX="746869734973415374617469634d61737465724b6579466f7254657374696e67"
 
     if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then

@@ -29,7 +29,7 @@ class AsherahIntegrationTest {
     System.setProperty("SERVICE_NAME", "svc");
     System.setProperty("PRODUCT_ID", "prod");
     System.setProperty("STATIC_MASTER_KEY_HEX", repeat("22", 32));
-    System.setProperty("KMS", "static");
+    System.setProperty("KMS", "test-debug-static");
   }
 
   @Test

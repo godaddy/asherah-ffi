@@ -27,7 +27,7 @@ public class HookTests
         Environment.SetEnvironmentVariable("PRODUCT_ID",
             Environment.GetEnvironmentVariable("PRODUCT_ID") ?? "hook-test-prod");
         Environment.SetEnvironmentVariable("KMS",
-            Environment.GetEnvironmentVariable("KMS") ?? "static");
+            Environment.GetEnvironmentVariable("KMS") ?? "test-debug-static");
         Environment.SetEnvironmentVariable("STATIC_MASTER_KEY_HEX",
             Environment.GetEnvironmentVariable("STATIC_MASTER_KEY_HEX")
                 ?? new string('2', 64));

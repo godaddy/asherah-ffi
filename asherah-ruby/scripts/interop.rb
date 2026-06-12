@@ -20,7 +20,7 @@ config = {
   "ServiceName" => ENV.fetch("SERVICE_NAME", "service"),
   "ProductID" => ENV.fetch("PRODUCT_ID", "product"),
   "Metastore" => ENV.fetch("Metastore", "memory"),
-  "KMS" => ENV.fetch("KMS", "static"),
+  "KMS" => ENV.fetch("KMS", "test-debug-static"),
   "EnableSessionCaching" => ENV.fetch("SESSION_CACHE", "1") != "0",
   "Verbose" => false
 }
