@@ -84,7 +84,7 @@ jobs:
             rust-tests-${{ runner.os }}-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
-      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
           tool: sccache@0.8.1
       - name: Install protoc
@@ -144,7 +144,7 @@ jobs:
           key: build-${{ runner.os }}-x86_64-rlib-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             build-${{ runner.os }}-x86_64-rlib-
-      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
           tool: sccache@0.8.1
       - name: Build FFI rlib (x86_64)
@@ -205,7 +205,7 @@ jobs:
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
           tool: sccache@0.8.1
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -310,7 +310,7 @@ jobs:
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
           tool: sccache@0.8.1
       - name: Build Java binding (x86_64)
@@ -358,7 +358,7 @@ jobs:
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
           tool: sccache@0.8.1
       - uses: actions/setup-dotnet@9a946fdbd5fb07b82b2f5a4466058b876ab72bb2 # v5.3.0
@@ -503,7 +503,7 @@ jobs:
           path: /tmp
       - name: Extract rlib artifacts
         run: tar xzf /tmp/x86_64-rlib.tar.gz
-      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
           tool: sccache@0.8.1
       - name: Build asherah-cobhan (x86_64)
@@ -702,7 +702,7 @@ jobs:
         with:
           go-version: '1.23'
           cache-dependency-path: asherah-go/go.sum
-      - uses: ruby/setup-ruby@12fd324f1d0b43274fdc8130f6980590a667c455 # v1.312.0
+      - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1.313.0
         if: matrix.binding == 'ruby'
         with:
           ruby-version: '3.3'
@@ -769,7 +769,7 @@ jobs:
         uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
         with:
           components: rustfmt
-      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
           tool: sccache@0.8.1
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -1355,7 +1355,7 @@ jobs:
         # workflows so dry-runs can't drift.
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
-      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
           tool: cargo-zigbuild
       - name: Build asherah-node for x86_64-musl
@@ -1545,7 +1545,7 @@ jobs:
         # workflows so dry-runs can't drift.
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
-      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
           tool: cargo-zigbuild
       - name: Build asherah-node for aarch64-musl
@@ -1621,7 +1621,7 @@ jobs:
         # workflows so dry-runs can't drift.
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
-      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
           tool: cargo-zigbuild
       - name: Setup musl OpenSSL
@@ -1667,7 +1667,7 @@ jobs:
         # workflows so dry-runs can't drift.
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
-      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
           tool: cargo-zigbuild
       - name: Setup musl OpenSSL
@@ -1703,7 +1703,7 @@ jobs:
     needs: build-ffi-x86_64
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: ruby/setup-ruby@12fd324f1d0b43274fdc8130f6980590a667c455 # v1.312.0
+      - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1.313.0
         with:
           ruby-version: '3.3'
       - name: Download x86_64 FFI artifact
@@ -1748,7 +1748,7 @@ jobs:
       - name: Install Zig (with retries)
         shell: bash
         run: bash "$GITHUB_WORKSPACE/scripts/install-zig.sh"
-      - uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+      - uses: taiki-e/install-action@15449e3094499af05d8d964a1c884208e4b8b595 # v2.81.11
         with:
           tool: cargo-zigbuild
       - name: Setup musl OpenSSL
