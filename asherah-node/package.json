@@ -1,6 +1,6 @@
 {
   "name": "asherah",
-  "version": "4.0.0-beta.1",
+  "version": "4.0.0",
   "private": false,
   "description": "Asherah application-layer encryption for Node.js with automatic key rotation, powered by the native Rust implementation.",
   "author": "Jay Gowdy",
