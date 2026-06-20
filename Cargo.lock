@@ -2051,9 +2051,9 @@ dependencies = [
 
 [[package]]
 name = "hardware-rust-crypto"
-version = "1.0.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b3a2958c55b16556aa01cb19c3adc038f94cf400da723db2e81004649ff59c06"
+checksum = "d6bb270cb0700ed6a5a3e8e298f9e8dcd5dc47e743094414bfee7012c049214e"
 dependencies = [
  "getrandom 0.3.4",
  "libc",
