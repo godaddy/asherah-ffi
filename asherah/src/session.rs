@@ -983,13 +983,15 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         }
         let mut drk = DrkGuard([0_u8; 32]);
         crate::aead::fast_random_bytes(&mut drk.0)?;
-        // Create DRK LessSafeKey once, use for both data + DRK encryption
-        let drk_lsk = crate::aead::make_lsk(&drk.0).context("encrypt: failed to create DRK key")?;
-        let enc_data = crate::aead::encrypt_with_lsk(data, &drk_lsk)
+        // Create DRK key once, use for both data + DRK encryption
+        let drk_key = crate::aead::make_key(&drk.0).context("encrypt: failed to create DRK key")?;
+        let enc_data = drk_key
+            .encrypt(&[], data)
             .context("encrypt: failed to encrypt data with DRK")?;
-        // Encrypt DRK under IK: use cached LessSafeKey if available (no Enclave::open)
-        let enc_drk = if let Some(ik_lsk) = ik.less_safe_key() {
-            crate::aead::encrypt_with_lsk(&drk.0, ik_lsk)
+        // Encrypt DRK under IK: use cached key if available (no Enclave::open)
+        let enc_drk = if let Some(ik_key) = ik.aead_key() {
+            ik_key
+                .encrypt(&[], &drk.0)
                 .context("encrypt: failed to encrypt DRK with IK")?
         } else {
             ik.with_key_func(|ikb| self.crypto.encrypt(&drk.0, ikb))
@@ -1177,19 +1179,19 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
         enc_drk: &[u8],
         data: &[u8],
     ) -> anyhow::Result<Vec<u8>> {
-        let mut drk = if let Some(ik_lsk) = ik.less_safe_key() {
-            crate::aead::decrypt_with_lsk(enc_drk, ik_lsk)?
+        let mut drk = if let Some(ik_key) = ik.aead_key() {
+            ik_key.decrypt(&[], enc_drk)?
         } else {
             ik.with_key_func(|ikb| self.crypto.decrypt(enc_drk, ikb))??
         };
-        let drk_lsk = match crate::aead::make_lsk(&drk) {
+        let drk_key = match crate::aead::make_key(&drk) {
             Ok(k) => k,
             Err(e) => {
                 drk.zeroize();
                 return Err(e);
             }
         };
-        let pt = crate::aead::decrypt_with_lsk(data, &drk_lsk);
+        let pt = drk_key.decrypt(&[], data);
         drk.zeroize();
         pt
     }
@@ -1492,18 +1494,20 @@ impl<A: AEAD + Clone, K: KeyManagementService + Clone, M: Metastore + Clone>
                         pmeta.id, pmeta.created
                     )
                 })?;
-            // Decrypt DRK under IK: use cached LessSafeKey if available (no Enclave::open)
-            let mut drk = if let Some(ik_lsk) = ik.less_safe_key() {
-                crate::aead::decrypt_with_lsk(&key.encrypted_key, ik_lsk)
+            // Decrypt DRK under IK: use cached key if available (no Enclave::open)
+            let mut drk = if let Some(ik_key) = ik.aead_key() {
+                ik_key
+                    .decrypt(&[], &key.encrypted_key)
                     .context("decrypt: failed to decrypt DRK with IK")?
             } else {
                 ik.with_key_func(|ikb| self.crypto.decrypt(&key.encrypted_key, ikb))
                     .context("decrypt: failed to decrypt DRK with IK")??
             };
-            // Create DRK LessSafeKey once for data decryption
-            let drk_lsk =
-                crate::aead::make_lsk(&drk).context("decrypt: failed to create DRK key")?;
-            let pt = crate::aead::decrypt_with_lsk(&drr.data, &drk_lsk)
+            // Create DRK key once for data decryption
+            let drk_key =
+                crate::aead::make_key(&drk).context("decrypt: failed to create DRK key")?;
+            let pt = drk_key
+                .decrypt(&[], &drr.data)
                 .context("decrypt: failed to decrypt data with DRK");
             drk.zeroize();
             pt
@@ -1829,12 +1833,14 @@ impl<
         }
         let mut drk = DrkGuard([0_u8; 32]);
         crate::aead::fast_random_bytes(&mut drk.0)?;
-        let drk_lsk =
-            crate::aead::make_lsk(&drk.0).context("encrypt_async: failed to create DRK key")?;
-        let enc_data = crate::aead::encrypt_with_lsk(data, &drk_lsk)
+        let drk_key =
+            crate::aead::make_key(&drk.0).context("encrypt_async: failed to create DRK key")?;
+        let enc_data = drk_key
+            .encrypt(&[], data)
             .context("encrypt_async: failed to encrypt data with DRK")?;
-        let enc_drk = if let Some(ik_lsk) = ik.less_safe_key() {
-            crate::aead::encrypt_with_lsk(&drk.0, ik_lsk)
+        let enc_drk = if let Some(ik_key) = ik.aead_key() {
+            ik_key
+                .encrypt(&[], &drk.0)
                 .context("encrypt_async: failed to encrypt DRK with IK")?
         } else {
             ik.with_key_func(|ikb| self.crypto.encrypt(&drk.0, ikb))
@@ -1912,16 +1918,18 @@ impl<
                 }
             };
             // Decrypt DRK under IK, then decrypt data — all CPU
-            let mut drk = if let Some(ik_lsk) = ik.less_safe_key() {
-                crate::aead::decrypt_with_lsk(&key.encrypted_key, ik_lsk)
+            let mut drk = if let Some(ik_key) = ik.aead_key() {
+                ik_key
+                    .decrypt(&[], &key.encrypted_key)
                     .context("decrypt_async: failed to decrypt DRK with IK")?
             } else {
                 ik.with_key_func(|ikb| self.crypto.decrypt(&key.encrypted_key, ikb))
                     .context("decrypt_async: failed to decrypt DRK with IK")??
             };
-            let drk_lsk =
-                crate::aead::make_lsk(&drk).context("decrypt_async: failed to create DRK key")?;
-            let pt = crate::aead::decrypt_with_lsk(&drr.data, &drk_lsk)
+            let drk_key =
+                crate::aead::make_key(&drk).context("decrypt_async: failed to create DRK key")?;
+            let pt = drk_key
+                .decrypt(&[], &drr.data)
                 .context("decrypt_async: failed to decrypt data with DRK");
             drk.zeroize();
             pt

@@ -92,6 +92,42 @@ jobs:
       - name: Unit tests
         run: scripts/test.sh --unit
 
+  # The default AEAD backend (hardware-crypto / hardware-rust-crypto) is
+  # exercised by the rust-tests and integration-tests jobs above. This job
+  # keeps the opt-in `ring-crypto` backend green: it must build clean, pass
+  # clippy with -D warnings, and decrypt the same NIST/cross-language
+  # envelopes as the hardware backend (proving wire compatibility).
+  aead-ring-backend:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      CARGO_BUILD_JOBS: "2"
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - name: Free disk space
+        run: bash scripts/ci-free-disk-space.sh
+      - name: Cache cargo registry
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: aead-ring-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            aead-ring-${{ runner.os }}-
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        with:
+          components: clippy
+      - name: Install protoc
+        run: sudo apt-get install -y protobuf-compiler
+      - name: Clippy (ring-crypto backend)
+        run: cargo clippy -p asherah --no-default-features --features ring-crypto --all-targets -- -D warnings
+      - name: Unit tests (ring-crypto backend)
+        run: cargo test -p asherah --no-default-features --features ring-crypto
+
   integration-tests:
     runs-on: ubuntu-latest
     permissions:
