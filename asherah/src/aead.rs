@@ -7,8 +7,7 @@ use std::cell::RefCell;
 // AEAD backend selection
 // ---------------------------------------------------------------------------
 //
-// Asherah's AES-256-GCM is provided by exactly one backend, chosen at compile
-// time:
+// Asherah's AES-256-GCM is provided by one backend, chosen at compile time:
 //
 //   * `hardware-crypto` (DEFAULT) — `hardware-rust-crypto`. The crypto library
 //     owns nonce generation: a per-instance 96-bit OS-drawn salt advanced by a
@@ -26,6 +25,13 @@ use std::cell::RefCell;
 //     encryptions under one key) bounded operationally by the key-rotation
 //     policy.
 //
+// To get ring you must disable the default: `--no-default-features --features
+// ring-crypto`. If BOTH features end up enabled — e.g. via `--all-features` or
+// Cargo feature unification across a workspace — **`hardware-crypto` takes
+// precedence** (the safer backend wins; the ring module is `cfg`-ed out). We
+// deliberately resolve this by precedence rather than a `compile_error!` so a
+// downstream `--all-features` build never breaks.
+//
 // Both backends produce the identical envelope `ciphertext || tag(16) ||
 // nonce(12)` over standard AES-256-GCM with **empty AAD** by default, so
 // ciphertext is interchangeable between backends and remains binary-compatible
@@ -34,13 +40,6 @@ use std::cell::RefCell;
 // into associated data; every in-tree call site passes `&[]` to preserve that
 // cross-language compatibility. Any non-empty AAD must be revved in lockstep on
 // both sides and versioned in the envelope.
-
-#[cfg(all(feature = "hardware-crypto", feature = "ring-crypto"))]
-compile_error!(
-    "features `hardware-crypto` and `ring-crypto` are mutually exclusive — enable exactly one \
-     AEAD backend (`hardware-crypto` is the default; use `--no-default-features --features \
-     ring-crypto` to select ring)"
-);
 
 #[cfg(not(any(feature = "hardware-crypto", feature = "ring-crypto")))]
 compile_error!("no AEAD backend enabled — enable `hardware-crypto` (default) or `ring-crypto`");
@@ -206,7 +205,10 @@ mod backend {
 // ===========================================================================
 // Backend: ring (opt-in: --no-default-features --features ring-crypto)
 // ===========================================================================
-#[cfg(feature = "ring-crypto")]
+// `not(hardware-crypto)` so that if both features are enabled (e.g.
+// `--all-features` or feature unification) exactly one `backend` module exists
+// and `hardware-crypto` wins — see the module-level note above.
+#[cfg(all(feature = "ring-crypto", not(feature = "hardware-crypto")))]
 mod backend {
     use super::{fast_random_bytes, GCM_NONCE_SIZE};
     use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM};

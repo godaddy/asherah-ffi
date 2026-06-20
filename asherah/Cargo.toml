@@ -30,9 +30,9 @@ subtle = "2.5"
 signal-hook = "0.4"
 libc = "0.2"
 windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Memory"] }
-# AES-256-GCM backends (mutually exclusive, selected via the `hardware-crypto`
-# [default] / `ring-crypto` features). Both are optional so only the chosen
-# backend is compiled in.
+# AES-256-GCM backends, selected via the `hardware-crypto` [default] /
+# `ring-crypto` features. Both are optional; if both end up enabled,
+# `hardware-crypto` takes precedence (see asherah/src/aead.rs).
 hardware-rust-crypto = { version = "1.0", optional = true }
 ring = { version = "0.17", optional = true }
 scc = "3"
@@ -46,9 +46,10 @@ path = "src/bin/interop.rs"
 
 [features]
 default = ["hardware-crypto"]
-# AEAD backend selection — enable exactly one. `hardware-crypto` is the default
-# (hardware-rust-crypto, which owns nonce generation). `ring-crypto` opts into
-# ring instead via `--no-default-features --features ring-crypto`.
+# AEAD backend selection. `hardware-crypto` is the default (hardware-rust-crypto,
+# which owns nonce generation). `ring-crypto` opts into ring via
+# `--no-default-features --features ring-crypto`. If both are enabled at once
+# (e.g. `--all-features`), `hardware-crypto` wins — see asherah/src/aead.rs.
 hardware-crypto = ["dep:hardware-rust-crypto"]
 ring-crypto = ["dep:ring"]
 sqlite = ["dep:rusqlite"]
