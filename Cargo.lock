@@ -146,6 +146,7 @@ dependencies = [
  "cucumber",
  "futures",
  "hardware-enclave",
+ "hardware-rust-crypto",
  "itoa",
  "libc",
  "log",
@@ -2045,6 +2046,18 @@ dependencies = [
  "thiserror",
  "tracing",
  "windows",
+ "zeroize",
+]
+
+[[package]]
+name = "hardware-rust-crypto"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6bb270cb0700ed6a5a3e8e298f9e8dcd5dc47e743094414bfee7012c049214e"
+dependencies = [
+ "getrandom 0.3.4",
+ "libc",
+ "subtle",
  "zeroize",
 ]
 

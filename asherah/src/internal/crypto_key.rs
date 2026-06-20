@@ -1,30 +1,30 @@
+use crate::aead::Aes256GcmKey;
 use hardware_enclave::{pool_release, MemoryEnclave, SecureBuffer};
 use zeroize::Zeroize as _;
 use zeroize::Zeroizing;
 
 const SLOT_SIZE: usize = 32; // AES-256 key size (matches hardware_enclave pool slot size)
-                             // LessSafeKey: safe in our usage — encryption always uses a fresh random nonce
-                             // per operation (see aead.rs). The cached key schedule is a performance
-                             // optimization that avoids re-expanding the AES key on every encrypt/decrypt.
-use ring::aead::{LessSafeKey, UnboundKey, AES_256_GCM};
+                             // The cached AES-256-GCM key is a performance optimization that
+                             // avoids re-expanding the key schedule (and re-opening the enclave)
+                             // on every encrypt/decrypt. See aead.rs for backend/nonce details.
 
 pub struct CryptoKey {
     created: i64,
     revoked: bool,
     secret: MemoryEnclave,
-    /// Pre-expanded AES-256-GCM key schedule (avoids re-expansion on every use).
-    /// See aead.rs for nonce safety documentation.
-    cached_lsk: Option<LessSafeKey>,
+    /// Pre-expanded AES-256-GCM key (avoids re-expansion on every use).
+    /// See aead.rs for backend selection and nonce safety documentation.
+    cached_key: Option<Aes256GcmKey>,
 }
 
-// LessSafeKey doesn't impl Debug
+// Aes256GcmKey carries no fields useful for Debug
 impl std::fmt::Debug for CryptoKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CryptoKey")
             .field("created", &self.created)
             .field("revoked", &self.revoked)
             .field("secret", &self.secret)
-            .field("cached_lsk", &self.cached_lsk.is_some())
+            .field("cached_key", &self.cached_key.is_some())
             .finish()
     }
 }
@@ -41,25 +41,25 @@ impl CryptoKey {
         cache_key_schedule: bool,
     ) -> anyhow::Result<Self> {
         let mut bytes = Zeroizing::new(bytes);
-        // Pre-expand key schedule for 32-byte keys.
+        // Pre-expand the AES-256-GCM key for 32-byte keys.
         //
-        // `UnboundKey::new` returns Err only for an algorithm/key-length
-        // mismatch. We've already gated on `bytes.len() == 32` for
-        // AES-256-GCM, so the error path is unreachable. Surface a
-        // contextual error rather than the previous `.ok()` silent
-        // discard so that a future regression (changing the gate
-        // without updating the algo) doesn't disappear into a
-        // `cached_lsk: None` and silently fall through to the
+        // `Aes256GcmKey::new` returns Err only for an algorithm/key-length
+        // mismatch (or absent AES hardware on the `hardware-crypto` backend).
+        // We've already gated on `bytes.len() == 32` for AES-256-GCM, so the
+        // key-length error path is unreachable. Surface a contextual error
+        // rather than silently discarding it so that a future regression
+        // (changing the gate without updating the algo) doesn't disappear
+        // into a `cached_key: None` and silently fall through to the
         // not-cached path. T-finding "UnboundKey::new(&AES_256_GCM,
         // &bytes).ok() silently discards unreachable error" in
         // `docs/review-2026-05-05-findings.md`.
-        let cached_lsk = if cache_key_schedule && bytes.len() == 32 {
-            match UnboundKey::new(&AES_256_GCM, bytes.as_slice()) {
-                Ok(k) => Some(LessSafeKey::new(k)),
-                Err(_) => {
+        let cached_key = if cache_key_schedule && bytes.len() == 32 {
+            match Aes256GcmKey::new(bytes.as_slice()) {
+                Ok(k) => Some(k),
+                Err(e) => {
                     return Err(anyhow::anyhow!(
-                        "internal: UnboundKey::new failed for 32-byte AES-256-GCM key — \
-                         algorithm/key-length gate mismatch (please report)"
+                        "internal: AES-256-GCM key init failed for 32-byte key \
+                         (algorithm/key-length gate mismatch or missing AES hardware): {e}"
                     ));
                 }
             }
@@ -92,7 +92,7 @@ impl CryptoKey {
             created,
             revoked,
             secret: enclave,
-            cached_lsk,
+            cached_key,
         })
     }
     pub fn created(&self) -> i64 {
@@ -102,10 +102,9 @@ impl CryptoKey {
         self.revoked
     }
     /// Returns the pre-expanded AES-256-GCM key if available (32-byte keys).
-    /// Named `LessSafeKey` by ring because it doesn't enforce nonce uniqueness
-    /// at the type level — our callers handle nonce generation correctly.
-    pub fn less_safe_key(&self) -> Option<&LessSafeKey> {
-        self.cached_lsk.as_ref()
+    /// Backend-neutral: see `aead::Aes256GcmKey` for nonce handling.
+    pub fn aead_key(&self) -> Option<&Aes256GcmKey> {
+        self.cached_key.as_ref()
     }
     pub fn with_key_func<R>(&self, f: impl FnOnce(&[u8]) -> R) -> anyhow::Result<R> {
         let buf = self

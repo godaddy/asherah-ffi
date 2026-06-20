@@ -584,6 +584,22 @@ do_sanitizers() {
     local platform="${PLATFORM:?PLATFORM must be set}"
     log "=== Sanitizer Tests ==="
 
+    # The ASAN/TSAN runs below use `-Zbuild-std`, which rebuilds `std_detect`.
+    # Under that rebuild, runtime CPU feature detection
+    # (`is_x86_feature_detected!`) has been observed to return false negatives
+    # for AES/PCLMULQDQ on GitHub x86_64 runners that *do* have them — making
+    # hardware-rust-crypto's default AES-GCM backend report `UnsupportedCpu`.
+    # Statically enabling the AES-GCM target features the runner actually has
+    # makes detection short-circuit at compile time (hardware-rust-crypto 1.0.1+
+    # honors `cfg!(target_feature)`), so the hardware backend initializes. The
+    # normal (non-build-std) jobs detect these features at runtime and need no
+    # such flag; this only declares the truth about the sanitizer runner.
+    local san_target_features=""
+    case "$platform" in
+        x64 | x86_64) san_target_features="-Ctarget-feature=+aes,+sse2,+ssse3,+pclmulqdq" ;;
+        arm64 | aarch64) san_target_features="-Ctarget-feature=+aes,+neon" ;;
+    esac
+
     # Ensure nightly toolchain is available (required for miri and ASAN)
     local has_nightly=false
     if command -v rustup >/dev/null 2>&1; then
@@ -610,8 +626,13 @@ do_sanitizers() {
             rustup component add --toolchain nightly miri rust-src 2>&1 | tail -1
         fi
         if PATH="$nightly_bin:$PATH" cargo miri --version >/dev/null 2>&1; then
+            # AES-GCM tests need: (1) the target features declared so the
+            # hardware backend's detection short-circuits under Miri (which has
+            # no CPUID), matching hardware-rust-crypto's own Miri job; and (2)
+            # disabled isolation so per-message nonce generation can draw OS
+            # entropy.
             run_test "Miri (asherah core lib)" \
-                bash -c "PATH=\"$nightly_bin:\$PATH\" cargo miri test -p asherah --lib -- --skip memcall --skip memguard"
+                bash -c "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"$san_target_features\" MIRIFLAGS=\"-Zmiri-disable-isolation\" cargo miri test -p asherah --lib -- --skip memcall --skip memguard"
             run_test "Miri (asherah types + json)" \
                 bash -c "PATH=\"$nightly_bin:\$PATH\" cargo miri test -p asherah --test types_tests --test json_shape"
             run_test "Miri (cobhan)" \
@@ -629,15 +650,15 @@ do_sanitizers() {
     if [ "$(uname)" = "Linux" ] && [ "$has_nightly" = true ]; then
         local asan_target="${platform}-unknown-linux-gnu"
         run_test "AddressSanitizer (asherah core)" bash -c \
-            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo -Zbuild-std test -p asherah --lib --target $asan_target -- --test-threads=1"
+            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address $san_target_features\" ASAN_OPTIONS=\"detect_leaks=1\" cargo -Zbuild-std test -p asherah --lib --target $asan_target -- --test-threads=1"
         run_test "AddressSanitizer (cobhan)" bash -c \
-            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo -Zbuild-std test -p asherah-cobhan --lib --target $asan_target -- --test-threads=1"
+            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address $san_target_features\" ASAN_OPTIONS=\"detect_leaks=1\" cargo -Zbuild-std test -p asherah-cobhan --lib --target $asan_target -- --test-threads=1"
         # Rotation integration tests: sleep-based + multithreaded.
         # ASAN catches use-after-free in the CryptoKey enclave / wipe
         # paths and any cache eviction UAF. Keep --test-threads=1
         # so tests don't compete for the second-resolution wall clock.
         run_test "AddressSanitizer (rotation integration tests)" bash -c \
-            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address\" ASAN_OPTIONS=\"detect_leaks=1\" cargo -Zbuild-std test -p asherah --target $asan_target \
+            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=address $san_target_features\" ASAN_OPTIONS=\"detect_leaks=1\" cargo -Zbuild-std test -p asherah --target $asan_target \
               --test concurrent_rotation \
               --test swr_loader_failure \
               --test rotation_expiration \
@@ -654,13 +675,13 @@ do_sanitizers() {
         # container's native triple, not a hardcoded x86_64 target.
         run_test "AddressSanitizer (asherah core, via Docker)" \
             run_in_sanitizer_container \
-            'TARGET=$(rustc +nightly -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly -Zbuild-std test -p asherah --lib --target "$TARGET" -- --test-threads=1'
+            'TARGET=$(rustc +nightly -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=address '"$san_target_features"'" ASAN_OPTIONS="detect_leaks=1" cargo +nightly -Zbuild-std test -p asherah --lib --target "$TARGET" -- --test-threads=1'
         run_test "AddressSanitizer (cobhan, via Docker)" \
             run_in_sanitizer_container \
-            'TARGET=$(rustc +nightly -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly -Zbuild-std test -p asherah-cobhan --lib --target "$TARGET" -- --test-threads=1'
+            'TARGET=$(rustc +nightly -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=address '"$san_target_features"'" ASAN_OPTIONS="detect_leaks=1" cargo +nightly -Zbuild-std test -p asherah-cobhan --lib --target "$TARGET" -- --test-threads=1'
         run_test "AddressSanitizer (rotation integration tests, via Docker)" \
             run_in_sanitizer_container \
-            'TARGET=$(rustc +nightly -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=address" ASAN_OPTIONS="detect_leaks=1" cargo +nightly -Zbuild-std test -p asherah --target "$TARGET" --test concurrent_rotation --test swr_loader_failure --test rotation_expiration --test rotation_timing_edges --test sk_revocation --test revocation --test async_rotation -- --test-threads=1'
+            'TARGET=$(rustc +nightly -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=address '"$san_target_features"'" ASAN_OPTIONS="detect_leaks=1" cargo +nightly -Zbuild-std test -p asherah --target "$TARGET" --test concurrent_rotation --test swr_loader_failure --test rotation_expiration --test rotation_timing_edges --test sk_revocation --test revocation --test async_rotation -- --test-threads=1'
     else
         skip "AddressSanitizer (requires Linux or Docker)"
     fi
@@ -674,7 +695,7 @@ do_sanitizers() {
     if [ "$(uname)" = "Linux" ] && [ "$has_nightly" = true ]; then
         local tsan_target="${platform}-unknown-linux-gnu"
         run_test "ThreadSanitizer (concurrent rotation + SWR)" bash -c \
-            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=thread\" cargo -Zbuild-std test -p asherah --target $tsan_target \
+            "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"-Zsanitizer=thread $san_target_features\" cargo -Zbuild-std test -p asherah --target $tsan_target \
               --test concurrent_rotation \
               --test swr_loader_failure \
               --test cache_concurrent \
@@ -683,7 +704,7 @@ do_sanitizers() {
         ensure_sanitizer_image
         run_test "ThreadSanitizer (concurrent rotation + SWR, via Docker)" \
             run_in_sanitizer_container \
-            'TARGET=$(rustc +nightly -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=thread" cargo +nightly -Zbuild-std test -p asherah --target "$TARGET" --test concurrent_rotation --test swr_loader_failure --test cache_concurrent -- --test-threads=1'
+            'TARGET=$(rustc +nightly -vV | grep host | cut -d" " -f2) && RUSTFLAGS="-Zsanitizer=thread '"$san_target_features"'" cargo +nightly -Zbuild-std test -p asherah --target "$TARGET" --test concurrent_rotation --test swr_loader_failure --test cache_concurrent -- --test-threads=1'
     else
         skip "ThreadSanitizer (requires Linux or Docker)"
     fi
