@@ -626,8 +626,13 @@ do_sanitizers() {
             rustup component add --toolchain nightly miri rust-src 2>&1 | tail -1
         fi
         if PATH="$nightly_bin:$PATH" cargo miri --version >/dev/null 2>&1; then
+            # AES-GCM tests need: (1) the target features declared so the
+            # hardware backend's detection short-circuits under Miri (which has
+            # no CPUID), matching hardware-rust-crypto's own Miri job; and (2)
+            # disabled isolation so per-message nonce generation can draw OS
+            # entropy.
             run_test "Miri (asherah core lib)" \
-                bash -c "PATH=\"$nightly_bin:\$PATH\" cargo miri test -p asherah --lib -- --skip memcall --skip memguard"
+                bash -c "PATH=\"$nightly_bin:\$PATH\" RUSTFLAGS=\"$san_target_features\" MIRIFLAGS=\"-Zmiri-disable-isolation\" cargo miri test -p asherah --lib -- --skip memcall --skip memguard"
             run_test "Miri (asherah types + json)" \
                 bash -c "PATH=\"$nightly_bin:\$PATH\" cargo miri test -p asherah --test types_tests --test json_shape"
             run_test "Miri (cobhan)" \
