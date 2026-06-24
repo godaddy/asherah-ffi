@@ -65,7 +65,7 @@
     "test:bun": "bun test/roundtrip.js && bun test/rotation.js && bun test/e2e-consumer.js && bun test/bun-compat.js"
   },
   "devDependencies": {
-    "@napi-rs/cli": "^2.18.0"
+    "@napi-rs/cli": "2.18.4"
   },
   "engines": {
     "node": ">= 18"

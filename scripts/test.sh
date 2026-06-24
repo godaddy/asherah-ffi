@@ -251,14 +251,14 @@ do_bindings() {
             if [ -n "${BINDING_ARTIFACTS_DIR:-}" ]; then
                 # CI: install pre-built wheel
                 PIP_BSP=""; python3 -m pip install --break-system-packages --help &>/dev/null && PIP_BSP="--break-system-packages"
-                python3 -m pip install $PIP_BSP -U pytest pytest-asyncio 2>&1 | tail -1 || true
+                python3 -m pip install $PIP_BSP pytest==9.1.1 pytest-asyncio==1.4.0 2>&1 | tail -1 || true
                 python3 -m pip install $PIP_BSP --force-reinstall --no-deps "$BINDING_ARTIFACTS_DIR"/python/*.whl 2>&1 | tail -1
             elif ! python3 -c "from asherah import SessionFactory" 2>/dev/null; then
                 log "Installing Python binding (maturin develop)..."
                 if command -v maturin >/dev/null 2>&1; then
                     maturin develop --release --manifest-path asherah-py/Cargo.toml 2>&1 | tail -1
                 else
-                    pip3 install maturin 2>&1 | tail -1
+                    pip3 install maturin==1.9.4 2>&1 | tail -1
                     maturin develop --release --manifest-path asherah-py/Cargo.toml 2>&1 | tail -1
                 fi
             fi
@@ -317,7 +317,7 @@ do_bindings() {
             export PATH="/opt/homebrew/opt/ruby/bin:/opt/homebrew/lib/ruby/gems/4.0.0/bin:$PATH"
         fi
         if ! command -v bundle >/dev/null 2>&1; then
-            gem install bundler --no-document
+            gem install bundler:2.6.9 --no-document
         fi
         (cd asherah-ruby && bundle install --quiet)
         run_test "Ruby" bash -c "cd asherah-ruby && bundle exec rake test"
