@@ -166,7 +166,7 @@ jobs:
     runs-on: ${{ matrix.settings.host }}
 
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
@@ -188,7 +188,7 @@ jobs:
 
       - name: Install cargo-zigbuild (musl builds)
         if: contains(matrix.settings.target, 'musl')
-        uses: taiki-e/install-action@fd2f5e3d644b484055ebf4268f474c565f148f25 # v2.81.9
+        uses: taiki-e/install-action@ace6ebe54a6a0c86dfb5f7764b17f793b6925bc3 # v2.82.3
         with:
           tool: cargo-zigbuild
 
@@ -198,7 +198,7 @@ jobs:
       # skip the dependent `publish` job.
       - name: Restore cargo cache
         id: cargo-cache
-        uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache/restore@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: |
             ~/.cargo/registry/index/
@@ -216,7 +216,7 @@ jobs:
       - name: Save cargo cache
         if: ${{ always() && steps.cargo-cache.outputs.cache-hit != 'true' }}
         continue-on-error: true
-        uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache/save@2c8a9bd7457de244a408f35966fab2fb45fda9c8 # v6.0.0
         with:
           path: |
             ~/.cargo/registry/index/
@@ -246,7 +246,7 @@ jobs:
       actions: write
 
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
 
