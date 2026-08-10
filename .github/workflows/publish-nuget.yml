@@ -158,7 +158,7 @@ jobs:
       - name: NuGet login
         id: nuget-login
         if: ${{ github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true') }}
-        uses: NuGet/login@ebc737b6fc418a6ca0073cf116ec8dc156d8b81e # v1.0.0
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.0.0
         with:
           user: ${{ secrets.NUGET_TRUSTED_PUBLISHING_USER }}
 
