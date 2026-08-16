@@ -171,7 +171,7 @@ That's the point — they can't drift.
 
 ## Coding Conventions
 
-- Rust edition 2021; minimum supported version 1.88.0 (toolchain pinned to 1.97.1)
+- Rust edition 2021; minimum supported version 1.94.1 (toolchain pinned to 1.97.1)
 - Keep changes minimal and focused
 - Use existing types and JSON field names in `types.rs` for cross-language compatibility
 - Never log sensitive material; locked buffers scrub on free
