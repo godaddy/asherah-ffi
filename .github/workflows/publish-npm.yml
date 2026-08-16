@@ -177,6 +177,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           targets: ${{ matrix.settings.target }}
 
       - name: Install Zig (musl builds, with retries)
