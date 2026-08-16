@@ -95,11 +95,11 @@ Changing any of these affects all publish workflows AND dry-runs simultaneously.
 That's the point — they can't drift.
 
 ### Rust toolchain
-- `rust-toolchain.toml` pins the workspace to 1.91.1 with Linux targets only
-- `dtolnay/rust-toolchain` in CI MUST use the `@1.91.1` SHA (`32a995a99d743b9c19db6838def362cd715afeb6`),
+- `rust-toolchain.toml` pins the workspace to 1.97.1 with Linux targets only
+- `dtolnay/rust-toolchain` in CI MUST use the `@1.97.1` SHA (`2c7215f132e9ebf062739d9130488b56d53c060c`),
   not `@stable`. Using `@stable` installs cross-compile targets for the wrong toolchain
   since `rust-toolchain.toml` overrides which toolchain cargo actually uses.
-- arm64 container jobs use `rust:1.91-bookworm` image
+- arm64 container jobs use `rust:1.97-bookworm` image
 - Fuzz and sanitizer jobs use `nightly` (independent of the pinned version)
 
 ## CI/CD Rules (hard-won, do not violate)
@@ -171,7 +171,7 @@ That's the point — they can't drift.
 
 ## Coding Conventions
 
-- Rust edition 2021; minimum supported version 1.88.0 (toolchain pinned to 1.91.1)
+- Rust edition 2021; minimum supported version 1.88.0 (toolchain pinned to 1.97.1)
 - Keep changes minimal and focused
 - Use existing types and JSON field names in `types.rs` for cross-language compatibility
 - Never log sensitive material; locked buffers scrub on free
