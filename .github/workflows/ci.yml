@@ -41,8 +41,9 @@ jobs:
           restore-keys: |
             lint-${{ runner.os }}-
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           components: rustfmt, clippy
       - name: Install protoc
         run: sudo apt-get install -y protobuf-compiler
@@ -83,7 +84,9 @@ jobs:
           restore-keys: |
             rust-tests-${{ runner.os }}-
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
+        with:
+          toolchain: 1.97.1
       - uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
         with:
           tool: sccache@0.8.1
@@ -118,8 +121,9 @@ jobs:
           restore-keys: |
             aead-ring-${{ runner.os }}-
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           components: clippy
       - name: Install protoc
         run: sudo apt-get install -y protobuf-compiler
@@ -151,7 +155,9 @@ jobs:
           restore-keys: |
             integration-${{ runner.os }}-
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
+        with:
+          toolchain: 1.97.1
       - name: Verify Docker availability
         run: docker version
       - name: Integration tests
@@ -301,7 +307,7 @@ jobs:
           export OPENSSL_NO_VENDOR=1
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none
           export PATH="$CARGO_HOME/bin:$PATH"
-          rustup toolchain install 1.91.1 --profile minimal --component rustfmt
+          rustup toolchain install 1.97.1 --profile minimal --component rustfmt
           bash "${GITHUB_WORKSPACE:-$(pwd)}/scripts/install-sccache.sh"
           python3.11 -m pip install maturin==1.9.4
           rm -rf artifacts/x86_64/python || true
@@ -562,8 +568,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           targets: x86_64-apple-darwin,aarch64-apple-darwin
       - name: Build FFI for macOS x86_64 + arm64
         run: |
@@ -589,7 +596,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
+        with:
+          toolchain: 1.97.1
       - name: Install OpenSSL via vcpkg
         shell: bash
         run: |
@@ -802,8 +811,9 @@ jobs:
           restore-keys: |
             interop-${{ runner.os }}-
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           components: rustfmt
       - uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2.85.11
         with:
@@ -912,7 +922,9 @@ jobs:
           restore-keys: |
             sanitizers-${{ runner.os }}-
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
+        with:
+          toolchain: 1.97.1
       - name: Install dependencies
         run: |
           echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/80-retries
@@ -925,7 +937,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    container: rust:1.91-bookworm
+    container: rust:1.97-bookworm
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -994,7 +1006,7 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
-    container: rust:1.91-bookworm
+    container: rust:1.97-bookworm
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -1044,7 +1056,7 @@ jobs:
           SKIP_CORE_BUILD: "1"
         run: |
           rustup target add aarch64-unknown-linux-gnu
-          rustup default 1.91.1
+          rustup default 1.97.1
           ./scripts/build-bindings.sh
       - name: Upload arm64 node binding artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1058,7 +1070,7 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
-    container: rust:1.91-bookworm
+    container: rust:1.97-bookworm
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -1116,8 +1128,8 @@ jobs:
           TARGET_ARCH: aarch64
           CARGO_LOG: cargo::core::compiler::fingerprint=info
         run: |
-          rustup toolchain install 1.91.1 --profile minimal --component rustfmt
-          rustup default 1.91.1
+          rustup toolchain install 1.97.1 --profile minimal --component rustfmt
+          rustup default 1.97.1
           rustup target add aarch64-unknown-linux-gnu
           rm -rf artifacts/aarch64/python || true
           mkdir -p artifacts/aarch64/python
@@ -1136,7 +1148,7 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
-    container: rust:1.91-bookworm
+    container: rust:1.97-bookworm
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -1182,7 +1194,7 @@ jobs:
           SKIP_CORE_BUILD: "1"
         run: |
           rustup target add aarch64-unknown-linux-gnu
-          rustup default 1.91.1
+          rustup default 1.97.1
           ./scripts/build-bindings.sh
       - name: Upload Java binding artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1196,7 +1208,7 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
-    container: rust:1.91-bookworm
+    container: rust:1.97-bookworm
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -1247,7 +1259,7 @@ jobs:
           SKIP_CORE_BUILD: "1"
         run: |
           rustup target add aarch64-unknown-linux-gnu
-          rustup default 1.91.1
+          rustup default 1.97.1
           ./scripts/build-bindings.sh
       - name: Upload .NET binding artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1287,7 +1299,7 @@ jobs:
       contents: read
     runs-on: ubuntu-latest
     needs: build-rlib-arm64
-    container: rust:1.91-bookworm
+    container: rust:1.97-bookworm
     env:
       CARGO_HOME: ${{ github.workspace }}/.cache/cargo
       RUSTUP_HOME: ${{ github.workspace }}/.cache/rustup
@@ -1333,7 +1345,7 @@ jobs:
           SKIP_CORE_BUILD: "1"
         run: |
           rustup target add aarch64-unknown-linux-gnu
-          rustup default 1.91.1
+          rustup default 1.97.1
           ./scripts/build-bindings.sh
       - name: Upload arm64 cobhan artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -1377,8 +1389,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           targets: x86_64-unknown-linux-musl
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -1411,7 +1424,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
+        with:
+          toolchain: 1.97.1
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
@@ -1448,15 +1463,16 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           targets: x86_64-unknown-linux-gnu
       - name: Build manylinux x86_64 wheel
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: x86_64-unknown-linux-gnu
           manylinux: "2_28"
-          rust-toolchain: "1.91.1"
+          rust-toolchain: "1.97.1"
           before-script-linux: source scripts/maturin-before-script-linux.sh
           args: --release --manifest-path asherah-py/Cargo.toml --out dist/
       - name: Verify wheel
@@ -1473,15 +1489,16 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           targets: aarch64-unknown-linux-gnu
       - name: Build manylinux aarch64 wheel
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: aarch64-unknown-linux-gnu
           manylinux: "2_28"
-          rust-toolchain: "1.91.1"
+          rust-toolchain: "1.97.1"
           before-script-linux: source scripts/maturin-before-script-linux.sh
           args: --release --manifest-path asherah-py/Cargo.toml --out dist/
       - name: Verify wheel
@@ -1498,8 +1515,9 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           targets: x86_64-apple-darwin,aarch64-apple-darwin
       - name: Build universal2 wheel
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
@@ -1520,15 +1538,16 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           targets: x86_64-unknown-linux-musl
       - name: Build musllinux x86_64 wheel
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: x86_64-unknown-linux-musl
           manylinux: musllinux_1_2
-          rust-toolchain: "1.91.1"
+          rust-toolchain: "1.97.1"
           before-script-linux: source scripts/maturin-before-script-linux.sh
           args: --release --manifest-path asherah-py/Cargo.toml --out dist/
       - name: Verify wheel
@@ -1545,15 +1564,16 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           targets: aarch64-unknown-linux-musl
       - name: Build musllinux aarch64 wheel
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1.51.0
         with:
           target: aarch64-unknown-linux-musl
           manylinux: musllinux_1_2
-          rust-toolchain: "1.91.1"
+          rust-toolchain: "1.97.1"
           before-script-linux: source scripts/maturin-before-script-linux.sh
           args: --release --manifest-path asherah-py/Cargo.toml --out dist/
       - name: Verify wheel
@@ -1567,8 +1587,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           targets: aarch64-unknown-linux-musl
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -1601,8 +1622,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           targets: aarch64-pc-windows-msvc
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -1646,8 +1668,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           targets: x86_64-unknown-linux-musl
       - name: Install Zig (with retries)
         # Replaces `mlugg/setup-zig@v2`, which has no internal retry —
@@ -1692,8 +1715,9 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           targets: aarch64-unknown-linux-musl
       - name: Install Zig (with retries)
         # Replaces `mlugg/setup-zig@v2`, which has no internal retry —
@@ -1771,8 +1795,9 @@ jobs:
     needs: build-ffi-x86_64
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           targets: x86_64-unknown-linux-musl
       - name: Download x86_64 FFI artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

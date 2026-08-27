@@ -424,7 +424,7 @@ do_bindings() {
                     run_test "PHP native FFI build (Docker)" docker run --rm \
                         -v "$ROOT_DIR:/work" -w /work \
                         -e CARGO_TARGET_DIR=/work/target-php-linux \
-                        rust:1.91-bookworm cargo build -p asherah-ffi
+                        rust:1.97-bookworm cargo build -p asherah-ffi
                 fi
                 run_test "PHP no-vendor smoke" docker run --rm \
                     -v "$ROOT_DIR:/work" -w /work \
@@ -554,7 +554,7 @@ ensure_sanitizer_image() {
     fi
     log "Building sanitizer Docker image (one-time)..."
     docker build -t "$SANITIZER_IMAGE" -f - "$ROOT_DIR" <<'DOCKERFILE'
-FROM rust:1.91-bullseye
+FROM rust:1.97-bullseye
 RUN apt-get update && apt-get install -y --no-install-recommends \
     clang llvm valgrind pkg-config libssl-dev build-essential \
     && rm -rf /var/lib/apt/lists/*

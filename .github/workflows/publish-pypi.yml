@@ -162,8 +162,9 @@ jobs:
           python-version: "3.11"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@32a995a99d743b9c19db6838def362cd715afeb6 # 1.91.1
+        uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c # 1.97.1
         with:
+          toolchain: 1.97.1
           targets: ${{ matrix.rust_targets || matrix.target }}
 
       - name: Set version
@@ -193,7 +194,7 @@ jobs:
         with:
           target: ${{ matrix.target }}
           manylinux: ${{ matrix.manylinux || 'auto' }}
-          rust-toolchain: "1.91.1"
+          rust-toolchain: "1.97.1"
           before-script-linux: source scripts/maturin-before-script-linux.sh
           args: >-
             --release
