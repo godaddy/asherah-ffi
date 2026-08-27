@@ -8,8 +8,8 @@
 #     --build-arg ASHERAH_GO_REF=<sha> \
 #     -f Dockerfile.go-ref -t asherah-server-go-ref:interop .
 #
-ARG GOVERSION=1.24
-ARG ALPINEVERSION=3.20
+ARG GOVERSION=1.26
+ARG ALPINEVERSION=3.22
 FROM golang:${GOVERSION}-alpine${ALPINEVERSION} AS builder
 
 ARG ASHERAH_GO_REF
