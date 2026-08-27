@@ -1,6 +1,6 @@
 module canonical_go_probe
 
-go 1.24.0
+go 1.26.7
 
 require github.com/godaddy/asherah/go/appencryption v0.3.0
 
