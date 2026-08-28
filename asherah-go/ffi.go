@@ -1,6 +1,7 @@
 package asherah
 
 import (
+	"fmt"
 	"math"
 	"unsafe"
 )
@@ -63,23 +64,42 @@ func safeBufferLen(bufLen, capacity uintptr) (int, bool) {
 	return int(bufLen), true
 }
 
-func readBuffer(buf *asherahBuffer) []byte {
+// readBuffer copies the native buffer's contents into a Go-owned []byte.
+// It returns an error — rather than silently treating the result as an
+// empty success — if the buffer's self-reported metadata is invalid, so
+// a corrupted or mismatched native library response is never mistaken
+// for "encrypted/decrypted to zero bytes."
+func readBuffer(buf *asherahBuffer) ([]byte, error) {
 	if buf.len == 0 || buf.data == 0 {
-		return nil
+		return nil, nil
 	}
 	n, ok := safeBufferLen(buf.len, buf.capacity)
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("asherah-go: native buffer metadata invalid (len=%d, capacity=%d)", buf.len, buf.capacity)
 	}
 	// Copy the data out before the buffer is freed.
 	src := unsafe.Slice((*byte)(unsafe.Pointer(buf.data)), n)
 	dst := make([]byte, len(src))
 	copy(dst, src)
-	return dst
+	return dst, nil
 }
 
+// freeBuffer releases the native buffer's underlying allocation. It
+// deliberately does nothing — leaking the native allocation rather than
+// freeing it — if the buffer's self-reported length exceeds its
+// capacity: asherah_buffer_free reconstructs a Vec<u8> from these exact
+// fields (zeroizing `len` bytes, then Vec::from_raw_parts(data, len,
+// capacity)), both of which are undefined behavior when len > capacity
+// (asherah-ffi/src/lib.rs). A corrupted or mismatched native library
+// response can produce such a triple — see safeBufferLen. A leak is a
+// bounded, recoverable failure mode; forwarding corrupted metadata into
+// more unsafe native code is not.
 func freeBuffer(buf *asherahBuffer) {
-	if buf.data != 0 {
-		fnBufferFree(uintptr(unsafe.Pointer(buf)))
+	if buf.data == 0 {
+		return
 	}
+	if _, ok := safeBufferLen(buf.len, buf.capacity); !ok {
+		return
+	}
+	fnBufferFree(uintptr(unsafe.Pointer(buf)))
 }

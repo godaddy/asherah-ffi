@@ -135,7 +135,7 @@ func (s *Session) Encrypt(plaintext []byte) ([]byte, error) {
 		return nil, fmt.Errorf("asherah-go: encrypt failed: %s", lastErrorMessage())
 	}
 	defer freeBuffer(buf)
-	return readBuffer(buf), nil
+	return readBuffer(buf)
 }
 
 // EncryptString encrypts a UTF-8 string and returns a JSON string.
@@ -178,7 +178,10 @@ func (s *Session) Decrypt(dataRowRecord []byte) ([]byte, error) {
 		return nil, fmt.Errorf("asherah-go: decrypt failed: %s", lastErrorMessage())
 	}
 	defer freeBuffer(buf)
-	pt := readBuffer(buf)
+	pt, err := readBuffer(buf)
+	if err != nil {
+		return nil, err
+	}
 	// Best-effort wipe of the Go-side plaintext copy. The Rust FFI
 	// already wipes the native buffer via `asherah_buffer_free`'s
 	// `zeroize::Zeroize` step, but the slice we return goes onto
