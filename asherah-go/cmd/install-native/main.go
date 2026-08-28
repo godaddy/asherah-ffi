@@ -209,8 +209,11 @@ func verifyChecksum(checksumURL, assetName, localFile string) error {
 		return fmt.Errorf("checksums not available (HTTP %d)", resp.StatusCode)
 	}
 
-	expectedHash, ok := parseChecksumLines(resp.Body, assetName)
-	if !ok {
+	expectedHash, err := parseChecksumLines(resp.Body, assetName)
+	if err != nil {
+		return fmt.Errorf("read checksums: %w", err)
+	}
+	if expectedHash == "" {
 		return fmt.Errorf("no checksum found for %s", assetName)
 	}
 
@@ -259,15 +262,25 @@ func (e *checksumMismatchError) Error() string {
 // reads one line at a time (bounded by bufio.MaxScanTokenSize) and this
 // returns as soon as a match is found, so memory use stays bounded
 // regardless of the response size.
-func parseChecksumLines(r io.Reader, assetName string) (hash string, ok bool) {
+//
+// Returns a non-nil error only if the scan itself failed (a network
+// error mid-read, or a line exceeding bufio.MaxScanTokenSize) —
+// distinct from a clean scan that simply never found a matching entry
+// (hash == "", err == nil). Without this distinction, a truncated or
+// corrupted SHA256SUMS response looked identical to "this release
+// predates SHA256SUMS," both silently reaching the same soft-warn path
+// in main(). They still share that soft-warn fate today — only a real
+// checksumMismatchError hard-fails — but the two cases are now
+// diagnosable instead of indistinguishable in the tool's output.
+func parseChecksumLines(r io.Reader, assetName string) (hash string, err error) {
 	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		parts := strings.Fields(scanner.Text())
 		if len(parts) == 2 && parts[1] == assetName {
-			return parts[0], true
+			return parts[0], nil
 		}
 	}
-	return "", false
+	return "", scanner.Err()
 }
 
 func fatalf(format string, args ...any) {
