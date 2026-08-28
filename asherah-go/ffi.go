@@ -51,17 +51,13 @@ func lastErrorMessage() string {
 }
 
 // safeBufferLen converts a native buffer's self-reported length to an int
-// suitable for unsafe.Slice, guarding against the uintptr->int conversion
-// wrapping negative (which would otherwise panic inside unsafe.Slice).
-//
-// NOTE: this does not yet reject bufLen > capacity; readBuffer trusts the
-// native length as long as it fits in an int. That gap is tracked for a
-// follow-up fix (see FuzzSafeBufferLen). capacity is accepted now so the
-// arithmetic can be fuzzed against both fields without changing the
-// function signature again once the check lands.
+// suitable for unsafe.Slice, rejecting anything that doesn't fit in an int
+// (which would otherwise wrap negative and panic inside unsafe.Slice) or
+// that exceeds the buffer's own reported capacity. A corrupted or
+// mismatched native library response fully controls both fields, so both
+// checks are load-bearing, not just defensive.
 func safeBufferLen(bufLen, capacity uintptr) (int, bool) {
-	_ = capacity
-	if bufLen > uintptr(math.MaxInt) {
+	if bufLen > capacity || bufLen > uintptr(math.MaxInt) {
 		return 0, false
 	}
 	return int(bufLen), true
