@@ -96,9 +96,17 @@ func (s *StaticKMS) EncryptKey(_ context.Context, _ []byte) ([]byte, error) {
 func (s *StaticKMS) DecryptKey(_ context.Context, _ []byte) ([]byte, error) {
 	return nil, errors.New("StaticKMS: handled by native layer")
 }
+
+// hexEncodeKey lowercase-hex-encodes a master key string for the native
+// core's StaticMasterKeyHex/STATIC_MASTER_KEY_HEX config, which both
+// expect hex rather than the raw key bytes.
+func hexEncodeKey(key string) string {
+	return fmt.Sprintf("%x", key)
+}
+
 func (s *StaticKMS) applyConfig(cfg *Config) {
 	cfg.KMS = "static"
-	hex := fmt.Sprintf("%x", s.key)
+	hex := hexEncodeKey(s.key)
 	// Populate both the JSON config field and the env var so the
 	// supplied key wins regardless of which constructor path the
 	// native core takes (`factory_new_with_config` reads the JSON;
