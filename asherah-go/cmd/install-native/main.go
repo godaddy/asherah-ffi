@@ -13,6 +13,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -76,6 +77,13 @@ func main() {
 	// Verify checksum
 	checksumURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/SHA256SUMS", *repo, *version)
 	if err := verifyChecksum(checksumURL, assetName, destFile); err != nil {
+		var mismatch *checksumMismatchError
+		if errors.As(err, &mismatch) {
+			// The download was fetched, hashed, and the hash does not
+			// match — this is a tampered or corrupted asset, not a
+			// "couldn't verify" situation. Never install it.
+			fatalf("%v", mismatch)
+		}
 		fmt.Fprintf(os.Stderr, "Warning: checksum verification skipped: %v\n", err)
 	} else {
 		fmt.Println("SHA256 checksum verified.")
@@ -225,9 +233,22 @@ func verifyChecksum(checksumURL, assetName, localFile string) error {
 
 	if actualHash != expectedHash {
 		os.Remove(localFile)
-		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)
+		return &checksumMismatchError{expected: expectedHash, actual: actualHash}
 	}
 	return nil
+}
+
+// checksumMismatchError distinguishes "the checksum was computed and it
+// does not match" (must abort — the download is tampered or corrupted)
+// from every other verifyChecksum error, such as the sums file being
+// unavailable (soft-fail: warn and continue, matching this tool's
+// long-standing behavior for older releases that predate SHA256SUMS).
+type checksumMismatchError struct {
+	expected, actual string
+}
+
+func (e *checksumMismatchError) Error() string {
+	return fmt.Sprintf("checksum mismatch: expected %s, got %s", e.expected, e.actual)
 }
 
 // parseChecksumLines scans a SHA256SUMS file body (format: "<hash>
