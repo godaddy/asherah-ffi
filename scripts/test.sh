@@ -506,9 +506,8 @@ do_interop() {
     fi
 }
 
-do_fuzz() {
-    local fuzz_time="${FUZZ_TIME:-30}"
-    log "=== Fuzz Tests (${fuzz_time}s per target) ==="
+do_fuzz_rust() {
+    local fuzz_time="$1"
     if ! command -v cargo-fuzz >/dev/null 2>&1; then
         log "Installing cargo-fuzz..."
         cargo install cargo-fuzz 2>&1 | tail -1
@@ -544,11 +543,15 @@ do_fuzz() {
         run_test "fuzz: $target (${fuzz_time}s)" \
             bash -c "cd fuzz && PATH=\"$nightly_bin:\$PATH\" cargo fuzz run $target -- -max_total_time=$fuzz_time"
     done
+}
 
-    # Go native fuzzing (go test -fuzz). These targets are pure Go
-    # (string/JSON parsing, unsafe-pointer bounds arithmetic extracted into
-    # testable helpers) and need no native FFI library built, so they run
-    # unconditionally whenever a Go toolchain is available.
+# Go native fuzzing (go test -fuzz). These targets are pure Go
+# (string/JSON parsing, unsafe-pointer bounds arithmetic extracted into
+# testable helpers) and need no native FFI library built, so they run
+# unconditionally whenever a Go toolchain is available — independent of
+# whether the Rust cargo-fuzz toolchain (do_fuzz_rust) is available.
+do_fuzz_go() {
+    local fuzz_time="$1"
     if ! command -v go >/dev/null 2>&1; then
         skip "Go fuzz tests (go toolchain not available)"
         return
@@ -574,6 +577,13 @@ do_fuzz() {
     if [ "$found_any" -eq 0 ]; then
         skip "Go fuzz tests (no Fuzz targets found)"
     fi
+}
+
+do_fuzz() {
+    local fuzz_time="${FUZZ_TIME:-30}"
+    log "=== Fuzz Tests (${fuzz_time}s per target) ==="
+    do_fuzz_rust "$fuzz_time"
+    do_fuzz_go "$fuzz_time"
 }
 
 SANITIZER_IMAGE="asherah-sanitizers:latest"
