@@ -1,6 +1,9 @@
 package asherah
 
-import "unsafe"
+import (
+	"math"
+	"unsafe"
+)
 
 // asherahBuffer mirrors the C AsherahBuffer struct { data *uint8; len uintptr; capacity uintptr }.
 type asherahBuffer struct {
@@ -47,12 +50,33 @@ func lastErrorMessage() string {
 	return string(scanCString(mem, maxLen))
 }
 
+// safeBufferLen converts a native buffer's self-reported length to an int
+// suitable for unsafe.Slice, guarding against the uintptr->int conversion
+// wrapping negative (which would otherwise panic inside unsafe.Slice).
+//
+// NOTE: this does not yet reject bufLen > capacity; readBuffer trusts the
+// native length as long as it fits in an int. That gap is tracked for a
+// follow-up fix (see FuzzSafeBufferLen). capacity is accepted now so the
+// arithmetic can be fuzzed against both fields without changing the
+// function signature again once the check lands.
+func safeBufferLen(bufLen, capacity uintptr) (int, bool) {
+	_ = capacity
+	if bufLen > uintptr(math.MaxInt) {
+		return 0, false
+	}
+	return int(bufLen), true
+}
+
 func readBuffer(buf *asherahBuffer) []byte {
 	if buf.len == 0 || buf.data == 0 {
 		return nil
 	}
+	n, ok := safeBufferLen(buf.len, buf.capacity)
+	if !ok {
+		return nil
+	}
 	// Copy the data out before the buffer is freed.
-	src := unsafe.Slice((*byte)(unsafe.Pointer(buf.data)), int(buf.len))
+	src := unsafe.Slice((*byte)(unsafe.Pointer(buf.data)), n)
 	dst := make([]byte, len(src))
 	copy(dst, src)
 	return dst
