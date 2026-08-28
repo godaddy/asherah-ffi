@@ -241,6 +241,16 @@ func lruTouch(cache map[string]*list.Element, lru *list.List, key string) (*Sess
 // least-recently-used entry if the cache is now over maxSize. It reports
 // the evicted session, if any.
 func lruInsertEvict(cache map[string]*list.Element, lru *list.List, maxSize int, entry sessionCacheEntry) (evicted *Session, evictedOK bool) {
+	if maxSize < 1 {
+		// A non-positive maxSize would otherwise evict the entry we just
+		// inserted below (the only entry once the cache is empty) and
+		// hand it back as "evicted" — the caller would then Close() the
+		// very session it's about to return to its own caller as a live
+		// result. Not reachable today (Setup clamps to > 0, SetupFromEnv
+		// hardcodes 1000), but this keeps the contract — "never evict
+		// the entry you just inserted" — true for any caller.
+		maxSize = 1
+	}
 	cache[entry.partition] = lru.PushBack(entry)
 	if lru.Len() <= maxSize {
 		return nil, false
