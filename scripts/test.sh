@@ -563,8 +563,15 @@ do_fuzz_go() {
         return
     fi
     for pkg in $go_packages; do
-        local go_targets
-        go_targets=$(cd asherah-go && CGO_ENABLED=0 go test -list 'Fuzz.*' "$pkg" 2>/dev/null | grep '^Fuzz')
+        local list_output list_status go_targets
+        list_output=$(cd asherah-go && CGO_ENABLED=0 go test -list 'Fuzz.*' "$pkg" 2>&1)
+        list_status=$?
+        if [ "$list_status" -ne 0 ]; then
+            fail "Go fuzz list: $pkg"
+            log "$list_output"
+            continue
+        fi
+        go_targets=$(printf '%s\n' "$list_output" | grep '^Fuzz')
         if [ -z "$go_targets" ]; then
             continue
         fi
