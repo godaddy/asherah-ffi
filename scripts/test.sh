@@ -553,16 +553,27 @@ do_fuzz() {
         skip "Go fuzz tests (go toolchain not available)"
         return
     fi
-    local go_targets
-    go_targets=$(cd asherah-go && CGO_ENABLED=0 go test -list 'Fuzz.*' . 2>/dev/null | grep '^Fuzz')
-    if [ -z "$go_targets" ]; then
-        skip "Go fuzz tests (no Fuzz targets found)"
+    local go_packages found_any=0
+    go_packages=$(cd asherah-go && go list ./... 2>/dev/null)
+    if [ -z "$go_packages" ]; then
+        skip "Go fuzz tests (no packages found)"
         return
     fi
-    for target in $go_targets; do
-        run_test "fuzz: go/$target (${fuzz_time}s)" \
-            bash -c "cd asherah-go && CGO_ENABLED=0 go test -run '^\$' -fuzz '^${target}\$' -fuzztime=${fuzz_time}s ."
+    for pkg in $go_packages; do
+        local go_targets
+        go_targets=$(cd asherah-go && CGO_ENABLED=0 go test -list 'Fuzz.*' "$pkg" 2>/dev/null | grep '^Fuzz')
+        if [ -z "$go_targets" ]; then
+            continue
+        fi
+        found_any=1
+        for target in $go_targets; do
+            run_test "fuzz: go/$target (${fuzz_time}s)" \
+                bash -c "cd asherah-go && CGO_ENABLED=0 go test -run '^\$' -fuzz '^${target}\$' -fuzztime=${fuzz_time}s '$pkg'"
+        done
     done
+    if [ "$found_any" -eq 0 ]; then
+        skip "Go fuzz tests (no Fuzz targets found)"
+    fi
 }
 
 SANITIZER_IMAGE="asherah-sanitizers:latest"
