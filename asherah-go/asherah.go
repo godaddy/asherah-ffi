@@ -222,6 +222,39 @@ func SetEnvMap(values map[string]*string) {
 	}
 }
 
+// lruTouch returns the cached session for key, marking it most-recently-
+// used (moved to the back of lru) if found. Extracted from
+// acquireSession's inline map+list bookkeeping so the LRU algorithm can
+// be exercised by FuzzSessionLRU without any locking, FFI calls, or
+// global state.
+func lruTouch(cache map[string]*list.Element, lru *list.List, key string) (*Session, bool) {
+	elem, ok := cache[key]
+	if !ok {
+		return nil, false
+	}
+	lru.MoveToBack(elem)
+	return elem.Value.(sessionCacheEntry).session, true
+}
+
+// lruInsertEvict inserts entry into cache/lru — callers must have already
+// confirmed entry.partition is absent via lruTouch — and evicts the
+// least-recently-used entry if the cache is now over maxSize. It reports
+// the evicted session, if any.
+func lruInsertEvict(cache map[string]*list.Element, lru *list.List, maxSize int, entry sessionCacheEntry) (evicted *Session, evictedOK bool) {
+	cache[entry.partition] = lru.PushBack(entry)
+	if lru.Len() <= maxSize {
+		return nil, false
+	}
+	front := lru.Front()
+	if front == nil {
+		return nil, false
+	}
+	lruEntry := front.Value.(sessionCacheEntry)
+	lru.Remove(front)
+	delete(cache, lruEntry.partition)
+	return lruEntry.session, true
+}
+
 func acquireSession(partition string) (*Session, func(), error) {
 	if partition == "" {
 		return nil, nil, errors.New("asherah-go: partition ID cannot be empty")
@@ -244,10 +277,7 @@ func acquireSession(partition string) (*Session, func(), error) {
 			globalMu.RUnlock()
 			return nil, nil, errors.New("asherah-go: Shutdown raced with session acquisition")
 		}
-		if elem, ok := sessionCache[partition]; ok {
-			// LRU hit: move to back (most-recently-used).
-			sessionLRU.MoveToBack(elem)
-			sess := elem.Value.(sessionCacheEntry).session
+		if sess, ok := lruTouch(sessionCache, sessionLRU, partition); ok {
 			sessionMu.Unlock()
 			globalMu.RUnlock()
 			return sess, nil, nil
@@ -271,10 +301,8 @@ func acquireSession(partition string) (*Session, func(), error) {
 			sess.Close()
 			return nil, nil, errors.New("asherah-go: Shutdown raced with session acquisition")
 		}
-		if elem, ok := sessionCache[partition]; ok {
+		if existing, ok := lruTouch(sessionCache, sessionLRU, partition); ok {
 			// Lost the race — another goroutine inserted while we created.
-			sessionLRU.MoveToBack(elem)
-			existing := elem.Value.(sessionCacheEntry).session
 			sessionMu.Unlock()
 			globalMu.RUnlock()
 			sess.Close()
@@ -285,17 +313,7 @@ func acquireSession(partition string) (*Session, func(), error) {
 			sessionLRU = list.New()
 		}
 		entry := sessionCacheEntry{partition: partition, session: sess}
-		sessionCache[partition] = sessionLRU.PushBack(entry)
-		// Evict the LRU entry if we're now over the bound.
-		if sessionLRU.Len() > sessionCacheMaxSize {
-			front := sessionLRU.Front()
-			if front != nil {
-				lruEntry := front.Value.(sessionCacheEntry)
-				sessionLRU.Remove(front)
-				delete(sessionCache, lruEntry.partition)
-				evicted = lruEntry.session
-			}
-		}
+		evicted, _ = lruInsertEvict(sessionCache, sessionLRU, sessionCacheMaxSize, entry)
 		sessionMu.Unlock()
 		globalMu.RUnlock()
 		// Close evicted session outside the lock — Close hits the FFI
