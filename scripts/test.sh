@@ -17,7 +17,8 @@ Modes:
   --integration   Integration tests with MySQL, Postgres, DynamoDB (Docker required)
   --bindings      All language binding tests (Python, Node, Bun, Ruby, Go, Java, .NET, PHP)
   --interop       Cross-language interop tests
-  --fuzz          Fuzz tests (requires cargo-fuzz + nightly; time-intensive)
+  --fuzz          Fuzz tests: Rust (requires cargo-fuzz + nightly) and Go
+                  (go test -fuzz, in asherah-go); time-intensive
   --sanitizers    Miri + AddressSanitizer + Valgrind
   --lint          Format check + clippy
   --e2e           E2E tests against published packages
@@ -542,6 +543,25 @@ do_fuzz() {
     for target in $targets; do
         run_test "fuzz: $target (${fuzz_time}s)" \
             bash -c "cd fuzz && PATH=\"$nightly_bin:\$PATH\" cargo fuzz run $target -- -max_total_time=$fuzz_time"
+    done
+
+    # Go native fuzzing (go test -fuzz). These targets are pure Go
+    # (string/JSON parsing, unsafe-pointer bounds arithmetic extracted into
+    # testable helpers) and need no native FFI library built, so they run
+    # unconditionally whenever a Go toolchain is available.
+    if ! command -v go >/dev/null 2>&1; then
+        skip "Go fuzz tests (go toolchain not available)"
+        return
+    fi
+    local go_targets
+    go_targets=$(cd asherah-go && CGO_ENABLED=0 go test -list 'Fuzz.*' . 2>/dev/null | grep '^Fuzz')
+    if [ -z "$go_targets" ]; then
+        skip "Go fuzz tests (no Fuzz targets found)"
+        return
+    fi
+    for target in $go_targets; do
+        run_test "fuzz: go/$target (${fuzz_time}s)" \
+            bash -c "cd asherah-go && CGO_ENABLED=0 go test -run '^\$' -fuzz '^${target}\$' -fuzztime=${fuzz_time}s ."
     done
 }
 
