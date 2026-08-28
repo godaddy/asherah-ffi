@@ -8,18 +8,31 @@ import (
 
 // FuzzConfigToJSON exercises Config.toJSON, the one choke point between
 // arbitrary caller-supplied config and the JSON payload the native core
-// parses. It fuzzes the plain string fields plus KMS specifically, since
-// KMS-defaulting to "static" when empty is the only non-trivial logic in
-// toJSON (every other field is a mechanical json.Marshal passthrough,
-// already covered by encoding/json's own test suite).
+// parses. It fuzzes the plain string fields, KMS specifically (KMS
+// defaulting to "static" when empty is the only non-trivial logic for
+// plain-string fields), and — since validateConfigUTF8 has dedicated
+// reflect.Pointer and reflect.Map branches that are otherwise
+// unreachable from this test — a *string field (ConnectionString) and a
+// map[string]string field (RegionMap) so a regression in either branch
+// can't silently reintroduce the U+FFFD mangling bug undetected.
 func FuzzConfigToJSON(f *testing.F) {
-	f.Add("svc", "prod", "memory", "")
-	f.Add("svc", "prod", "memory", "aws")
-	f.Add("", "", "", "")
-	f.Add("unicode-\u00e9\u4e2d", "prod\x00nul", "memory", "static")
+	f.Add("svc", "prod", "memory", "", "", "", "")
+	f.Add("svc", "prod", "memory", "aws", "postgres://x", "us-east-1", "aws-us-east-1")
+	f.Add("", "", "", "", "", "", "")
+	f.Add("unicode-\u00e9\u4e2d", "prod\x00nul", "memory", "static", "conn\x00nul", "region\x00nul", "val\x00nul")
+	f.Add("svc", "prod", "memory", "aws", "\xe2", "region", "value") // invalid UTF-8 in *string field
+	f.Add("svc", "prod", "memory", "aws", "conn", "\xe2", "value")   // invalid UTF-8 in map key
+	f.Add("svc", "prod", "memory", "aws", "conn", "region", "\xe2")  // invalid UTF-8 in map value
 
-	f.Fuzz(func(t *testing.T, serviceName, productID, metastore, kms string) {
-		cfg := Config{ServiceName: serviceName, ProductID: productID, Metastore: metastore, KMS: kms}
+	f.Fuzz(func(t *testing.T, serviceName, productID, metastore, kms, connectionString, regionKey, regionVal string) {
+		cfg := Config{
+			ServiceName:      serviceName,
+			ProductID:        productID,
+			Metastore:        metastore,
+			KMS:              kms,
+			ConnectionString: &connectionString,
+			RegionMap:        map[string]string{regionKey: regionVal},
+		}
 
 		data, err := cfg.toJSON()
 
@@ -28,7 +41,8 @@ func FuzzConfigToJSON(f *testing.F) {
 		// bytes — a round-trip check can't detect that corruption since
 		// the *output* is well-formed JSON, just not equal to the input.
 		if !utf8.ValidString(serviceName) || !utf8.ValidString(productID) ||
-			!utf8.ValidString(metastore) || !utf8.ValidString(kms) {
+			!utf8.ValidString(metastore) || !utf8.ValidString(kms) ||
+			!utf8.ValidString(connectionString) || !utf8.ValidString(regionKey) || !utf8.ValidString(regionVal) {
 			if err == nil {
 				t.Fatalf("toJSON() should reject invalid UTF-8 input, got data=%s", data)
 			}
@@ -51,6 +65,12 @@ func FuzzConfigToJSON(f *testing.F) {
 		}
 		if got.Metastore != metastore {
 			t.Fatalf("Metastore round-trip: got %q, want %q", got.Metastore, metastore)
+		}
+		if got.ConnectionString == nil || *got.ConnectionString != connectionString {
+			t.Fatalf("ConnectionString round-trip: got %v, want %q", got.ConnectionString, connectionString)
+		}
+		if got.RegionMap[regionKey] != regionVal {
+			t.Fatalf("RegionMap round-trip: got %v, want {%q: %q}", got.RegionMap, regionKey, regionVal)
 		}
 
 		wantKMS := kms
