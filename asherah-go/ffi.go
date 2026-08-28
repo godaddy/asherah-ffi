@@ -42,15 +42,9 @@ func lastErrorMessage() string {
 		return "(unknown error)"
 	}
 	// Read null-terminated C string without CGO (bounded to 4096 bytes).
-	var buf []byte
-	for i := uintptr(0); i < 4096; i++ {
-		b := *(*byte)(unsafe.Pointer(ptr + i))
-		if b == 0 {
-			break
-		}
-		buf = append(buf, b)
-	}
-	return string(buf)
+	const maxLen = 4096
+	mem := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), maxLen)
+	return string(scanCString(mem, maxLen))
 }
 
 func readBuffer(buf *asherahBuffer) []byte {
