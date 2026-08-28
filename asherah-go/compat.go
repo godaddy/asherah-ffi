@@ -173,6 +173,14 @@ func WithMetrics(_ bool) FactoryOption {
 
 // NewSessionFactory creates a new SessionFactory matching the canonical API signature.
 // The metastore, kms, and crypto arguments are used to derive native config.
+// millisToSeconds truncates a millisecond duration down to whole
+// seconds, matching the native config's second-granularity fields
+// (ExpireAfter, CheckInterval). Sub-second remainders are dropped, not
+// rounded — a CryptoPolicy value under 1000ms truncates to 0.
+func millisToSeconds(millis int64) int64 {
+	return millis / 1000
+}
+
 func NewSessionFactory(config *CanonicalConfig, store Metastore, kms KeyManagementService, crypto AEAD, opts ...FactoryOption) *SessionFactory {
 	if config.Policy == nil {
 		config.Policy = NewCryptoPolicy()
@@ -208,11 +216,11 @@ func NewSessionFactory(config *CanonicalConfig, store Metastore, kms KeyManageme
 		cfg.EnableSessionCaching = &f
 	}
 	if policy.ExpireKeyAfterMillis > 0 {
-		secs := policy.ExpireKeyAfterMillis / 1000
+		secs := millisToSeconds(policy.ExpireKeyAfterMillis)
 		cfg.ExpireAfter = &secs
 	}
 	if policy.RevokeCheckMillis > 0 {
-		secs := policy.RevokeCheckMillis / 1000
+		secs := millisToSeconds(policy.RevokeCheckMillis)
 		cfg.CheckInterval = &secs
 	}
 
