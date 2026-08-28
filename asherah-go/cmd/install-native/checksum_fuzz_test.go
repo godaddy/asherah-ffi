@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -18,7 +19,7 @@ func FuzzParseChecksumLines(f *testing.F) {
 	f.Add([]byte("\x00\x00binary garbage\x00\x00"), "libasherah-x64.so")
 
 	f.Fuzz(func(t *testing.T, sums []byte, assetName string) {
-		hash, ok := parseChecksumLines(sums, assetName)
+		hash, ok := parseChecksumLines(bytes.NewReader(sums), assetName)
 		if !ok {
 			if hash != "" {
 				t.Fatalf("parseChecksumLines returned ok=false but hash=%q", hash)

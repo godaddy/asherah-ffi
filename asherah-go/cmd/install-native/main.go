@@ -9,7 +9,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -210,11 +209,7 @@ func verifyChecksum(checksumURL, assetName, localFile string) error {
 		return fmt.Errorf("checksums not available (HTTP %d)", resp.StatusCode)
 	}
 
-	sums, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("read checksums: %w", err)
-	}
-	expectedHash, ok := parseChecksumLines(sums, assetName)
+	expectedHash, ok := parseChecksumLines(resp.Body, assetName)
 	if !ok {
 		return fmt.Errorf("no checksum found for %s", assetName)
 	}
@@ -256,8 +251,16 @@ func (e *checksumMismatchError) Error() string {
 // verifyChecksum so the untrusted-input parsing — the release asset is
 // fetched over HTTP and could be tampered with or corrupted — can be
 // fuzzed without a network call.
-func parseChecksumLines(sums []byte, assetName string) (hash string, ok bool) {
-	scanner := bufio.NewScanner(bytes.NewReader(sums))
+//
+// Takes an io.Reader rather than a []byte deliberately: SHA256SUMS is
+// remote, untrusted input, and buffering the full response before
+// parsing (e.g. via io.ReadAll) would let an arbitrarily large release
+// asset exhaust memory before verification even starts. bufio.Scanner
+// reads one line at a time (bounded by bufio.MaxScanTokenSize) and this
+// returns as soon as a match is found, so memory use stays bounded
+// regardless of the response size.
+func parseChecksumLines(r io.Reader, assetName string) (hash string, ok bool) {
+	scanner := bufio.NewScanner(r)
 	for scanner.Scan() {
 		parts := strings.Fields(scanner.Text())
 		if len(parts) == 2 && parts[1] == assetName {
