@@ -9,6 +9,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -201,18 +202,12 @@ func verifyChecksum(checksumURL, assetName, localFile string) error {
 		return fmt.Errorf("checksums not available (HTTP %d)", resp.StatusCode)
 	}
 
-	// Parse SHA256SUMS format: "<hash>  <filename>"
-	var expectedHash string
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.Fields(line)
-		if len(parts) == 2 && parts[1] == assetName {
-			expectedHash = parts[0]
-			break
-		}
+	sums, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read checksums: %w", err)
 	}
-	if expectedHash == "" {
+	expectedHash, ok := parseChecksumLines(sums, assetName)
+	if !ok {
 		return fmt.Errorf("no checksum found for %s", assetName)
 	}
 
@@ -233,6 +228,22 @@ func verifyChecksum(checksumURL, assetName, localFile string) error {
 		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)
 	}
 	return nil
+}
+
+// parseChecksumLines scans a SHA256SUMS file body (format: "<hash>
+// <filename>" per line) for the entry matching assetName. Extracted from
+// verifyChecksum so the untrusted-input parsing — the release asset is
+// fetched over HTTP and could be tampered with or corrupted — can be
+// fuzzed without a network call.
+func parseChecksumLines(sums []byte, assetName string) (hash string, ok bool) {
+	scanner := bufio.NewScanner(bytes.NewReader(sums))
+	for scanner.Scan() {
+		parts := strings.Fields(scanner.Text())
+		if len(parts) == 2 && parts[1] == assetName {
+			return parts[0], true
+		}
+	}
+	return "", false
 }
 
 func fatalf(format string, args ...any) {
