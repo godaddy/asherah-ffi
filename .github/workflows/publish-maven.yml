@@ -126,20 +126,22 @@ jobs:
           if [ -n "$INPUT_VERSION" ]; then
             VERSION="$INPUT_VERSION"
           else
-            TAG="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
-            RELEASE_VERSION="${TAG#v}"
-
-            # Keep Java artifact versioning on the 0.50.x track.
-            # We derive x from the release tag patch so Java versions
-            # remain monotonic while still mapping deterministically to
-            # each repo release.
-            PATCH="${RELEASE_VERSION##*.}"
-            if [[ "$PATCH" =~ ^[0-9]+$ ]]; then
-              VERSION="0.50.${PATCH}"
-            else
-              echo "ERROR: Unable to derive Java patch version from tag '${TAG}'"
+            # Keep the Java artifact on the 0.50.x track, monotonically increasing
+            # from the latest version already published to GitHub Packages.
+            #
+            # The previous scheme derived the patch from the git tag ("0.50.<tag
+            # patch>"), which collided once the repo moved off the v0.5.x tag line:
+            # v1.0.0 -> patch 0 -> 0.50.0, which already existed (409 Conflict).
+            # Deriving from the published metadata is tag-independent and never
+            # collides.
+            META="$(curl -sSf -u "x:${GH_TOKEN}" \
+              "https://maven.pkg.github.com/${GITHUB_REPOSITORY}/com/godaddy/asherah/encryption/appencryption/maven-metadata.xml" || true)"
+            LATEST="$(printf '%s' "$META" | grep -oE '0\.50\.[0-9]+' | sort -V | tail -1)"
+            if [ -z "$LATEST" ]; then
+              echo "ERROR: could not determine the latest published 0.50.x version from GitHub Packages metadata"
               exit 1
             fi
+            VERSION="0.50.$(( ${LATEST##*.} + 1 ))"
           fi
           echo "Publishing version: ${VERSION}"
           mvn -B -f asherah-java/java/pom.xml versions:set -DnewVersion="${VERSION}"
