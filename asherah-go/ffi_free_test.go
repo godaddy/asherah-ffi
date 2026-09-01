@@ -56,15 +56,36 @@ func TestReadBuffer_ErrorsOnCorruptedMetadata(t *testing.T) {
 }
 
 // TestReadBuffer_EmptyBufferIsNotAnError confirms the legitimate "no
-// data" case (len==0 or data==0, e.g. encrypting empty plaintext) still
-// returns (nil, nil) rather than an error.
+// data" case (len==0, e.g. encrypting empty plaintext) still returns
+// (nil, nil) rather than an error, regardless of whether data is null —
+// a legitimate empty result may still carry a non-null dangling
+// pointer, and len==0 means nothing gets dereferenced either way.
 func TestReadBuffer_EmptyBufferIsNotAnError(t *testing.T) {
-	buf := &asherahBuffer{data: 0, len: 0, capacity: 0}
+	for _, buf := range []*asherahBuffer{
+		{data: 0, len: 0, capacity: 0},
+		{data: 1, len: 0, capacity: 0}, // non-null dangling pointer, still empty
+	} {
+		data, err := readBuffer(buf)
+		if err != nil {
+			t.Fatalf("readBuffer(%+v) should not error, got %v", buf, err)
+		}
+		if data != nil {
+			t.Fatalf("readBuffer(%+v) should return nil data, got %v", buf, data)
+		}
+	}
+}
+
+// TestReadBuffer_ErrorsOnNilDataWithNonZeroLen confirms readBuffer
+// treats len > 0 with a null data pointer as malformed metadata rather
+// than taking the empty-success path — the native side promised data
+// but supplied no pointer, which is not the same as "zero bytes."
+func TestReadBuffer_ErrorsOnNilDataWithNonZeroLen(t *testing.T) {
+	buf := &asherahBuffer{data: 0, len: 10, capacity: 10}
 	data, err := readBuffer(buf)
-	if err != nil {
-		t.Fatalf("readBuffer on an empty buffer should not error, got %v", err)
+	if err == nil {
+		t.Fatalf("readBuffer should return an error for len>0 with data==nil, got data=%v, err=nil", data)
 	}
 	if data != nil {
-		t.Fatalf("readBuffer on an empty buffer should return nil data, got %v", data)
+		t.Fatalf("readBuffer should return nil data alongside the error, got %v", data)
 	}
 }

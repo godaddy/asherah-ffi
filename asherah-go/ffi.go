@@ -69,9 +69,20 @@ func safeBufferLen(bufLen, capacity uintptr) (int, bool) {
 // empty success — if the buffer's self-reported metadata is invalid, so
 // a corrupted or mismatched native library response is never mistaken
 // for "encrypted/decrypted to zero bytes."
+//
+// Only buf.len == 0 takes the empty-success path, regardless of
+// buf.data: a legitimate empty result may still carry a non-null
+// (dangling) data pointer, and len == 0 means nothing gets dereferenced
+// either way. buf.len > 0 with buf.data == 0 is the malformed case —
+// the native side promised data but supplied no pointer — and must
+// error rather than silently produce an empty result indistinguishable
+// from success.
 func readBuffer(buf *asherahBuffer) ([]byte, error) {
-	if buf.len == 0 || buf.data == 0 {
+	if buf.len == 0 {
 		return nil, nil
+	}
+	if buf.data == 0 {
+		return nil, fmt.Errorf("asherah-go: native buffer metadata invalid (len=%d, data=nil)", buf.len)
 	}
 	n, ok := safeBufferLen(buf.len, buf.capacity)
 	if !ok {
