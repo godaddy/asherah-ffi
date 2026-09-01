@@ -557,7 +557,15 @@ do_fuzz_go() {
         return
     fi
     local go_packages found_any=0
-    go_packages=$(cd asherah-go && go list ./... 2>/dev/null)
+    local list_pkgs_output list_pkgs_status
+    list_pkgs_output=$(cd asherah-go && go list ./... 2>&1)
+    list_pkgs_status=$?
+    if [ "$list_pkgs_status" -ne 0 ]; then
+        fail "Go fuzz: go list ./..."
+        log "$list_pkgs_output"
+        return
+    fi
+    go_packages="$list_pkgs_output"
     if [ -z "$go_packages" ]; then
         skip "Go fuzz tests (no packages found)"
         return
