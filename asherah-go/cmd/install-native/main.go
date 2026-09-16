@@ -76,12 +76,11 @@ func main() {
 	// Verify checksum
 	checksumURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/SHA256SUMS", *repo, *version)
 	if err := verifyChecksum(checksumURL, assetName, destFile); err != nil {
-		var mismatch *checksumMismatchError
-		if errors.As(err, &mismatch) {
+		if checksumIsFatal(err) {
 			// The download was fetched, hashed, and the hash does not
 			// match — this is a tampered or corrupted asset, not a
 			// "couldn't verify" situation. Never install it.
-			fatalf("%v", mismatch)
+			fatalf("%v", err)
 		}
 		fmt.Fprintf(os.Stderr, "Warning: checksum verification skipped: %v\n", err)
 	} else {
@@ -247,6 +246,23 @@ type checksumMismatchError struct {
 
 func (e *checksumMismatchError) Error() string {
 	return fmt.Sprintf("checksum mismatch: expected %s, got %s", e.expected, e.actual)
+}
+
+// checksumIsFatal reports whether err represents a genuine checksum
+// mismatch — the download was fetched, hashed, and the hash does not
+// match, so it must never be installed — as opposed to every other
+// verifyChecksum error (sums file unavailable, network failure, no
+// matching entry), which main() treats as soft: warn and continue,
+// matching this tool's long-standing behavior for releases that
+// predate SHA256SUMS.
+//
+// This is the one decision this tool's checksum verification exists
+// to make, so it is its own function rather than inline in main():
+// callers can test the decision directly instead of only exercising
+// the checksumMismatchError type declaration and the standard library.
+func checksumIsFatal(err error) bool {
+	var mismatch *checksumMismatchError
+	return errors.As(err, &mismatch)
 }
 
 // parseChecksumLines scans a SHA256SUMS file body (format: "<hash>
