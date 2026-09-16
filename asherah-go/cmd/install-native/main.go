@@ -12,6 +12,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -62,22 +63,11 @@ func main() {
 	destFile := filepath.Join(destDir, localName)
 
 	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", *repo, *version, assetName)
+	checksumURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/SHA256SUMS", *repo, *version)
 	fmt.Printf("Downloading %s ...\n", url)
 
-	if err := downloadFile(url, destFile); err != nil {
-		fatalf("download failed: %v", err)
-	}
-
-	if runtime.GOOS != "windows" {
-		_ = os.Chmod(destFile, 0o755)
-	}
-
-	// Verify checksum
-	checksumURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/SHA256SUMS", *repo, *version)
-	if err := verifyChecksum(checksumURL, assetName, destFile); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: checksum verification skipped: %v\n", err)
-	} else {
-		fmt.Println("SHA256 checksum verified.")
+	if err := installAsset(url, checksumURL, assetName, destFile); err != nil {
+		fatalf("%v", err)
 	}
 
 	fmt.Printf("\nInstalled: %s\n", destFile)
@@ -161,6 +151,50 @@ func fetchLatestVersion(repo string) (string, error) {
 	return release.TagName, nil
 }
 
+// installAsset downloads url to a temporary path, verifies it against
+// checksumURL, and only then moves it into place at destFile — a
+// checksum mismatch never reaches destFile.
+//
+// Before this, downloadFile wrote straight to destFile (via its own
+// internal atomic rename) and only *then* did verification run: the
+// unverified library sat on the load path — which the loader searches
+// automatically (cwd, the default install destination) with no hash or
+// version check of its own — for the whole SHA256SUMS fetch/parse/hash
+// window. A process that starts during that window loads an unverified
+// file; an interrupt or hang during the fetch leaves one installed with
+// no verdict at all. Downloading to a temp path first and renaming into
+// place only after a non-fatal verification outcome means destFile is
+// never written unless the download is either verified or the tool has
+// explicitly decided (as it always has) to soft-skip verification for a
+// release that predates SHA256SUMS.
+func installAsset(url, checksumURL, assetName, destFile string) error {
+	tmp := destFile + ".verify"
+	if err := downloadFile(url, tmp); err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+
+	verifyErr := verifyChecksum(checksumURL, assetName, tmp)
+	if checksumIsFatal(verifyErr) {
+		if rmErr := os.Remove(tmp); rmErr != nil {
+			return fmt.Errorf("%w (additionally failed to remove unverified download %s: %v)", verifyErr, tmp, rmErr)
+		}
+		return verifyErr
+	}
+	if verifyErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: checksum verification skipped: %v\n", verifyErr)
+	} else {
+		fmt.Println("SHA256 checksum verified.")
+	}
+
+	if err := os.Rename(tmp, destFile); err != nil {
+		return fmt.Errorf("finalize install: %w", err)
+	}
+	if runtime.GOOS != "windows" {
+		_ = os.Chmod(destFile, 0o755)
+	}
+	return nil
+}
+
 func downloadFile(url, dest string) error {
 	resp, err := http.Get(url)
 	if err != nil {
@@ -201,16 +235,9 @@ func verifyChecksum(checksumURL, assetName, localFile string) error {
 		return fmt.Errorf("checksums not available (HTTP %d)", resp.StatusCode)
 	}
 
-	// Parse SHA256SUMS format: "<hash>  <filename>"
-	var expectedHash string
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.Fields(line)
-		if len(parts) == 2 && parts[1] == assetName {
-			expectedHash = parts[0]
-			break
-		}
+	expectedHash, err := parseChecksumLines(resp.Body, assetName)
+	if err != nil {
+		return fmt.Errorf("read checksums: %w", err)
 	}
 	if expectedHash == "" {
 		return fmt.Errorf("no checksum found for %s", assetName)
@@ -229,10 +256,76 @@ func verifyChecksum(checksumURL, assetName, localFile string) error {
 	actualHash := hex.EncodeToString(h.Sum(nil))
 
 	if actualHash != expectedHash {
-		os.Remove(localFile)
-		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHash, actualHash)
+		// Removing localFile on a mismatch is installAsset's job, not
+		// this function's: verifyChecksum only verifies, so its callers
+		// (and tests) have one place that owns the file's lifecycle.
+		return &checksumMismatchError{expected: expectedHash, actual: actualHash}
 	}
 	return nil
+}
+
+// checksumMismatchError distinguishes "the checksum was computed and it
+// does not match" (must abort — the download is tampered or corrupted)
+// from every other verifyChecksum error, such as the sums file being
+// unavailable (soft-fail: warn and continue, matching this tool's
+// long-standing behavior for older releases that predate SHA256SUMS).
+type checksumMismatchError struct {
+	expected, actual string
+}
+
+func (e *checksumMismatchError) Error() string {
+	return fmt.Sprintf("checksum mismatch: expected %s, got %s", e.expected, e.actual)
+}
+
+// checksumIsFatal reports whether err represents a genuine checksum
+// mismatch — the download was fetched, hashed, and the hash does not
+// match, so it must never be installed — as opposed to every other
+// verifyChecksum error (sums file unavailable, network failure, no
+// matching entry), which main() treats as soft: warn and continue,
+// matching this tool's long-standing behavior for releases that
+// predate SHA256SUMS.
+//
+// This is the one decision this tool's checksum verification exists
+// to make, so it is its own function rather than inline in main():
+// callers can test the decision directly instead of only exercising
+// the checksumMismatchError type declaration and the standard library.
+func checksumIsFatal(err error) bool {
+	var mismatch *checksumMismatchError
+	return errors.As(err, &mismatch)
+}
+
+// parseChecksumLines scans a SHA256SUMS file body (format: "<hash>
+// <filename>" per line) for the entry matching assetName. Extracted from
+// verifyChecksum so the untrusted-input parsing — the release asset is
+// fetched over HTTP and could be tampered with or corrupted — can be
+// fuzzed without a network call.
+//
+// Takes an io.Reader rather than a []byte deliberately: SHA256SUMS is
+// remote, untrusted input, and buffering the full response before
+// parsing (e.g. via io.ReadAll) would let an arbitrarily large release
+// asset exhaust memory before verification even starts. bufio.Scanner
+// reads one line at a time (bounded by bufio.MaxScanTokenSize) and this
+// returns as soon as a match is found, so memory use stays bounded
+// regardless of the response size.
+//
+// Returns a non-nil error only if the scan itself failed (a network
+// error mid-read, or a line exceeding bufio.MaxScanTokenSize) —
+// distinct from a clean scan that simply never found a matching entry
+// (hash == "", err == nil). Without this distinction, a truncated or
+// corrupted SHA256SUMS response looked identical to "this release
+// predates SHA256SUMS," both silently reaching the same soft-warn path
+// in main(). They still share that soft-warn fate today — only a real
+// checksumMismatchError hard-fails — but the two cases are now
+// diagnosable instead of indistinguishable in the tool's output.
+func parseChecksumLines(r io.Reader, assetName string) (hash string, err error) {
+	scanner := bufio.NewScanner(r)
+	for scanner.Scan() {
+		parts := strings.Fields(scanner.Text())
+		if len(parts) == 2 && parts[1] == assetName {
+			return parts[0], nil
+		}
+	}
+	return "", scanner.Err()
 }
 
 func fatalf(format string, args ...any) {
