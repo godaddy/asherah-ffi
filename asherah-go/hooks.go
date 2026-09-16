@@ -114,7 +114,7 @@ func cstr(ptr uintptr) string {
 	}
 	const maxLen = 64 * 1024
 	mem := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), maxLen)
-	return string(scanCString(mem, maxLen))
+	return string(scanCString(mem))
 }
 
 // cLevelToSlog maps the C ABI integer level (mirrors Rust log crate) to a

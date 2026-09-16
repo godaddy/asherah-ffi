@@ -48,7 +48,7 @@ func lastErrorMessage() string {
 	// Read null-terminated C string without CGO (bounded to 4096 bytes).
 	const maxLen = 4096
 	mem := unsafe.Slice((*byte)(unsafe.Pointer(ptr)), maxLen)
-	return string(scanCString(mem, maxLen))
+	return string(scanCString(mem))
 }
 
 // safeBufferLen converts a native buffer's self-reported length to an int

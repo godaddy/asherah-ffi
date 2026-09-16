@@ -7,6 +7,10 @@ import (
 	"unsafe"
 )
 
+// benchLastErrorMessageSink forces lastErrorMessage's result to escape.
+// See benchCstrSink's comment in cstr_bench_test.go for why this matters.
+var benchLastErrorMessageSink string
+
 // BenchmarkLastErrorMessage exercises lastErrorMessage end-to-end,
 // stubbing fnLastErrorMessage to point at a real Go-owned buffer instead
 // of requiring the native library. Comparable against main:
@@ -22,7 +26,7 @@ func BenchmarkLastErrorMessage(b *testing.B) {
 
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		_ = lastErrorMessage()
+		benchLastErrorMessageSink = lastErrorMessage()
 	}
 	// msg is only reachable through the bare uintptr ptr captured by the
 	// fnLastErrorMessage stub, which the GC does not treat as a live
