@@ -63,28 +63,11 @@ func main() {
 	destFile := filepath.Join(destDir, localName)
 
 	url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", *repo, *version, assetName)
+	checksumURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/SHA256SUMS", *repo, *version)
 	fmt.Printf("Downloading %s ...\n", url)
 
-	if err := downloadFile(url, destFile); err != nil {
-		fatalf("download failed: %v", err)
-	}
-
-	if runtime.GOOS != "windows" {
-		_ = os.Chmod(destFile, 0o755)
-	}
-
-	// Verify checksum
-	checksumURL := fmt.Sprintf("https://github.com/%s/releases/download/%s/SHA256SUMS", *repo, *version)
-	if err := verifyChecksum(checksumURL, assetName, destFile); err != nil {
-		if checksumIsFatal(err) {
-			// The download was fetched, hashed, and the hash does not
-			// match — this is a tampered or corrupted asset, not a
-			// "couldn't verify" situation. Never install it.
-			fatalf("%v", err)
-		}
-		fmt.Fprintf(os.Stderr, "Warning: checksum verification skipped: %v\n", err)
-	} else {
-		fmt.Println("SHA256 checksum verified.")
+	if err := installAsset(url, checksumURL, assetName, destFile); err != nil {
+		fatalf("%v", err)
 	}
 
 	fmt.Printf("\nInstalled: %s\n", destFile)
@@ -168,6 +151,50 @@ func fetchLatestVersion(repo string) (string, error) {
 	return release.TagName, nil
 }
 
+// installAsset downloads url to a temporary path, verifies it against
+// checksumURL, and only then moves it into place at destFile — a
+// checksum mismatch never reaches destFile.
+//
+// Before this, downloadFile wrote straight to destFile (via its own
+// internal atomic rename) and only *then* did verification run: the
+// unverified library sat on the load path — which the loader searches
+// automatically (cwd, the default install destination) with no hash or
+// version check of its own — for the whole SHA256SUMS fetch/parse/hash
+// window. A process that starts during that window loads an unverified
+// file; an interrupt or hang during the fetch leaves one installed with
+// no verdict at all. Downloading to a temp path first and renaming into
+// place only after a non-fatal verification outcome means destFile is
+// never written unless the download is either verified or the tool has
+// explicitly decided (as it always has) to soft-skip verification for a
+// release that predates SHA256SUMS.
+func installAsset(url, checksumURL, assetName, destFile string) error {
+	tmp := destFile + ".verify"
+	if err := downloadFile(url, tmp); err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+
+	verifyErr := verifyChecksum(checksumURL, assetName, tmp)
+	if checksumIsFatal(verifyErr) {
+		if rmErr := os.Remove(tmp); rmErr != nil {
+			return fmt.Errorf("%w (additionally failed to remove unverified download %s: %v)", verifyErr, tmp, rmErr)
+		}
+		return verifyErr
+	}
+	if verifyErr != nil {
+		fmt.Fprintf(os.Stderr, "Warning: checksum verification skipped: %v\n", verifyErr)
+	} else {
+		fmt.Println("SHA256 checksum verified.")
+	}
+
+	if err := os.Rename(tmp, destFile); err != nil {
+		return fmt.Errorf("finalize install: %w", err)
+	}
+	if runtime.GOOS != "windows" {
+		_ = os.Chmod(destFile, 0o755)
+	}
+	return nil
+}
+
 func downloadFile(url, dest string) error {
 	resp, err := http.Get(url)
 	if err != nil {
@@ -229,7 +256,9 @@ func verifyChecksum(checksumURL, assetName, localFile string) error {
 	actualHash := hex.EncodeToString(h.Sum(nil))
 
 	if actualHash != expectedHash {
-		os.Remove(localFile)
+		// Removing localFile on a mismatch is installAsset's job, not
+		// this function's: verifyChecksum only verifies, so its callers
+		// (and tests) have one place that owns the file's lifecycle.
 		return &checksumMismatchError{expected: expectedHash, actual: actualHash}
 	}
 	return nil
