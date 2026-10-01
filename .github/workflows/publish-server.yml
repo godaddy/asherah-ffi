@@ -101,11 +101,15 @@ jobs:
 
       - name: Extract version tag
         id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ github.event.inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            VERSION="${{ github.event.release.tag_name }}"
-          elif [ -n "${{ github.event.inputs.tag }}" ]; then
-            VERSION="${{ github.event.inputs.tag }}"
+          if [ "$EVENT_NAME" = "release" ]; then
+            VERSION="$RELEASE_TAG"
+          elif [ -n "$INPUT_TAG" ]; then
+            VERSION="$INPUT_TAG"
           else
             VERSION="sha-$(git rev-parse --short HEAD)"
           fi
@@ -139,16 +143,18 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Show image details
+        env:
+          IMAGE_VERSION: ${{ steps.meta.outputs.version }}
         run: |
           echo "=============================================="
           echo "asherah-server container image published"
           echo "=============================================="
           echo ""
           echo "Pull with:"
-          echo "  docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }}"
+          echo "  docker pull ${REGISTRY}/${IMAGE_NAME}:${IMAGE_VERSION}"
           echo ""
           echo "Run with:"
-          echo "  docker run --rm -v /tmp:/tmp ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.version }} \\"
+          echo "  docker run --rm -v /tmp:/tmp ${REGISTRY}/${IMAGE_NAME}:${IMAGE_VERSION} \\"
           echo "    --service my-service --product my-product --kms static --metastore memory"
           echo ""
           echo "Platforms: linux/amd64, linux/arm64"
