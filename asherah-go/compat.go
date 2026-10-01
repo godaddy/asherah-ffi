@@ -96,9 +96,17 @@ func (s *StaticKMS) EncryptKey(_ context.Context, _ []byte) ([]byte, error) {
 func (s *StaticKMS) DecryptKey(_ context.Context, _ []byte) ([]byte, error) {
 	return nil, errors.New("StaticKMS: handled by native layer")
 }
+
+// hexEncodeKey lowercase-hex-encodes a master key string for the native
+// core's StaticMasterKeyHex/STATIC_MASTER_KEY_HEX config, which both
+// expect hex rather than the raw key bytes.
+func hexEncodeKey(key string) string {
+	return fmt.Sprintf("%x", key)
+}
+
 func (s *StaticKMS) applyConfig(cfg *Config) {
 	cfg.KMS = "static"
-	hex := fmt.Sprintf("%x", s.key)
+	hex := hexEncodeKey(s.key)
 	// Populate both the JSON config field and the env var so the
 	// supplied key wins regardless of which constructor path the
 	// native core takes (`factory_new_with_config` reads the JSON;
@@ -171,6 +179,14 @@ func WithMetrics(_ bool) FactoryOption {
 	return func(_ *SessionFactory) {}
 }
 
+// millisToSeconds truncates a millisecond duration down to whole
+// seconds, matching the native config's second-granularity fields
+// (ExpireAfter, CheckInterval). Sub-second remainders are dropped, not
+// rounded — a CryptoPolicy value under 1000ms truncates to 0.
+func millisToSeconds(millis int64) int64 {
+	return millis / 1000
+}
+
 // NewSessionFactory creates a new SessionFactory matching the canonical API signature.
 // The metastore, kms, and crypto arguments are used to derive native config.
 func NewSessionFactory(config *CanonicalConfig, store Metastore, kms KeyManagementService, crypto AEAD, opts ...FactoryOption) *SessionFactory {
@@ -208,11 +224,11 @@ func NewSessionFactory(config *CanonicalConfig, store Metastore, kms KeyManageme
 		cfg.EnableSessionCaching = &f
 	}
 	if policy.ExpireKeyAfterMillis > 0 {
-		secs := policy.ExpireKeyAfterMillis / 1000
+		secs := millisToSeconds(policy.ExpireKeyAfterMillis)
 		cfg.ExpireAfter = &secs
 	}
 	if policy.RevokeCheckMillis > 0 {
-		secs := policy.RevokeCheckMillis / 1000
+		secs := millisToSeconds(policy.RevokeCheckMillis)
 		cfg.CheckInterval = &secs
 	}
 

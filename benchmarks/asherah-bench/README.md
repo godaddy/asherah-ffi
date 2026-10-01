@@ -8,7 +8,7 @@ benchmark harness to keep the measurements comparable.
 ## Prerequisites
 
 - Rust toolchain (matching the workspace version)
-- Go 1.23 or newer (the build script sets `GOTOOLCHAIN=auto`, so Go will fetch
+- Go 1.26 or newer (the build script sets `GOTOOLCHAIN=auto`, so Go will fetch
   the required toolchain automatically when using Go 1.21+)
 
 ## Layout

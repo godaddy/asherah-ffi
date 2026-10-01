@@ -1,6 +1,11 @@
 package asherah
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"reflect"
+	"unicode/utf8"
+)
 
 // Config mirrors the configuration options supported by other Asherah bindings.
 type Config struct {
@@ -58,5 +63,47 @@ func (c Config) toJSON() ([]byte, error) {
 	if cloned.KMS == "" {
 		cloned.KMS = "static"
 	}
+	if err := validateConfigUTF8(&cloned); err != nil {
+		return nil, err
+	}
 	return json.Marshal(&cloned)
+}
+
+// validateConfigUTF8 rejects a Config containing invalid UTF-8 in any
+// string field (or RegionMap key/value). encoding/json silently
+// substitutes the U+FFFD replacement character for invalid UTF-8 on
+// Marshal rather than erroring, which would otherwise send
+// silently-corrupted config values (service name, connection strings,
+// KMS key IDs, etc.) to the native core with no error surfaced to the
+// caller. Uses reflection to cover every current and future string /
+// *string / map[string]string field without hand-listing them.
+func validateConfigUTF8(cfg *Config) error {
+	v := reflect.ValueOf(cfg).Elem()
+	t := v.Type()
+	for i := 0; i < t.NumField(); i++ {
+		field := v.Field(i)
+		switch field.Kind() {
+		case reflect.String:
+			if !utf8.ValidString(field.String()) {
+				return fmt.Errorf("asherah-go: Config.%s contains invalid UTF-8", t.Field(i).Name)
+			}
+		case reflect.Pointer:
+			if field.IsNil() || field.Elem().Kind() != reflect.String {
+				continue
+			}
+			if !utf8.ValidString(field.Elem().String()) {
+				return fmt.Errorf("asherah-go: Config.%s contains invalid UTF-8", t.Field(i).Name)
+			}
+		case reflect.Map:
+			for _, key := range field.MapKeys() {
+				if key.Kind() != reflect.String || field.MapIndex(key).Kind() != reflect.String {
+					continue
+				}
+				if !utf8.ValidString(key.String()) || !utf8.ValidString(field.MapIndex(key).String()) {
+					return fmt.Errorf("asherah-go: Config.%s contains invalid UTF-8", t.Field(i).Name)
+				}
+			}
+		}
+	}
+	return nil
 }

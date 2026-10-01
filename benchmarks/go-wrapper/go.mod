@@ -1,6 +1,6 @@
 module github.com/godaddy/asherah-bench/go-wrapper
 
-go 1.25.0
+go 1.26.7
 
 require github.com/godaddy/asherah/go/appencryption v0.9.0
 

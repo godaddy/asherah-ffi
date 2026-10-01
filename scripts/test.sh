@@ -17,7 +17,8 @@ Modes:
   --integration   Integration tests with MySQL, Postgres, DynamoDB (Docker required)
   --bindings      All language binding tests (Python, Node, Bun, Ruby, Go, Java, .NET, PHP)
   --interop       Cross-language interop tests
-  --fuzz          Fuzz tests (requires cargo-fuzz + nightly; time-intensive)
+  --fuzz          Fuzz tests: Rust (requires cargo-fuzz + nightly) and Go
+                  (go test -fuzz, in asherah-go); time-intensive
   --sanitizers    Miri + AddressSanitizer + Valgrind
   --lint          Format check + clippy
   --e2e           E2E tests against published packages
@@ -505,9 +506,8 @@ do_interop() {
     fi
 }
 
-do_fuzz() {
-    local fuzz_time="${FUZZ_TIME:-30}"
-    log "=== Fuzz Tests (${fuzz_time}s per target) ==="
+do_fuzz_rust() {
+    local fuzz_time="$1"
     if ! command -v cargo-fuzz >/dev/null 2>&1; then
         log "Installing cargo-fuzz..."
         cargo install cargo-fuzz 2>&1 | tail -1
@@ -543,6 +543,62 @@ do_fuzz() {
         run_test "fuzz: $target (${fuzz_time}s)" \
             bash -c "cd fuzz && PATH=\"$nightly_bin:\$PATH\" cargo fuzz run $target -- -max_total_time=$fuzz_time"
     done
+}
+
+# Go native fuzzing (go test -fuzz). These targets are pure Go
+# (string/JSON parsing, unsafe-pointer bounds arithmetic extracted into
+# testable helpers) and need no native FFI library built, so they run
+# unconditionally whenever a Go toolchain is available — independent of
+# whether the Rust cargo-fuzz toolchain (do_fuzz_rust) is available.
+do_fuzz_go() {
+    local fuzz_time="$1"
+    if ! command -v go >/dev/null 2>&1; then
+        skip "Go fuzz tests (go toolchain not available)"
+        return
+    fi
+    local go_packages found_any=0
+    local list_pkgs_output list_pkgs_status
+    list_pkgs_output=$(cd asherah-go && go list ./... 2>&1)
+    list_pkgs_status=$?
+    if [ "$list_pkgs_status" -ne 0 ]; then
+        fail "Go fuzz: go list ./..."
+        log "$list_pkgs_output"
+        return
+    fi
+    go_packages="$list_pkgs_output"
+    if [ -z "$go_packages" ]; then
+        skip "Go fuzz tests (no packages found)"
+        return
+    fi
+    for pkg in $go_packages; do
+        local list_output list_status go_targets
+        list_output=$(cd asherah-go && CGO_ENABLED=0 go test -list 'Fuzz.*' "$pkg" 2>&1)
+        list_status=$?
+        if [ "$list_status" -ne 0 ]; then
+            fail "Go fuzz list: $pkg"
+            log "$list_output"
+            continue
+        fi
+        go_targets=$(printf '%s\n' "$list_output" | grep '^Fuzz')
+        if [ -z "$go_targets" ]; then
+            continue
+        fi
+        found_any=1
+        for target in $go_targets; do
+            run_test "fuzz: go/$target (${fuzz_time}s)" \
+                bash -c "cd asherah-go && CGO_ENABLED=0 go test -run '^\$' -fuzz '^${target}\$' -fuzztime=${fuzz_time}s '$pkg'"
+        done
+    done
+    if [ "$found_any" -eq 0 ]; then
+        skip "Go fuzz tests (no Fuzz targets found)"
+    fi
+}
+
+do_fuzz() {
+    local fuzz_time="${FUZZ_TIME:-30}"
+    log "=== Fuzz Tests (${fuzz_time}s per target) ==="
+    do_fuzz_rust "$fuzz_time"
+    do_fuzz_go "$fuzz_time"
 }
 
 SANITIZER_IMAGE="asherah-sanitizers:latest"

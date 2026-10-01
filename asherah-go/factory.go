@@ -135,7 +135,21 @@ func (s *Session) Encrypt(plaintext []byte) ([]byte, error) {
 		return nil, fmt.Errorf("asherah-go: encrypt failed: %s", lastErrorMessage())
 	}
 	defer freeBuffer(buf)
-	return readBuffer(buf), nil
+	ct, err := readBuffer(buf)
+	if err != nil {
+		return nil, err
+	}
+	if len(ct) == 0 {
+		// Encrypt's output is always the non-empty DataRowRecord JSON
+		// envelope (to_json_fast never produces empty output), unlike
+		// Decrypt where an empty result is legitimate for empty
+		// plaintext. readBuffer's buf.len == 0 path can't tell Encrypt
+		// and Decrypt callers apart, so the native-mismatch check
+		// belongs here: rc == 0 with nothing written to *out only
+		// happens with a skewed/mismatched native library.
+		return nil, errors.New("asherah-go: encrypt returned an empty result (native library mismatch?)")
+	}
+	return ct, nil
 }
 
 // EncryptString encrypts a UTF-8 string and returns a JSON string.
@@ -178,7 +192,10 @@ func (s *Session) Decrypt(dataRowRecord []byte) ([]byte, error) {
 		return nil, fmt.Errorf("asherah-go: decrypt failed: %s", lastErrorMessage())
 	}
 	defer freeBuffer(buf)
-	pt := readBuffer(buf)
+	pt, err := readBuffer(buf)
+	if err != nil {
+		return nil, err
+	}
 	// Best-effort wipe of the Go-side plaintext copy. The Rust FFI
 	// already wipes the native buffer via `asherah_buffer_free`'s
 	// `zeroize::Zeroize` step, but the slice we return goes onto

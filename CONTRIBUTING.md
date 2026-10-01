@@ -15,7 +15,7 @@ guidelines keep contributions consistent and easy to review.
    - .NET 8.0 or 10.0
    - Java 11+ (Maven)
    - Ruby 3.0+
-   - Go 1.23+
+   - Go 1.26+
 3. Docker is required for integration tests (MySQL, Postgres, DynamoDB) and
    the full test suite: `scripts/test.sh --all`.
 
