@@ -37,11 +37,13 @@ cannot wire through.
 
 ```bash
 docker build -t asherah-server -f asherah-server/Dockerfile .
+mkdir -p /tmp/asherah-sock
+chmod 777 /tmp/asherah-sock # For local development only; production should grant uid 10001 access.
 docker run --rm \
   -e ASHERAH_SERVICE_NAME=my-service \
   -e ASHERAH_PRODUCT_NAME=my-product \
   -e ASHERAH_METASTORE_MODE=memory \
-  -e ASHERAH_KMS_MODE=static \
+  -e ASHERAH_KMS_MODE=test-debug-static \
   -v /tmp/asherah-sock:/sock \
   asherah-server --socket-file=/sock/asherah.sock
 ```
