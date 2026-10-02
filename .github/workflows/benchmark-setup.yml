@@ -131,4 +131,4 @@ jobs:
           ASHERAH_DOTNET_NATIVE: ${{ github.workspace }}/target/release
           ASHERAH_RUBY_NATIVE: ${{ github.workspace }}/target/release
           ASHERAH_GO_NATIVE: ${{ github.workspace }}/target/release
-        run: scripts/benchmark.sh --${{ inputs.bench_mode }}
+        run: scripts/benchmark.sh "--${BENCH_MODE}"

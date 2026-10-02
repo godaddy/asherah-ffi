@@ -88,11 +88,12 @@ jobs:
 
       - name: Ensure asherah-go module tag exists for this release
         shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
 
-          RELEASE_TAG="${{ github.event.release.tag_name }}"
-          RELEASE_SHA="${{ github.sha }}"
           GO_TAG="asherah-go/${RELEASE_TAG}"
 
           if [[ -z "${RELEASE_TAG}" ]]; then
@@ -506,9 +507,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Show download URLs
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+          REPO: ${{ github.repository }}
         run: |
-          TAG="${{ github.event.inputs.tag || github.ref_name }}"
-          REPO="${{ github.repository }}"
           echo ""
           echo "=============================================="
           echo "libasherah Download URLs (Drop-in compatible)"

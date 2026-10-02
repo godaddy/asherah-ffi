@@ -243,15 +243,17 @@ jobs:
         if: ${{ github.event_name == 'workflow_run' || (github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run != 'true' && (github.event.inputs.publish_target == 'central' || github.event.inputs.publish_target == 'both')) }}
         env:
           MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_CENTRAL_AUTO_PUBLISH: ${{ github.event.inputs.central_auto_publish }}
         run: |
           if [ -z "${MAVEN_GPG_PASSPHRASE}" ]; then
             echo "ERROR: Missing MAVEN_GPG_PASSPHRASE secret"
             exit 1
           fi
-          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
             CENTRAL_AUTO_PUBLISH=true
           else
-            CENTRAL_AUTO_PUBLISH=${{ github.event.inputs.central_auto_publish }}
+            CENTRAL_AUTO_PUBLISH="$INPUT_CENTRAL_AUTO_PUBLISH"
           fi
           mkdir -p ~/.m2
           cat > ~/.m2/settings.xml <<EOF
@@ -279,9 +281,11 @@ jobs:
 
       - name: Dry run
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
+        env:
+          INPUT_PUBLISH_TARGET: ${{ github.event.inputs.publish_target }}
         run: |
           echo "Dry run complete. Would publish:"
           ls -lh asherah-java/java/target/*.jar
           echo ""
           echo "Package: com.godaddy.asherah.encryption:appencryption:${MAVEN_VERSION}"
-          echo "Target: ${{ github.event.inputs.publish_target }}"
+          echo "Target: $INPUT_PUBLISH_TARGET"
