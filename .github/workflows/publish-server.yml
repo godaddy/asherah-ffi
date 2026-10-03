@@ -155,7 +155,7 @@ jobs:
           echo ""
           echo "Run with:"
           echo "  docker run --rm -v /tmp:/tmp ${REGISTRY}/${IMAGE_NAME}:${IMAGE_VERSION} \\"
-          echo "    --service my-service --product my-product --kms static --metastore memory"
+          echo "    --service my-service --product my-product --kms test-debug-static --metastore memory"
           echo ""
           echo "Platforms: linux/amd64, linux/arm64"
           echo "=============================================="

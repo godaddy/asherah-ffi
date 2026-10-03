@@ -134,6 +134,10 @@ struct Cli {
     )]
     kms: KmsMode,
 
+    /// Hex-encoded static master key. Required when --kms=static.
+    #[arg(long, env = "ASHERAH_STATIC_MASTER_KEY_HEX")]
+    static_master_key_hex: Option<String>,
+
     /// A comma separated list of key-value pairs in the form of REGION1=ARN1[,REGION2=ARN2] (required if --kms=aws)
     #[arg(long, env = "ASHERAH_REGION_MAP")]
     region_map: Option<String>,
@@ -397,6 +401,7 @@ fn cli_to_config(cli: &Cli) -> asherah_config::ConfigOptions {
         metastore: Some(cli.metastore.as_str().to_string()),
         connection_string: cli.conn.clone(),
         kms: Some(cli.kms.as_str().to_string()),
+        static_master_key_hex: cli.static_master_key_hex.clone(),
         region_map,
         preferred_region: cli.preferred_region.clone(),
         aws_profile_name: cli.aws_profile_name.clone(),
@@ -735,6 +740,27 @@ mod tests {
             resolve_socket_path(Some(""), Some("/b/alias.sock")),
             "/b/alias.sock"
         );
+    }
+
+    #[test]
+    fn cli_to_config_passes_static_master_key() {
+        let cli = Cli::parse_from([
+            "asherah-server",
+            "--service",
+            "service",
+            "--product",
+            "product",
+            "--metastore",
+            "memory",
+            "--kms",
+            "static",
+            "--static-master-key-hex",
+            "aabbccdd",
+        ]);
+
+        let config = cli_to_config(&cli);
+        assert_eq!(config.static_master_key_hex.as_deref(), Some("aabbccdd"));
+        assert!(config.resolve().is_ok());
     }
 
     #[cfg(unix)]

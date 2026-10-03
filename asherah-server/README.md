@@ -51,6 +51,20 @@ docker run --rm \
 For a non-trivial deployment with MySQL + AWS KMS, see
 [the interop-grpc Docker Compose harness](../interop-grpc/docker-compose.yml).
 
+### Upgrading the container image
+
+The image runs as UID/GID `10001` (`asherah`) instead of root. Socket bind
+mounts and volumes must be writable by this account; a root-owned directory
+will prevent the server from creating its socket. For AWS KMS, mount shared
+credentials where this account can read them, such as
+`/home/asherah/.aws` (the image creates this home directory). Existing
+workloads can temporarily retain the prior behavior with `--user 0` while
+mount permissions are updated.
+
+`--cap-add IPC_LOCK` no longer grants the capability to the non-root server
+process. This only affects hosts whose memlock limit is below one page; raise
+the limit or run as root if that prevents startup.
+
 ### Binary
 
 ```bash
@@ -59,7 +73,7 @@ cargo build --release -p asherah-server
   --service my-service \
   --product my-product \
   --metastore memory \
-  --kms static \
+  --kms test-debug-static \
   --socket-file /tmp/asherah.sock
 ```
 
@@ -147,12 +161,13 @@ on Postgres).
 
 | Env var | Flag | Description |
 |---|---|---|
+| `ASHERAH_STATIC_MASTER_KEY_HEX` | `--static-master-key-hex` | Hex-encoded static master key (required for `--kms=static`) |
 | `ASHERAH_REGION_MAP` | `--region-map` | `REGION1=ARN1,REGION2=ARN2` (required for `--kms=aws`) |
 | `ASHERAH_PREFERRED_REGION` | `--preferred-region` | Preferred AWS region (required for `--kms=aws`) |
 | `ASHERAH_AWS_PROFILE_NAME` | `--aws-profile-name` | AWS shared-credentials profile name |
 
-`--kms=static` and `--kms=test-debug-static` are exact synonyms. Both
-fall back to the canonical Asherah test key
+`--kms=static` requires an explicit `StaticMasterKeyHex`. For testing only,
+`--kms=test-debug-static` falls back to the canonical Asherah test key
 (`thisIsAStaticMasterKeyForTesting`) when `StaticMasterKeyHex` is not
 provided. For production you must use `--kms=aws`.
 
