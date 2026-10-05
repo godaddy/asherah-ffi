@@ -49,5 +49,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /out/asherah-server /usr/local/bin/asherah-server
 
+RUN groupadd --system --gid 10001 asherah && \
+    useradd --system --uid 10001 --gid asherah --create-home \
+        --shell /usr/sbin/nologin asherah
+ENV HOME=/home/asherah
+USER 10001:10001
+
 ENTRYPOINT ["asherah-server"]
 CMD ["--help"]

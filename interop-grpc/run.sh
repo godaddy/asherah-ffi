@@ -28,13 +28,10 @@ export ASHERAH_SERVICE_NAME="${ASHERAH_SERVICE_NAME:-interop_service}"
 export ASHERAH_PRODUCT_NAME="${ASHERAH_PRODUCT_NAME:-interop_product}"
 export ASHERAH_METASTORE_MODE="${ASHERAH_METASTORE_MODE:-rdbms}"
 export ASHERAH_CONNECTION_STRING="${ASHERAH_CONNECTION_STRING:-testuser:testpass@tcp(mysql:3306)/asherah}"
-# Both servers default to KMS=static. The Go reference uses the hardcoded
-# test key "thisIsAStaticMasterKeyForTesting"; our Rust binary falls back
-# to the same 32 bytes (TEST_DEBUG_STATIC_MASTER_KEY_HEX is exactly the
-# hex of that string) when StaticMasterKeyHex is unset, after the
-# KMS=static / KMS=test-debug-static synonym fix. Cross-decrypt works
-# end-to-end because both servers derive identical key material.
+# KMS=static with an explicit key keeps the configuration accepted by the
+# Go reference while ensuring both servers derive identical test material.
 export ASHERAH_KMS_MODE="${ASHERAH_KMS_MODE:-static}"
+export ASHERAH_STATIC_MASTER_KEY_HEX="${ASHERAH_STATIC_MASTER_KEY_HEX:-746869734973415374617469634d61737465724b6579466f7254657374696e67}"
 export ASHERAH_VERBOSE="${ASHERAH_VERBOSE:-true}"
 export ASHERAH_SOCKET_MODE="${ASHERAH_SOCKET_MODE:-0666}"
 

@@ -31,11 +31,20 @@ services:
     volumes:
       - ./scripts:/docker-entrypoint-initdb.d:ro
 
+  sockets-init:
+    image: busybox:1.36
+    user: "0:0"
+    command: ["sh", "-c", "chown 10001:10001 /sockets && chmod 0770 /sockets"]
+    volumes:
+      - sockets:/sockets
+
   go-server:
     image: asherah-server-go-ref:interop
     depends_on:
       mysql:
         condition: service_healthy
+      sockets-init:
+        condition: service_completed_successfully
     # The Go reference reads ASHERAH_* env vars but does NOT have an env
     # binding for the socket file; we must pass it via --socket-file.
     # Asherah env knobs are otherwise identical between the two servers.
@@ -47,6 +56,7 @@ services:
       ASHERAH_METASTORE_MODE: ${ASHERAH_METASTORE_MODE:-rdbms}
       ASHERAH_CONNECTION_STRING: ${ASHERAH_CONNECTION_STRING:-testuser:testpass@tcp(mysql:3306)/asherah}
       ASHERAH_KMS_MODE: ${ASHERAH_KMS_MODE:-static}
+      ASHERAH_STATIC_MASTER_KEY_HEX: ${ASHERAH_STATIC_MASTER_KEY_HEX:-746869734973415374617469634d61737465724b6579466f7254657374696e67}
       ASHERAH_EXPIRE_AFTER: ${ASHERAH_EXPIRE_AFTER:-60m}
       ASHERAH_CHECK_INTERVAL: ${ASHERAH_CHECK_INTERVAL:-10m}
       ASHERAH_VERBOSE: ${ASHERAH_VERBOSE:-true}
@@ -58,6 +68,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      sockets-init:
+        condition: service_completed_successfully
     # Override the Dockerfile's CMD ["--help"] with an explicit socket
     # flag so the binary actually serves. All other config flows from
     # env vars below.
@@ -72,6 +84,7 @@ services:
       ASHERAH_METASTORE_MODE: ${ASHERAH_METASTORE_MODE:-rdbms}
       ASHERAH_CONNECTION_STRING: ${ASHERAH_CONNECTION_STRING:-testuser:testpass@tcp(mysql:3306)/asherah}
       ASHERAH_KMS_MODE: ${ASHERAH_KMS_MODE:-static}
+      ASHERAH_STATIC_MASTER_KEY_HEX: ${ASHERAH_STATIC_MASTER_KEY_HEX:-746869734973415374617469634d61737465724b6579466f7254657374696e67}
       ASHERAH_EXPIRE_AFTER: ${ASHERAH_EXPIRE_AFTER:-60m}
       ASHERAH_CHECK_INTERVAL: ${ASHERAH_CHECK_INTERVAL:-10m}
       ASHERAH_VERBOSE: ${ASHERAH_VERBOSE:-true}
