@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install Rust toolchain
-        # Respect rust-toolchain.toml (channel 1.91.1). `rustup show` in the
+        # Respect rust-toolchain.toml (channel 1.97.1). `rustup show` in the
         # repo root activates and installs the pinned toolchain.
         run: rustup show
 
