@@ -3,9 +3,146 @@ use std::sync::OnceLock;
 
 use async_trait::async_trait;
 use aws_config::meta::region::RegionProviderChain;
+use aws_sdk_kms::error::{ProvideErrorMetadata, SdkError};
+use aws_sdk_kms::operation::RequestId;
 use aws_sdk_kms::{config::Region, primitives::Blob, types::DataKeySpec, Client};
 
 use crate::traits::{KeyManagementService, AEAD};
+
+// ─── KMS failure descriptions ────────────────────────────────────────────
+//
+// KMS failures are described by SdkError kind, KMS error code and AWS
+// request id — nothing else. `SdkError`'s Display prints only the variant
+// name, while the operation error's Display/Debug and
+// `ProvideErrorMetadata::message()` carry the AWS message text, which
+// embeds principal and key ARNs (and therefore account ids). Error codes
+// and request ids are server-supplied, so they are passed through only
+// when they fit a narrow charset and length; anything else is replaced by
+// a fixed placeholder.
+
+/// Longest server-supplied error code or request id passed through.
+const MAX_SERVER_TOKEN_LEN: usize = 64;
+/// Longest envelope region name passed through.
+const MAX_REGION_LEN: usize = 32;
+/// Envelope regions listed when no configured region matches.
+const MAX_LISTED_ENVELOPE_REGIONS: usize = 8;
+const UNRECOGNIZED_CODE: &str = "<unrecognized error code>";
+const UNRECOGNIZED_REQUEST_ID: &str = "<unrecognized request id>";
+const UNRECOGNIZED_REGION: &str = "<unrecognized region>";
+
+fn is_bounded_token(s: &str, max_len: usize, allowed: impl Fn(u8) -> bool) -> bool {
+    !s.is_empty() && s.len() <= max_len && s.bytes().all(allowed)
+}
+
+/// Pass an error code only in the shape `[A-Za-z][A-Za-z0-9._#-]{0,63}`.
+/// No `:` (the SDK already strips everything from the first `:`), so an
+/// ARN cannot pass as a code; no whitespace, so message text cannot.
+fn safe_error_code(code: &str) -> &str {
+    let allowed = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'#' | b'-');
+    let starts_with_letter = code.bytes().next().is_some_and(|b| b.is_ascii_alphabetic());
+    if starts_with_letter && is_bounded_token(code, MAX_SERVER_TOKEN_LEN, allowed) {
+        code
+    } else {
+        UNRECOGNIZED_CODE
+    }
+}
+
+fn safe_request_id(id: &str) -> &str {
+    let allowed = |b: u8| b.is_ascii_alphanumeric() || b == b'-';
+    if is_bounded_token(id, MAX_SERVER_TOKEN_LEN, allowed) {
+        id
+    } else {
+        UNRECOGNIZED_REQUEST_ID
+    }
+}
+
+/// Envelope region names come from the metastore, not from configuration.
+fn safe_region(region: &str) -> &str {
+    let allowed = |b: u8| b.is_ascii_alphanumeric() || b == b'-';
+    if is_bounded_token(region, MAX_REGION_LEN, allowed) {
+        region
+    } else {
+        UNRECOGNIZED_REGION
+    }
+}
+
+fn push_request_id(out: &mut String, request_id: Option<&str>) {
+    if let Some(id) = request_id {
+        out.push_str(", request id ");
+        out.push_str(safe_request_id(id));
+    }
+}
+
+/// Describe a KMS SDK failure as `<kind>[ <code>][, request id <id>]`,
+/// e.g. `service error AccessDeniedException, request id 3f2c…` or
+/// `dispatch failure (io)`. Only the variant, the connector error kind,
+/// the HTTP status, the bounded error code and the bounded request id
+/// are used — never the error's Display/Debug or its message.
+fn describe_sdk_error<E: ProvideErrorMetadata>(err: &SdkError<E>) -> String {
+    let mut out = String::with_capacity(96);
+    match err {
+        SdkError::ConstructionFailure(_) => out.push_str("request construction failure"),
+        SdkError::TimeoutError(_) => out.push_str("timeout"),
+        SdkError::DispatchFailure(d) => {
+            out.push_str("dispatch failure");
+            if d.is_timeout() {
+                out.push_str(" (timeout)");
+            } else if d.is_io() {
+                out.push_str(" (io)");
+            } else if d.is_user() {
+                out.push_str(" (user)");
+            } else if let Some(kind) = d.as_other() {
+                out.push_str(&format!(" (other: {kind})"));
+            } else if d.is_other() {
+                out.push_str(" (other)");
+            }
+        }
+        SdkError::ResponseError(r) => {
+            out.push_str(&format!(
+                "response error (HTTP {})",
+                r.raw().status().as_u16()
+            ));
+        }
+        SdkError::ServiceError(s) => match err.code() {
+            Some(code) => {
+                out.push_str("service error ");
+                out.push_str(safe_error_code(code));
+            }
+            None => out.push_str(&format!(
+                "service error (no error code, HTTP {})",
+                s.raw().status().as_u16()
+            )),
+        },
+        _ => out.push_str("unclassified SDK failure"),
+    }
+    push_request_id(&mut out, err.request_id());
+    out
+}
+
+/// Caller-facing error for a failed KMS call on the encrypt path. Built
+/// from [`describe_sdk_error`] only, so the `SdkError` (and the AWS
+/// message text its source chain would print under `{:#}`) is not kept.
+fn kms_call_error<E: ProvideErrorMetadata>(
+    op: &str,
+    region: &str,
+    err: &SdkError<E>,
+) -> anyhow::Error {
+    anyhow::anyhow!(
+        "KMS {op} failed in region {region}: {}",
+        describe_sdk_error(err)
+    )
+}
+
+fn kms_missing_field_error(
+    op: &str,
+    field: &str,
+    region: &str,
+    request_id: Option<&str>,
+) -> anyhow::Error {
+    let mut msg = format!("KMS {op} returned no {field} in region {region}");
+    push_request_id(&mut msg, request_id);
+    anyhow::anyhow!(msg)
+}
 
 /// Process-wide fallback runtime — same role as `kms_aws::fallback_runtime()`
 /// but lives here so the envelope module compiles without depending on a
@@ -216,13 +353,24 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
             .key_id(pref.key_arn.clone())
             .key_spec(DataKeySpec::Aes256)
             .send()
-            .await?;
-        let plaintext = resp
-            .plaintext()
-            .ok_or_else(|| anyhow::anyhow!("missing plaintext"))?;
-        let preferred_ciphertext = resp
-            .ciphertext_blob()
-            .ok_or_else(|| anyhow::anyhow!("missing ciphertext_blob"))?;
+            .await
+            .map_err(|e| kms_call_error("GenerateDataKey", &pref.region, &e))?;
+        let plaintext = resp.plaintext().ok_or_else(|| {
+            kms_missing_field_error(
+                "GenerateDataKey",
+                "plaintext",
+                &pref.region,
+                resp.request_id(),
+            )
+        })?;
+        let preferred_ciphertext = resp.ciphertext_blob().ok_or_else(|| {
+            kms_missing_field_error(
+                "GenerateDataKey",
+                "ciphertext blob",
+                &pref.region,
+                resp.request_id(),
+            )
+        })?;
         let key_id = resp.key_id().unwrap_or("").to_string();
 
         // AEAD-encrypt the key with the plaintext data key
@@ -245,10 +393,11 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
                 .key_id(&c.key_arn)
                 .plaintext(Blob::new(plaintext.as_ref().to_vec()))
                 .send()
-                .await?;
-            let blob = out
-                .ciphertext_blob()
-                .ok_or_else(|| anyhow::anyhow!("missing ciphertext_blob"))?;
+                .await
+                .map_err(|e| kms_call_error("Encrypt", &c.region, &e))?;
+            let blob = out.ciphertext_blob().ok_or_else(|| {
+                kms_missing_field_error("Encrypt", "ciphertext blob", &c.region, out.request_id())
+            })?;
             keks.push(RegionalKek {
                 region: c.region.clone(),
                 arn: c.key_arn.clone(),
@@ -285,22 +434,29 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
 
         // Iterate configured regions in preferred-first order so the
         // preferred region's KMS bills first when the envelope has a
-        // matching KEK. Per-region log entries are kept at debug level
-        // so they don't broadcast region/ARN identity at info+; the
-        // aggregated error string returned to the caller is also
-        // sanitized — no per-region details, just region names. The
-        // envelope's `arn` field is informational only; AEAD's tag
-        // provides the integrity binding for the actual data key, so
-        // an envelope with a mismatched `arn` cannot trick us into
-        // returning a forged data key (the AEAD decrypt fails for any
-        // wrong-key candidate). T-finding "Multi-region decrypt
-        // fallthrough is silently permissive" in
+        // matching KEK. For each region attempted, the step that failed
+        // is recorded: the Decrypt call (by SdkError kind, plus the KMS
+        // error code for a service error), a Decrypt response with no
+        // plaintext, or a data key that fails envelope authentication —
+        // each with the AWS request id when a response carried one. The
+        // aggregated error and its error-level log line carry these
+        // per-region reasons; the per-region debug lines carry the same
+        // text. None of them contains the AWS error message (it embeds
+        // principal and key ARNs, hence account ids), the configured key
+        // ARN, the envelope's `arn`, or AEAD error detail; server-supplied
+        // codes and request ids pass only in a bounded charset and length
+        // (see `describe_sdk_error`). The envelope's `arn` field is
+        // informational only; AEAD's tag provides the integrity binding
+        // for the actual data key, so an envelope with a mismatched `arn`
+        // cannot trick us into returning a forged data key (the AEAD
+        // decrypt fails for any wrong-key candidate). T-finding
+        // "Multi-region decrypt fallthrough is silently permissive" in
         // `docs/review-2026-05-05-findings.md`.
         let mut order: Vec<usize> = (0..self.clients.len()).collect();
         if self.preferred < order.len() {
             order.swap(0, self.preferred);
         }
-        let mut failed_regions: Vec<String> = Vec::new();
+        let mut failures: Vec<(&str, String)> = Vec::new();
         for i in order {
             let c = &self.clients[i];
             let reg_kek = match map.get(c.region.as_str()) {
@@ -323,11 +479,12 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
             let out = match out {
                 Ok(v) => v,
                 Err(e) => {
+                    let reason = format!("Decrypt {}", describe_sdk_error(&e));
                     log::debug!(
-                        "AwsKmsEnvelope decrypt_key: KMS Decrypt failed for region={}: {e:#}",
+                        "AwsKmsEnvelope decrypt_key: region={} failed: {reason}",
                         c.region
                     );
-                    failed_regions.push(c.region.clone());
+                    failures.push((c.region.as_str(), reason));
                     continue;
                 }
             };
@@ -341,43 +498,89 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
             let dk: zeroize::Zeroizing<Vec<u8>> = match out.plaintext() {
                 Some(p) => zeroize::Zeroizing::new(p.as_ref().to_vec()),
                 None => {
+                    let mut reason = String::from("Decrypt returned no plaintext");
+                    push_request_id(&mut reason, out.request_id());
                     log::debug!(
-                        "AwsKmsEnvelope decrypt_key: KMS returned no plaintext for region={}",
+                        "AwsKmsEnvelope decrypt_key: region={} failed: {reason}",
                         c.region
                     );
-                    failed_regions.push(c.region.clone());
+                    failures.push((c.region.as_str(), reason));
                     continue;
                 }
             };
             match self.aead.decrypt(&env.encrypted_key, &dk) {
                 Ok(key) => return Ok(key),
-                Err(e) => {
+                Err(_) => {
                     // AEAD failure here means the regional KEK decrypted
                     // to a value that doesn't match the data-key encryption.
                     // Either the envelope is corrupt or the regional KEK
-                    // was rotated out of band. Don't leak the AEAD error
-                    // detail (which can include cipher state info) to the
-                    // aggregated user-facing string.
+                    // was rotated out of band. The AEAD error detail (which
+                    // can include cipher state info) is not formatted
+                    // anywhere — only this fixed label is recorded.
+                    let mut reason = String::from("data key failed envelope authentication");
+                    push_request_id(&mut reason, out.request_id());
                     log::debug!(
-                        "AwsKmsEnvelope decrypt_key: AEAD decrypt failed for region={}: {e:#}",
+                        "AwsKmsEnvelope decrypt_key: region={} failed: {reason}",
                         c.region
                     );
-                    failed_regions.push(c.region.clone());
+                    failures.push((c.region.as_str(), reason));
                     // `dk` Zeroizing wrapper drops at end of loop
                     // iteration → wipes the data-key bytes.
                 }
             }
         }
-        let detail = if failed_regions.is_empty() {
-            "no matching regions found".to_string()
+        let detail = if failures.is_empty() {
+            no_matching_region_detail(&self.clients, &env)
         } else {
-            format!("tried regions: {}", failed_regions.join(", "))
+            let mut s = String::from("tried regions: ");
+            for (n, (region, reason)) in failures.iter().enumerate() {
+                if n > 0 {
+                    s.push_str("; ");
+                }
+                s.push_str(region);
+                s.push_str(" [");
+                s.push_str(reason);
+                s.push(']');
+            }
+            s
         };
         log::error!("AwsKmsEnvelope decrypt_key: all backends failed: {detail}");
         Err(anyhow::anyhow!(
             "all KMS backends failed to decrypt ({detail})"
         ))
     }
+}
+
+/// Detail for a decrypt in which no configured region had a KEK in the
+/// envelope: the configured regions and the (sanitized) envelope regions,
+/// so a region mismatch between writer and reader is visible.
+fn no_matching_region_detail(clients: &[RegionalClient], env: &KekEnvelope) -> String {
+    let configured: Vec<&str> = clients.iter().map(|c| c.region.as_str()).collect();
+    let in_envelope: Vec<&str> = env
+        .keks
+        .iter()
+        .take(MAX_LISTED_ENVELOPE_REGIONS)
+        .map(|k| safe_region(&k.region))
+        .collect();
+    let list = |v: &[&str]| {
+        if v.is_empty() {
+            "none".to_string()
+        } else {
+            v.join(", ")
+        }
+    };
+    let mut s = format!(
+        "no matching regions found; configured regions: {}; envelope regions: {}",
+        list(&configured),
+        list(&in_envelope)
+    );
+    if env.keks.len() > MAX_LISTED_ENVELOPE_REGIONS {
+        s.push_str(&format!(
+            ", +{} more",
+            env.keks.len() - MAX_LISTED_ENVELOPE_REGIONS
+        ));
+    }
+    s
 }
 
 async fn new_kms_client_async(
@@ -640,5 +843,67 @@ mod tests {
                 .contains("all KMS backends failed to decrypt"),
             "expected 'all KMS backends failed to decrypt', got: {err}"
         );
+        assert_eq!(
+            err.to_string(),
+            "all KMS backends failed to decrypt (no matching regions found; \
+             configured regions: none; envelope regions: us-east-1)"
+        );
+    }
+
+    #[test]
+    fn no_matching_region_detail_sanitizes_and_caps_envelope_regions() {
+        let mut keks: Vec<RegionalKek> = (0..10)
+            .map(|i| RegionalKek {
+                region: format!("r-{i}"),
+                arn: "arn:aws:kms:r:123456789012:key/k".into(),
+                encrypted_kek: vec![],
+            })
+            .collect();
+        keks[1].region = "arn:aws:kms:us-west-2:123456789012".into();
+        keks[2].region = "x".repeat(MAX_REGION_LEN + 1);
+        let env = KekEnvelope {
+            encrypted_key: vec![],
+            keks,
+        };
+        let detail = no_matching_region_detail(&[], &env);
+        assert_eq!(
+            detail,
+            "no matching regions found; configured regions: none; envelope regions: \
+             r-0, <unrecognized region>, <unrecognized region>, r-3, r-4, r-5, r-6, r-7, \
+             +2 more"
+        );
+    }
+
+    #[test]
+    fn server_tokens_are_bounded() {
+        let max = "A".repeat(MAX_SERVER_TOKEN_LEN);
+        let over = "A".repeat(MAX_SERVER_TOKEN_LEN + 1);
+        assert_eq!(
+            safe_error_code("AccessDeniedException"),
+            "AccessDeniedException"
+        );
+        assert_eq!(safe_error_code("com.amazon#Err_1-x"), "com.amazon#Err_1-x");
+        assert_eq!(
+            safe_error_code("arn:aws:iam::123456789012"),
+            UNRECOGNIZED_CODE
+        );
+        assert_eq!(safe_error_code("123456789012"), UNRECOGNIZED_CODE);
+        assert_eq!(safe_error_code(&max), max.as_str());
+        assert_eq!(safe_error_code(&over), UNRECOGNIZED_CODE);
+        assert_eq!(safe_error_code(""), UNRECOGNIZED_CODE);
+        assert_eq!(safe_error_code("Access Denied"), UNRECOGNIZED_CODE);
+        assert_eq!(safe_error_code("Bad/Code"), UNRECOGNIZED_CODE);
+        assert_eq!(safe_error_code("Ünicode"), UNRECOGNIZED_CODE);
+
+        let rid = "4f6c8a1e-2b3d-4c5e-9f70-81a2b3c4d5e6";
+        assert_eq!(safe_request_id(rid), rid);
+        assert_eq!(safe_request_id(&max), max.as_str());
+        assert_eq!(safe_request_id(&over), UNRECOGNIZED_REQUEST_ID);
+        assert_eq!(safe_request_id(""), UNRECOGNIZED_REQUEST_ID);
+        assert_eq!(safe_request_id("id:1"), UNRECOGNIZED_REQUEST_ID);
+        assert_eq!(safe_request_id("id_1"), UNRECOGNIZED_REQUEST_ID);
+
+        assert_eq!(safe_region("us-gov-west-1"), "us-gov-west-1");
+        assert_eq!(safe_region("us west"), UNRECOGNIZED_REGION);
     }
 }
