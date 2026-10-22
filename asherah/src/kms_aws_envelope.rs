@@ -11,36 +11,11 @@ use aws_sdk_kms::{config::Region, primitives::Blob, types::DataKeySpec, Client};
 
 use crate::traits::{KeyManagementService, AEAD};
 
-// ─── KMS failure descriptions ────────────────────────────────────────────
-//
-// KMS failures are described only by fixed labels: the SdkError variant,
-// the connector error kind, the HTTP status, a label for the first
-// recognised cause on the error's source chain (credentials error variant,
-// invalid endpoint parameters, `std::io::ErrorKind`), the KMS error code
-// and the AWS request id. Nothing is taken from any error's Display or
-// Debug: the operation error and `ProvideErrorMetadata::message()` carry
-// the AWS message text, which embeds principal and key ARNs (and account
-// ids); credential providers backed by STS or SSO can carry the same; and
-// connector and DNS errors carry host names, addresses and URLs.
-//
-// Error codes and request ids are server-supplied, and region names come
-// from configuration or from the stored envelope, so each passes only in a
-// narrow shape and is otherwise replaced by a fixed placeholder: codes
-// `[A-Za-z]{1,64}`, request ids the UUID form, regions
-// `[a-z][a-z0-9-]{0,31}`. None of these shapes admits `:` or `/`, so no
-// ARN can pass. Remaining limits — a value that fits its shape is printed
-// verbatim:
-// - An endpoint that answers as KMS (or a proxy in front of it) controls
-//   the code and request id: it can return a key UUID as the request id,
-//   and a letters-only code made of arbitrary words.
-// - A region-shaped name carrying an account id or a key-id prefix (for
-//   example `acct-123456789012` or `aws-kms-us-west-2-123456789012`) is
-//   printed as is, whether it comes from the stored envelope (anyone who
-//   can write the metastore) or from configuration.
+// SDK errors and their sources can contain ARNs, account IDs and endpoint
+// URLs, so KMS failures are reported as fixed labels and bounded metadata.
+// The shape checks reject full ARNs but do not guarantee identifier-free values.
 
-/// Longest server-supplied error code passed through.
 const MAX_ERROR_CODE_LEN: usize = 64;
-/// Longest region name passed through.
 const MAX_REGION_LEN: usize = 32;
 /// Envelope regions listed when no configured region matches.
 const MAX_LISTED_ENVELOPE_REGIONS: usize = 8;
@@ -49,8 +24,12 @@ const UNRECOGNIZED_REQUEST_ID: &str = "<unrecognized request id>";
 const UNRECOGNIZED_REGION: &str = "<unrecognized region>";
 
 /// Pass an error code only in the shape `[A-Za-z]{1,64}`. Every error code
-/// aws-sdk-kms models matches; anything carrying digits, punctuation or
-/// whitespace (an account id, an ARN, message text) does not.
+/// aws-sdk-kms models fits; an account id, an ARN or message text does not.
+///
+/// Codes and request ids are server-supplied, hence the narrow shapes. A
+/// value that fits is still printed verbatim: an endpoint that answers as
+/// KMS (or a proxy in front of it) can return arbitrary letters-only words
+/// as a code and a key UUID as a request id.
 fn safe_error_code(code: &str) -> &str {
     if !code.is_empty()
         && code.len() <= MAX_ERROR_CODE_LEN
@@ -64,6 +43,7 @@ fn safe_error_code(code: &str) -> &str {
 
 /// Pass a request id only in the UUID shape
 /// `[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}`.
+/// The limit stated on [`safe_error_code`] applies.
 fn safe_request_id(id: &str) -> &str {
     let b = id.as_bytes();
     let is_uuid = b.len() == 36
@@ -78,10 +58,12 @@ fn safe_request_id(id: &str) -> &str {
     }
 }
 
-/// Pass a region name only in the shape `[a-z][a-z0-9-]{0,31}`. Applied to
-/// every region name this module prints, configured or read from an
-/// envelope: a mis-ordered region map can put a key ARN where the region
-/// belongs. Empty (no region resolved) prints as the placeholder too.
+/// Pass a region name only in the shape `[a-z][a-z0-9-]{0,31}`; empty (no
+/// region resolved) prints as the placeholder. Region names come from
+/// configuration or from the stored envelope, which anyone who can write
+/// the metastore controls, and a mis-ordered region map puts a key ARN
+/// where the region belongs. A region-shaped name is still printed
+/// verbatim, including one that carries an account id (`acct-123456789012`).
 fn safe_region(region: &str) -> &str {
     let b = region.as_bytes();
     let ok = !b.is_empty()
@@ -114,10 +96,11 @@ fn credentials_error_label(err: &CredentialsError) -> &'static str {
     }
 }
 
-/// Fixed label for the first recognised cause on `err`'s source chain:
-/// a credentials error variant, invalid endpoint parameters (for example
-/// a region that is not a valid host label), or an I/O error kind. Each
-/// link is identified by downcasting; no link's Display or Debug is used.
+/// Fixed label for the first recognised cause on `err`'s source chain,
+/// identified by downcasting, never by Display or Debug. The chain is walked
+/// outermost first, so a credentials error is named rather than the I/O
+/// error beneath it, which would read as though the KMS endpoint had
+/// refused the connection.
 fn source_label(err: &(dyn std::error::Error + 'static)) -> Option<String> {
     let mut cur = err.source();
     while let Some(e) = cur {
@@ -137,10 +120,8 @@ fn source_label(err: &(dyn std::error::Error + 'static)) -> Option<String> {
     None
 }
 
-/// Describe a KMS SDK failure as `<kind>[ <code>][, request id <id>]`,
-/// e.g. `service error AccessDeniedException, request id 3f2c…`,
-/// `dispatch failure (io: connection refused)` or
-/// `dispatch failure (other: no credentials available)`.
+/// Describe a KMS SDK failure as `<kind>[ <code>][, request id <id>]`, for
+/// example `dispatch failure (io: connection refused)`.
 fn describe_sdk_error<E>(err: &SdkError<E>) -> String
 where
     E: ProvideErrorMetadata + std::error::Error + 'static,
@@ -208,9 +189,9 @@ fn has_region(c: &RegionalClient) -> bool {
 
 const NO_REGION: &str = "not sent: no region configured";
 
-/// Caller-facing error for a failed KMS call on the encrypt path. Built
-/// from [`describe_sdk_error`] only, so the `SdkError` (and the AWS
-/// message text its source chain would print under `{:#}`) is not kept.
+/// Error for a failed KMS call on the encrypt path. The `SdkError` is not
+/// kept as its source: that chain carries the AWS message text, with
+/// principal and key ARNs (hence account ids), which `{:#}` would print.
 fn kms_call_error<E>(op: &str, region: &str, err: &SdkError<E>) -> anyhow::Error
 where
     E: ProvideErrorMetadata + std::error::Error + 'static,
@@ -532,23 +513,13 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
 
         // Iterate configured regions in preferred-first order so the
         // preferred region's KMS bills first when the envelope has a
-        // matching KEK. For each region attempted, the step that failed
-        // is recorded: the Decrypt call (by SdkError kind, plus the KMS
-        // error code for a service error), a Decrypt response with no
-        // plaintext, or a data key that fails envelope authentication —
-        // each with the AWS request id when a response carried one. The
-        // aggregated error and its error-level log line carry these
-        // per-region reasons; the per-region debug lines carry the same
-        // text. None of them contains the AWS error message (it embeds
-        // principal and key ARNs, hence account ids), the configured key
-        // ARN, the envelope's `arn`, or AEAD error detail; error codes,
-        // request ids and every region name pass only in a narrow shape
-        // (see "KMS failure descriptions" above). The envelope's `arn` field is
-        // informational only; AEAD's tag provides the integrity binding
-        // for the actual data key, so an envelope with a mismatched `arn`
-        // cannot trick us into returning a forged data key (the AEAD
-        // decrypt fails for any wrong-key candidate). T-finding
-        // "Multi-region decrypt fallthrough is silently permissive" in
+        // matching KEK. Each region's failure reason is built by the
+        // formatters above. The envelope's `arn` field is informational
+        // only; AEAD's tag provides the integrity binding for the actual
+        // data key, so an envelope with a mismatched `arn` cannot trick us
+        // into returning a forged data key (the AEAD decrypt fails for any
+        // wrong-key candidate). T-finding "Multi-region decrypt
+        // fallthrough is silently permissive" in
         // `docs/review-2026-05-05-findings.md`.
         let mut order: Vec<usize> = (0..self.clients.len()).collect();
         if self.preferred < order.len() {
@@ -621,9 +592,9 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
                     // AEAD failure here means the regional KEK decrypted
                     // to a value that doesn't match the data-key encryption.
                     // Either the envelope is corrupt or the regional KEK
-                    // was rotated out of band. The AEAD error detail (which
-                    // can include cipher state info) is not formatted
-                    // anywhere — only this fixed label is recorded.
+                    // was rotated out of band. The AEAD error detail can
+                    // include cipher state info, so only a fixed label is
+                    // recorded.
                     let mut reason = String::from("data key failed envelope authentication");
                     push_request_id(&mut reason, out.request_id());
                     log::debug!(
@@ -659,9 +630,7 @@ impl<A: AEAD + Send + Sync + 'static> AwsKmsEnvelope<A> {
 }
 
 /// Detail for a decrypt in which no configured region had a KEK in the
-/// envelope: the configured regions and the envelope regions (both through
-/// [`safe_region`]), so a region mismatch between writer and reader is
-/// visible.
+/// envelope, listing both sides so a writer/reader region mismatch shows.
 fn no_matching_region_detail(clients: &[RegionalClient], env: &KekEnvelope) -> String {
     let configured: Vec<&str> = clients.iter().map(|c| safe_region(&c.region)).collect();
     let in_envelope: Vec<&str> = env
