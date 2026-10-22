@@ -155,67 +155,41 @@ error (<Code>)` followed by the AWS message:
   a table schema mismatch. Asherah expects partition key `Id`
   (string), sort key `Created` (number).
 - A DNS failure may read `dispatch failure: io error: client error
-  (Connect): dns error: …` (not reproduced in testing). Check for a VPC
-  endpoint / network ACL / `AWS_REGION` mismatch.
+  (Connect): dns error: …`. Check for a VPC endpoint / network
+  ACL / `AWS_REGION` mismatch.
 
-KMS errors (`KMS: "aws"`) never include the AWS message, which embeds
-account ids and ARNs. They name the region, the step that failed and a
-fixed label for the cause, plus the AWS request id when AWS answered
-(look it up in CloudTrail):
+KMS errors (`KMS: "aws"`) name the step that failed, the region and a
+fixed label for the cause, plus the AWS request id when AWS answered:
 
 ```
 all KMS backends failed to decrypt (tried regions: us-west-2 [Decrypt service error AccessDeniedException, request id 4f6c8a1e-…])
-KMS GenerateDataKey failed in region us-west-2: dispatch failure (other: no credentials available)
 ```
 
 The `Error` thrown to your code carries only the outermost context
 (`<op> failed: …`). The full chain, with the KMS detail, is in the
-binding's warn-level `<op> failed: …` log event; a failed KMS decrypt also produces an error-level
-`asherah::kms_aws_envelope` event and a failed KMS encrypt an
-error-level `asherah::session` event.
-The log hook receives all of these at its default level (warn).
+binding's warn-level `<op> failed: …` log event; a failed KMS decrypt
+also produces an error-level `asherah::kms_aws_envelope` event and a
+failed KMS encrypt an error-level `asherah::session` event. The log
+hook (`setLogHook`) receives all of these at its default level (warn).
 
-- `service error <code>` — KMS answered. `AccessDeniedException`: the
-  IAM or key policy does not allow the call. `DisabledException` /
-  `KMSInvalidStateException` / `NotFoundException`: the key is
-  disabled, pending deletion, or missing in that region.
-  `ThrottlingException`: request rate; retry.
-- `dispatch failure (other: <credentials label>)` — no usable AWS
-  credentials, so the request never reached KMS:
-  - `no credentials available` — no credentials source was found
-    (environment, shared files, web identity, container, instance
-    metadata). On EC2 it may also mean the instance metadata service
-    could not be reached (aws-config reports that case the same way),
-    where retrying can help.
-  - `credentials provider error` — a configured source failed, for
-    example a `credential_process` command that fails or a container
-    credentials endpoint that answers HTTP 500.
-  - `unexpected credentials provider failure` — for example a
-    container credentials endpoint that refuses the connection or
-    answers with a body that is not JSON.
-  - `invalid credentials configuration` — for example an
-    `AWS_CONTAINER_AUTHORIZATION_TOKEN` that is not a valid HTTP header
-    value (one containing a newline).
-  - A credentials source that never answers — for example a container
-    credentials endpoint that accepts the connection and does not
-    reply — shows as a bare `dispatch failure (other)`, with no
-    credentials label, after a delay (about 6 s per call in testing).
-- `not sent: no region configured`, `request construction failure
-  (invalid endpoint parameters)` — no region is configured, or the
-  configured region is not a region name (for example a key ARN where
-  `RegionMap` expects a region). Retrying does not help.
-- `dispatch failure (io: connection refused)` and other connection-level
-  kinds — the KMS endpoint (or VPC endpoint / proxy) could not be
-  reached. A DNS failure may also appear as `dispatch failure (io: …)`;
-  which kind it names is not fixed. Check for a VPC
-  endpoint / network ACL / `AWS_REGION` mismatch.
-- `dispatch failure (io: other error)` — commonly a TLS failure: a
-  TLS-inspecting proxy, a VPC endpoint whose certificate comes from a
-  private CA the client does not trust, or an endpoint that does not
-  speak TLS. Retrying does not fix it.
-- `dispatch failure (timeout)`, `dispatch failure (other: transient
-  error)` — the connection attempt timed out, or the connection closed
-  before a response arrived.
+- Permissions or key state: `service error AccessDeniedException` (IAM
+  or key policy), `DisabledException`, `KMSInvalidStateException`,
+  `NotFoundException` (key disabled, pending deletion or missing).
+- Credentials: `dispatch failure (other: no credentials available)` or
+  another credentials label; the request never reached KMS.
+- Region: `not sent: no region configured` — set `AWS_REGION` or
+  `RegionMap`; `no matching regions found` — no configured region has
+  a KEK in the stored envelope.
+- Network: `dispatch failure (io: …)`, `(timeout)`, `(other: transient
+  error)` — KMS could not be reached; `io: other error` can indicate TLS
+  trouble. Check for a VPC endpoint / network ACL / `AWS_REGION` mismatch.
+- Envelope: `data key failed envelope authentication` — the envelope
+  is corrupt or the KEK was replaced out of band.
+
+Unlike the DynamoDB errors above, KMS errors omit the AWS message,
+which embeds ARNs and account ids; the request id lets AWS support (or
+CloudTrail) find the call. Every label is explained in
+[`docs/kms-errors.md`](../../docs/kms-errors.md).
 
 ## Diagnostic recipe
 

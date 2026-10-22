@@ -147,102 +147,42 @@ error (<Code>)` followed by the AWS message:
   a table schema mismatch. Asherah expects partition key `Id`
   (string), sort key `Created` (number).
 - A DNS failure may read `dispatch failure: io error: client error
-  (Connect): dns error: …` (not reproduced in testing). Check for a VPC
-  endpoint / network ACL / `AWS_REGION` mismatch.
+  (Connect): dns error: …`. Check for a VPC endpoint / network
+  ACL / `AWS_REGION` mismatch.
 
 ### KMS
 
-KMS failures (`KMS: "aws"`) name the region, the step that failed and
-a fixed label for the cause, plus the AWS request id when AWS answered:
+KMS failures (`KMS: "aws"`) name the step that failed, the region and a
+fixed label for the cause, plus the AWS request id when AWS answered:
 
 ```
 all KMS backends failed to decrypt (tried regions: us-west-2 [Decrypt service error AccessDeniedException, request id 4f6c8a1e-…])
-KMS GenerateDataKey failed in region us-west-2: dispatch failure (other: no credentials available)
 ```
 
-The AWS error message is deliberately left out — it embeds account
-ids and principal/key ARNs. Look the request id up in CloudTrail for
-the full event. Decrypt failures are logged as an
-`asherah::kms_aws_envelope` error event, and both decrypt and encrypt
-failures appear in full in the binding's `python binding operation
-failed: …` warn event; both reach the log hook at the default `warn`
-level. The `RuntimeError` message carries only the outermost context.
+Decrypt failures are logged as an `asherah::kms_aws_envelope` error
+event, and both decrypt and encrypt failures appear in full in the
+binding's `python binding operation failed: …` warn event; both reach
+the log hook (`asherah.set_log_hook`) at the default `warn` level. The
+`RuntimeError` message carries only the outermost context.
 
-KMS answered (`service error <code>`):
-
-- `AccessDeniedException` — the IAM policy or key policy does not
-  allow the call (`kms:Decrypt`, `kms:GenerateDataKey`, `kms:Encrypt`)
-  for the calling principal.
-- `DisabledException` / `KMSInvalidStateException` /
-  `NotFoundException` — the key is disabled, pending deletion, or does
-  not exist in that region.
-- `IncorrectKeyException` / `InvalidCiphertextException` — the KEK was
-  not encrypted under the configured key, or the stored KEK is damaged.
-- `ThrottlingException` — request rate; transient.
-
-Credentials — `dispatch failure (other: <label>)`; the request never
-reached KMS:
-
-- `no credentials available` — no credentials source was found
-  (environment, shared files, web identity, container, instance
-  metadata). On EC2 it may also mean the instance metadata service
-  could not be reached (aws-config reports that case the same way),
-  where retrying can help.
-- `credentials provider error` — a configured source failed, for
-  example a `credential_process` command that fails or a container
-  credentials endpoint that answers HTTP 500.
-- `unexpected credentials provider failure` — for example a
-  container credentials endpoint that refuses the connection or
-  answers with a body that is not JSON.
-- `invalid credentials configuration` — for example an
-  `AWS_CONTAINER_AUTHORIZATION_TOKEN` that is not a valid HTTP header
-  value (one containing a newline).
-- A credentials source that never answers — for example a container
-  credentials endpoint that accepts the connection and does not
-  reply — shows as a bare `dispatch failure (other)`, with no
-  credentials label, after a delay (about 6 s per call in testing).
-
-Region — the request never left the client, so retrying does not help:
-
-- `not sent: no region configured` — no region was resolved; set
-  `AWS_REGION` or use `RegionMap` / `PreferredRegion`.
-- `request construction failure (invalid endpoint parameters)` — the
-  configured region is not a valid region name, for example a key ARN
-  where `RegionMap` expects a region (`{"<region>": "<key ARN>"}`). The
-  region itself prints as `<unrecognized region>`.
-
-Network, TLS and endpoint:
-
-- `dispatch failure (io: connection refused)` and other
-  connection-level kinds — the KMS endpoint (or VPC endpoint / proxy)
-  could not be reached. A DNS failure may also appear as `dispatch
-  failure (io: …)`; which kind it names is not fixed. Check for a VPC
-  endpoint / network ACL / `AWS_REGION` mismatch.
-- `dispatch failure (io: other error)` — commonly a TLS failure: a
-  TLS-inspecting proxy, a VPC endpoint whose certificate comes from a
-  private CA the client does not trust, or an endpoint that does not
-  speak TLS. Retrying does not fix it.
-- `dispatch failure (timeout)` — the connection attempt timed out.
-- `dispatch failure (other: transient error)` — the connection closed
-  before a response arrived.
-- `response error (HTTP …, unexpected end of file)` — the response was
-  cut off.
-- `service error (no error code, HTTP …)` — the answer was not a KMS
-  error, for example an HTML page from a proxy.
-
-Other:
-
-- `Decrypt returned no plaintext` — KMS answered without a data key.
-- `data key failed envelope authentication` — KMS decrypted the KEK
-  but the result does not authenticate the stored key: the envelope
+- Permissions or key state: `service error AccessDeniedException` (IAM
+  or key policy), `DisabledException`, `KMSInvalidStateException`,
+  `NotFoundException` (key disabled, pending deletion or missing).
+- Credentials: `dispatch failure (other: no credentials available)` or
+  another credentials label; the request never reached KMS.
+- Region: `not sent: no region configured` — set `AWS_REGION` or
+  `RegionMap`; `no matching regions found` — no configured region has
+  a KEK in the stored envelope.
+- Network: `dispatch failure (io: …)`, `(timeout)`, `(other: transient
+  error)` — KMS could not be reached; `io: other error` can indicate TLS
+  trouble. Check for a VPC endpoint / network ACL / `AWS_REGION` mismatch.
+- Envelope: `data key failed envelope authentication` — the envelope
   is corrupt or the KEK was replaced out of band.
-- `no matching regions found; configured regions: …; envelope
-  regions: …` — none of the configured regions has a KEK in the
-  stored envelope; KMS was not called.
 
-`<unrecognized region>`, `<unrecognized error code>` and
-`<unrecognized request id>` stand in for values that did not have the
-expected shape (a region name, a KMS error code, a UUID request id).
+Unlike the DynamoDB errors above, KMS errors omit the AWS message,
+which embeds ARNs and account ids; the request id lets AWS support (or
+CloudTrail) find the call. Every label is explained in
+[`docs/kms-errors.md`](../../docs/kms-errors.md).
 
 ## asyncio caveats
 
