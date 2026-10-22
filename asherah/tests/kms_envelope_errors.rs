@@ -17,46 +17,39 @@
 //! The behaviour a mode triggers is selected by the key id the client
 //! sends (`…:key/<test-tag>.<mode>`), so tests can run in parallel
 //! against one server without shared mutable mode state.
+//!
+//! Failures that never reach a KMS endpoint (no credentials, no region,
+//! connection refused, connect timeout) need a different fence and live
+//! in `kms_envelope_nocreds.rs` and `kms_envelope_transport_errors.rs`.
+
+#[path = "support/kms_fence.rs"]
+mod kms_fence;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex, OnceLock};
-use std::thread::ThreadId;
 
 use asherah::aead::AES256GCM;
 use asherah::kms_aws_envelope::AwsKmsEnvelope;
-use asherah::logging::{ensure_logger, set_sink, LogSink};
+use asherah::kms_multi::MultiKms;
 use asherah::traits::KeyManagementService;
-use aws_sdk_kms::config::ProvideCredentials;
 use base64::Engine as _;
+use kms_fence::{
+    assert_clean, assert_loopback_only, assert_records_clean, envelope_error_line, fence_env,
+    install_capture, take_thread_records, Creds, Rec, RegionEnv,
+};
 
 type Envelope = AwsKmsEnvelope<AES256GCM>;
 
-const DUMMY_ACCESS_KEY_ID: &str = "AKIDFAKEKMSENVELOPE0";
 const REQUEST_ID: &str = "4f6c8a1e-2b3d-4c5e-9f70-81a2b3c4d5e6";
-const PLANTED_ACCOUNT: &str = "123456789012";
 const PLANTED_MESSAGE: &str =
     "User: arn:aws:sts::123456789012:assumed-role/planted-role/planted-session \
      is not authorized to perform: kms:Decrypt on resource: \
      arn:aws:kms:us-west-2:123456789012:key/planted-key because no identity-based policy allows it";
-/// Substrings of `PLANTED_MESSAGE`, the configured key ids and the data
-/// keys (base64 and hex of `DATA_KEY` / `WRONG_DATA_KEY`) that must never
-/// reach an error string or a log record.
-const FORBIDDEN: &[&str] = &[
-    "arn:",
-    PLANTED_ACCOUNT,
-    "000000000000",
-    "planted",
-    "not authorized",
-    "identity-based",
-    "assumed-role",
-    "kms:Decrypt",
-    "QkJCQkJC",
-    "42424242",
-    "JCQkJCQk",
-    "24242424",
-];
+/// A region map with key and value swapped puts this where a region
+/// belongs.
+const SWAPPED_REGION: &str = "arn:aws:kms:us-west-2:111122223333:key/swapped-map-key";
 const DATA_KEY: [u8; 32] = [0x42; 32];
 const WRONG_DATA_KEY: [u8; 32] = [0x24; 32];
 
@@ -91,6 +84,9 @@ struct Reply {
     status: u16,
     body: String,
     request_id: Option<String>,
+    /// Content-Length to declare instead of the body's length; the fake
+    /// then closes the connection after sending the shorter body.
+    declared_len: Option<usize>,
 }
 
 fn error_reply(code: &str, request_id: Option<String>) -> Reply {
@@ -98,6 +94,7 @@ fn error_reply(code: &str, request_id: Option<String>) -> Reply {
         status: 400,
         body: serde_json::json!({ "__type": code, "message": PLANTED_MESSAGE }).to_string(),
         request_id,
+        declared_len: None,
     }
 }
 
@@ -106,6 +103,7 @@ fn ok_reply(body: serde_json::Value) -> Reply {
         status: 200,
         body: body.to_string(),
         request_id: Some(REQUEST_ID.to_string()),
+        declared_len: None,
     }
 }
 
@@ -152,10 +150,21 @@ fn reply_for(op: &str, mode: &str) -> Option<Reply> {
             Some("req id; arn:aws:iam::123456789012".into()),
         )),
         (_, "longreqid") => Some(error_reply("AccessDeniedException", Some("a".repeat(65)))),
+        (_, "digitreqid") => Some(error_reply(
+            "AccessDeniedException",
+            Some("123456789012".into()),
+        )),
         (_, "html500") => Some(Reply {
             status: 500,
             body: format!("<html><body>proxy error {PLANTED_MESSAGE}</body></html>"),
             request_id: None,
+            declared_len: None,
+        }),
+        (_, "truncated") => Some(Reply {
+            status: 400,
+            body: format!(r#"{{"__type":"AccessDeniedException","message":"{PLANTED_MESSAGE}"#),
+            request_id: Some(REQUEST_ID.into()),
+            declared_len: Some(8192),
         }),
         (_, code) => Some(error_reply(code, Some(REQUEST_ID.into()))),
     }
@@ -218,7 +227,7 @@ fn handle(mut s: TcpStream, fake: &'static Fake) {
         "HTTP/1.1 {} {}\r\nContent-Type: application/x-amz-json-1.1\r\nContent-Length: {}\r\nConnection: close\r\n",
         reply.status,
         if reply.status == 200 { "OK" } else { "Error" },
-        reply.body.len()
+        reply.declared_len.unwrap_or(reply.body.len())
     );
     if let Some(rid) = &reply.request_id {
         resp.push_str(&format!("x-amzn-RequestId: {rid}\r\n"));
@@ -228,95 +237,6 @@ fn handle(mut s: TcpStream, fake: &'static Fake) {
     drop(s.write_all(resp.as_bytes()));
 }
 
-/// Neutralise every AWS configuration source the SDK's default chain
-/// consults, then point the endpoint at the fake. Must run before any
-/// SDK client or config is constructed in this process.
-fn fence_env(endpoint: &str) {
-    for k in [
-        "AWS_PROFILE",
-        "AWS_DEFAULT_PROFILE",
-        "AWS_SESSION_TOKEN",
-        "AWS_SECURITY_TOKEN",
-        "AWS_WEB_IDENTITY_TOKEN_FILE",
-        "AWS_ROLE_ARN",
-        "AWS_ROLE_SESSION_NAME",
-        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
-        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
-        "AWS_CONTAINER_AUTHORIZATION_TOKEN",
-        "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
-        "AWS_ENDPOINT_URL_KMS",
-        "AWS_IGNORE_CONFIGURED_ENDPOINT_URLS",
-        "AWS_USE_FIPS_ENDPOINT",
-        "AWS_USE_DUALSTACK_ENDPOINT",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "all_proxy",
-    ] {
-        std::env::remove_var(k);
-    }
-    std::env::set_var(
-        "AWS_CONFIG_FILE",
-        "/nonexistent/asherah-kms-envelope-errors/config",
-    );
-    std::env::set_var(
-        "AWS_SHARED_CREDENTIALS_FILE",
-        "/nonexistent/asherah-kms-envelope-errors/credentials",
-    );
-    std::env::set_var("AWS_EC2_METADATA_DISABLED", "true");
-    std::env::set_var("AWS_ACCESS_KEY_ID", DUMMY_ACCESS_KEY_ID);
-    std::env::set_var("AWS_SECRET_ACCESS_KEY", "fake-kms-envelope-secret");
-    std::env::set_var("AWS_REGION", "us-west-2");
-    std::env::set_var("AWS_MAX_ATTEMPTS", "1");
-    std::env::set_var("NO_PROXY", "127.0.0.1,localhost");
-    std::env::set_var("no_proxy", "127.0.0.1,localhost");
-    std::env::set_var("AWS_ENDPOINT_URL", endpoint);
-}
-
-fn host_of(url: &str) -> &str {
-    let rest = url.split_once("://").map_or(url, |(_, r)| r);
-    let authority = rest.split('/').next().unwrap_or("");
-    authority.rsplit_once(':').map_or(authority, |(h, _)| h)
-}
-
-/// Fail unless the SDK, configured from this process's environment the
-/// same way `AwsKmsEnvelope` configures it, resolves a loopback endpoint
-/// and the dummy credentials.
-fn assert_loopback_only(expected_endpoint: &str) {
-    let env_ep = std::env::var("AWS_ENDPOINT_URL").expect("AWS_ENDPOINT_URL must be set");
-    assert_eq!(env_ep, expected_endpoint);
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .unwrap();
-    let (sdk_ep, akid) = rt.block_on(async {
-        let conf = aws_config::defaults(aws_config::BehaviorVersion::latest())
-            .region(aws_sdk_kms::config::Region::new("us-west-2"))
-            .load()
-            .await;
-        let ep = conf.endpoint_url().map(str::to_string);
-        let creds = conf
-            .credentials_provider()
-            .expect("credentials provider")
-            .provide_credentials()
-            .await
-            .expect("dummy credentials resolve");
-        (ep, creds.access_key_id().to_string())
-    });
-    let sdk_ep = sdk_ep.expect("SDK config must carry the fake endpoint");
-    let host = host_of(&sdk_ep);
-    assert!(
-        host == "127.0.0.1" || host == "localhost",
-        "refusing to run: effective KMS endpoint {sdk_ep} is not loopback"
-    );
-    assert_eq!(
-        akid, DUMMY_ACCESS_KEY_ID,
-        "refusing to run: credentials did not come from the dummy env values"
-    );
-}
-
 /// Start the fake once per process, fence the environment, verify the
 /// fence, and install the log capture. Every test calls this before it
 /// constructs a client.
@@ -324,8 +244,8 @@ fn fake() -> &'static Fake {
     FAKE.get_or_init(|| {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
-        fence_env(&endpoint);
-        assert_loopback_only(&endpoint);
+        fence_env(&endpoint, Creds::Dummy, RegionEnv::Set);
+        assert_loopback_only(&endpoint, Creds::Dummy);
         let fake: &'static Fake = Box::leak(Box::new(Fake {
             hits: Mutex::new(HashMap::new()),
         }));
@@ -334,71 +254,9 @@ fn fake() -> &'static Fake {
                 drop(std::thread::spawn(move || handle(s, fake)));
             }
         }));
-        ensure_logger().unwrap();
-        set_sink("kms-envelope-errors-test", Some(Arc::new(Capture)));
+        install_capture();
         fake
     })
-}
-
-// ───────────────────────────── log capture ─────────────────────────────
-
-struct Rec {
-    thread: ThreadId,
-    level: log::Level,
-    target: String,
-    message: String,
-}
-
-static RECORDS: Mutex<Vec<Rec>> = Mutex::new(Vec::new());
-
-struct Capture;
-
-impl LogSink for Capture {
-    fn min_level(&self) -> log::LevelFilter {
-        log::LevelFilter::Trace
-    }
-    fn log(&self, r: &log::Record<'_>) {
-        RECORDS.lock().unwrap().push(Rec {
-            thread: std::thread::current().id(),
-            level: r.level(),
-            target: r.target().to_string(),
-            message: r.args().to_string(),
-        });
-    }
-}
-
-/// Drain the records logged on the current thread. Sync KMS calls run
-/// their future on the calling thread, so these are this test's records.
-fn take_thread_records() -> Vec<Rec> {
-    let me = std::thread::current().id();
-    let mut all = RECORDS.lock().unwrap();
-    let (mine, rest): (Vec<Rec>, Vec<Rec>) = all.drain(..).partition(|r| r.thread == me);
-    *all = rest;
-    mine
-}
-
-fn envelope_error_line(recs: &[Rec]) -> String {
-    let lines: Vec<&Rec> = recs
-        .iter()
-        .filter(|r| r.level == log::Level::Error && r.target == "asherah::kms_aws_envelope")
-        .collect();
-    assert_eq!(lines.len(), 1, "expected one envelope error line");
-    lines[0].message.clone()
-}
-
-fn assert_clean(what: &str, s: &str) {
-    for f in FORBIDDEN {
-        assert!(!s.contains(f), "{what} leaks {f:?}: {s}");
-    }
-}
-
-fn assert_records_clean(recs: &[Rec]) {
-    for r in recs {
-        assert_clean(
-            &format!("[{} {}] log record", r.level, r.target),
-            &r.message,
-        );
-    }
 }
 
 // ─────────────────────────────── helpers ───────────────────────────────
@@ -442,7 +300,7 @@ fn written_envelope(tag: &str) -> Vec<u8> {
 fn fence_resolves_loopback_endpoint_and_dummy_credentials() {
     let _ = fake();
     let ep = std::env::var("AWS_ENDPOINT_URL").unwrap();
-    assert_loopback_only(&ep);
+    assert_loopback_only(&ep, Creds::Dummy);
 }
 
 #[test]
@@ -612,6 +470,10 @@ fn server_supplied_identifiers_are_bounded() {
             "longreqid",
             "Decrypt service error AccessDeniedException, request id <unrecognized request id>]",
         ),
+        (
+            "digitreqid",
+            "Decrypt service error AccessDeniedException, request id <unrecognized request id>]",
+        ),
     ];
     drop(take_thread_records());
     for (mode, expected) in cases {
@@ -779,4 +641,213 @@ fn session_decrypt_error_chain_carries_region_detail() {
     assert!(chain.ends_with(&detail), "{chain}");
     assert_clean("session error chain", &chain);
     assert_records_clean(&recs);
+}
+
+/// An envelope with one KEK for `region` (the KEK bytes are never
+/// decrypted successfully in the tests that use this).
+fn envelope_json(region: &str) -> Vec<u8> {
+    serde_json::to_vec(&serde_json::json!({
+        "encryptedKey": b64(&[1, 2, 3, 4]),
+        "kmsKeks": [{
+            "region": region,
+            "arn": "arn:aws:kms:us-west-2:000000000000:key/fake-writer",
+            "encryptedKek": b64(b"kek"),
+        }],
+    }))
+    .unwrap()
+}
+
+fn assert_all_sinks_clean(what: &str, msg: &str, recs: &[Rec]) {
+    assert_clean(what, msg);
+    assert_records_clean(recs);
+}
+
+#[test]
+fn swapped_region_map_never_prints_the_key_arn() {
+    let fake = fake();
+    let tag = "swapped";
+    // REGION_MAP {"<key ARN>": "us-west-2"}: the ARN lands where the region
+    // belongs, and "us-west-2" where the key id belongs.
+    let swapped = || {
+        Envelope::new_multi(
+            Arc::new(AES256GCM::new()),
+            0,
+            vec![(SWAPPED_REGION.to_string(), "us-west-2".to_string())],
+            None,
+        )
+        .unwrap()
+    };
+    let blob = written_envelope(tag);
+    drop(take_thread_records());
+
+    // Decrypt of an ordinary envelope: no region matches.
+    let err = swapped().decrypt_key(&(), &blob).unwrap_err();
+    let msg = format!("{err:#}");
+    let recs = take_thread_records();
+    let line = envelope_error_line(&recs);
+    println!("swapped map, decrypt\n  error: {msg}\n  error log: {line}");
+    let detail = "no matching regions found; configured regions: <unrecognized region>; \
+                  envelope regions: us-west-2";
+    assert_eq!(
+        msg,
+        format!("all KMS backends failed to decrypt ({detail})")
+    );
+    assert_eq!(
+        line,
+        format!("AwsKmsEnvelope decrypt_key: all backends failed: {detail}")
+    );
+    assert!(
+        recs.iter().any(|r| r.level == log::Level::Debug
+            && r.message
+                == "AwsKmsEnvelope decrypt_key: no KEK for region=<unrecognized region>, skipping"),
+        "debug line"
+    );
+    assert_all_sinks_clean("swapped map decrypt", &msg, &recs);
+
+    // Decrypt of an envelope whose KEK region is the same ARN: the region
+    // matches, and the SDK rejects it before dispatch.
+    let err = swapped()
+        .decrypt_key(&(), &envelope_json(SWAPPED_REGION))
+        .unwrap_err();
+    let msg = format!("{err:#}");
+    let recs = take_thread_records();
+    let line = envelope_error_line(&recs);
+    println!("swapped map, decrypt, matching envelope\n  error: {msg}\n  error log: {line}");
+    let detail = "tried regions: <unrecognized region> \
+                  [Decrypt request construction failure (invalid endpoint parameters)]";
+    assert_eq!(
+        msg,
+        format!("all KMS backends failed to decrypt ({detail})")
+    );
+    assert_eq!(
+        line,
+        format!("AwsKmsEnvelope decrypt_key: all backends failed: {detail}")
+    );
+    assert_all_sinks_clean("swapped map decrypt (matching)", &msg, &recs);
+
+    // Encrypt.
+    let err = swapped().encrypt_key(&(), &[1_u8; 32]).unwrap_err();
+    let msg = format!("{err:#}");
+    let recs = take_thread_records();
+    println!("swapped map, encrypt\n  error: {msg}");
+    assert_eq!(
+        msg,
+        "KMS GenerateDataKey failed in region <unrecognized region>: \
+         request construction failure (invalid endpoint parameters)"
+    );
+    assert_all_sinks_clean("swapped map encrypt", &msg, &recs);
+    assert_eq!(fake.hits("GenerateDataKey", "us-west-2"), 0);
+    assert_eq!(fake.hits("Decrypt", "us-west-2"), 0);
+}
+
+#[test]
+fn truncated_response_is_a_response_error_with_io_kind() {
+    let _ = fake();
+    let tag = "truncated";
+    let blob = written_envelope(tag);
+    drop(take_thread_records());
+
+    let err = single("us-west-2", tag, "truncated")
+        .decrypt_key(&(), &blob)
+        .unwrap_err();
+    let msg = format!("{err:#}");
+    let recs = take_thread_records();
+    let line = envelope_error_line(&recs);
+    println!("truncated, decrypt\n  error: {msg}\n  error log: {line}");
+    let detail = format!(
+        "tried regions: us-west-2 [Decrypt response error (HTTP 400, unexpected end of file), \
+         request id {REQUEST_ID}]"
+    );
+    assert_eq!(
+        msg,
+        format!("all KMS backends failed to decrypt ({detail})")
+    );
+    assert_eq!(
+        line,
+        format!("AwsKmsEnvelope decrypt_key: all backends failed: {detail}")
+    );
+    assert_all_sinks_clean("truncated decrypt", &msg, &recs);
+
+    let err = single("us-west-2", tag, "truncated")
+        .encrypt_key(&(), &[1_u8; 32])
+        .unwrap_err();
+    let msg = format!("{err:#}");
+    println!("truncated, encrypt\n  error: {msg}");
+    assert_eq!(
+        msg,
+        format!(
+            "KMS GenerateDataKey failed in region us-west-2: \
+             response error (HTTP 400, unexpected end of file), request id {REQUEST_ID}"
+        )
+    );
+    assert_all_sinks_clean("truncated encrypt", &msg, &take_thread_records());
+}
+
+/// `MultiKms::is_terminal_kms_error` substring-matches the error text, and
+/// the envelope's error now carries the KMS error code, so a MultiKms
+/// composed over AwsKmsEnvelope backends stops at the preferred backend
+/// for AccessDenied, Disabled and InvalidKeyUsage, and still falls back
+/// for other failures.
+#[test]
+fn multikms_over_envelope_stops_on_terminal_codes() {
+    let fake = fake();
+    let blob = written_envelope("multikms");
+    let cases = [
+        ("AccessDeniedException", true),
+        ("DisabledException", true),
+        ("InvalidKeyUsageException", true),
+        ("ThrottlingException", false),
+        ("IncorrectKeyException", false),
+        ("KMSInvalidStateException", false),
+    ];
+    for (mode, terminal) in cases {
+        let tag = format!("multikms-{mode}");
+        let fallback_key = key_arn("us-west-2", &tag, "ok");
+        let backends: Vec<Arc<dyn KeyManagementService>> = vec![
+            Arc::new(single("us-west-2", &tag, mode)),
+            Arc::new(single("us-west-2", &tag, "ok")),
+        ];
+        let m = MultiKms::new(0, backends).unwrap();
+        let res = m.decrypt_key(&(), &blob);
+        println!(
+            "MultiKms preferred={mode}: {:?}, fallback Decrypt hits={}",
+            res.as_ref().map(Vec::len).map_err(|e| format!("{e:#}")),
+            fake.hits("Decrypt", &fallback_key)
+        );
+        if terminal {
+            let msg = format!("{:#}", res.unwrap_err());
+            assert_eq!(
+                msg,
+                format!(
+                    "preferred KMS backend failed terminally: all KMS backends failed to \
+                     decrypt (tried regions: us-west-2 [Decrypt service error {mode}, \
+                     request id {REQUEST_ID}])"
+                )
+            );
+            assert_eq!(fake.hits("Decrypt", &fallback_key), 0, "{mode}");
+        } else {
+            assert_eq!(res.unwrap(), vec![7_u8; 32], "{mode}");
+            assert_eq!(fake.hits("Decrypt", &fallback_key), 1, "{mode}");
+        }
+    }
+
+    // The async path applies the same policy.
+    let tag = "multikms-async";
+    let fallback_key = key_arn("us-west-2", tag, "ok");
+    let backends: Vec<Arc<dyn KeyManagementService>> = vec![
+        Arc::new(single("us-west-2", tag, "AccessDeniedException")),
+        Arc::new(single("us-west-2", tag, "ok")),
+    ];
+    let m = MultiKms::new(0, backends).unwrap();
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    let err = rt.block_on(m.decrypt_key_async(&(), &blob)).unwrap_err();
+    assert!(
+        format!("{err:#}").starts_with("preferred KMS backend failed terminally: "),
+        "{err:#}"
+    );
+    assert_eq!(fake.hits("Decrypt", &fallback_key), 0);
+    drop(take_thread_records());
 }
