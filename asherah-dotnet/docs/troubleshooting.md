@@ -207,7 +207,8 @@ error (<Code>)` followed by the AWS message. Common shapes:
   (string), sort key `Created` (number); recreate the table with the
   correct schema if it was created manually with a different one.
 - A DNS failure may read `dispatch failure: io error: client error
-  (Connect): dns error: …` (not reproduced in testing).
+  (Connect): dns error: …` (not reproduced in testing). Check VPC
+  endpoints / network ACLs / `AWS_REGION` agreement.
 
 KMS errors (`KMS: "aws"`) never include the AWS message, which embeds
 account ids and ARNs. They name the region, the step that failed and a
@@ -219,14 +220,18 @@ all KMS backends failed to decrypt (tried regions: us-west-2 [Decrypt service er
 KMS GenerateDataKey failed in region us-west-2: dispatch failure (other: no credentials available)
 ```
 
-The exception carries only the outermost context: `<op> failed: …`
-for synchronous calls, and the outermost context alone for the
-`*Async` methods. Synchronous calls also log the full chain, with
-the KMS detail, as a warn-level `<op> failed: …` event; for every
-call style, a failed KMS decrypt also produces an error-level
-`asherah::kms_aws_envelope` event and a failed KMS encrypt an
-error-level `asherah::session` event. The log hook receives these at
-its default level (warn).
+The exception carries only the outermost context. Synchronous calls
+throw `<op>: <op> failed: …` and also log the full chain, with the KMS
+detail, as a warn-level `<op> failed: …` event. So do the
+`GoDaddy.Asherah.Encryption.Compat` package's `Session.EncryptAsync` /
+`DecryptAsync`, which run the synchronous call with `Task.Run`.
+`AsherahSession.EncryptBytesAsync` / `DecryptBytesAsync` and
+`AsherahApi.EncryptAsync` / `DecryptAsync` use the native async calls:
+their exception carries the outermost context alone, and the native
+layer logs no warn-level event for them. For every call style, a failed
+KMS decrypt also produces an error-level `asherah::kms_aws_envelope`
+event and a failed KMS encrypt an error-level `asherah::session`
+event. The log hook receives these at its default level (warn).
 
 - `service error <code>` — KMS answered. `AccessDeniedException`: the
   IAM or key policy does not allow the call. `DisabledException` /
@@ -244,10 +249,15 @@ its default level (warn).
     example a `credential_process` command that fails or a container
     credentials endpoint that answers HTTP 500.
   - `unexpected credentials provider failure` — for example a
-    container credentials endpoint that refuses the connection.
-  - `credentials provider timed out`, `invalid credentials
-    configuration` — may be reported when a provider times out or its
-    configuration is invalid.
+    container credentials endpoint that refuses the connection or
+    answers with a body that is not JSON.
+  - `invalid credentials configuration` — for example an
+    `AWS_CONTAINER_AUTHORIZATION_TOKEN` that is not a valid HTTP header
+    value (one containing a newline).
+  - A credentials source that never answers — for example a container
+    credentials endpoint that accepts the connection and does not
+    reply — shows as a bare `dispatch failure (other)`, with no
+    credentials label, after a delay (about 6 s per call in testing).
 - `not sent: no region configured`, `request construction failure
   (invalid endpoint parameters)` — no region is configured, or the
   configured region is not a region name (for example a key ARN where
@@ -255,7 +265,8 @@ its default level (warn).
 - `dispatch failure (io: connection refused)` and other connection-level
   kinds — the KMS endpoint (or VPC endpoint / proxy) could not be
   reached. A DNS failure may also appear as `dispatch failure (io: …)`;
-  which kind it names is not fixed.
+  which kind it names is not fixed. Check VPC
+  endpoints / network ACLs / `AWS_REGION` agreement.
 - `dispatch failure (io: other error)` — commonly a TLS failure: a
   TLS-inspecting proxy, a VPC endpoint whose certificate comes from a
   private CA the client does not trust, or an endpoint that does not

@@ -203,10 +203,15 @@ The log hook receives all of these at its default level (warn).
     example a `credential_process` command that fails or a container
     credentials endpoint that answers HTTP 500.
   - `unexpected credentials provider failure` — for example a
-    container credentials endpoint that refuses the connection.
-  - `credentials provider timed out`, `invalid credentials
-    configuration` — may be reported when a provider times out or its
-    configuration is invalid.
+    container credentials endpoint that refuses the connection or
+    answers with a body that is not JSON.
+  - `invalid credentials configuration` — for example an
+    `AWS_CONTAINER_AUTHORIZATION_TOKEN` that is not a valid HTTP header
+    value (one containing a newline).
+  - A credentials source that never answers — for example a container
+    credentials endpoint that accepts the connection and does not
+    reply — shows as a bare `dispatch failure (other)`, with no
+    credentials label, after a delay (about 6 s per call in testing).
 - `not sent: no region configured`, `request construction failure
   (invalid endpoint parameters)` — no region is configured, or the
   configured region is not a region name (for example a key ARN where

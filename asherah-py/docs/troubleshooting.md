@@ -147,7 +147,8 @@ error (<Code>)` followed by the AWS message:
   a table schema mismatch. Asherah expects partition key `Id`
   (string), sort key `Created` (number).
 - A DNS failure may read `dispatch failure: io error: client error
-  (Connect): dns error: …` (not reproduced in testing).
+  (Connect): dns error: …` (not reproduced in testing). Check for a VPC
+  endpoint / network ACL / `AWS_REGION` mismatch.
 
 ### KMS
 
@@ -190,11 +191,16 @@ reached KMS:
 - `credentials provider error` — a configured source failed, for
   example a `credential_process` command that fails or a container
   credentials endpoint that answers HTTP 500.
-- `unexpected credentials provider failure` — for example a container
-  credentials endpoint that refuses the connection.
-- `credentials provider timed out`, `invalid credentials
-  configuration` — may be reported when a provider times out or its
-  configuration is invalid.
+- `unexpected credentials provider failure` — for example a
+  container credentials endpoint that refuses the connection or
+  answers with a body that is not JSON.
+- `invalid credentials configuration` — for example an
+  `AWS_CONTAINER_AUTHORIZATION_TOKEN` that is not a valid HTTP header
+  value (one containing a newline).
+- A credentials source that never answers — for example a container
+  credentials endpoint that accepts the connection and does not
+  reply — shows as a bare `dispatch failure (other)`, with no
+  credentials label, after a delay (about 6 s per call in testing).
 
 Region — the request never left the client, so retrying does not help:
 
@@ -210,7 +216,8 @@ Network, TLS and endpoint:
 - `dispatch failure (io: connection refused)` and other
   connection-level kinds — the KMS endpoint (or VPC endpoint / proxy)
   could not be reached. A DNS failure may also appear as `dispatch
-  failure (io: …)`; which kind it names is not fixed.
+  failure (io: …)`; which kind it names is not fixed. Check for a VPC
+  endpoint / network ACL / `AWS_REGION` mismatch.
 - `dispatch failure (io: other error)` — commonly a TLS failure: a
   TLS-inspecting proxy, a VPC endpoint whose certificate comes from a
   private CA the client does not trust, or an endpoint that does not

@@ -182,11 +182,15 @@ all KMS backends failed to decrypt (tried regions: us-west-2 [Decrypt service er
 KMS GenerateDataKey failed in region us-west-2: dispatch failure (other: no credentials available)
 ```
 
-The raised error carries only the outermost context: `<op> failed:
-…` for synchronous calls, and the outermost context alone for the
-`*_async` methods. Synchronous calls also log the full chain, with
-the KMS detail, as a warn-level `<op> failed: …` event; for every
-call style, a failed KMS decrypt also produces an error-level
+The raised error carries only the outermost context. Synchronous
+calls, and the module-level `Asherah.encrypt_async` /
+`Asherah.decrypt_async` (which run the synchronous call in a `Thread`),
+raise `<op> failed: …` and also log the full chain, with the KMS
+detail, as a warn-level `<op> failed: …` event.
+`Session#encrypt_bytes_async` / `#decrypt_bytes_async` use the native
+async calls: their error carries the outermost context alone, and the
+native layer logs no warn-level event for them. For every call style,
+a failed KMS decrypt also produces an error-level
 `asherah::kms_aws_envelope` event and a failed KMS encrypt an
 error-level `asherah::session` event. The log hook receives these at
 its default level (warn).
@@ -207,10 +211,15 @@ its default level (warn).
     example a `credential_process` command that fails or a container
     credentials endpoint that answers HTTP 500.
   - `unexpected credentials provider failure` — for example a
-    container credentials endpoint that refuses the connection.
-  - `credentials provider timed out`, `invalid credentials
-    configuration` — may be reported when a provider times out or its
-    configuration is invalid.
+    container credentials endpoint that refuses the connection or
+    answers with a body that is not JSON.
+  - `invalid credentials configuration` — for example an
+    `AWS_CONTAINER_AUTHORIZATION_TOKEN` that is not a valid HTTP header
+    value (one containing a newline).
+  - A credentials source that never answers — for example a container
+    credentials endpoint that accepts the connection and does not
+    reply — shows as a bare `dispatch failure (other)`, with no
+    credentials label, after a delay (about 6 s per call in testing).
 - `not sent: no region configured`, `request construction failure
   (invalid endpoint parameters)` — no region is configured, or the
   configured region is not a region name (for example a key ARN where
