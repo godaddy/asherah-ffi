@@ -131,18 +131,88 @@ Reinstall Python for the matching architecture and `pip install`.
 
 ## AWS-specific errors
 
-Forwarded from the AWS SDK for Rust running in the native core:
+### DynamoDB metastore
+
+DynamoDB metastore errors (`Metastore: "dynamodb"`) carry the AWS
+SDK's error chain, including the AWS message:
 
 - `dispatch failure: ResolveError` — DNS resolution failed. VPC
   endpoint / network ACL / `AWS_REGION` mismatch.
-- `service error: AccessDeniedException` — IAM. The error names the
-  missing action; cross-reference against
-  [`aws-production-setup.md`](./aws-production-setup.md#step-3-iam-policy).
+- `service error: unhandled error (AccessDeniedException)` — IAM. The
+  AWS message names the missing `dynamodb:` action; cross-reference
+  against [`aws-production-setup.md`](./aws-production-setup.md#step-3-iam-policy).
 - `service error: ValidationException: ...AttributeName...` —
   DynamoDB schema mismatch. Asherah expects partition key `Id`
   (string), sort key `Created` (number).
-- `service error: KMSInvalidStateException` — KMS key is
-  `PendingDeletion`/`Disabled`.
+
+### KMS
+
+KMS failures (`KMS: "aws"`) name the region, the step that failed and
+a fixed label for the cause, plus the AWS request id when AWS answered:
+
+```
+all KMS backends failed to decrypt (tried regions: us-west-2 [Decrypt service error AccessDeniedException, request id 4f6c8a1e-…])
+KMS GenerateDataKey failed in region us-west-2: dispatch failure (other: no credentials available)
+```
+
+The AWS error message is deliberately left out — it embeds account
+ids and principal/key ARNs. Look the request id up in CloudTrail for
+the full event. Decrypt failures are logged as an
+`asherah::kms_aws_envelope` error event, and both decrypt and encrypt
+failures appear in full in the binding's `python binding operation
+failed: …` warn event; both reach the log hook at the default `warn`
+level. The `RuntimeError` message carries only the outermost context.
+
+KMS answered (`service error <code>`):
+
+- `AccessDeniedException` — the IAM policy or key policy does not
+  allow the call (`kms:Decrypt`, `kms:GenerateDataKey`, `kms:Encrypt`)
+  for the calling principal.
+- `DisabledException` / `KMSInvalidStateException` /
+  `NotFoundException` — the key is disabled, pending deletion, or does
+  not exist in that region.
+- `IncorrectKeyException` / `InvalidCiphertextException` — the KEK was
+  not encrypted under the configured key, or the stored KEK is damaged.
+- `ThrottlingException` — request rate; transient.
+
+Configuration — the request never left the client, so retrying does
+not help:
+
+- `dispatch failure (other: no credentials available)` — no AWS
+  credentials were found (environment, shared files, web identity,
+  container or instance metadata).
+- `not sent: no region configured` — no region was resolved; set
+  `AWS_REGION` or use `RegionMap` / `PreferredRegion`.
+- `request construction failure (invalid endpoint parameters)` — the
+  configured region is not a valid region name, for example a key ARN
+  where `RegionMap` expects a region (`{"<region>": "<key ARN>"}`). The
+  region itself prints as `<unrecognized region>`.
+
+Transient — network or endpoint:
+
+- `dispatch failure (io: …)`, for example `io: connection refused` —
+  the KMS endpoint (or VPC endpoint / proxy) is unreachable.
+- `dispatch failure (timeout)` — the connection attempt timed out.
+- `dispatch failure (other: transient error)` — the connection closed
+  before a response arrived.
+- `response error (HTTP …, unexpected end of file)` — the response was
+  cut off.
+- `service error (no error code, HTTP …)` — the answer was not a KMS
+  error, for example an HTML page from a proxy.
+
+Other:
+
+- `Decrypt returned no plaintext` — KMS answered without a data key.
+- `data key failed envelope authentication` — KMS decrypted the KEK
+  but the result does not authenticate the stored key: the envelope
+  is corrupt or the KEK was replaced out of band.
+- `no matching regions found; configured regions: …; envelope
+  regions: …` — none of the configured regions has a KEK in the
+  stored envelope; KMS was not called.
+
+`<unrecognized region>`, `<unrecognized error code>` and
+`<unrecognized request id>` stand in for values that did not have the
+expected shape (a region name, a KMS error code, a UUID request id).
 
 ## asyncio caveats
 
@@ -165,15 +235,19 @@ that's still consuming Asherah resources. Ensure all in-flight encrypt
 
 When a problem isn't covered above:
 
-1. **Set verbose logging:**
+1. **Install a log hook:**
    ```python
-   def trace_log(event):
+   def on_log(event):
        print(f"[asherah {event['level']}] {event['target']}: {event['message']}")
-   asherah.set_log_hook_sync(trace_log, min_level="trace")
-   factory = asherah.SessionFactory.from_config({**config, "Verbose": True})
+   asherah.set_log_hook(on_log)
+   factory = asherah.SessionFactory.from_config(config)
    ```
-   Trace records cover every metastore call, KMS call, and
-   key-cache decision.
+   The hook receives `warn` and `error` events; `info`, `debug` and
+   `trace` records are not delivered. An operation that fails in the
+   Rust core logs a `python binding operation failed: …` warn event
+   with the full error chain, and a failed KMS decrypt logs an
+   `asherah::kms_aws_envelope` error event that lists every attempted
+   region with its cause (see [KMS](#kms)).
 
 2. **Inspect the metastore directly.** RDBMS: query
    `encryption_key`. DynamoDB: scan `AsherahKeys`. Confirm rows for

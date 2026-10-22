@@ -192,20 +192,46 @@ architecture in your publish profile if needed.
 
 ## AWS-specific errors
 
-Forwarded from the AWS SDK for Rust running in the native core. Common
-shapes:
+DynamoDB metastore errors (`Metastore: "dynamodb"`) carry the AWS
+SDK's error chain, including the AWS message. Common shapes:
 
 - `dispatch failure: unhandled error: ResolveError` — DNS resolution
   failed. Check VPC endpoints / network ACLs / `AWS_REGION` agreement.
-- `service error: AccessDeniedException` — IAM. The error usually
-  names the missing action; cross-reference against the policy in
+- `service error: unhandled error (AccessDeniedException)` — IAM. The
+  AWS message names the missing `dynamodb:` action; cross-reference
+  against the policy in
   [`aws-production-setup.md`](./aws-production-setup.md#step-3-iam-policy-for-the-application).
 - `service error: ValidationException: ...AttributeName...` — DynamoDB
   table schema doesn't match. Asherah expects partition key `Id`
   (string), sort key `Created` (number); recreate the table with the
   correct schema if it was created manually with a different one.
-- `service error: KMSInvalidStateException` — the KMS key is
-  `PendingDeletion` / `Disabled`. Re-enable or use a different key.
+
+KMS errors (`KMS: "aws"`) never include the AWS message, which embeds
+account ids and ARNs. They name the region, the step that failed and a
+fixed label for the cause, plus the AWS request id when AWS answered
+(look it up in CloudTrail):
+
+```
+all KMS backends failed to decrypt (tried regions: us-west-2 [Decrypt service error AccessDeniedException, request id 4f6c8a1e-…])
+KMS GenerateDataKey failed in region us-west-2: dispatch failure (other: no credentials available)
+```
+
+- `service error <code>` — KMS answered. `AccessDeniedException`: the
+  IAM or key policy does not allow the call. `DisabledException` /
+  `KMSInvalidStateException` / `NotFoundException`: the key is
+  disabled, pending deletion, or missing in that region.
+- `dispatch failure (other: no credentials available)`, `not sent: no
+  region configured`, `request construction failure (invalid endpoint
+  parameters)`: configuration — no AWS credentials found, no region
+  configured, or a region that is not a region name. The request never
+  left the client; retrying does not help.
+- `dispatch failure (io: …)` (for example `io: connection refused`),
+  `dispatch failure (timeout)`, `dispatch failure (other: transient
+  error)`: the KMS endpoint was unreachable, the connection attempt
+  timed out, or the connection closed before a response.
+
+The native core logs each failed KMS decrypt with this detail as an
+error-level `asherah::kms_aws_envelope` log event.
 
 ## Diagnostic recipe
 
