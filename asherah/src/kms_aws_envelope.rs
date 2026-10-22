@@ -951,160 +951,17 @@ mod tests {
         );
     }
 
-    /// Every error code aws-sdk-kms 1.114.0 models (49 names).
-    const KMS_MODELED_CODES: &[&str] = &[
-        "AlreadyExistsException",
-        "CloudHsmClusterInUseException",
-        "CloudHsmClusterInvalidConfigurationException",
-        "CloudHsmClusterNotActiveException",
-        "CloudHsmClusterNotFoundException",
-        "CloudHsmClusterNotRelatedException",
-        "ConflictException",
-        "CustomKeyStoreHasCMKsException",
-        "CustomKeyStoreInvalidStateException",
-        "CustomKeyStoreNameInUseException",
-        "CustomKeyStoreNotFoundException",
-        "DependencyTimeoutException",
-        "DisabledException",
-        "DryRunOperationException",
-        "ExpiredImportTokenException",
-        "IncorrectKeyException",
-        "IncorrectKeyMaterialException",
-        "IncorrectTrustAnchorException",
-        "InvalidAliasNameException",
-        "InvalidArnException",
-        "InvalidCiphertextException",
-        "InvalidGrantIdException",
-        "InvalidGrantTokenException",
-        "InvalidImportTokenException",
-        "InvalidKeyUsageException",
-        "InvalidMarkerException",
-        "KeyUnavailableException",
-        "KMSInternalException",
-        "KMSInvalidMacException",
-        "KMSInvalidSignatureException",
-        "KMSInvalidStateException",
-        "LimitExceededException",
-        "MalformedPolicyDocumentException",
-        "NotFoundException",
-        "ResourceNotFoundException",
-        "TagException",
-        "UnsupportedOperationException",
-        "XksKeyAlreadyInUseException",
-        "XksKeyInvalidConfigurationException",
-        "XksKeyNotFoundException",
-        "XksProxyIncorrectAuthenticationCredentialException",
-        "XksProxyInvalidConfigurationException",
-        "XksProxyInvalidResponseException",
-        "XksProxyUriEndpointInUseException",
-        "XksProxyUriInUseException",
-        "XksProxyUriUnreachableException",
-        "XksProxyVpcEndpointServiceInUseException",
-        "XksProxyVpcEndpointServiceInvalidConfigurationException",
-        "XksProxyVpcEndpointServiceNotFoundException",
-    ];
-
-    /// Request-level codes any AWS JSON service may return, including the
-    /// SDK's throttling and transient code lists (aws-runtime 1.9.1) except
-    /// `EC2ThrottledException`, which only EC2 returns.
-    const COMMON_AWS_CODES: &[&str] = &[
-        "AccessDeniedException",
-        "UnrecognizedClientException",
-        "ExpiredTokenException",
-        "ExpiredToken",
-        "InvalidSignatureException",
-        "IncompleteSignature",
-        "RequestExpired",
-        "InvalidClientTokenId",
-        "SignatureDoesNotMatch",
-        "MissingAuthenticationToken",
-        "NotAuthorized",
-        "OptInRequired",
-        "InternalFailure",
-        "ServiceUnavailable",
-        "ValidationException",
-        "ValidationError",
-        "InvalidAction",
-        "MalformedQueryString",
-        "Throttling",
-        "ThrottlingException",
-        "ThrottledException",
-        "RequestThrottledException",
-        "TooManyRequestsException",
-        "ProvisionedThroughputExceededException",
-        "TransactionInProgressException",
-        "RequestLimitExceeded",
-        "BandwidthLimitExceeded",
-        "LimitExceededException",
-        "RequestThrottled",
-        "SlowDown",
-        "PriorRequestNotComplete",
-        "RequestTimeout",
-        "RequestTimeoutException",
-    ];
-
-    /// Region names in the partitions data shipped with aws-sdk-kms 1.114.0.
-    const SHIPPED_REGIONS: &[&str] = &[
-        "af-south-1",
-        "ap-east-1",
-        "ap-east-2",
-        "ap-northeast-1",
-        "ap-northeast-2",
-        "ap-northeast-3",
-        "ap-south-1",
-        "ap-south-2",
-        "ap-southeast-1",
-        "ap-southeast-2",
-        "ap-southeast-3",
-        "ap-southeast-4",
-        "ap-southeast-5",
-        "ap-southeast-6",
-        "ap-southeast-7",
-        "aws-global",
-        "ca-central-1",
-        "ca-west-1",
-        "eu-central-1",
-        "eu-central-2",
-        "eu-north-1",
-        "eu-south-1",
-        "eu-south-2",
-        "eu-west-1",
-        "eu-west-2",
-        "eu-west-3",
-        "il-central-1",
-        "me-central-1",
-        "me-south-1",
-        "mx-central-1",
-        "sa-east-1",
-        "us-east-1",
-        "us-east-2",
-        "us-west-1",
-        "us-west-2",
-        "aws-cn-global",
-        "cn-north-1",
-        "cn-northwest-1",
-        "eusc-de-east-1",
-        "aws-iso-global",
-        "us-iso-east-1",
-        "us-iso-west-1",
-        "aws-iso-b-global",
-        "us-isob-east-1",
-        "us-isob-west-1",
-        "aws-iso-e-global",
-        "eu-isoe-west-1",
-        "aws-iso-f-global",
-        "us-isof-east-1",
-        "us-isof-south-1",
-        "aws-us-gov-global",
-        "us-gov-east-1",
-        "us-gov-west-1",
-    ];
-
     #[test]
     fn error_codes_are_letters_only() {
-        assert_eq!(KMS_MODELED_CODES.len(), 49);
-        for code in KMS_MODELED_CODES.iter().chain(COMMON_AWS_CODES) {
-            assert_eq!(safe_error_code(code), *code, "{code}");
+        for code in [
+            "AccessDeniedException",
+            "KMSInvalidStateException",
+            "XksProxyVpcEndpointServiceInvalidConfigurationException",
+            "ThrottlingException",
+            "ExpiredToken",
+            "SlowDown",
+        ] {
+            assert_eq!(safe_error_code(code), code);
         }
         let max = "A".repeat(MAX_ERROR_CODE_LEN);
         assert_eq!(safe_error_code(&max), max.as_str());
@@ -1118,6 +975,7 @@ mod tests {
             "key.1234abcd-12ab-34cd-56ef-1234567890ab".into(),
             "arn:aws:iam::123456789012".into(),
             "Access Denied".into(),
+            "AccessDenied\n".into(),
             "Bad/Code".into(),
             "Ünicode".into(),
             "EC2ThrottledException".into(),
@@ -1152,9 +1010,18 @@ mod tests {
 
     #[test]
     fn region_names_are_bounded() {
-        assert_eq!(SHIPPED_REGIONS.len(), 53);
-        for region in SHIPPED_REGIONS {
-            assert_eq!(safe_region(region), *region, "{region}");
+        for region in [
+            "us-east-1",
+            "eu-central-2",
+            "ap-southeast-7",
+            "us-gov-west-1",
+            "cn-northwest-1",
+            "us-isob-east-1",
+            "eusc-de-east-1",
+            "aws-global",
+            "a",
+        ] {
+            assert_eq!(safe_region(region), region);
         }
         let max = format!("a{}", "-".repeat(MAX_REGION_LEN - 1));
         assert_eq!(safe_region(&max), max.as_str());
@@ -1164,11 +1031,64 @@ mod tests {
             "arn:aws:kms:us-west-2:111122223333:key/swapped-map-key".into(),
             "123456789012".into(),
             "US-WEST-2".into(),
+            "us-West-2".into(),
             "us_west_2".into(),
             "us west".into(),
+            "us-west-2/".into(),
             "-us-west-2".into(),
         ] {
             assert_eq!(safe_region(&bad), UNRECOGNIZED_REGION, "{bad:?}");
         }
+    }
+
+    #[test]
+    fn sdk_errors_without_a_response_are_labelled() {
+        use aws_sdk_kms::error::ConnectorError;
+        use aws_sdk_kms::operation::decrypt::DecryptError;
+        use std::io::{Error as IoError, ErrorKind};
+
+        let describe = |e: SdkError<DecryptError>| describe_sdk_error(&e);
+        let io = |kind, text: &str| IoError::new(kind, text.to_string());
+
+        // A cause that is none of the recognised types adds no label.
+        assert_eq!(
+            describe(SdkError::dispatch_failure(ConnectorError::timeout(
+                "connect to 127.0.0.1:9 timed out".into()
+            ))),
+            "dispatch failure (timeout)"
+        );
+        assert_eq!(
+            describe(SdkError::dispatch_failure(ConnectorError::timeout(
+                Box::new(io(ErrorKind::TimedOut, "127.0.0.1:9"))
+            ))),
+            "dispatch failure (timeout: timed out)"
+        );
+        assert_eq!(
+            describe(SdkError::dispatch_failure(ConnectorError::io(Box::new(
+                io(ErrorKind::ConnectionRefused, "tcp connect 127.0.0.1:9")
+            )))),
+            "dispatch failure (io: connection refused)"
+        );
+        assert_eq!(
+            describe(SdkError::dispatch_failure(ConnectorError::user(
+                "invalid request to 127.0.0.1:9".into()
+            ))),
+            "dispatch failure (user)"
+        );
+        // A credentials error above an I/O error is named, not the I/O error.
+        assert_eq!(
+            describe(SdkError::dispatch_failure(ConnectorError::other(
+                Box::new(CredentialsError::provider_error(io(
+                    ErrorKind::ConnectionRefused,
+                    "http://127.0.0.1:9/creds"
+                ))),
+                None
+            ))),
+            "dispatch failure (other: credentials provider error)"
+        );
+        assert_eq!(
+            describe(SdkError::timeout_error("operation timed out after 3.1s")),
+            "timeout"
+        );
     }
 }

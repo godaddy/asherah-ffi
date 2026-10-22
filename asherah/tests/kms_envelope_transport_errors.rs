@@ -5,20 +5,21 @@
     clippy::print_stdout
 )]
 //! `AwsKmsEnvelope` failures that never get an answer from a KMS endpoint:
-//! connection refused, connect timeout, and no region configured.
+//! connection refused, no region configured, and connect timeout.
 //!
 //! Each scenario needs its own endpoint or region environment, and both
-//! are process-wide, so the scenarios run sequentially from one test. Each
-//! re-applies the full fence (dummy credentials, no config files, IMDS
-//! off, loopback endpoint) and re-checks it before building a client, and
-//! each call runs under a deadline so an unexpected wait fails the test.
+//! are process-wide, so the scenarios run sequentially: both tests hold
+//! `SERIAL`, which keeps them apart under `--include-ignored`. Each
+//! scenario re-applies the full fence (dummy credentials, no config files,
+//! IMDS off, loopback endpoint) and re-checks it before building a client,
+//! and each call runs under a deadline so an unexpected wait fails the test.
 
 #[path = "support/kms_fence.rs"]
 mod kms_fence;
 
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use asherah::aead::AES256GCM;
@@ -31,6 +32,14 @@ use kms_fence::{
 };
 
 const KEY_ID: &str = "arn:aws:kms:us-west-2:000000000000:key/transport";
+
+static SERIAL: Mutex<()> = Mutex::new(());
+
+fn serial() -> MutexGuard<'static, ()> {
+    SERIAL
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 fn envelope_json(region: &str) -> Vec<u8> {
     let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
@@ -116,6 +125,7 @@ fn check(label: &str, out: &Outcome, encrypt: &str, decrypt_detail: &str, port: 
 
 #[test]
 fn client_side_failures_name_their_cause() {
+    let _serial = serial();
     install_capture();
 
     // Connection refused: a loopback port with no listener.
@@ -170,6 +180,13 @@ fn client_side_failures_name_their_cause() {
         port,
     );
     assert_eq!(CONNECTIONS.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+#[ignore = "fills the TCP accept backlog; host-dependent; run with --ignored"]
+fn connect_timeout_names_its_cause() {
+    let _serial = serial();
+    install_capture();
 
     // Connect timeout: a listener that never accepts, with its accept
     // backlog filled so further connection attempts get no answer. The
