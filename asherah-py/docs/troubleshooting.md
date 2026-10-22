@@ -134,16 +134,20 @@ Reinstall Python for the matching architecture and `pip install`.
 ### DynamoDB metastore
 
 DynamoDB metastore errors (`Metastore: "dynamodb"`) carry the AWS
-SDK's error chain, including the AWS message:
+SDK's error chain, including the AWS message. Exceptions that
+aws-sdk-dynamodb does not model, `AccessDeniedException` and
+`ValidationException` among them, print as `service error: unhandled
+error (<Code>)` followed by the AWS message:
 
-- `dispatch failure: ResolveError` — DNS resolution failed. VPC
-  endpoint / network ACL / `AWS_REGION` mismatch.
 - `service error: unhandled error (AccessDeniedException)` — IAM. The
-  AWS message names the missing `dynamodb:` action; cross-reference
-  against [`aws-production-setup.md`](./aws-production-setup.md#step-3-iam-policy).
-- `service error: ValidationException: ...AttributeName...` —
-  DynamoDB schema mismatch. Asherah expects partition key `Id`
+  AWS message that follows usually names the missing `dynamodb:`
+  action; cross-reference against
+  [`aws-production-setup.md`](./aws-production-setup.md#step-3-iam-policy).
+- `service error: unhandled error (ValidationException)` — for example
+  a table schema mismatch. Asherah expects partition key `Id`
   (string), sort key `Created` (number).
+- A DNS failure may read `dispatch failure: io error: client error
+  (Connect): dns error: …` (not reproduced in testing).
 
 ### KMS
 
@@ -175,12 +179,25 @@ KMS answered (`service error <code>`):
   not encrypted under the configured key, or the stored KEK is damaged.
 - `ThrottlingException` — request rate; transient.
 
-Configuration — the request never left the client, so retrying does
-not help:
+Credentials — `dispatch failure (other: <label>)`; the request never
+reached KMS:
 
-- `dispatch failure (other: no credentials available)` — no AWS
-  credentials were found (environment, shared files, web identity,
-  container or instance metadata).
+- `no credentials available` — no credentials source was found
+  (environment, shared files, web identity, container, instance
+  metadata). On EC2 it may also mean the instance metadata service
+  could not be reached (aws-config reports that case the same way),
+  where retrying can help.
+- `credentials provider error` — a configured source failed, for
+  example a `credential_process` command that fails or a container
+  credentials endpoint that answers HTTP 500.
+- `unexpected credentials provider failure` — for example a container
+  credentials endpoint that refuses the connection.
+- `credentials provider timed out`, `invalid credentials
+  configuration` — may be reported when a provider times out or its
+  configuration is invalid.
+
+Region — the request never left the client, so retrying does not help:
+
 - `not sent: no region configured` — no region was resolved; set
   `AWS_REGION` or use `RegionMap` / `PreferredRegion`.
 - `request construction failure (invalid endpoint parameters)` — the
@@ -188,10 +205,16 @@ not help:
   where `RegionMap` expects a region (`{"<region>": "<key ARN>"}`). The
   region itself prints as `<unrecognized region>`.
 
-Transient — network or endpoint:
+Network, TLS and endpoint:
 
-- `dispatch failure (io: …)`, for example `io: connection refused` —
-  the KMS endpoint (or VPC endpoint / proxy) is unreachable.
+- `dispatch failure (io: connection refused)` and other
+  connection-level kinds — the KMS endpoint (or VPC endpoint / proxy)
+  could not be reached. A DNS failure may also appear as `dispatch
+  failure (io: …)`; which kind it names is not fixed.
+- `dispatch failure (io: other error)` — commonly a TLS failure: a
+  TLS-inspecting proxy, a VPC endpoint whose certificate comes from a
+  private CA the client does not trust, or an endpoint that does not
+  speak TLS. Retrying does not fix it.
 - `dispatch failure (timeout)` — the connection attempt timed out.
 - `dispatch failure (other: transient error)` — the connection closed
   before a response arrived.

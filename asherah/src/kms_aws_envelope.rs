@@ -27,10 +27,16 @@ use crate::traits::{KeyManagementService, AEAD};
 // from configuration or from the stored envelope, so each passes only in a
 // narrow shape and is otherwise replaced by a fixed placeholder: codes
 // `[A-Za-z]{1,64}`, request ids the UUID form, regions
-// `[a-z][a-z0-9-]{0,31}`. Neither shape admits `:` or `/`, so no ARN can
-// pass. Remaining limit: an endpoint that answers as KMS (or a proxy in
-// front of it) controls these tokens, and can still return a key UUID as
-// the request id.
+// `[a-z][a-z0-9-]{0,31}`. None of these shapes admits `:` or `/`, so no
+// ARN can pass. Remaining limits — a value that fits its shape is printed
+// verbatim:
+// - An endpoint that answers as KMS (or a proxy in front of it) controls
+//   the code and request id: it can return a key UUID as the request id,
+//   and a letters-only code made of arbitrary words.
+// - A region-shaped name carrying an account id or a key-id prefix (for
+//   example `acct-123456789012` or `aws-kms-us-west-2-123456789012`) is
+//   printed as is, whether it comes from the stored envelope (anyone who
+//   can write the metastore) or from configuration.
 
 /// Longest server-supplied error code passed through.
 const MAX_ERROR_CODE_LEN: usize = 64;
