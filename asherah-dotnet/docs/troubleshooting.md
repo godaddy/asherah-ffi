@@ -206,9 +206,6 @@ error (<Code>)` followed by the AWS message. Common shapes:
   a table schema mismatch. Asherah expects partition key `Id`
   (string), sort key `Created` (number); recreate the table with the
   correct schema if it was created manually with a different one.
-- A DNS failure may read `dispatch failure: io error: client error
-  (Connect): dns error: …`. Check VPC endpoints / network ACLs /
-  `AWS_REGION` agreement.
 
 KMS errors (`KMS: "aws"`) name the step that failed, the region and a
 fixed label for the cause, plus the AWS request id when AWS answered:

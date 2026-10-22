@@ -62,7 +62,7 @@ AWS credentials, so the request was not sent.
 | `credentials provider error` | A configured credentials source failed. Check the source the active profile or environment selects. |
 | `unexpected credentials provider failure` | A credentials source failed in a way it does not classify. Check it as for `credentials provider error`. |
 | `invalid credentials configuration` | A credentials source is configured incorrectly. Check the active profile and the `AWS_*` variables. |
-| `credentials provider timed out` | A credentials source reported that it took too long. A source that never answers can instead show as a bare `dispatch failure (other)`, with no label. |
+| `credentials provider timed out` | Defined for the SDK's timeout variant, which none of the locked credential providers produces. A credentials source that never answers shows as a bare `dispatch failure (other)` with no label, after the SDK's own timeout. |
 
 Service errors: `service error <Code>`. KMS, or an endpoint answering as
 KMS, returned this error code. Representative codes:

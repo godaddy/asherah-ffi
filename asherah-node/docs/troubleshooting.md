@@ -154,9 +154,6 @@ error (<Code>)` followed by the AWS message:
 - `service error: unhandled error (ValidationException)` — for example
   a table schema mismatch. Asherah expects partition key `Id`
   (string), sort key `Created` (number).
-- A DNS failure may read `dispatch failure: io error: client error
-  (Connect): dns error: …`. Check for a VPC endpoint / network
-  ACL / `AWS_REGION` mismatch.
 
 KMS errors (`KMS: "aws"`) name the step that failed, the region and a
 fixed label for the cause, plus the AWS request id when AWS answered:
