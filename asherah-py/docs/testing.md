@@ -60,7 +60,9 @@ parallel test runners (pytest-xdist) race on hook state.
 @pytest.mark.serial
 def test_log_hook_fires(asherah_factory):
     events = []
-    asherah.set_log_hook(events.append)
+    # The default level (warn) delivers nothing for a plain encrypt; the
+    # key loads and creations it performs are logged at debug.
+    asherah.set_log_hook(events.append, min_level="debug")
     try:
         with asherah_factory.get_session("p") as s:
             s.encrypt_text("hello")

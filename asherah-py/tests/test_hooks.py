@@ -12,6 +12,10 @@ What this exercises:
   - registering hook AFTER setup is supported
   - hooks fire under both module-level and Session API
   - log event level is the lowercase name ("warn" not "WARN")
+  - log hook min_level: default delivers warn+ only, "debug" adds debug,
+    invalid names raise ValueError
+  - set_log_hook requires its callback argument; rejected calls leave the
+    installed hook in place
 """
 from __future__ import annotations
 
@@ -290,3 +294,74 @@ def test_metrics_event_dict_shape():
         elif e["type"] in ("cache_hit", "cache_miss", "cache_stale"):
             assert "name" in e
             assert isinstance(e["name"], str)
+
+
+def test_log_hook_min_level_debug_delivers_debug_records():
+    """The default hook level is warn; min_level="debug" adds debug records."""
+    import asherah
+
+    _configure_env()
+    default_events = []
+    asherah.set_log_hook(lambda e: default_events.append(e))
+    asherah.setup(_config())
+    # First encrypt for a partition loads/creates keys and logs at debug.
+    asherah.encrypt_string("lvl-default", "payload")
+    asherah.shutdown()
+    _wait_for_stable_len(default_events)
+    below_warn = [e for e in default_events if e["level"] not in ("warn", "error")]
+    assert below_warn == [], f"default hook received sub-warn events: {below_warn!r}"
+
+    debug_events = []
+    asherah.set_log_hook(lambda e: debug_events.append(e), min_level="debug")
+    asherah.setup(_config())
+    asherah.encrypt_string("lvl-debug", "payload")
+    asherah.shutdown()
+    assert _wait_for(lambda: any(e["level"] == "debug" for e in debug_events)), (
+        f"expected a debug event with min_level='debug', got {debug_events!r}"
+    )
+    _wait_for_stable_len(debug_events)
+    assert not any(e["level"] == "trace" for e in debug_events), (
+        "min_level='debug' must not deliver trace events"
+    )
+
+
+def test_log_hook_invalid_min_level_raises_value_error():
+    import asherah
+
+    with pytest.raises(ValueError, match="min_level"):
+        asherah.set_log_hook(lambda e: None, min_level="verbose")
+    with pytest.raises(ValueError, match="min_level"):
+        asherah.set_log_hook(None, min_level="")
+    with pytest.raises(ValueError, match='"warning"'):
+        asherah.set_log_hook(None, min_level="critical")
+    # Level names are case-insensitive; "warning" is accepted. Passing
+    # None with a valid level deregisters (nothing is installed here).
+    asherah.set_log_hook(None, min_level="WARNING")
+    with pytest.raises(TypeError):
+        asherah.set_log_hook(None, min_level=10)
+
+
+def test_log_hook_callback_is_required_and_rejected_calls_keep_the_hook():
+    import asherah
+
+    _configure_env()
+    with pytest.raises(TypeError):
+        asherah.set_log_hook()
+
+    events = []
+    asherah.set_log_hook(lambda e: events.append(e), min_level="debug")
+    # None of these may replace or remove the installed hook.
+    with pytest.raises(TypeError):
+        asherah.set_log_hook(min_level="debug")
+    with pytest.raises(ValueError):
+        asherah.set_log_hook(lambda e: None, min_level="verbose")
+    with pytest.raises(TypeError):
+        asherah.set_log_hook(lambda e: None, min_level=10)
+
+    asherah.setup(_config())
+    asherah.encrypt_string("still-hooked", "payload")
+    asherah.shutdown()
+    assert _wait_for(lambda: any(e["level"] == "debug" for e in events)), (
+        f"the installed debug hook stopped receiving events: {events!r}"
+    )
+    _wait_for_stable_len(events)

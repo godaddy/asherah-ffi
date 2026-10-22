@@ -19,7 +19,8 @@ Two API styles, both fully supported and producing the same wire format:
 
 Observability hooks are also exposed:
 
-- :func:`set_log_hook` receives every log event from the Rust core.
+- :func:`set_log_hook` receives log events from the Rust core at or above
+  ``min_level`` (default ``"warn"``).
 - :func:`set_metrics_hook` receives encrypt/decrypt timings and key cache
   hit/miss/stale counters.
 
