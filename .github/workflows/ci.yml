@@ -46,7 +46,10 @@ jobs:
           toolchain: 1.97.1
           components: rustfmt, clippy
       - name: Install protoc
-        run: sudo apt-get install -y protobuf-compiler
+        run: |
+          echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/80-retries
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
       - name: Lint
         run: scripts/test.sh --lint
 
@@ -91,7 +94,10 @@ jobs:
         with:
           tool: sccache@0.8.1
       - name: Install protoc
-        run: sudo apt-get install -y protobuf-compiler
+        run: |
+          echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/80-retries
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
       - name: Unit tests
         run: scripts/test.sh --unit
 
@@ -126,7 +132,10 @@ jobs:
           toolchain: 1.97.1
           components: clippy
       - name: Install protoc
-        run: sudo apt-get install -y protobuf-compiler
+        run: |
+          echo 'Acquire::Retries "3";' | sudo tee /etc/apt/apt.conf.d/80-retries
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
       - name: Clippy (ring-crypto backend)
         run: cargo clippy -p asherah --no-default-features --features ring-crypto --all-targets -- -D warnings
       - name: Unit tests (ring-crypto backend)
