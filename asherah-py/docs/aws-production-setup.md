@@ -145,7 +145,10 @@ asherah.set_metrics_hook(on_metric)
 The first encrypt produces:
 - A row in `AsherahKeys` with `Id="_SK_payments"`.
 - A row in `AsherahKeys` with `Id="_IK_<partition>_payments_checkout"`.
-- A log event at `info` level reporting IK creation.
+- With the log hook installed at `min_level="debug"`, a `debug` event
+  from `asherah::session` reporting IK creation
+  (`create_intermediate_key: id=_IK_<partition>_payments_checkout`). The
+  hook above uses the default level (`warn`), which does not deliver it.
 
 Subsequent encrypts in the same partition reuse the cached IK — no
 metastore round-trip — until expiry.

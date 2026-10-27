@@ -9,7 +9,7 @@ use asherah::metrics;
 use asherah::metrics::{AsyncMetricsConfig, AsyncMetricsSink, MetricsSink};
 use asherah_config as config;
 use once_cell::sync::Lazy;
-use pyo3::exceptions::PyRuntimeError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use pyo3::types::PyDict;
@@ -34,6 +34,24 @@ type SessionHandle = ael::session::PublicSession<
 
 const NATIVE_HOOK_QUEUE_CAPACITY: usize = 4096;
 const DEFAULT_LOG_HOOK_MIN_LEVEL: log::LevelFilter = log::LevelFilter::Warn;
+
+/// Resolve `set_log_hook`'s `min_level` argument (case-insensitive);
+/// `None` selects the Warn default.
+fn log_hook_min_level(name: Option<&str>) -> Result<log::LevelFilter, String> {
+    let Some(name) = name else {
+        return Ok(DEFAULT_LOG_HOOK_MIN_LEVEL);
+    };
+    match name.to_ascii_lowercase().as_str() {
+        "error" => Ok(log::LevelFilter::Error),
+        "warn" | "warning" => Ok(log::LevelFilter::Warn),
+        "info" => Ok(log::LevelFilter::Info),
+        "debug" => Ok(log::LevelFilter::Debug),
+        "trace" => Ok(log::LevelFilter::Trace),
+        _ => Err(format!(
+            "invalid min_level {name:?}: expected one of \"error\", \"warn\", \"warning\", \"info\", \"debug\", \"trace\""
+        )),
+    }
+}
 
 fn sanitized_anyhow_message(op: &str, err: &anyhow::Error) -> String {
     format!("{op} failed: {err}")
@@ -597,11 +615,12 @@ impl MetricsSink for PyMetricsSink {
 
 struct PyLogSink {
     callback: Arc<Py<PyAny>>,
+    min_level: log::LevelFilter,
 }
 
 impl LogSink for PyLogSink {
     fn min_level(&self) -> log::LevelFilter {
-        DEFAULT_LOG_HOOK_MIN_LEVEL
+        self.min_level
     }
 
     fn log(&self, record: &log::Record<'_>) {
@@ -661,7 +680,12 @@ fn set_metrics_hook(callback: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
 }
 
 #[pyfunction]
-fn set_log_hook(callback: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
+#[pyo3(
+    signature = (callback, min_level=None),
+    text_signature = "(callback, min_level='warn')"
+)]
+fn set_log_hook(callback: Option<&Bound<'_, PyAny>>, min_level: Option<&str>) -> PyResult<()> {
+    let min_level = log_hook_min_level(min_level).map_err(PyValueError::new_err)?;
     ensure_logger().map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
     if let Some(cb) = callback {
         let obj: Py<PyAny> = cb.clone().unbind();
@@ -669,10 +693,11 @@ fn set_log_hook(callback: Option<&Bound<'_, PyAny>>) -> PyResult<()> {
         let sink = AsyncLogSink::new(
             PyLogSink {
                 callback: Arc::clone(&arc),
+                min_level,
             },
             AsyncLogConfig {
                 queue_capacity: NATIVE_HOOK_QUEUE_CAPACITY,
-                min_level: DEFAULT_LOG_HOOK_MIN_LEVEL,
+                min_level,
             },
         )
         .map_err(|e| PyRuntimeError::new_err(format!("log hook dispatcher error: {e}")))?;
@@ -733,6 +758,27 @@ mod tests {
     fn native_hooks_are_bounded_and_warn_by_default() {
         assert_eq!(NATIVE_HOOK_QUEUE_CAPACITY, 4096);
         assert_eq!(DEFAULT_LOG_HOOK_MIN_LEVEL, log::LevelFilter::Warn);
+    }
+
+    #[test]
+    fn log_hook_min_level_parses_names_case_insensitively() {
+        use log::LevelFilter;
+        assert_eq!(log_hook_min_level(None), Ok(LevelFilter::Warn));
+        for (name, level) in [
+            ("error", LevelFilter::Error),
+            ("warn", LevelFilter::Warn),
+            ("warning", LevelFilter::Warn),
+            ("WARNING", LevelFilter::Warn),
+            ("info", LevelFilter::Info),
+            ("Debug", LevelFilter::Debug),
+            ("TRACE", LevelFilter::Trace),
+        ] {
+            assert_eq!(log_hook_min_level(Some(name)), Ok(level), "{name}");
+        }
+        for bad in ["", "verbose", "off", "warn ", "critical"] {
+            let err = log_hook_min_level(Some(bad)).unwrap_err();
+            assert!(err.contains("invalid min_level"), "{bad}: {err}");
+        }
     }
 
     #[test]

@@ -125,17 +125,23 @@ asyncio.run(main())
 
 ### Log hook
 
-Receive every log event from the Rust core (encrypt/decrypt path,
-metastore drivers, KMS clients).
+Receive log events from the Rust core (encrypt/decrypt path,
+metastore drivers, KMS clients). Only `warn` and `error` events are
+delivered unless you pass `min_level`: `"error"`, `"warn"` (or
+`"warning"`), `"info"`, `"debug"` or `"trace"`, case-insensitive.
+Omitting it or passing `None` means `"warn"`. Any other string raises
+`ValueError` and a non-string (such as `logging.DEBUG`) raises
+`TypeError`; the installed hook is left unchanged. The callback argument
+is required: pass `None` to deregister.
 
 ```python
 def on_log(event):
     # event = {"level": "trace"|"debug"|"info"|"warn"|"error",
     #          "message": str, "target": str}
-    if event["level"] in ("warn", "error"):
-        print(f"[asherah {event['level']}] {event['message']}")
+    print(f"[asherah {event['level']}] {event['target']}: {event['message']}")
 
-asherah.set_log_hook(on_log)
+asherah.set_log_hook(on_log)                     # warn and error
+asherah.set_log_hook(on_log, min_level="debug")  # include debug and info
 
 # later, to deregister:
 asherah.set_log_hook(None)
@@ -300,7 +306,7 @@ behavior in an asyncio application.
 
 | Function | Description |
 |---|---|
-| `set_log_hook(callback)` | Register a `(event_dict) -> None` log callback. Pass `None` to deregister. |
+| `set_log_hook(callback, min_level="warn")` | Register a `(event_dict) -> None` log callback for events at or above `min_level`. Pass `None` to deregister. |
 | `set_metrics_hook(callback)` | Register a `(event_dict) -> None` metrics callback. Pass `None` to deregister. |
 
 ### Factory / Session API (recommended)
