@@ -131,18 +131,55 @@ Reinstall Python for the matching architecture and `pip install`.
 
 ## AWS-specific errors
 
-Forwarded from the AWS SDK for Rust running in the native core:
+### DynamoDB metastore
 
-- `dispatch failure: ResolveError` — DNS resolution failed. VPC
-  endpoint / network ACL / `AWS_REGION` mismatch.
-- `service error: AccessDeniedException` — IAM. The error names the
-  missing action; cross-reference against
+DynamoDB metastore errors (`Metastore: "dynamodb"`) carry the AWS
+SDK's error chain, including the AWS message. Exceptions that
+aws-sdk-dynamodb does not model, `AccessDeniedException` and
+`ValidationException` among them, print as `service error: unhandled
+error (<Code>)` followed by the AWS message:
+
+- `service error: unhandled error (AccessDeniedException)` — IAM. The
+  AWS message that follows usually names the missing `dynamodb:`
+  action; cross-reference against
   [`aws-production-setup.md`](./aws-production-setup.md#step-3-iam-policy).
-- `service error: ValidationException: ...AttributeName...` —
-  DynamoDB schema mismatch. Asherah expects partition key `Id`
+- `service error: unhandled error (ValidationException)` — for example
+  a table schema mismatch. Asherah expects partition key `Id`
   (string), sort key `Created` (number).
-- `service error: KMSInvalidStateException` — KMS key is
-  `PendingDeletion`/`Disabled`.
+
+### KMS
+
+KMS failures (`KMS: "aws"`) name the step that failed, the region and a
+fixed label for the cause, plus the AWS request id when AWS answered:
+
+```
+all KMS backends failed to decrypt (tried regions: us-west-2 [Decrypt service error AccessDeniedException, request id 4f6c8a1e-…])
+```
+
+Decrypt failures are logged as an `asherah::kms_aws_envelope` error
+event, and both decrypt and encrypt failures appear in full in the
+binding's `python binding operation failed: …` warn event; both reach
+the log hook (`asherah.set_log_hook`) at the default `warn` level. The
+`RuntimeError` message carries only the outermost context.
+
+- Permissions or key state: `service error AccessDeniedException` (IAM
+  or key policy), `DisabledException`, `KMSInvalidStateException`,
+  `NotFoundException` (key disabled, pending deletion or missing).
+- Credentials: `dispatch failure (other: no credentials available)` or
+  another credentials label; the request never reached KMS.
+- Region: `not sent: no region configured` — set `AWS_REGION` or
+  `RegionMap`; `no matching regions found` — no configured region has
+  a KEK in the stored envelope.
+- Network: `dispatch failure (io: …)`, `(timeout)`, `(other: transient
+  error)` — KMS could not be reached; `io: other error` can indicate TLS
+  trouble. Check for a VPC endpoint / network ACL / `AWS_REGION` mismatch.
+- Envelope: `data key failed envelope authentication` — the envelope
+  is corrupt or the KEK was replaced out of band.
+
+Unlike the DynamoDB errors above, KMS errors omit the AWS message,
+which embeds ARNs and account ids; the request id lets AWS support (or
+CloudTrail) find the call. Every label is explained in
+[`docs/kms-errors.md`](../../docs/kms-errors.md).
 
 ## asyncio caveats
 
@@ -165,15 +202,19 @@ that's still consuming Asherah resources. Ensure all in-flight encrypt
 
 When a problem isn't covered above:
 
-1. **Set verbose logging:**
+1. **Install a log hook:**
    ```python
-   def trace_log(event):
+   def on_log(event):
        print(f"[asherah {event['level']}] {event['target']}: {event['message']}")
-   asherah.set_log_hook_sync(trace_log, min_level="trace")
-   factory = asherah.SessionFactory.from_config({**config, "Verbose": True})
+   asherah.set_log_hook(on_log)
+   factory = asherah.SessionFactory.from_config(config)
    ```
-   Trace records cover every metastore call, KMS call, and
-   key-cache decision.
+   The hook receives `warn` and `error` events; `info`, `debug` and
+   `trace` records are not delivered. An operation that fails in the
+   Rust core logs a `python binding operation failed: …` warn event
+   with the full error chain, and a failed KMS decrypt logs an
+   `asherah::kms_aws_envelope` error event that lists every attempted
+   region with its cause (see [KMS](#kms)).
 
 2. **Inspect the metastore directly.** RDBMS: query
    `encryption_key`. DynamoDB: scan `AsherahKeys`. Confirm rows for

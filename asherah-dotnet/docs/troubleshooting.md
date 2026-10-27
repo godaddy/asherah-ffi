@@ -192,20 +192,60 @@ architecture in your publish profile if needed.
 
 ## AWS-specific errors
 
-Forwarded from the AWS SDK for Rust running in the native core. Common
-shapes:
+DynamoDB metastore errors (`Metastore: "dynamodb"`) carry the AWS
+SDK's error chain, including the AWS message. Exceptions that
+aws-sdk-dynamodb does not model, `AccessDeniedException` and
+`ValidationException` among them, print as `service error: unhandled
+error (<Code>)` followed by the AWS message. Common shapes:
 
-- `dispatch failure: unhandled error: ResolveError` — DNS resolution
-  failed. Check VPC endpoints / network ACLs / `AWS_REGION` agreement.
-- `service error: AccessDeniedException` — IAM. The error usually
-  names the missing action; cross-reference against the policy in
+- `service error: unhandled error (AccessDeniedException)` — IAM. The
+  AWS message that follows usually names the missing `dynamodb:`
+  action; cross-reference against the policy in
   [`aws-production-setup.md`](./aws-production-setup.md#step-3-iam-policy-for-the-application).
-- `service error: ValidationException: ...AttributeName...` — DynamoDB
-  table schema doesn't match. Asherah expects partition key `Id`
+- `service error: unhandled error (ValidationException)` — for example
+  a table schema mismatch. Asherah expects partition key `Id`
   (string), sort key `Created` (number); recreate the table with the
   correct schema if it was created manually with a different one.
-- `service error: KMSInvalidStateException` — the KMS key is
-  `PendingDeletion` / `Disabled`. Re-enable or use a different key.
+
+KMS errors (`KMS: "aws"`) name the step that failed, the region and a
+fixed label for the cause, plus the AWS request id when AWS answered:
+
+```
+all KMS backends failed to decrypt (tried regions: us-west-2 [Decrypt service error AccessDeniedException, request id 4f6c8a1e-…])
+```
+
+The exception carries only the outermost context. Synchronous calls,
+and the `GoDaddy.Asherah.Encryption.Compat` package's
+`Session.EncryptAsync` / `DecryptAsync` (which run the synchronous call
+with `Task.Run`), throw `<op>: <op> failed: …` and also log the full
+chain, with the KMS detail, as a warn-level `<op> failed: …` event.
+`AsherahSession.EncryptBytesAsync` / `DecryptBytesAsync` and
+`AsherahApi.EncryptAsync` / `DecryptAsync` use the native async calls:
+their exception carries the outermost context alone, and the native
+layer logs no warn-level event for them. For every call style, a failed
+KMS decrypt also produces an error-level `asherah::kms_aws_envelope`
+event and a failed KMS encrypt an error-level `asherah::session`
+event. The log hook (`AsherahHooks.SetLogHook`) receives these at its
+default level (warn).
+
+- Permissions or key state: `service error AccessDeniedException` (IAM
+  or key policy), `DisabledException`, `KMSInvalidStateException`,
+  `NotFoundException` (key disabled, pending deletion or missing).
+- Credentials: `dispatch failure (other: no credentials available)` or
+  another credentials label; the request never reached KMS.
+- Region: `not sent: no region configured` — set `AWS_REGION` or
+  `RegionMap`; `no matching regions found` — no configured region has
+  a KEK in the stored envelope.
+- Network: `dispatch failure (io: …)`, `(timeout)`, `(other: transient
+  error)` — KMS could not be reached; `io: other error` can indicate TLS
+  trouble. Check VPC endpoints / network ACLs / `AWS_REGION` agreement.
+- Envelope: `data key failed envelope authentication` — the envelope
+  is corrupt or the KEK was replaced out of band.
+
+Unlike the DynamoDB errors above, KMS errors omit the AWS message,
+which embeds ARNs and account ids; the request id lets AWS support (or
+CloudTrail) find the call. Every label is explained in
+[`docs/kms-errors.md`](../../docs/kms-errors.md).
 
 ## Diagnostic recipe
 

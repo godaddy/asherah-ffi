@@ -127,17 +127,55 @@ retry.
 
 ## AWS-specific errors
 
-Forwarded from the AWS SDK for Rust running in the native core:
+DynamoDB metastore errors (`Metastore: "dynamodb"`) carry the AWS
+SDK's error chain, including the AWS message. Exceptions that
+aws-sdk-dynamodb does not model, `AccessDeniedException` and
+`ValidationException` among them, print as `service error: unhandled
+error (<Code>)` followed by the AWS message:
 
-- `dispatch failure: ResolveError` — DNS resolution failed. VPC
-  endpoint / network ACL / `AWS_REGION` mismatch.
-- `service error: AccessDeniedException` — IAM. The error names the
-  missing action.
-- `service error: ValidationException: ...AttributeName...` —
-  DynamoDB schema mismatch. Asherah expects partition key `Id`
+- `service error: unhandled error (AccessDeniedException)` — IAM. The
+  AWS message that follows usually names the missing `dynamodb:`
+  action.
+- `service error: unhandled error (ValidationException)` — for example
+  a table schema mismatch. Asherah expects partition key `Id`
   (string), sort key `Created` (number).
-- `service error: KMSInvalidStateException` — KMS key is
-  `PendingDeletion`/`Disabled`.
+
+KMS errors (`KMS: "aws"`) name the step that failed, the region and a
+fixed label for the cause, plus the AWS request id when AWS answered:
+
+```
+all KMS backends failed to decrypt (tried regions: us-west-2 [Decrypt service error AccessDeniedException, request id 4f6c8a1e-…])
+```
+
+The `RuntimeException` carries only the outermost context:
+`<op> failed: …` for synchronous calls, and the outermost context
+alone when an async call's `CompletableFuture` completes
+exceptionally. The full chain, with the KMS detail, is in a
+warn-level log event (`<op> failed: …`, or `java async operation
+failed: …` for async calls); a failed KMS decrypt also produces an
+error-level `asherah::kms_aws_envelope` event and a failed KMS encrypt
+an error-level `asherah::session` event. The log hook
+(`Asherah.setLogHook`) receives all of these at its default level
+(warn).
+
+- Permissions or key state: `service error AccessDeniedException` (IAM
+  or key policy), `DisabledException`, `KMSInvalidStateException`,
+  `NotFoundException` (key disabled, pending deletion or missing).
+- Credentials: `dispatch failure (other: no credentials available)` or
+  another credentials label; the request never reached KMS.
+- Region: `not sent: no region configured` — set `AWS_REGION` or
+  `RegionMap`; `no matching regions found` — no configured region has
+  a KEK in the stored envelope.
+- Network: `dispatch failure (io: …)`, `(timeout)`, `(other: transient
+  error)` — KMS could not be reached; `io: other error` can indicate TLS
+  trouble. Check for a VPC endpoint / network ACL / `AWS_REGION` mismatch.
+- Envelope: `data key failed envelope authentication` — the envelope
+  is corrupt or the KEK was replaced out of band.
+
+Unlike the DynamoDB errors above, KMS errors omit the AWS message,
+which embeds ARNs and account ids; the request id lets AWS support (or
+CloudTrail) find the call. Every label is explained in
+[`docs/kms-errors.md`](../../docs/kms-errors.md).
 
 The AWS Java SDK's `DefaultCredentialsProvider` is **not** consulted —
 Asherah's native core uses the AWS SDK for Rust's chain. They have
