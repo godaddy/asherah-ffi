@@ -12,7 +12,7 @@ BenchmarkRunner.Run<CanonicalBenchmark>(
         .WithOptions(ConfigOptions.DisableOptimizationsValidator));
 
 [MemoryDiagnoser]
-[SimpleJob(RuntimeMoniker.Net80, warmupCount: 3, iterationCount: 10)]
+[SimpleJob(RuntimeMoniker.Net11_0, warmupCount: 3, iterationCount: 10)]
 [GroupBenchmarksBy(BenchmarkDotNet.Configs.BenchmarkLogicalGroupRule.ByCategory)]
 [CategoriesColumn]
 public class CanonicalBenchmark

@@ -415,8 +415,8 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: |
-            8.0.x
             10.0.x
+            11.0.x
       - name: Build .NET binding (x86_64)
         env:
           TARGET_ARCH: x86_64
@@ -440,8 +440,8 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: |
-            8.0.x
             10.0.x
+            11.0.x
       - name: Download rlib artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -749,8 +749,8 @@ jobs:
         if: matrix.binding == 'dotnet'
         with:
           dotnet-version: |
-            8.0.x
             10.0.x
+            11.0.x
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: matrix.binding == 'go'
         with:
@@ -830,6 +830,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 20
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: |
+            10.0.x
+            11.0.x
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           # canonical com.godaddy.asherah:appencryption@0.4.0 is compiled
@@ -1253,8 +1258,8 @@ jobs:
           apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu wget curl
           wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
           chmod +x dotnet-install.sh
-          ./dotnet-install.sh --channel 8.0 --install-dir /usr/share/dotnet
           ./dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet
+          ./dotnet-install.sh --channel 11.0 --install-dir /usr/share/dotnet
           ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet
           bash "${GITHUB_WORKSPACE:-$(pwd)}/scripts/install-sccache.sh"
       - name: Build .NET binding (arm64)

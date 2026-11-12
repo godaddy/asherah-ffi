@@ -12,7 +12,7 @@ guidelines keep contributions consistent and easy to review.
 2. Install language toolchains for the bindings you plan to touch:
    - Node.js 18+
    - Python 3.8+
-   - .NET 8.0 or 10.0
+   - .NET 11 SDK and .NET 10 runtime (for testing both target frameworks)
    - Java 11+ (Maven)
    - Ruby 3.0+
    - Go 1.26+
@@ -68,7 +68,7 @@ Individual binding tests:
 |---------|---------|
 | Node.js | `cd asherah-node && npm test` |
 | Python | `maturin develop --manifest-path asherah-py/Cargo.toml && pytest asherah-py/tests/` |
-| .NET | `dotnet test asherah-dotnet/GoDaddy.Asherah.Encryption.slnx --nologo -p:RestoreLockedMode=true` |
+| .NET | `dotnet test --solution asherah-dotnet/GoDaddy.Asherah.Encryption.slnx --nologo -p:RestoreLockedMode=true` |
 | Java | `cd asherah-java/java && mvn test` |
 | Ruby | `ruby -Iasherah-ruby/lib -Iasherah-ruby/test asherah-ruby/test/round_trip_test.rb` |
 | Go | `cd asherah-go && go test ./...` |

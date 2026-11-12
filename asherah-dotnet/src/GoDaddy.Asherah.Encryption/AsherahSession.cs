@@ -396,15 +396,11 @@ public sealed class AsherahSession : IAsherahSession
         // Wrap the entire callback body in a catch-all because this
         // function is invoked from native code (a tokio worker
         // thread). An exception that unwinds out of an
-        // `[UnmanagedCallersOnly]` method into native code is UB on
-        // .NET 8 — the runtime can't propagate managed exceptions
-        // through Rust frames, so the process dies with an opaque
-        // `EXCEPTION_NONCONTINUABLE` or terminates silently. Catch
-        // everything, surface it through the TaskCompletionSource so
-        // the awaiting consumer sees a normal AggregateException, and
-        // never let an exception escape this frame. T-finding
-        // "[UnmanagedCallersOnly] callback can let SetException
-        // exception unwind into native code (UB in .NET 8)" in
+        // `[UnmanagedCallersOnly]` method into native code cannot be
+        // propagated through Rust frames and may terminate the process.
+        // Catch everything, surface it through the TaskCompletionSource
+        // so the awaiting consumer sees the error, and never let an
+        // exception escape this frame. See the callback finding in
         // `docs/review-2026-05-05-findings.md`.
         AsyncCallbackState? state = null;
         try
