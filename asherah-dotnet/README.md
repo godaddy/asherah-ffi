@@ -12,7 +12,7 @@ P/Invoke; the native binary ships in NuGet for `linux-x64`, `linux-arm64`,
 dotnet add package GoDaddy.Asherah.Encryption
 ```
 
-Targets `net8.0` and `net10.0`. Namespace: `GoDaddy.Asherah.Encryption`.
+Targets `net10.0` and `net11.0`. Namespace: `GoDaddy.Asherah.Encryption`.
 The package is currently on the `0.50.x-beta` track; pin the exact beta version
 you validate in your application instead of relying on floating prerelease
 resolution.
@@ -592,20 +592,29 @@ parity (those forward to `AsherahHooks` internally).
 
 ## Building from Source
 
-From the repository root:
+From the repository root, configure the test-only in-memory setup before running either test command:
+
+```bash
+export SERVICE_NAME=svc
+export PRODUCT_ID=prod
+export KMS=test-debug-static
+export STATIC_MASTER_KEY_HEX=2222222222222222222222222222222222222222222222222222222222222222
+```
+
+The static master key is for tests only; use AWS KMS in production.
 
 **Debug FFI (simplest)** — test projects locate the workspace root and, when `ASHERAH_DOTNET_NATIVE` is unset, point it at `target/debug` automatically:
 
 ```bash
 cargo build -p asherah-ffi
-dotnet test asherah-dotnet/GoDaddy.Asherah.Encryption.slnx --nologo -p:RestoreLockedMode=true
+dotnet test --solution asherah-dotnet/GoDaddy.Asherah.Encryption.slnx --nologo -p:RestoreLockedMode=true
 ```
 
 **Release FFI** — use a **shell-expanded absolute path** for `ASHERAH_DOTNET_NATIVE`. A value like `target/release` alone is wrong: the binding resolves relative paths against the test process working directory, not the repo root.
 
 ```bash
 cargo build --release -p asherah-ffi
-ASHERAH_DOTNET_NATIVE="$(pwd)/target/release" dotnet test asherah-dotnet/GoDaddy.Asherah.Encryption.slnx --nologo -p:RestoreLockedMode=true
+ASHERAH_DOTNET_NATIVE="$(pwd)/target/release" dotnet test --solution asherah-dotnet/GoDaddy.Asherah.Encryption.slnx --nologo -p:RestoreLockedMode=true
 ```
 
 `ASHERAH_DOTNET_NATIVE` must refer to the directory containing `libasherah_ffi.dylib` / `libasherah_ffi.so` / `asherah_ffi.dll`. Without a correct path, the loader can bind a different `asherah_ffi` on `PATH` and tests may fail with missing entry points.

@@ -358,7 +358,7 @@ do_bindings() {
     # .NET
     if [ "$binding" = "all" ] || [ "$binding" = "dotnet" ]; then
         if command -v dotnet >/dev/null 2>&1; then
-            run_test ".NET (xUnit)" dotnet test asherah-dotnet/GoDaddy.Asherah.Encryption.slnx --nologo -p:RestoreLockedMode=true
+            run_test ".NET (xUnit)" dotnet test --solution asherah-dotnet/GoDaddy.Asherah.Encryption.slnx --nologo -p:RestoreLockedMode=true
         else
             skip ".NET tests (dotnet not installed)"
         fi

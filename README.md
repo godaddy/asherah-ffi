@@ -231,7 +231,7 @@ refresh loads the latest version from the metastore.
 
 - **127 Rust unit tests** covering core encryption engine, key management,
 metastore adapters, and memory protection
-- **64 .NET tests** (34 core + 30 compatibility layer) across net8.0 and net10.0
+- **64 .NET tests** (34 core + 30 compatibility layer) across net10.0 and net11.0
 - **49 Node.js tests** including async context, unicode, binary edge cases, and
 Factory/Session API
 - **21 Go tests** covering Factory/Session API and compatibility layer

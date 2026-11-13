@@ -18,7 +18,7 @@ encrypt/decrypt. After this guide, see:
 dotnet add package GoDaddy.Asherah.Encryption
 ```
 
-Targets `net8.0` and `net10.0`. Native binaries for Linux x64/arm64
+Targets `net10.0` and `net11.0`. Native binaries for Linux x64/arm64
 (glibc + musl), macOS x64/arm64, and Windows x64/arm64 ship with the
 package.
 

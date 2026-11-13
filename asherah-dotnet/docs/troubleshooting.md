@@ -171,13 +171,13 @@ If that's failing:
   `<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>`.
 
 **For repo development:** the native library is built by `cargo build`
-into `target/<profile>/`. Set `ASHERAH_DOTNET_NATIVE` to an absolute
-path:
+into `target/<profile>/`. From the repository root, set
+`ASHERAH_DOTNET_NATIVE` to an absolute path:
 
 ```bash
 cargo build -p asherah-ffi
 export ASHERAH_DOTNET_NATIVE="$(pwd)/target/debug"
-dotnet test
+dotnet test --solution asherah-dotnet/GoDaddy.Asherah.Encryption.slnx
 ```
 
 A relative path (`target/debug`) is wrong — the binding resolves

@@ -191,11 +191,12 @@ tests.
 The NuGet package ships native binaries under `runtimes/<rid>/native/`.
 Tests run from `bin/Debug/<tfm>/` and the .NET runtime resolves the
 binary automatically. If a test fails with "unable to load
-asherah_ffi", set `ASHERAH_DOTNET_NATIVE` to an explicit directory:
+asherah_ffi", set `ASHERAH_DOTNET_NATIVE` to an explicit directory from
+the repository root:
 
 ```bash
 export ASHERAH_DOTNET_NATIVE="$(pwd)/target/debug"
-dotnet test
+dotnet test --solution asherah-dotnet/GoDaddy.Asherah.Encryption.slnx
 ```
 
 Locally during repository development, point this at your `cargo
