@@ -124,14 +124,28 @@ def set_metrics_hook(callback: Optional[Callable[[Any], None]] = ...) -> None:
     callback, so the callback runs single-threaded from Python's
     perspective."""
 
-def set_log_hook(callback: Optional[Callable[[Any], None]] = ...) -> None:
-    """Install a callback that receives every log event from the Rust
-    core (encrypt/decrypt path, metastore drivers, KMS clients).
+def set_log_hook(
+    callback: Optional[Callable[[Any], None]], min_level: Optional[str] = ...
+) -> None:
+    """Install a callback that receives log events from the Rust core
+    (encrypt/decrypt path, metastore drivers, KMS clients) at or above
+    ``min_level``.
+
+    ``callback`` is required; pass ``None`` to deregister.
+
+    ``min_level`` is one of ``"error"``, ``"warn"``, ``"warning"``,
+    ``"info"``, ``"debug"``, ``"trace"``, case-insensitive; omitted or
+    ``None`` means ``"warn"``. Any other string raises ``ValueError`` and
+    a non-string raises ``TypeError``; either way the current hook is left
+    unchanged. Records below the level are discarded before they are
+    formatted.
 
     The callback receives a single ``dict`` argument with keys
     ``"level"`` (``"trace"|"debug"|"info"|"warn"|"error"``),
     ``"message"`` (the formatted log message), and ``"target"`` (the
-    source module string).
+    source module string). Events are queued and delivered on a
+    dedicated dispatch thread; when the queue is full, events are
+    dropped rather than blocking encrypt/decrypt.
 
     Pass ``None`` to deregister."""
 

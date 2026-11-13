@@ -163,10 +163,15 @@ asherah.set_metrics_hook(on_metric)
 Hooks are process-global. `set_log_hook(None)` / `set_metrics_hook(None)`
 deregister.
 
-`set_log_hook_sync` and `set_metrics_hook_sync` variants fire on the
-encrypt/decrypt thread before the operation returns — pick those if
-you need contextvars / OpenTelemetry trace context intact in the
-callback or have verifiably non-blocking handlers.
+The log hook delivers `warn` and `error` events by default. Pass
+`min_level` (`"error"`, `"warn"`, `"info"`, `"debug"` or `"trace"`) to
+change that, e.g. `asherah.set_log_hook(on_log, min_level="debug")`.
+
+Both hooks queue events and invoke the callback on a dedicated dispatch
+thread, not on the encrypt/decrypt thread, so contextvars and
+OpenTelemetry trace context from the calling code are not visible in
+the callback. When the queue is full, events are dropped rather than
+blocking the operation.
 
 ## 8. Move to production
 

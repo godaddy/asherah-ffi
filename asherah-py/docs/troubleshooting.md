@@ -206,11 +206,14 @@ When a problem isn't covered above:
    ```python
    def on_log(event):
        print(f"[asherah {event['level']}] {event['target']}: {event['message']}")
-   asherah.set_log_hook(on_log)
+   asherah.set_log_hook(on_log, min_level="trace")
    factory = asherah.SessionFactory.from_config(config)
    ```
-   The hook receives `warn` and `error` events; `info`, `debug` and
-   `trace` records are not delivered. An operation that fails in the
+   The log hook delivers only `warn` and `error` unless `min_level`
+   is lowered. At `debug`/`trace` it adds the session's key loads and
+   creations and metastore load/store calls. Records from other Rust
+   crates that log through the `log` facade are forwarded too; the AWS
+   SDK's internal diagnostics are not. An operation that fails in the
    Rust core logs a `python binding operation failed: …` warn event
    with the full error chain, and a failed KMS decrypt logs an
    `asherah::kms_aws_envelope` error event that lists every attempted
