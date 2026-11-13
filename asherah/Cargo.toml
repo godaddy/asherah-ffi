@@ -71,6 +71,9 @@ version = "1"
 [dependencies.aws-types]
 version = "1"
 
+[dependencies.aws-credential-types]
+version = "1"
+
 [dependencies.aws-sdk-kms]
 version = "1"
 default-features = false
